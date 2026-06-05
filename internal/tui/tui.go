@@ -90,10 +90,11 @@ type Model struct {
 	cursor int          // index into flat (tasks) or notes (notes tab)
 	offset int          // first visible line (scroll position)
 
-	filter string
-	detail bool // detail overlay open (narrow modes)
-	help   bool
-	ready  bool // gates key input until startup terminal-query noise settles
+	filter       string
+	detailFocus  bool // detail pane is focused: j/k scroll the body, not the list
+	detailScroll int  // scroll offset within the focused detail pane
+	help         bool
+	ready        bool // gates key input until startup terminal-query noise settles
 
 	input  textinput.Model
 	ik     inputKind
@@ -300,26 +301,27 @@ var (
 	cSelBg   = lipgloss.Color("#283457")
 	cBarBg   = lipgloss.Color("#1f2335")
 
-	stBrand  = lipgloss.NewStyle().Foreground(cMagenta).Bold(true).Background(cBarBg)
-	stTabOn  = lipgloss.NewStyle().Foreground(cFg).Bold(true).Background(cBarBg)
-	stTabOff = lipgloss.NewStyle().Foreground(cDim).Background(cBarBg)
-	stBar    = lipgloss.NewStyle().Foreground(cMuted)
-	stBarBg  = lipgloss.NewStyle().Foreground(cMuted).Background(cBarBg)
-	stHeader = lipgloss.NewStyle().Background(cBarBg)
-	stRule   = lipgloss.NewStyle().Foreground(cBorder)
-	stGroup  = lipgloss.NewStyle().Foreground(cBlue).Bold(true)
-	stSel    = lipgloss.NewStyle().Background(cSelBg)
-	stSelTxt = lipgloss.NewStyle().Background(cSelBg).Foreground(cFg).Bold(true)
-	stDim    = lipgloss.NewStyle().Foreground(cDim)
-	stMuted  = lipgloss.NewStyle().Foreground(cMuted)
-	stKey    = lipgloss.NewStyle().Foreground(cCyan)
-	stKeyBg  = lipgloss.NewStyle().Foreground(cCyan).Background(cBarBg)
-	stSec    = lipgloss.NewStyle().Foreground(cBlue).Bold(true)
-	stTag    = lipgloss.NewStyle().Foreground(cMagenta)
-	stProj   = lipgloss.NewStyle().Foreground(cBlue)
-	stLink   = lipgloss.NewStyle().Foreground(cCyan)
-	stDone   = lipgloss.NewStyle().Foreground(cDim).Strikethrough(true)
-	stPanel  = lipgloss.NewStyle().Border(lipgloss.NormalBorder(), false, false, false, true).BorderForeground(cBorder).Padding(0, 2)
-	stCard   = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(cBlue).Padding(1, 2)
-	stTitle  = lipgloss.NewStyle().Foreground(cFg).Bold(true)
+	stBrand      = lipgloss.NewStyle().Foreground(cMagenta).Bold(true).Background(cBarBg)
+	stTabOn      = lipgloss.NewStyle().Foreground(cFg).Bold(true).Background(cBarBg)
+	stTabOff     = lipgloss.NewStyle().Foreground(cDim).Background(cBarBg)
+	stBar        = lipgloss.NewStyle().Foreground(cMuted)
+	stBarBg      = lipgloss.NewStyle().Foreground(cMuted).Background(cBarBg)
+	stHeader     = lipgloss.NewStyle().Background(cBarBg)
+	stRule       = lipgloss.NewStyle().Foreground(cBorder)
+	stGroup      = lipgloss.NewStyle().Foreground(cBlue).Bold(true)
+	stSel        = lipgloss.NewStyle().Background(cSelBg)
+	stSelTxt     = lipgloss.NewStyle().Background(cSelBg).Foreground(cFg).Bold(true)
+	stDim        = lipgloss.NewStyle().Foreground(cDim)
+	stMuted      = lipgloss.NewStyle().Foreground(cMuted)
+	stKey        = lipgloss.NewStyle().Foreground(cCyan)
+	stKeyBg      = lipgloss.NewStyle().Foreground(cCyan).Background(cBarBg)
+	stSec        = lipgloss.NewStyle().Foreground(cBlue).Bold(true)
+	stTag        = lipgloss.NewStyle().Foreground(cMagenta)
+	stProj       = lipgloss.NewStyle().Foreground(cBlue)
+	stLink       = lipgloss.NewStyle().Foreground(cCyan)
+	stDone       = lipgloss.NewStyle().Foreground(cDim).Strikethrough(true)
+	stPanel      = lipgloss.NewStyle().Border(lipgloss.NormalBorder(), false, false, false, true).BorderForeground(cBorder).Padding(0, 2)
+	stPanelFocus = lipgloss.NewStyle().Border(lipgloss.NormalBorder(), false, false, false, true).BorderForeground(cBlue).Padding(0, 2)
+	stCard       = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(cBlue).Padding(1, 2)
+	stTitle      = lipgloss.NewStyle().Foreground(cFg).Bold(true)
 )

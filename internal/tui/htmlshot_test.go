@@ -83,10 +83,10 @@ func TestRenderHTML(t *testing.T) {
 		return ansiToHTML(m.View())
 	}
 	frames := []frame{
-		{"Wide split (140 cols)", render(140, 28, func() { m.tab, m.detail = tabTasks, false })},
-		{"Standard (80 cols)", render(80, 24, func() { m.tab, m.detail = tabTasks, false })},
-		{"Detail overlay (80 cols)", render(80, 24, func() { m.detail = true })},
-		{"Compact strip (34 cols)", render(34, 20, func() { m.detail = false })},
+		{"Wide split (140 cols)", render(140, 28, func() { m.tab, m.detailFocus = tabTasks, false })},
+		{"Standard (80 cols)", render(80, 24, func() { m.tab, m.detailFocus = tabTasks, false })},
+		{"Detail overlay (80 cols)", render(80, 24, func() { m.detailFocus = true })},
+		{"Compact strip (34 cols)", render(34, 20, func() { m.detailFocus = false })},
 		{"Notes tab (80 cols)", render(80, 24, func() { m.tab, m.cursor = tabNotes, 0 })},
 		{"Notes split (140 cols)", render(140, 28, func() { m.tab, m.cursor = tabNotes, 0 })},
 	}

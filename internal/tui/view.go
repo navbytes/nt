@@ -29,7 +29,7 @@ func (m *Model) View() string {
 
 	var body string
 	switch {
-	case m.detail && m.width < wideMin:
+	case m.detailFocus && m.width < wideMin:
 		body = m.detailCard(bodyH)
 	case m.width >= wideMin:
 		body = m.wideView(bodyH)
@@ -143,8 +143,44 @@ func (m *Model) wideView(h int) string {
 	}
 	list := lipgloss.NewStyle().Width(leftW).Height(h).Render(listContent)
 	// stPanel: 1 border + 2+2 padding = 5 cols of chrome.
-	detail := stPanel.Width(rightW - 1).Height(h).Render(m.rightDetail(rightW - 6))
+	panel := stPanel
+	if m.detailFocus {
+		panel = stPanelFocus
+	}
+	content := m.scrollDetail(m.rightDetail(rightW-6), h)
+	detail := panel.Width(rightW - 1).Height(h).Render(content)
 	return lipgloss.JoinHorizontal(lipgloss.Top, list, detail)
+}
+
+// scrollDetail windows the detail content to h rows at the current scroll
+// offset (clamped), and appends a scroll indicator when more is below/above.
+func (m *Model) scrollDetail(content string, h int) string {
+	lines := strings.Split(content, "\n")
+	n := len(lines)
+	if n <= h || h <= 0 {
+		m.detailScroll = 0
+		return content
+	}
+	if m.detailScroll > n-h {
+		m.detailScroll = n - h
+	}
+	if m.detailScroll < 0 {
+		m.detailScroll = 0
+	}
+	out := strings.Join(lines[m.detailScroll:m.detailScroll+h-1], "\n")
+	more := n - h - m.detailScroll
+	ind := fmt.Sprintf("↑%d ↓%d", m.detailScroll, max0(more))
+	if !m.detailFocus {
+		ind += "  (enter to scroll)"
+	}
+	return out + "\n" + stDim.Render(ind)
+}
+
+func max0(n int) int {
+	if n < 0 {
+		return 0
+	}
+	return n
 }
 
 // rightDetail picks the detail pane content for the active tab.
@@ -322,6 +358,11 @@ func (m *Model) detailCard(h int) string {
 	default:
 		inner = stDim.Render("nothing selected")
 	}
+	cardH := h - 4 // leave a margin around the centered card
+	if cardH < 4 {
+		cardH = 4
+	}
+	inner = m.scrollDetail(inner, cardH)
 	card := stCard.Width(w).Render(inner)
 	return lipgloss.Place(m.width, h, lipgloss.Center, lipgloss.Center, card)
 }
@@ -445,7 +486,7 @@ func (m *Model) helpView() string {
 		{"navigate", [][2]string{
 			{"j / k, ↑ ↓", "move"}, {"Ctrl+d / Ctrl+u", "half-page down / up"},
 			{"g / G", "top / bottom"}, {"1 / 2 / tab", "switch tasks / notes"},
-			{"enter", "toggle detail"},
+			{"enter", "focus detail (then j/k scroll the body)"}, {"esc", "back to list"},
 		}},
 		{"edit", [][2]string{
 			{"x  or  dd", "toggle done"}, {"a / A", "add task / note"},

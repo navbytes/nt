@@ -56,18 +56,42 @@ func (m *Model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "q", "ctrl+c":
 		return m, tea.Quit
 	case "j", "down":
-		m.move(1)
+		if m.detailFocus {
+			m.detailScroll++
+		} else {
+			m.move(1)
+		}
 	case "k", "up":
-		m.move(-1)
+		if m.detailFocus {
+			m.detailScroll--
+		} else {
+			m.move(-1)
+		}
 	case "ctrl+d":
-		m.move(m.halfPage())
+		if m.detailFocus {
+			m.detailScroll += m.halfPage()
+		} else {
+			m.move(m.halfPage())
+		}
 	case "ctrl+u":
-		m.move(-m.halfPage())
+		if m.detailFocus {
+			m.detailScroll -= m.halfPage()
+		} else {
+			m.move(-m.halfPage())
+		}
 	case "g", "home":
-		m.cursor, m.offset = 0, 0
+		if m.detailFocus {
+			m.detailScroll = 0
+		} else {
+			m.cursor, m.offset = 0, 0
+		}
 	case "G", "end":
-		m.cursor = m.selectableLen() - 1
-		m.clampCursor()
+		if m.detailFocus {
+			m.detailScroll = 1 << 20 // clamped to the bottom on render
+		} else {
+			m.cursor = m.selectableLen() - 1
+			m.clampCursor()
+		}
 	case "1":
 		m.tab, m.cursor, m.offset = tabTasks, 0, 0
 	case "2":
@@ -87,9 +111,19 @@ func (m *Model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.rebuild()
 		m.setStatus("blocked: " + onOff(m.showBlocked))
 	case "enter":
-		m.detail = !m.detail
+		// Focus the detail pane so j/k scroll its body (esp. long note bodies).
+		m.detailFocus = !m.detailFocus
+		m.detailScroll = 0
+		if m.detailFocus {
+			m.setStatus("detail focused — j/k scroll · esc back")
+		}
 	case "esc":
-		m.detail, m.help = false, false
+		if m.detailFocus {
+			m.detailFocus = false
+			m.status = ""
+		} else {
+			m.help = false
+		}
 	case "x":
 		m.toggleDone()
 	case "d":
@@ -150,6 +184,7 @@ func (m *Model) move(d int) {
 	}
 	m.cursor += d
 	m.clampCursor()
+	m.detailScroll = 0 // new selection → reset the detail pane scroll
 }
 
 func (m *Model) startInput(ik inputKind, initial, placeholder string) tea.Cmd {

@@ -65,11 +65,11 @@ func TestViewRendersAllLayouts(t *testing.T) {
 			}
 		}
 	}
-	m.tab, m.width, m.detail = tabTasks, 80, true
+	m.tab, m.width, m.detailFocus = tabTasks, 80, true
 	if m.View() == "" {
 		t.Fatal("empty detail overlay")
 	}
-	m.detail, m.help = false, true
+	m.detailFocus, m.help = false, true
 	if m.View() == "" {
 		t.Fatal("empty help view")
 	}

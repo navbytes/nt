@@ -88,6 +88,38 @@ func TestAllInputFlows(t *testing.T) {
 	}
 }
 
+// TestDetailScroll: enter focuses the detail pane and j/k scroll its body
+// (the long-note scroll fix) without moving the list selection.
+func TestDetailScroll(t *testing.T) {
+	m := testModel(t)
+	m.width, m.height = 100, 24
+	body := strings.Repeat("a line of note body\n", 80)
+	if _, err := note.Create(m.eng.S, "Long Note", body, nil, "tui"); err != nil {
+		t.Fatal(err)
+	}
+	m.reload()
+	m.tab = tabNotes
+	m.cursor = 0
+	beforeNote := m.selectedNote().Title
+
+	mm := press(m, "enter").(*Model)
+	if !mm.detailFocus {
+		t.Fatal("enter should focus the detail pane")
+	}
+	mm = press(mm, "j", "j", "j").(*Model)
+	mm.View() // render clamps the scroll
+	if mm.detailScroll == 0 {
+		t.Fatal("j should scroll the detail body when focused")
+	}
+	if mm.selectedNote().Title != beforeNote {
+		t.Fatal("scrolling the detail must not change the list selection")
+	}
+	mm = press(mm, "esc").(*Model)
+	if mm.detailFocus {
+		t.Fatal("esc should unfocus the detail pane")
+	}
+}
+
 // TestFollowLink: L on a task with a [[note]] link jumps to that note.
 func TestFollowLink(t *testing.T) {
 	m := testModel(t)
