@@ -165,16 +165,22 @@ func (m *Model) compactView(h int) string {
 	for _, g := range m.groups {
 		for _, t := range g.tasks {
 			cur := idx == m.cursor
-			row := m.icon(t) + " " + truncate(colorizeStr(t.Text, t.Done), m.width-6) + " " + priStr(t.Priority)
 			if cur {
-				row = stSel.Width(m.width).Render(" " + row)
-				sel = len(lines)
+				body := glyphFor(m.effStatus(t)) + " " + truncate(t.Text, m.width-8)
+				if p := plainMeta(t); p != "" {
+					body += " " + p
+				}
+				lines = append(lines, selRow(body, m.width))
+				sel = len(lines) - 1
 			} else {
-				row = " " + row
+				row := m.icon(t) + " " + truncate(colorizeStr(t.Text, t.Done), m.width-6) + " " + priStr(t.Priority)
+				lines = append(lines, " "+row)
 			}
-			lines = append(lines, row)
 			idx++
 		}
+	}
+	if len(lines) == 0 {
+		return stDim.Render(" no tasks")
 	}
 	return window(lines, sel, h)
 }
@@ -230,13 +236,17 @@ func (m *Model) notesList(width, h int) string {
 	}
 	var lines []string
 	for i, n := range m.notes {
-		row := stDim.Render("▤") + " " + n.Title
-		if tags := n.Tags; len(tags) > 0 {
-			row += "  " + stTag.Render("@"+strings.Join(tags, " @"))
-		}
 		if i == m.cursor {
-			lines = append(lines, stSel.Width(width).Render(" ▌ "+row))
+			body := "▤ " + n.Title
+			if len(n.Tags) > 0 {
+				body += "  @" + strings.Join(n.Tags, " @")
+			}
+			lines = append(lines, selRow(body, width))
 		} else {
+			row := stDim.Render("▤") + " " + n.Title
+			if len(n.Tags) > 0 {
+				row += "  " + stTag.Render("@"+strings.Join(n.Tags, " @"))
+			}
 			lines = append(lines, "   "+row)
 		}
 	}
@@ -245,13 +255,24 @@ func (m *Model) notesList(width, h int) string {
 
 // taskRow renders one task line sized to width, highlighting if selected.
 func (m *Model) taskRow(t *task.Task, sel bool, width int) string {
-	icon := m.icon(t)
-	meta := metaStr(t)
-	marker := "  "
+	status := m.effStatus(t)
 	if sel {
-		marker = lipgloss.NewStyle().Foreground(cBlue).Render(" ▌")
+		// Plain content on a solid selection bar (see selRow).
+		meta := plainMeta(t)
+		avail := width - 5 - lipgloss.Width(meta) // 3 bar + glyph + space
+		if avail < 4 {
+			avail = 4
+		}
+		text := truncate(t.Text, avail)
+		left := glyphFor(status) + " " + text
+		gap := width - 3 - lipgloss.Width(left) - lipgloss.Width(meta)
+		if gap < 1 {
+			gap = 1
+		}
+		return selRow(left+strings.Repeat(" ", gap)+meta, width)
 	}
-	// budget: marker(2) icon(2) spaces + meta
+	icon := iconFor(status)
+	meta := metaStr(t)
 	avail := width - 6 - lipgloss.Width(meta)
 	if avail < 4 {
 		avail = 4
@@ -260,16 +281,12 @@ func (m *Model) taskRow(t *task.Task, sel bool, width int) string {
 	if lipgloss.Width(text) > avail {
 		text = truncate(text, avail)
 	}
-	left := marker + " " + icon + " " + text
+	left := "   " + icon + " " + text
 	gap := width - lipgloss.Width(left) - lipgloss.Width(meta) - 1
 	if gap < 1 {
 		gap = 1
 	}
-	line := left + strings.Repeat(" ", gap) + meta + " "
-	if sel {
-		return stSel.Width(width).Inline(true).Render(line)
-	}
-	return line
+	return left + strings.Repeat(" ", gap) + meta + " "
 }
 
 // --- detail --------------------------------------------------------------
@@ -440,28 +457,36 @@ func priStr(p byte) string {
 	return ""
 }
 
+// dueLabel returns the short relative label and its color (no styling applied).
+func dueLabel(due string) (string, lipgloss.Color) {
+	if due == "" {
+		return "", cDim
+	}
+	dt, err := time.Parse("2006-01-02", due)
+	if err != nil {
+		return due, cDim
+	}
+	now := time.Now()
+	today := now.Format("2006-01-02")
+	switch {
+	case due < today:
+		return due, cRed
+	case due == today:
+		return "today", cOrange
+	case due == now.AddDate(0, 0, 1).Format("2006-01-02"):
+		return "tom", cYellow
+	case dt.Before(now.AddDate(0, 0, 7)):
+		return dt.Weekday().String()[:3], cYellow
+	}
+	return due, cDim
+}
+
 func dueStr(due string) string {
 	if due == "" {
 		return ""
 	}
-	dt, err := time.Parse("2006-01-02", due)
-	if err != nil {
-		return due
-	}
-	now := time.Now()
-	today := now.Format("2006-01-02")
-	label, col := due, cDim
-	switch {
-	case due < today:
-		col = cRed
-	case due == today:
-		label, col = "today", cOrange
-	case due == now.AddDate(0, 0, 1).Format("2006-01-02"):
-		label, col = "tom", cYellow
-	case dt.Before(now.AddDate(0, 0, 7)):
-		label, col = dt.Weekday().String()[:3], cYellow
-	}
-	return lipgloss.NewStyle().Foreground(col).Render(label)
+	l, c := dueLabel(due)
+	return lipgloss.NewStyle().Foreground(c).Render(l)
 }
 
 func metaStr(t *task.Task) string {
@@ -473,6 +498,50 @@ func metaStr(t *task.Task) string {
 		parts = append(parts, d)
 	}
 	return strings.Join(parts, " ")
+}
+
+// plainMeta is metaStr without ANSI, for selected rows (rendered on a solid bg).
+func plainMeta(t *task.Task) string {
+	parts := []string{}
+	switch t.Priority {
+	case 'A':
+		parts = append(parts, "(A)")
+	case 'B':
+		parts = append(parts, "(B)")
+	case 'C':
+		parts = append(parts, "(C)")
+	}
+	if l, _ := dueLabel(t.Due()); l != "" {
+		parts = append(parts, l)
+	}
+	return strings.Join(parts, " ")
+}
+
+// glyphFor is the plain status glyph (no color), for selected rows.
+func glyphFor(status string) string {
+	switch status {
+	case "done":
+		return "✓"
+	case "doing":
+		return "◐"
+	case "blocked":
+		return "⊘"
+	default:
+		return "○"
+	}
+}
+
+// selRow renders a selected list row: a blue accent bar plus PLAIN body text on
+// the selection background, filled to the full width. Keeping the body plain
+// (no inner ANSI resets) lets lipgloss fill the background cleanly to the edge —
+// the fix for the ragged selection bar and the bad-color-blend artifact.
+func selRow(body string, width int) string {
+	bar := lipgloss.NewStyle().Foreground(cBlue).Background(cSelBg).Render(" ▌ ")
+	bw := lipgloss.Width(bar)
+	if lipgloss.Width(body) > width-bw {
+		body = truncate(body, width-bw)
+	}
+	return bar + lipgloss.NewStyle().Background(cSelBg).Foreground(cFg).Width(width-bw).Render(body)
 }
 
 func colorizeStr(text string, done bool) string {
