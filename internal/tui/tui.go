@@ -6,6 +6,7 @@
 package tui
 
 import (
+	"strings"
 	"time"
 
 	"github.com/charmbracelet/bubbles/textinput"
@@ -59,6 +60,7 @@ const (
 	inRename
 	inDue
 	inTag
+	inUntag
 	inLink
 )
 
@@ -78,13 +80,15 @@ type Model struct {
 	showDone      bool
 	showBlocked   bool
 
-	tasks   []*task.Task
-	notes   []*note.Note
-	blocked map[string]bool // task ULIDs blocked by an open dependency
+	tasks     []*task.Task
+	notes     []*note.Note
+	notesView []*note.Note    // notes after the active filter
+	blocked   map[string]bool // task ULIDs blocked by an open dependency
 
 	groups []group      // tasks tab, current grouping
 	flat   []*task.Task // selectable tasks in display order
 	cursor int          // index into flat (tasks) or notes (notes tab)
+	offset int          // first visible line (scroll position)
 
 	filter string
 	detail bool // detail overlay open (narrow modes)
@@ -155,15 +159,83 @@ func (m *Model) reload() {
 }
 
 // rebuild recomputes groups + the flat selectable list from the current tasks,
-// filter, grouping, and showDone state, then clamps the cursor.
+// filter, grouping, and showDone state. It preserves the selected task across
+// the rebuild (so regrouping/filtering keeps the cursor on the same item rather
+// than the same numeric index), then clamps.
 func (m *Model) rebuild() {
+	selID := m.selectedID()
+
 	m.blocked = task.BlockedIDs(m.tasks)
 	m.groups = buildGroups(m.tasks, m.grp, m.filter, m.showDone, m.showBlocked, m.blocked)
 	m.flat = m.flat[:0]
 	for _, g := range m.groups {
 		m.flat = append(m.flat, g.tasks...)
 	}
+
+	needle := strings.ToLower(strings.TrimSpace(m.filter))
+	m.notesView = m.notesView[:0]
+	for _, n := range m.notes {
+		if noteMatches(n, needle) {
+			m.notesView = append(m.notesView, n)
+		}
+	}
+
+	if selID != "" {
+		m.selectByID(selID)
+	}
 	m.clampCursor()
+}
+
+// selectedID returns the ULID of the currently-selected item in the active tab.
+func (m *Model) selectedID() string {
+	if m.tab == tabNotes {
+		if m.cursor >= 0 && m.cursor < len(m.notesView) {
+			return m.notesView[m.cursor].ID
+		}
+		return ""
+	}
+	if m.cursor >= 0 && m.cursor < len(m.flat) {
+		return m.flat[m.cursor].ID()
+	}
+	return ""
+}
+
+// selectByID moves the cursor to the item with the given ULID in the active tab.
+func (m *Model) selectByID(id string) {
+	if m.tab == tabNotes {
+		for i, n := range m.notesView {
+			if n.ID == id {
+				m.cursor = i
+				return
+			}
+		}
+		return
+	}
+	for i, t := range m.flat {
+		if t.ID() == id {
+			m.cursor = i
+			return
+		}
+	}
+}
+
+// halfPage is half the visible body height, for Ctrl+d / Ctrl+u scrolling.
+func (m *Model) halfPage() int {
+	h := (m.height - 4) / 2
+	if h < 1 {
+		h = 1
+	}
+	return h
+}
+
+// noteMatches reports whether a note matches the filter across title, tags,
+// body, and source — so the notes tab filter is a full-text search.
+func noteMatches(n *note.Note, needle string) bool {
+	if needle == "" {
+		return true
+	}
+	hay := strings.ToLower(n.Title + " " + strings.Join(n.Tags, " ") + " " + n.Body + " " + n.Source)
+	return strings.Contains(hay, needle)
 }
 
 func (m *Model) clampCursor() {
@@ -178,7 +250,7 @@ func (m *Model) clampCursor() {
 
 func (m *Model) selectableLen() int {
 	if m.tab == tabNotes {
-		return len(m.notes)
+		return len(m.notesView)
 	}
 	return len(m.flat)
 }
@@ -191,10 +263,10 @@ func (m *Model) selectedTask() *task.Task {
 }
 
 func (m *Model) selectedNote() *note.Note {
-	if m.tab != tabNotes || m.cursor < 0 || m.cursor >= len(m.notes) {
+	if m.tab != tabNotes || m.cursor < 0 || m.cursor >= len(m.notesView) {
 		return nil
 	}
-	return m.notes[m.cursor]
+	return m.notesView[m.cursor]
 }
 
 func (m *Model) setStatus(s string) { m.status = s }

@@ -405,15 +405,15 @@ backlinks section (both from §5.1); `L` opens a picker to jump to any linked it
 ### Essential keybindings (full list under `?`)
 | Key | Action | • | Key | Action |
 |-----|--------|---|-----|--------|
-| `j`/`k` | navigate | | `t`/`T` | add / remove tag |
-| `Enter` | detail overlay | | `D` | set due date |
-| `dd` | toggle done | | `p` | set priority |
-| `u` | undo | | `s` | expand/collapse subtasks |
-| `a`/`A` | add task / note | | `/` | filter |
-| `r` | rename | | `Ctrl+/` | search (ripgrep) |
-| `l`/`L` | add link / follow links | | `v` | cycle grouping |
-| `e`/`E` | edit body (ext/inline) | | `?` / `q` | help / quit |
-| `Ctrl+L` | lock/unlock editing | | | |
+| `j`/`k`, `↑`/`↓` | navigate | | `t`/`T` | add / remove tag |
+| `Ctrl+d`/`Ctrl+u` | half-page scroll | | `D` | set due date |
+| `g`/`G` | top / bottom | | `p` | cycle priority |
+| `Enter` | toggle detail | | `l`/`L` | add link / follow link |
+| `x` (or `dd`) | toggle done | | `/` | filter (searches note bodies on notes tab) |
+| `a`/`A` | add task / note | | `v` | cycle grouping |
+| `r` | rename | | `.` / `b` | show-hide done / blocked |
+| `e`/`E` | edit (external/inline) | | `u` | undo (again = redo) |
+| `1`/`2`/`tab` | switch tasks / notes | | `?` / `q` | help / quit |
 
 ---
 

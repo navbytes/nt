@@ -55,17 +55,19 @@ func (m *Model) headerView() string {
 	}
 	left := stBrand.Render(" nt ") + stHeader.Render(" ") + t1 + t2
 
-	layout := "standard"
-	if m.width >= wideMin {
-		layout = "split"
-	} else if m.width <= compactMax {
-		layout = "compact"
+	// Persistently surface the view state (toggles + filter) in the header so
+	// the user always knows what they're looking at.
+	parts := []string{"group:" + m.grp.String()}
+	if m.showDone {
+		parts = append(parts, "+done")
 	}
-	right := "group: " + m.grp.String() + "  ·  " + layout + " "
+	if m.showBlocked {
+		parts = append(parts, "+blocked")
+	}
 	if m.filter != "" {
-		right = "filter: " + m.filter + "  ·  " + right
+		parts = append(parts, fmt.Sprintf("/%s (%d)", m.filter, m.selectableLen()))
 	}
-	rightR := stBarBg.Render(right)
+	rightR := stBarBg.Render(strings.Join(parts, "  ·  ") + " ")
 	gap := m.width - lipgloss.Width(left) - lipgloss.Width(rightR)
 	line := left + barPad(gap) + rightR
 	rule := stRule.Render(strings.Repeat("─", m.width))
@@ -97,28 +99,35 @@ func barPad(n int) string {
 	return stBarBg.Render(strings.Repeat(" ", n))
 }
 
-// keybar renders key/label pairs (cyan key, dim label) up to a width budget,
-// matching the mockup's keymap strip.
+// keybar renders key/label pairs (cyan key, dim label) up to a width budget.
+// `? help` and `q quit` are always reserved at the end so the discoverability
+// keys never get truncated off-screen, however narrow the terminal.
 func (m *Model) keybar(width int) string {
 	pairs := [][2]string{
-		{"j/k", "move"}, {"enter", "detail"}, {"dd", "done"}, {"a/A", "add"},
-		{"e", "edit"}, {"p", "pri"}, {"D", "due"}, {"t", "tag"}, {"l/L", "link"},
+		{"j/k", "move"}, {"enter", "detail"}, {"x", "done"}, {"a/A", "add"},
+		{"e", "edit"}, {"p", "pri"}, {"D", "due"}, {"t/T", "tag"}, {"l/L", "link"},
 		{"/", "filter"}, {"v", "group"}, {"b", "blocked"}, {"u", "undo"},
-		{"?", "help"}, {"q", "quit"},
 	}
 	sep := lipgloss.NewStyle().Foreground(cBorder).Background(cBarBg).Render(" · ")
+	seg := func(p [2]string) string { return stKeyBg.Render(p[0]) + stBarBg.Render(" "+p[1]) }
+	tail := seg([2]string{"?", "help"}) + sep + seg([2]string{"q", "quit"})
+	budget := width - lipgloss.Width(tail) - lipgloss.Width(sep)
+
 	out := ""
-	for i, p := range pairs {
-		seg := stKeyBg.Render(p[0]) + stBarBg.Render(" "+p[1])
-		if i > 0 {
-			seg = sep + seg
+	for _, p := range pairs {
+		s := seg(p)
+		if out != "" {
+			s = sep + s
 		}
-		if lipgloss.Width(out)+lipgloss.Width(seg) > width {
+		if lipgloss.Width(out)+lipgloss.Width(s) > budget {
 			break
 		}
-		out += seg
+		out += s
 	}
-	return out
+	if out != "" {
+		out += sep
+	}
+	return out + tail
 }
 
 // --- layouts -------------------------------------------------------------
@@ -182,12 +191,15 @@ func (m *Model) compactView(h int) string {
 	if len(lines) == 0 {
 		return stDim.Render(" no tasks")
 	}
-	return window(lines, sel, h)
+	return m.viewport(lines, sel, h)
 }
 
 // listView renders the grouped task list, windowed to h rows.
 func (m *Model) listView(width, h int) string {
 	if len(m.flat) == 0 {
+		if m.filter != "" {
+			return stDim.Render(fmt.Sprintf("  no tasks match %q", m.filter))
+		}
 		return stDim.Render("  no tasks — press 'a' to add one")
 	}
 	var lines []string
@@ -206,7 +218,7 @@ func (m *Model) listView(width, h int) string {
 			idx++
 		}
 	}
-	return window(lines, sel, h)
+	return m.viewport(lines, sel, h)
 }
 
 // groupHeader renders a labelled separator like "TODAY ──────────── (3)".
@@ -231,11 +243,14 @@ func sectionHeader(label string, width int) string {
 }
 
 func (m *Model) notesList(width, h int) string {
-	if len(m.notes) == 0 {
+	if len(m.notesView) == 0 {
+		if m.filter != "" {
+			return stDim.Render(fmt.Sprintf("  no notes match %q", m.filter))
+		}
 		return stDim.Render("  no notes — press 'A' to add one")
 	}
 	var lines []string
-	for i, n := range m.notes {
+	for i, n := range m.notesView {
 		if i == m.cursor {
 			body := "▤ " + n.Title
 			if len(n.Tags) > 0 {
@@ -250,7 +265,7 @@ func (m *Model) notesList(width, h int) string {
 			lines = append(lines, "   "+row)
 		}
 	}
-	return window(lines, m.cursor, h)
+	return m.viewport(lines, m.cursor, h)
 }
 
 // taskRow renders one task line sized to width, highlighting if selected.
@@ -351,11 +366,28 @@ func (m *Model) detailContent(w int) string {
 	if len(back) > 0 {
 		b.WriteString("\n" + sectionHeader("LINKED FROM ←", w) + "\n")
 		for _, h := range back {
-			rel, _ := filepath.Rel(m.eng.S.Dir, h.Path)
-			b.WriteString("  " + stTag.Render("←") + " " + stDim.Render(rel) + "\n")
+			kind, title := m.backlinkLabel(h.Path, h.Text)
+			b.WriteString("  " + stTag.Render("←") + " " + stDim.Render("["+kind+"]") + " " + truncate(title, w-10) + "\n")
 		}
 	}
 	return b.String()
+}
+
+// backlinkLabel turns a backlink hit (file path + matching line) into a human
+// label — a note title or a task's text — instead of a raw file path.
+func (m *Model) backlinkLabel(path, text string) (kind, title string) {
+	if strings.HasSuffix(path, ".md") {
+		for _, n := range m.notes {
+			if n.Path == path {
+				return "note", n.Title
+			}
+		}
+		return "note", strings.TrimSuffix(filepath.Base(path), ".md")
+	}
+	if tk, ok := task.ParseLine(strings.TrimSpace(text)); ok {
+		return "task", tk.Text
+	}
+	return "task", strings.TrimSpace(text)
 }
 
 func (m *Model) noteDetail(n *note.Note, w int) string {
@@ -406,21 +438,35 @@ func (m *Model) renderMarkdown(id, body string, w int) string {
 }
 
 func (m *Model) helpView() string {
-	rows := [][2]string{
-		{"j / k, ↑ ↓", "move"}, {"g / G", "top / bottom"},
-		{"1 / 2 / tab", "switch tasks / notes"}, {"enter", "toggle detail"},
-		{"dd", "toggle done"}, {"u", "undo (again = redo)"},
-		{"a / A", "add task / note"}, {"r", "rename"},
-		{"e / E", "edit in $EDITOR"}, {"p", "cycle priority"},
-		{"D", "set due date"}, {"t", "add tag"},
-		{"l / L", "add link / follow link"}, {"/", "filter"},
-		{"v", "cycle grouping (date→project→tag)"}, {".", "show/hide done"},
-		{"b", "show/hide blocked"}, {"? ", "this help"}, {"q", "quit"},
+	groups := []struct {
+		title string
+		rows  [][2]string
+	}{
+		{"navigate", [][2]string{
+			{"j / k, ↑ ↓", "move"}, {"Ctrl+d / Ctrl+u", "half-page down / up"},
+			{"g / G", "top / bottom"}, {"1 / 2 / tab", "switch tasks / notes"},
+			{"enter", "toggle detail"},
+		}},
+		{"edit", [][2]string{
+			{"x  or  dd", "toggle done"}, {"a / A", "add task / note"},
+			{"r", "rename"}, {"e / E", "edit in $EDITOR"}, {"p", "cycle priority"},
+			{"D", "set due date"}, {"t / T", "add / remove tag"},
+			{"l / L", "add link / follow link"}, {"u", "undo (again = redo)"},
+		}},
+		{"view", [][2]string{
+			{"/", "filter (searches note bodies on the notes tab)"},
+			{"v", "cycle grouping (date→project→tag)"},
+			{".", "show / hide done"}, {"b", "show / hide blocked"},
+			{"?", "this help"}, {"q", "quit"},
+		}},
 	}
 	var b strings.Builder
-	b.WriteString(stTitle.Render("nt — keys") + "\n\n")
-	for _, r := range rows {
-		b.WriteString("  " + stKey.Render(fmt.Sprintf("%-12s", r[0])) + stMuted.Render(r[1]) + "\n")
+	b.WriteString(stTitle.Render("nt — keys") + "\n")
+	for _, g := range groups {
+		b.WriteString("\n" + stSec.Render(strings.ToUpper(g.title)) + "\n")
+		for _, r := range g.rows {
+			b.WriteString("  " + stKey.Render(fmt.Sprintf("%-16s", r[0])) + stMuted.Render(r[1]) + "\n")
+		}
 	}
 	b.WriteString("\n" + stDim.Render("press ? or esc to close"))
 	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center,
@@ -576,6 +622,8 @@ func promptLabel(ik inputKind) string {
 		return "due:"
 	case inTag:
 		return "tag:"
+	case inUntag:
+		return "untag:"
 	case inLink:
 		return "link:"
 	}
@@ -607,20 +655,33 @@ func truncate(s string, max int) string {
 	return string(r) + "…"
 }
 
-// window returns up to h lines centered on the selected line index.
-func window(lines []string, sel, h int) string {
-	if len(lines) <= h || h <= 0 {
+// viewport returns up to h lines, scrolling only when the selected line nears an
+// edge (a scrolloff margin). Unlike a recentering window, the cursor stays put
+// in the middle band and the list feels planted. It keeps m.offset as the
+// persistent scroll position.
+func (m *Model) viewport(lines []string, sel, h int) string {
+	n := len(lines)
+	if n <= h || h <= 0 {
+		m.offset = 0
 		return strings.Join(lines, "\n")
 	}
-	start := 0
+	so := 4 // scrolloff
+	if h < 2*so+1 {
+		so = (h - 1) / 2
+	}
 	if sel >= 0 {
-		start = sel - h/2
+		if sel < m.offset+so {
+			m.offset = sel - so
+		}
+		if sel > m.offset+h-1-so {
+			m.offset = sel - (h - 1 - so)
+		}
 	}
-	if start < 0 {
-		start = 0
+	if m.offset > n-h {
+		m.offset = n - h
 	}
-	if start+h > len(lines) {
-		start = len(lines) - h
+	if m.offset < 0 {
+		m.offset = 0
 	}
-	return strings.Join(lines[start:start+h], "\n")
+	return strings.Join(lines[m.offset:m.offset+h], "\n")
 }

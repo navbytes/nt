@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"strings"
@@ -44,10 +45,12 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m *Model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	key := msg.String()
-	if key != "d" {
+	// Clear the pending-'d' hint (and its status) on any other key. The status
+	// line is NOT wiped on every key, so action feedback persists until replaced.
+	if key != "d" && m.pendD {
 		m.pendD = false
+		m.status = ""
 	}
-	m.status = ""
 
 	switch key {
 	case "q", "ctrl+c":
@@ -56,18 +59,22 @@ func (m *Model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.move(1)
 	case "k", "up":
 		m.move(-1)
+	case "ctrl+d":
+		m.move(m.halfPage())
+	case "ctrl+u":
+		m.move(-m.halfPage())
 	case "g", "home":
-		m.cursor = 0
+		m.cursor, m.offset = 0, 0
 	case "G", "end":
 		m.cursor = m.selectableLen() - 1
 		m.clampCursor()
 	case "1":
-		m.tab, m.cursor = tabTasks, 0
+		m.tab, m.cursor, m.offset = tabTasks, 0, 0
 	case "2":
-		m.tab, m.cursor = tabNotes, 0
+		m.tab, m.cursor, m.offset = tabNotes, 0, 0
 	case "tab":
 		m.tab = tabTasks + tabNotes - m.tab
-		m.cursor = 0
+		m.cursor, m.offset = 0, 0
 	case "v":
 		m.grp = (m.grp + 1) % 3
 		m.rebuild()
@@ -83,12 +90,16 @@ func (m *Model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.detail = !m.detail
 	case "esc":
 		m.detail, m.help = false, false
+	case "x":
+		m.toggleDone()
 	case "d":
 		if m.pendD {
 			m.pendD = false
+			m.status = ""
 			m.toggleDone()
 		} else {
 			m.pendD = true
+			m.setStatus("d-  press d again to toggle done")
 		}
 	case "u":
 		m.undo()
@@ -117,6 +128,10 @@ func (m *Model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "t":
 		if m.selectedTask() != nil {
 			return m, m.startInput(inTag, "", "add tag")
+		}
+	case "T":
+		if t := m.selectedTask(); t != nil && len(t.Tags()) > 0 {
+			return m, m.startInput(inUntag, "", "remove tag: "+strings.Join(t.Tags(), " "))
 		}
 	case "l":
 		if m.selectedTask() != nil {
@@ -176,7 +191,11 @@ func (m *Model) commitInput() (tea.Model, tea.Cmd) {
 		}
 	case inFilter:
 		m.filter = val
+		m.offset = 0
 		m.rebuild()
+		if val != "" {
+			m.setStatus(fmt.Sprintf("%d match(es)", m.selectableLen()))
+		}
 	case inRename:
 		if val != "" {
 			m.rename(val)
@@ -186,6 +205,10 @@ func (m *Model) commitInput() (tea.Model, tea.Cmd) {
 	case inTag:
 		if val != "" {
 			m.addTag(val)
+		}
+	case inUntag:
+		if val != "" {
+			m.removeTag(val)
 		}
 	case inLink:
 		if val != "" {
@@ -278,7 +301,37 @@ func (m *Model) addTag(tag string) {
 		return
 	}
 	tag = strings.TrimPrefix(tag, "@")
+	if tag == "" || contains(t.Tags(), tag) {
+		return // ignore empty or duplicate
+	}
 	m.mutate("tag", t.ID(), func(tk *task.Task) { tk.SetText(tk.Text + " @" + tag) })
+}
+
+func (m *Model) removeTag(tag string) {
+	t := m.selectedTask()
+	if t == nil {
+		return
+	}
+	tag = strings.TrimPrefix(tag, "@")
+	m.mutate("untag", t.ID(), func(tk *task.Task) {
+		words := strings.Fields(tk.Text)
+		out := words[:0]
+		for _, w := range words {
+			if w != "@"+tag {
+				out = append(out, w)
+			}
+		}
+		tk.SetText(strings.Join(out, " "))
+	})
+}
+
+func contains(ss []string, v string) bool {
+	for _, s := range ss {
+		if s == v {
+			return true
+		}
+	}
+	return false
 }
 
 func (m *Model) addLinkTarget(target string) {
@@ -335,25 +388,18 @@ func (m *Model) followLink() {
 	}
 	if it.Kind == "note" {
 		m.tab = tabNotes
-		m.selectNoteByID(it.ID)
 	} else {
 		m.tab = tabTasks
-		m.selectTaskByID(it.ID)
 	}
+	m.filter = "" // clear filter so the target is visible
+	m.rebuild()
+	m.selectByID(it.ID)
+	m.setStatus("→ " + it.Title)
 }
 
 func (m *Model) selectTaskByID(id string) {
 	for i, t := range m.flat {
 		if t.ID() == id {
-			m.cursor = i
-			return
-		}
-	}
-}
-
-func (m *Model) selectNoteByID(id string) {
-	for i, n := range m.notes {
-		if n.ID == id {
 			m.cursor = i
 			return
 		}
