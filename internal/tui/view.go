@@ -1,0 +1,557 @@
+package tui
+
+import (
+	"fmt"
+	"path/filepath"
+	"strings"
+	"time"
+
+	"github.com/charmbracelet/glamour"
+	"github.com/charmbracelet/lipgloss"
+	"github.com/navbytes/nt/internal/links"
+	"github.com/navbytes/nt/internal/note"
+	"github.com/navbytes/nt/internal/task"
+)
+
+func (m *Model) View() string {
+	if m.width == 0 || m.height == 0 {
+		return "loading…"
+	}
+	if m.help {
+		return m.helpView()
+	}
+	header := m.headerView()
+	footer := m.footerView()
+	bodyH := m.height - lipgloss.Height(header) - lipgloss.Height(footer)
+	if bodyH < 1 {
+		bodyH = 1
+	}
+
+	var body string
+	switch {
+	case m.detail && m.width < wideMin:
+		body = m.detailCard(bodyH)
+	case m.width >= wideMin:
+		body = m.wideView(bodyH)
+	case m.width <= compactMax:
+		body = m.compactView(bodyH)
+	default:
+		body = m.standardView(bodyH)
+	}
+	// Pad the body to the full available height so the footer pins to the
+	// bottom of the window instead of floating under the content.
+	body = lipgloss.NewStyle().Height(bodyH).MaxHeight(bodyH).Render(body)
+	return lipgloss.JoinVertical(lipgloss.Left, header, body, footer)
+}
+
+// --- header / footer -----------------------------------------------------
+
+func (m *Model) headerView() string {
+	t1, t2 := " 1 tasks ", " 2 notes "
+	if m.tab == tabTasks {
+		t1, t2 = stTabOn.Render(t1), stTabOff.Render(t2)
+	} else {
+		t1, t2 = stTabOff.Render(t1), stTabOn.Render(t2)
+	}
+	left := stBrand.Render(" nt ") + stHeader.Render(" ") + t1 + t2
+
+	layout := "standard"
+	if m.width >= wideMin {
+		layout = "split"
+	} else if m.width <= compactMax {
+		layout = "compact"
+	}
+	right := "group: " + m.grp.String() + "  ·  " + layout + " "
+	if m.filter != "" {
+		right = "filter: " + m.filter + "  ·  " + right
+	}
+	rightR := stBarBg.Render(right)
+	gap := m.width - lipgloss.Width(left) - lipgloss.Width(rightR)
+	line := left + barPad(gap) + rightR
+	rule := stRule.Render(strings.Repeat("─", m.width))
+	return line + "\n" + rule
+}
+
+func (m *Model) footerView() string {
+	rule := stRule.Render(strings.Repeat("─", m.width))
+	var content string
+	if m.ik != inNone {
+		content = stKeyBg.Render(" "+promptLabel(m.ik)+" ") + m.input.View()
+	} else if m.status != "" {
+		content = padBetween(stBarBg.Render(" ")+m.keybar(m.width-len(m.status)-3), stKeyBg.Render(m.status+" "), m.width)
+	} else {
+		content = stBarBg.Render(" ") + m.keybar(m.width-1)
+	}
+	// Fill the rest of the row with background-styled spaces. lipgloss won't
+	// re-apply an outer background after the inner segments reset, so each cell
+	// must carry the bar background itself.
+	content += barPad(m.width - lipgloss.Width(content))
+	return rule + "\n" + content
+}
+
+// barPad returns n background-styled spaces for filling a bar to full width.
+func barPad(n int) string {
+	if n < 1 {
+		return ""
+	}
+	return stBarBg.Render(strings.Repeat(" ", n))
+}
+
+// keybar renders key/label pairs (cyan key, dim label) up to a width budget,
+// matching the mockup's keymap strip.
+func (m *Model) keybar(width int) string {
+	pairs := [][2]string{
+		{"j/k", "move"}, {"enter", "detail"}, {"dd", "done"}, {"a/A", "add"},
+		{"e", "edit"}, {"p", "pri"}, {"D", "due"}, {"t", "tag"}, {"l/L", "link"},
+		{"/", "filter"}, {"v", "group"}, {"b", "blocked"}, {"u", "undo"},
+		{"?", "help"}, {"q", "quit"},
+	}
+	sep := lipgloss.NewStyle().Foreground(cBorder).Background(cBarBg).Render(" · ")
+	out := ""
+	for i, p := range pairs {
+		seg := stKeyBg.Render(p[0]) + stBarBg.Render(" "+p[1])
+		if i > 0 {
+			seg = sep + seg
+		}
+		if lipgloss.Width(out)+lipgloss.Width(seg) > width {
+			break
+		}
+		out += seg
+	}
+	return out
+}
+
+// --- layouts -------------------------------------------------------------
+
+func (m *Model) wideView(h int) string {
+	leftW := m.width * 58 / 100
+	rightW := m.width - leftW
+	var listContent string
+	if m.tab == tabNotes {
+		listContent = m.notesList(leftW, h)
+	} else {
+		listContent = m.listView(leftW, h)
+	}
+	list := lipgloss.NewStyle().Width(leftW).Height(h).Render(listContent)
+	// stPanel: 1 border + 2+2 padding = 5 cols of chrome.
+	detail := stPanel.Width(rightW - 1).Height(h).Render(m.rightDetail(rightW - 6))
+	return lipgloss.JoinHorizontal(lipgloss.Top, list, detail)
+}
+
+// rightDetail picks the detail pane content for the active tab.
+func (m *Model) rightDetail(w int) string {
+	if m.tab == tabNotes {
+		if n := m.selectedNote(); n != nil {
+			return m.noteDetail(n, w)
+		}
+		return stDim.Render("no note selected")
+	}
+	return m.detailContent(w)
+}
+
+func (m *Model) standardView(h int) string {
+	if m.tab == tabNotes {
+		return m.notesList(m.width, h)
+	}
+	return m.listView(m.width, h)
+}
+
+func (m *Model) compactView(h int) string {
+	if m.tab == tabNotes {
+		return m.notesList(m.width, h)
+	}
+	var lines []string
+	idx, sel := 0, -1
+	for _, g := range m.groups {
+		for _, t := range g.tasks {
+			cur := idx == m.cursor
+			row := m.icon(t) + " " + truncate(colorizeStr(t.Text, t.Done), m.width-6) + " " + priStr(t.Priority)
+			if cur {
+				row = stSel.Width(m.width).Render(" " + row)
+				sel = len(lines)
+			} else {
+				row = " " + row
+			}
+			lines = append(lines, row)
+			idx++
+		}
+	}
+	return window(lines, sel, h)
+}
+
+// listView renders the grouped task list, windowed to h rows.
+func (m *Model) listView(width, h int) string {
+	if len(m.flat) == 0 {
+		return stDim.Render("  no tasks — press 'a' to add one")
+	}
+	var lines []string
+	idx, sel := 0, -1
+	for gi, g := range m.groups {
+		if gi > 0 {
+			lines = append(lines, "")
+		}
+		lines = append(lines, groupHeader(g.name, len(g.tasks), width))
+		for _, t := range g.tasks {
+			cur := idx == m.cursor
+			lines = append(lines, m.taskRow(t, cur, width))
+			if cur {
+				sel = len(lines) - 1
+			}
+			idx++
+		}
+	}
+	return window(lines, sel, h)
+}
+
+// groupHeader renders a labelled separator like "TODAY ──────────── (3)".
+func groupHeader(name string, count, width int) string {
+	label := "  " + strings.ToUpper(name) + " "
+	tail := stDim.Render(fmt.Sprintf(" %d ", count))
+	ruleLen := width - lipgloss.Width(label) - lipgloss.Width(tail) - 1
+	if ruleLen < 1 {
+		ruleLen = 1
+	}
+	return stGroup.Render(label) + stRule.Render(strings.Repeat("─", ruleLen)) + tail
+}
+
+// sectionHeader renders an underlined detail section label with a trailing rule.
+func sectionHeader(label string, width int) string {
+	l := stSec.Render(label) + " "
+	ruleLen := width - lipgloss.Width(l) - 1
+	if ruleLen < 0 {
+		ruleLen = 0
+	}
+	return l + stRule.Render(strings.Repeat("─", ruleLen))
+}
+
+func (m *Model) notesList(width, h int) string {
+	if len(m.notes) == 0 {
+		return stDim.Render("  no notes — press 'A' to add one")
+	}
+	var lines []string
+	for i, n := range m.notes {
+		row := stDim.Render("▤") + " " + n.Title
+		if tags := n.Tags; len(tags) > 0 {
+			row += "  " + stTag.Render("@"+strings.Join(tags, " @"))
+		}
+		if i == m.cursor {
+			lines = append(lines, stSel.Width(width).Render(" ▌ "+row))
+		} else {
+			lines = append(lines, "   "+row)
+		}
+	}
+	return window(lines, m.cursor, h)
+}
+
+// taskRow renders one task line sized to width, highlighting if selected.
+func (m *Model) taskRow(t *task.Task, sel bool, width int) string {
+	icon := m.icon(t)
+	meta := metaStr(t)
+	marker := "  "
+	if sel {
+		marker = lipgloss.NewStyle().Foreground(cBlue).Render(" ▌")
+	}
+	// budget: marker(2) icon(2) spaces + meta
+	avail := width - 6 - lipgloss.Width(meta)
+	if avail < 4 {
+		avail = 4
+	}
+	text := colorizeStr(t.Text, t.Done)
+	if lipgloss.Width(text) > avail {
+		text = truncate(text, avail)
+	}
+	left := marker + " " + icon + " " + text
+	gap := width - lipgloss.Width(left) - lipgloss.Width(meta) - 1
+	if gap < 1 {
+		gap = 1
+	}
+	line := left + strings.Repeat(" ", gap) + meta + " "
+	if sel {
+		return stSel.Width(width).Inline(true).Render(line)
+	}
+	return line
+}
+
+// --- detail --------------------------------------------------------------
+
+func (m *Model) detailCard(h int) string {
+	t := m.selectedTask()
+	n := m.selectedNote()
+	w := m.width * 8 / 10
+	if w > 70 {
+		w = 70
+	}
+	var inner string
+	switch {
+	case m.tab == tabTasks && t != nil:
+		inner = m.detailContent(w - 4)
+	case m.tab == tabNotes && n != nil:
+		inner = m.noteDetail(n, w-4)
+	default:
+		inner = stDim.Render("nothing selected")
+	}
+	card := stCard.Width(w).Render(inner)
+	return lipgloss.Place(m.width, h, lipgloss.Center, lipgloss.Center, card)
+}
+
+func (m *Model) detailContent(w int) string {
+	t := m.selectedTask()
+	if t == nil {
+		return stDim.Render("no task selected")
+	}
+	var b strings.Builder
+	b.WriteString(stTitle.Render(truncate(t.Text, w)) + "\n\n")
+	kv := func(k, v string) {
+		if v != "" {
+			b.WriteString(stDim.Render(fmt.Sprintf("%-9s", k)) + v + "\n")
+		}
+	}
+	kv("status", m.icon(t)+" "+m.effStatus(t))
+	kv("priority", priStr(t.Priority))
+	kv("due", dueStr(t.Due()))
+	if p := t.Projects(); len(p) > 0 {
+		kv("project", stProj.Render("+"+strings.Join(p, " +")))
+	}
+	if tg := t.Tags(); len(tg) > 0 {
+		kv("tags", stTag.Render("@"+strings.Join(tg, " @")))
+	}
+	kv("source", t.Source())
+	kv("id", stDim.Render(t.ID()))
+
+	// Links + backlinks (SPEC §5.1).
+	d, _ := m.eng.Read()
+	if fwd := t.Links(); len(fwd) > 0 {
+		b.WriteString("\n" + sectionHeader("LINKS →", w) + "\n")
+		for _, target := range fwd {
+			if it, ok := links.Resolve(target, d, m.notes); ok {
+				b.WriteString("  " + stProj.Render("→") + " " + stDim.Render("["+it.Kind+"]") + " " + truncate(it.Title, w-10) + "\n")
+			} else {
+				b.WriteString("  " + stProj.Render("→") + " " + stLink.Render("[["+target+"]]") + stDim.Render(" (unresolved)") + "\n")
+			}
+		}
+	}
+	back := links.Backlinks(m.eng.S, t.ID(), "")
+	if len(back) > 0 {
+		b.WriteString("\n" + sectionHeader("LINKED FROM ←", w) + "\n")
+		for _, h := range back {
+			rel, _ := filepath.Rel(m.eng.S.Dir, h.Path)
+			b.WriteString("  " + stTag.Render("←") + " " + stDim.Render(rel) + "\n")
+		}
+	}
+	return b.String()
+}
+
+func (m *Model) noteDetail(n *note.Note, w int) string {
+	var b strings.Builder
+	b.WriteString(stTitle.Render(truncate(n.Title, w)) + "\n\n")
+	if len(n.Tags) > 0 {
+		b.WriteString(stDim.Render("tags     ") + stTag.Render("@"+strings.Join(n.Tags, " @")) + "\n")
+	}
+	if n.Source != "" {
+		b.WriteString(stDim.Render("source   ") + n.Source + "\n")
+	}
+	b.WriteString("\n" + sectionHeader("BODY", w) + "\n")
+	b.WriteString(m.renderMarkdown(n.ID, n.Body, w))
+	return b.String()
+}
+
+// mdCache memoizes the last glamour render so View() doesn't re-render the
+// markdown body on every frame.
+type mdCache struct {
+	id, body string
+	w        int
+	out      string
+}
+
+// renderMarkdown renders a note body to styled terminal markdown via glamour,
+// cached by note id + width + body. Falls back to plain text on any error.
+func (m *Model) renderMarkdown(id, body string, w int) string {
+	if strings.TrimSpace(body) == "" {
+		return ""
+	}
+	if w < 8 {
+		w = 8
+	}
+	if len(body) > 4000 {
+		body = body[:4000] + "\n\n…"
+	}
+	if m.md.id == id && m.md.w == w && m.md.body == body {
+		return m.md.out
+	}
+	out := stMuted.Render(body)
+	if r, err := glamour.NewTermRenderer(glamour.WithStandardStyle("dark"), glamour.WithWordWrap(w)); err == nil {
+		if s, err := r.Render(body); err == nil {
+			out = strings.Trim(s, "\n")
+		}
+	}
+	m.md = mdCache{id: id, body: body, w: w, out: out}
+	return out
+}
+
+func (m *Model) helpView() string {
+	rows := [][2]string{
+		{"j / k, ↑ ↓", "move"}, {"g / G", "top / bottom"},
+		{"1 / 2 / tab", "switch tasks / notes"}, {"enter", "toggle detail"},
+		{"dd", "toggle done"}, {"u", "undo (again = redo)"},
+		{"a / A", "add task / note"}, {"r", "rename"},
+		{"e / E", "edit in $EDITOR"}, {"p", "cycle priority"},
+		{"D", "set due date"}, {"t", "add tag"},
+		{"l / L", "add link / follow link"}, {"/", "filter"},
+		{"v", "cycle grouping (date→project→tag)"}, {".", "show/hide done"},
+		{"b", "show/hide blocked"}, {"? ", "this help"}, {"q", "quit"},
+	}
+	var b strings.Builder
+	b.WriteString(stTitle.Render("nt — keys") + "\n\n")
+	for _, r := range rows {
+		b.WriteString("  " + stKey.Render(fmt.Sprintf("%-12s", r[0])) + stMuted.Render(r[1]) + "\n")
+	}
+	b.WriteString("\n" + stDim.Render("press ? or esc to close"))
+	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center,
+		stCard.Render(b.String()))
+}
+
+// --- small render helpers ------------------------------------------------
+
+// icon renders a task's status glyph, accounting for dependency blocking.
+func (m *Model) icon(t *task.Task) string { return iconFor(m.effStatus(t)) }
+
+func iconFor(status string) string {
+	switch status {
+	case "done":
+		return stDim.Render("✓")
+	case "doing":
+		return lipgloss.NewStyle().Foreground(cGreen).Render("◐")
+	case "blocked":
+		return lipgloss.NewStyle().Foreground(cRed).Render("⊘")
+	default:
+		return stDim.Render("○")
+	}
+}
+
+func priStr(p byte) string {
+	switch p {
+	case 'A':
+		return lipgloss.NewStyle().Foreground(cRed).Render("(A)")
+	case 'B':
+		return lipgloss.NewStyle().Foreground(cYellow).Render("(B)")
+	case 'C':
+		return lipgloss.NewStyle().Foreground(cBlue).Render("(C)")
+	}
+	return ""
+}
+
+func dueStr(due string) string {
+	if due == "" {
+		return ""
+	}
+	dt, err := time.Parse("2006-01-02", due)
+	if err != nil {
+		return due
+	}
+	now := time.Now()
+	today := now.Format("2006-01-02")
+	label, col := due, cDim
+	switch {
+	case due < today:
+		col = cRed
+	case due == today:
+		label, col = "today", cOrange
+	case due == now.AddDate(0, 0, 1).Format("2006-01-02"):
+		label, col = "tom", cYellow
+	case dt.Before(now.AddDate(0, 0, 7)):
+		label, col = dt.Weekday().String()[:3], cYellow
+	}
+	return lipgloss.NewStyle().Foreground(col).Render(label)
+}
+
+func metaStr(t *task.Task) string {
+	parts := []string{}
+	if p := priStr(t.Priority); p != "" {
+		parts = append(parts, p)
+	}
+	if d := dueStr(t.Due()); d != "" {
+		parts = append(parts, d)
+	}
+	return strings.Join(parts, " ")
+}
+
+func colorizeStr(text string, done bool) string {
+	if done {
+		return stDone.Render(text)
+	}
+	words := strings.Fields(text)
+	for i, w := range words {
+		switch {
+		case strings.HasPrefix(w, "@") && len(w) > 1:
+			words[i] = stTag.Render(w)
+		case strings.HasPrefix(w, "+") && len(w) > 1:
+			words[i] = stProj.Render(w)
+		case strings.HasPrefix(w, "[["):
+			words[i] = stLink.Render(w)
+		}
+	}
+	return strings.Join(words, " ")
+}
+
+func promptLabel(ik inputKind) string {
+	switch ik {
+	case inAddTask:
+		return "add:"
+	case inAddNote:
+		return "note:"
+	case inFilter:
+		return "filter:"
+	case inRename:
+		return "rename:"
+	case inDue:
+		return "due:"
+	case inTag:
+		return "tag:"
+	case inLink:
+		return "link:"
+	}
+	return ">"
+}
+
+// padBetween left-justifies left and right-justifies right within width.
+func padBetween(left, right string, width int) string {
+	gap := width - lipgloss.Width(left) - lipgloss.Width(right)
+	if gap < 1 {
+		gap = 1
+	}
+	return left + strings.Repeat(" ", gap) + right
+}
+
+// truncate cuts s to a max display width, adding an ellipsis. ANSI-aware via
+// lipgloss width; for styled strings it trims conservatively by runes.
+func truncate(s string, max int) string {
+	if max < 1 {
+		return ""
+	}
+	if lipgloss.Width(s) <= max {
+		return s
+	}
+	r := []rune(s)
+	if len(r) > max-1 {
+		r = r[:max-1]
+	}
+	return string(r) + "…"
+}
+
+// window returns up to h lines centered on the selected line index.
+func window(lines []string, sel, h int) string {
+	if len(lines) <= h || h <= 0 {
+		return strings.Join(lines, "\n")
+	}
+	start := 0
+	if sel >= 0 {
+		start = sel - h/2
+	}
+	if start < 0 {
+		start = 0
+	}
+	if start+h > len(lines) {
+		start = len(lines) - h
+	}
+	return strings.Join(lines[start:start+h], "\n")
+}

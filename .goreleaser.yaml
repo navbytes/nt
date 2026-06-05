@@ -1,0 +1,52 @@
+# GoReleaser config — cross-platform release binaries + a Homebrew tap.
+# Cut a release: tag the commit (git tag v0.1.0 && git push --tags) then
+# `make release` (or `goreleaser release --clean`). Local dry run: `make snapshot`.
+version: 2
+
+project_name: nt
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: nt
+    main: .
+    binary: nt
+    env:
+      - CGO_ENABLED=0
+    goos: [linux, darwin]
+    goarch: [amd64, arm64]
+    ldflags:
+      - -s -w -X main.version={{ .Version }}
+
+archives:
+  - id: nt
+    formats: [tar.gz]
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+
+checksum:
+  name_template: checksums.txt
+
+changelog:
+  use: github
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+
+# Publishes a formula to github.com/navbytes/homebrew-tap so users can
+# `brew install navbytes/tap/nt`. Requires that tap repo to exist.
+brews:
+  - name: nt
+    repository:
+      owner: navbytes
+      name: homebrew-tap
+    homepage: "https://github.com/navbytes/nt"
+    description: "Terminal task & note manager — durable memory for AI coding sessions"
+    license: MIT
+    install: |
+      bin.install "nt"
+    test: |
+      system "#{bin}/nt", "--version"

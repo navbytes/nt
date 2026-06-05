@@ -1,0 +1,307 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>nt — TUI design mockup</title>
+<style>
+  :root{
+    --bg:#1a1b26; --panel:#16161e; --bar:#1f2335; --sel:#283457;
+    --fg:#c0caf5; --dim:#565f89; --muted:#787c99;
+    --red:#f7768e; --orange:#ff9e64; --yellow:#e0af68;
+    --green:#9ece6a; --cyan:#7dcfff; --blue:#7aa2f7; --magenta:#bb9af7;
+    --border:#3b4261;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0; background:#0d0e14; color:var(--fg);
+    font-family:ui-monospace,"SF Mono","JetBrains Mono",Menlo,Consolas,monospace;
+    font-size:13px; line-height:1.5; padding:32px 24px 80px;
+  }
+  h1{font-size:20px;margin:0 0 4px;color:#fff;font-weight:600}
+  .lede{color:var(--muted);max-width:760px;margin:0 0 28px;font-size:13px;line-height:1.6}
+  .lede b{color:var(--cyan);font-weight:600}
+  h2{font-size:13px;text-transform:uppercase;letter-spacing:.12em;color:var(--blue);
+     margin:36px 0 6px;font-weight:600}
+  .cap{color:var(--muted);margin:0 0 14px;max-width:760px;font-size:12.5px}
+  .cap code{color:var(--yellow);background:#1f2335;padding:1px 5px;border-radius:4px}
+
+  /* terminal frame */
+  .term{background:var(--bg);border:1px solid var(--border);border-radius:10px;
+        overflow:hidden;box-shadow:0 10px 40px rgba(0,0,0,.45);margin-bottom:8px}
+  .chrome{display:flex;align-items:center;gap:7px;padding:8px 12px;background:#11121a;
+          border-bottom:1px solid var(--border)}
+  .dot{width:11px;height:11px;border-radius:50%}
+  .dot.r{background:#ff5f57}.dot.y{background:#febc2e}.dot.g{background:#28c840}
+  .chrome .t{margin-left:8px;color:var(--dim);font-size:11.5px}
+  .screen{padding:0}
+  .frames{display:flex;gap:18px;flex-wrap:wrap;align-items:flex-start}
+
+  /* app header bar inside the TUI */
+  .appbar{display:flex;justify-content:space-between;align-items:center;
+          padding:6px 12px;background:var(--bar);border-bottom:1px solid var(--border);
+          color:var(--muted);font-size:12px}
+  .appbar .brand{color:var(--magenta);font-weight:700;letter-spacing:.04em}
+  .appbar .tab{color:var(--dim);margin-right:10px}
+  .appbar .tab.on{color:var(--fg);border-bottom:1px solid var(--blue);padding-bottom:2px}
+  .appbar .mode{color:var(--dim)}
+
+  /* list */
+  .pane{padding:6px 0}
+  .group{color:var(--dim);font-size:11px;text-transform:uppercase;letter-spacing:.1em;
+         padding:8px 12px 3px}
+  .group::after{content:"";display:inline-block;width:40%;height:1px;background:var(--border);
+                vertical-align:middle;margin-left:8px}
+  .row{display:grid;grid-template-columns:14px 16px 1fr auto;gap:8px;
+       padding:2px 12px;align-items:center;white-space:nowrap}
+  .row .mk{color:var(--blue);font-weight:700}
+  .row.sel{background:var(--sel)}
+  .row.sel .mk::before{content:"▌";color:var(--blue)}
+  .ico.open{color:var(--dim)} .ico.doing{color:var(--green)}
+  .ico.block{color:var(--red)} .ico.done{color:var(--dim)}
+  .txt{overflow:hidden;text-overflow:ellipsis}
+  .txt .lnk{color:var(--cyan)} .txt .tag{color:var(--magenta)} .txt .proj{color:var(--blue)}
+  .done .txt{color:var(--dim);text-decoration:line-through}
+  .sub{color:var(--dim)}
+  .meta{display:flex;gap:8px;align-items:center;color:var(--dim);font-size:12px;justify-self:end}
+  .pa{color:var(--red)} .pb{color:var(--yellow)} .pc{color:var(--blue)}
+  .due{color:var(--orange)} .due.soon{color:var(--yellow)} .due.none{color:var(--dim)}
+  .badge{color:var(--green)}
+
+  /* detail */
+  .detail{border-left:1px solid var(--border);min-width:340px;max-width:380px;padding:10px 14px}
+  .detail h3{margin:2px 0 10px;color:#fff;font-size:14px;font-weight:600}
+  .kv{display:grid;grid-template-columns:74px 1fr;gap:2px 10px;font-size:12.5px;margin-bottom:10px}
+  .kv .k{color:var(--dim)}
+  .sec{color:var(--blue);font-size:11px;text-transform:uppercase;letter-spacing:.1em;
+       margin:12px 0 4px;border-bottom:1px solid var(--border);padding-bottom:3px}
+  .body{color:var(--muted);font-size:12.5px;white-space:normal}
+  .link{padding:1px 0;font-size:12.5px}
+  .link .arrow{color:var(--blue)} .link.back .arrow{color:var(--magenta)}
+  .link .kind{color:var(--dim)}
+
+  /* keybar */
+  .keybar{display:flex;flex-wrap:wrap;gap:2px 14px;padding:7px 12px;background:var(--bar);
+          border-top:1px solid var(--border);color:var(--muted);font-size:11.5px}
+  .keybar b{color:var(--cyan);font-weight:600}
+
+  /* compact */
+  .compact{width:210px}
+  .compact .row{grid-template-columns:16px 1fr auto;gap:6px;padding:2px 10px;font-size:12.5px}
+  .compact .more{color:var(--dim);padding:4px 10px}
+
+  /* overlay demo */
+  .stage{position:relative;background:var(--bg)}
+  .dim-list{opacity:.35;filter:saturate(.6)}
+  .overlay{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+           background:rgba(7,8,12,.5)}
+  .card{background:#1b1d2b;border:1px solid var(--blue);border-radius:10px;width:min(560px,92%);
+        box-shadow:0 16px 50px rgba(0,0,0,.6)}
+  .card .head{padding:9px 14px;border-bottom:1px solid var(--border);color:#fff;font-weight:600;
+              display:flex;justify-content:space-between}
+  .card .head .esc{color:var(--dim);font-weight:400;font-size:11.5px}
+  .card .pad{padding:12px 14px}
+  .note{color:var(--dim);font-size:11.5px;margin:8px 2px 26px;display:flex;gap:8px}
+  .note .pin{color:var(--blue)}
+  .legend{color:var(--muted);font-size:12px;display:flex;flex-wrap:wrap;gap:6px 18px;margin:6px 0 30px}
+  .legend span b{color:var(--fg);font-weight:600}
+</style>
+</head>
+<body>
+
+<h1>nt — TUI design mockup</h1>
+<p class="lede">
+  A <b>static HTML preview</b> of the planned Bubble&nbsp;Tea TUI (SPEC §12), for design review
+  <b>before</b> any Go is written. Nothing here is interactive — it shows the visual language:
+  layouts, colors, status glyphs, grouping, the detail overlay with links/backlinks, and the keybar.
+  Colors approximate a Tokyo-Night terminal theme rendered with Lipgloss.
+</p>
+
+<div class="legend">
+  <span><b style="color:var(--dim)">○</b> open</span>
+  <span><b style="color:var(--green)">◐</b> doing</span>
+  <span><b style="color:var(--dim)">✓</b> done</span>
+  <span><b style="color:var(--red)">⊘</b> blocked</span>
+  <span><b class="pa">(A)</b> high</span>
+  <span><b class="pb">(B)</b> med</span>
+  <span><b class="pc">(C)</b> low</span>
+  <span><b class="lnk" style="color:var(--cyan)">[[link]]</b></span>
+  <span><b class="tag" style="color:var(--magenta)">@tag</b></span>
+  <span><b class="proj" style="color:var(--blue)">+project</b></span>
+</div>
+
+<!-- ============ WIDE SPLIT ============ -->
+<h2>1 · Wide layout — split list + detail (≥120 cols)</h2>
+<p class="cap">List on the left, live detail of the selected task on the right. This is the
+  primary working view. Press <code>Enter</code> to focus detail, <code>L</code> to jump to a linked item.</p>
+<div class="term">
+  <div class="chrome"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span>
+    <span class="t">nt — ~/.local/share/nt — 142×38</span></div>
+  <div class="appbar">
+    <span><span class="brand">nt</span> &nbsp;<span class="tab on">1 tasks</span><span class="tab">2 notes</span></span>
+    <span class="mode">group: date ▾ &nbsp; filter: none &nbsp; ⊞ split</span>
+  </div>
+  <div class="frames">
+    <div class="pane" style="flex:1;min-width:420px">
+      <div class="group">Today</div>
+      <div class="row sel done-no doing"><span class="mk"></span>
+        <span class="ico doing">◐</span>
+        <span class="txt">fix auth bug <span class="proj">+api</span> <span class="tag">@backend</span> <span class="lnk">[[jwt-expiry]]</span></span>
+        <span class="meta"><span class="pa">(A)</span><span class="due">today</span></span></div>
+      <div class="row"><span class="mk"></span><span class="ico open">○</span>
+        <span class="txt">deploy API v2 <span class="sub">[1/3]</span></span>
+        <span class="meta"><span class="pa">(A)</span><span class="due">today</span></span></div>
+      <div class="row"><span class="mk"></span><span class="ico block">⊘</span>
+        <span class="txt">run load tests <span class="sub">— blocked by deploy</span></span>
+        <span class="meta"><span class="due none">—</span></span></div>
+      <div class="group">This week</div>
+      <div class="row"><span class="mk"></span><span class="ico open">○</span>
+        <span class="txt">write migration <span class="proj">+api</span></span>
+        <span class="meta"><span class="pb">(B)</span><span class="due soon">Fri</span></span></div>
+      <div class="row"><span class="mk"></span><span class="ico open">○</span>
+        <span class="txt">update config <span class="proj">+api</span></span>
+        <span class="meta"><span class="due soon">Fri</span></span></div>
+      <div class="group">No date</div>
+      <div class="row"><span class="mk"></span><span class="ico open">○</span>
+        <span class="txt">spike: rotate auth secrets <span class="lnk">[[jwt-expiry]]</span></span>
+        <span class="meta"><span class="pc">(C)</span></span></div>
+      <div class="row done"><span class="mk"></span><span class="ico done">✓</span>
+        <span class="txt">ship release notes</span>
+        <span class="meta"><span class="badge">done</span></span></div>
+    </div>
+    <div class="detail">
+      <h3>fix auth bug</h3>
+      <div class="kv">
+        <span class="k">status</span><span><span class="ico doing">◐</span> doing</span>
+        <span class="k">priority</span><span class="pa">(A) high</span>
+        <span class="k">due</span><span class="due">today · 2026-06-06</span>
+        <span class="k">project</span><span class="proj">+api</span>
+        <span class="k">tags</span><span class="tag">@backend</span>
+        <span class="k">source</span><span>claude</span>
+        <span class="k">id</span><span class="sub">01KTC…0SJDQ7</span>
+      </div>
+      <div class="sec">Body</div>
+      <div class="body">JWT tokens expire after 24h; refresh after 7d. Root-caused the
+        race in token refresh — fix lands with the migration.</div>
+      <div class="sec">Links →</div>
+      <div class="link"><span class="arrow">→</span> <span class="kind">[note]</span> JWT expiry</div>
+      <div class="sec">Linked from ←</div>
+      <div class="link back"><span class="arrow">←</span> <span class="kind">[note]</span> auth investigation</div>
+      <div class="link back"><span class="arrow">←</span> <span class="kind">[task]</span> spike: rotate auth secrets</div>
+    </div>
+  </div>
+  <div class="keybar">
+    <span><b>j/k</b> move</span><span><b>enter</b> detail</span><span><b>dd</b> done</span>
+    <span><b>a/A</b> add</span><span><b>e</b> edit</span><span><b>t</b> tag</span><span><b>D</b> due</span>
+    <span><b>l/L</b> link</span><span><b>/</b> filter</span><span><b>^/</b> search</span>
+    <span><b>v</b> group</span><span><b>u</b> undo</span><span><b>?</b> help</span><span><b>q</b> quit</span>
+  </div>
+</div>
+<p class="note"><span class="pin">▎</span> <span>The detail pane is the same data <code>nt links</code> and
+  <code>nt recall --json</code> expose on the CLI — forward links and ripgrep-computed backlinks, no index.</span></p>
+
+<!-- ============ STANDARD ============ -->
+<h2>2 · Standard layout — tabbed list (≥60 cols)</h2>
+<p class="cap">Detail collapses; pressing <code>Enter</code> opens it as an overlay (see §4). Tabs switch
+  tasks/notes with <code>1</code>/<code>2</code>; <code>v</code> cycles grouping date → project → tag.</p>
+<div class="term" style="max-width:560px">
+  <div class="chrome"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span>
+    <span class="t">nt — 72×30</span></div>
+  <div class="appbar">
+    <span><span class="brand">nt</span> &nbsp;<span class="tab on">1 tasks</span><span class="tab">2 notes</span></span>
+    <span class="mode">group: date ▾</span>
+  </div>
+  <div class="pane">
+    <div class="group">Today</div>
+    <div class="row sel doing"><span class="mk"></span><span class="ico doing">◐</span>
+      <span class="txt">fix auth bug <span class="tag">@backend</span></span>
+      <span class="meta"><span class="pa">(A)</span><span class="due">today</span></span></div>
+    <div class="row"><span class="mk"></span><span class="ico open">○</span>
+      <span class="txt">deploy API v2 <span class="sub">[1/3]</span></span>
+      <span class="meta"><span class="pa">(A)</span><span class="due">today</span></span></div>
+    <div class="row"><span class="mk"></span><span class="ico block">⊘</span>
+      <span class="txt">run load tests</span>
+      <span class="meta"><span class="due none">—</span></span></div>
+    <div class="group">This week</div>
+    <div class="row"><span class="mk"></span><span class="ico open">○</span>
+      <span class="txt">write migration <span class="proj">+api</span></span>
+      <span class="meta"><span class="pb">(B)</span><span class="due soon">Fri</span></span></div>
+  </div>
+  <div class="keybar">
+    <span><b>j/k</b> move</span><span><b>enter</b> open</span><span><b>dd</b> done</span>
+    <span><b>a</b> add</span><span><b>/</b> filter</span><span><b>v</b> group</span><span><b>?</b> help</span>
+  </div>
+</div>
+
+<!-- ============ COMPACT + OVERLAY side by side ============ -->
+<div class="frames" style="margin-top:8px">
+  <div>
+    <h2>3 · Compact strip (25–40 cols)</h2>
+    <p class="cap" style="max-width:240px">For a narrow side-pane next to your editor /
+      Claude sessions. Monitoring-only.</p>
+    <div class="term compact">
+      <div class="chrome"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span>
+        <span class="t">32×</span></div>
+      <div class="appbar" style="padding:5px 10px">
+        <span class="brand">nt</span><span class="mode">3 due</span></div>
+      <div class="pane">
+        <div class="row sel doing"><span class="ico doing">◐</span>
+          <span class="txt">fix auth bug</span><span class="meta"><span class="pa">A</span></span></div>
+        <div class="row"><span class="ico open">○</span>
+          <span class="txt">deploy API v2</span><span class="meta"><span class="pa">A</span></span></div>
+        <div class="row"><span class="ico block">⊘</span>
+          <span class="txt">run load tests</span><span class="meta"></span></div>
+        <div class="row"><span class="ico open">○</span>
+          <span class="txt">write migration</span><span class="meta"><span class="pb">B</span></span></div>
+        <div class="more">  +2 more · ↑↓</div>
+      </div>
+    </div>
+  </div>
+
+  <div style="flex:1;min-width:380px">
+    <h2>4 · Detail overlay (narrow modes)</h2>
+    <p class="cap">What <code>Enter</code> opens when there's no room for a split pane — a modal over the
+      dimmed list, with the same fields, body, and links.</p>
+    <div class="term">
+      <div class="chrome"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span>
+        <span class="t">nt — 80×30</span></div>
+      <div class="stage">
+        <div class="pane dim-list">
+          <div class="group">Today</div>
+          <div class="row doing"><span class="mk"></span><span class="ico doing">◐</span><span class="txt">fix auth bug</span><span class="meta"><span class="pa">(A)</span></span></div>
+          <div class="row"><span class="mk"></span><span class="ico open">○</span><span class="txt">deploy API v2</span><span class="meta"><span class="pa">(A)</span></span></div>
+          <div class="row"><span class="mk"></span><span class="ico block">⊘</span><span class="txt">run load tests</span><span class="meta"></span></div>
+          <div class="row"><span class="mk"></span><span class="ico open">○</span><span class="txt">write migration</span><span class="meta"><span class="pb">(B)</span></span></div>
+        </div>
+        <div class="overlay">
+          <div class="card">
+            <div class="head"><span>fix auth bug</span><span class="esc">esc to close · L follow link</span></div>
+            <div class="pad">
+              <div class="kv">
+                <span class="k">status</span><span><span class="ico doing">◐</span> doing</span>
+                <span class="k">priority</span><span class="pa">(A) high</span>
+                <span class="k">due</span><span class="due">today · 2026-06-06</span>
+                <span class="k">tags</span><span class="tag">@backend</span>
+                <span class="k">source</span><span>claude</span>
+              </div>
+              <div class="sec">Body</div>
+              <div class="body">JWT tokens expire after 24h; refresh after 7d.</div>
+              <div class="sec">Links → / Linked from ←</div>
+              <div class="link"><span class="arrow">→</span> <span class="kind">[note]</span> JWT expiry</div>
+              <div class="link back"><span class="arrow">←</span> <span class="kind">[note]</span> auth investigation</div>
+              <div class="link back"><span class="arrow">←</span> <span class="kind">[task]</span> spike: rotate auth secrets</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<p class="note" style="margin-top:34px"><span class="pin">▎</span>
+  <span>Reviewing this? Things worth a call: the <b style="color:var(--cyan)">glyph + color scheme</b>,
+  the <b style="color:var(--cyan)">date/project/tag grouping</b>, what belongs in the
+  <b style="color:var(--cyan)">detail pane</b>, and whether the compact strip shows the right minimum.</span></p>
+
+</body>
+</html>

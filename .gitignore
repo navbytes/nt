@@ -1,0 +1,10 @@
+# compiled binary
+/nt
+
+# editor / OS cruft
+*.swp
+.DS_Store
+
+# go
+*.test
+*.out
