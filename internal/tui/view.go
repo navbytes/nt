@@ -53,7 +53,7 @@ func (m *Model) headerView() string {
 	} else {
 		t1, t2 = stTabOff.Render(t1), stTabOn.Render(t2)
 	}
-	left := stBrand.Render(" nt ") + stHeader.Render(" ") + t1 + t2
+	left := stHeader.Render("  ") + stBrand.Render(" nt ") + stHeader.Render("  ") + t1 + t2
 
 	// Persistently surface the view state (toggles + filter) in the header so
 	// the user always knows what they're looking at.
@@ -67,7 +67,7 @@ func (m *Model) headerView() string {
 	if m.filter != "" {
 		parts = append(parts, fmt.Sprintf("/%s (%d)", m.filter, m.selectableLen()))
 	}
-	rightR := stBarBg.Render(strings.Join(parts, "  ·  ") + " ")
+	rightR := stBarBg.Render(strings.Join(parts, "  ·  ") + "  ")
 	gap := m.width - lipgloss.Width(left) - lipgloss.Width(rightR)
 	line := left + barPad(gap) + rightR
 	rule := stRule.Render(strings.Repeat("─", m.width))
@@ -78,11 +78,11 @@ func (m *Model) footerView() string {
 	rule := stRule.Render(strings.Repeat("─", m.width))
 	var content string
 	if m.ik != inNone {
-		content = stKeyBg.Render(" "+promptLabel(m.ik)+" ") + m.input.View()
+		content = stKeyBg.Render("  "+promptLabel(m.ik)+" ") + m.input.View()
 	} else if m.status != "" {
-		content = padBetween(stBarBg.Render(" ")+m.keybar(m.width-len(m.status)-3), stKeyBg.Render(m.status+" "), m.width)
+		content = padBetween(stBarBg.Render("  ")+m.keybar(m.width-len(m.status)-4), stKeyBg.Render(m.status+"  "), m.width)
 	} else {
-		content = stBarBg.Render(" ") + m.keybar(m.width-1)
+		content = stBarBg.Render("  ") + m.keybar(m.width-2)
 	}
 	// Fill the rest of the row with background-styled spaces. lipgloss won't
 	// re-apply an outer background after the inner segments reset, so each cell
