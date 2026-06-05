@@ -236,12 +236,20 @@ func (m *Model) addTask(text string) {
 }
 
 func (m *Model) addNote(title string) {
-	if _, err := note.Create(m.eng.S, title, "", nil, "tui"); err != nil {
+	n, err := note.Create(m.eng.S, title, "", nil, "tui")
+	if err != nil {
 		m.setStatus("note error")
 		return
 	}
+	// Switch to the notes tab and select the new note so it's visible (otherwise
+	// adding a note from the tasks tab looks like nothing happened).
 	m.reload()
-	m.setStatus("note created")
+	m.tab = tabNotes
+	m.filter = ""
+	m.cursor = 0
+	m.rebuild()
+	m.selectByID(n.ID)
+	m.setStatus("note added — press e to edit its body")
 }
 
 func (m *Model) toggleDone() {
