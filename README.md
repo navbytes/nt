@@ -83,6 +83,7 @@ Everything is plain text — open it in any editor, `grep` it, or `git init` it.
 ```bash
 nt add "fix auth bug" --pri high --due today --tag backend --project api
 nt note "JWT expiry" --body "tokens last 24h" --tag auth
+nt ready [--source claude] [--json]   # open, unblocked tasks by urgency — start here
 nt list [--status open|doing|blocked|done] [--tag T] [--sort urgency] [--all] [--json]
 nt done <id|task:N>            # also accepts the 6-char short code shown in list
 nt update <id|task:N> --status doing --due tomorrow --pri med

@@ -61,13 +61,19 @@ store can't be opened, it simply does nothing.
 The bundled skill ([.claude/skills/nt/SKILL.md](../.claude/skills/nt/SKILL.md))
 teaches Claude to use `nt` directly. With it installed, you can say things like:
 
+- "what should I work on?" → Claude runs `nt ready` (open, unblocked, by urgency)
 - "save that as a task in nt"
 - "note this finding for later"
 - "what did we capture last session?" → Claude runs `nt recall --source claude`
 - or just type `/nt`
 
-Claude will run the right `nt` commands (`add`, `note`, `recall`, `done`,
-`links`, `search`), always passing `--source claude`.
+Claude will run the right `nt` commands (`ready`, `add`, `note`, `recall`,
+`done`, `links`, `search`), always passing `--source claude`.
+
+**Start a session with `nt ready`.** It returns only actionable work — open
+tasks that aren't done and aren't waiting on a dependency — newest-urgency
+first. That's the agent's "pick up here" feed; `nt recall` is the broader
+"everything we captured" read.
 
 Install it by keeping `.claude/skills/nt/` in your project, or copy it to
 `~/.claude/skills/nt/` to make it available everywhere.
@@ -93,10 +99,11 @@ recall, and ad-hoc edits.
 # session 1 — Claude works, todos sync automatically via the hook
 #   (or: nt add "fix token refresh race" --source claude)
 
-# session 2 — recall what was captured
-nt recall --source claude --json
-# → Claude reads its prior action items back and continues where it left off
+# session 2 — pick up where it left off
+nt ready --json                    # what's actionable right now (open, unblocked)
+nt recall --source claude --json   # the fuller context: everything captured
+# → Claude reads its prior work back and continues
 ```
 
-That recall step is the whole point: the action items don't vanish when the
-session ends.
+That pickup step is the whole point: the action items don't vanish when the
+session ends — and `nt ready` tells the next agent exactly where to start.

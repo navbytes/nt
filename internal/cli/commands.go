@@ -182,6 +182,59 @@ func cmdList(args []string) int {
 	return 0
 }
 
+// cmdReady lists open, unblocked tasks by urgency — the canonical "what should I
+// pick up next" feed, and the recommended entry point for an AI session resuming
+// work. It's the default actionable set (no done, no dependency-blocked tasks),
+// urgency-sorted, optionally narrowed by source/tag/project.
+func cmdReady(args []string) int {
+	fs := flag.NewFlagSet("ready", flag.ContinueOnError)
+	source := fs.String("source", "", "filter by source (e.g. claude)")
+	tag := fs.String("tag", "", "filter by tag")
+	project := fs.String("project", "", "filter by project")
+	asJSON := fs.Bool("json", false, "machine-readable output")
+
+	flags, _ := splitArgs(args, map[string]bool{"json": true})
+	if err := fs.Parse(flags); err != nil {
+		return 2
+	}
+	e, ok := engine()
+	if !ok {
+		return 1
+	}
+	d, err := e.Read()
+	if err != nil {
+		return fail(err)
+	}
+	all := d.Tasks()
+	idx := indexMap(all)
+	blocked := task.BlockedIDs(all)
+
+	var rows []*task.Task
+	for _, t := range all {
+		// keep with all=false, showBlocked=false drops done + dependency-blocked.
+		if !keep(t, "", *tag, *project, false, false, blocked) {
+			continue
+		}
+		if *source != "" && t.Source() != *source {
+			continue
+		}
+		rows = append(rows, t)
+	}
+	sortTasks(rows, "urgency")
+
+	if *asJSON {
+		return printJSON(tasksToJSON(rows, idx))
+	}
+	if len(rows) == 0 {
+		fmt.Println("nothing ready — all clear, or everything open is blocked")
+		return 0
+	}
+	for _, t := range rows {
+		fmt.Println(formatRow(t, idx[t], false)) // ready ⇒ not blocked
+	}
+	return 0
+}
+
 func cmdRecall(args []string) int {
 	fs := flag.NewFlagSet("recall", flag.ContinueOnError)
 	source := fs.String("source", "", "filter by source")

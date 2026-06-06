@@ -12,15 +12,18 @@ persist as plain text that the user — and the next session — can read back.
 Everything is the `nt` CLI. Always pass `--source claude` so AI-created items are
 distinguishable from what the user typed by hand.
 
-## Recall first
+## Start here: `nt ready`
 
-At the start of substantive work, load what prior sessions captured so you don't
-lose context:
+At the start of substantive work, find what's actionable and reload prior context:
 
 ```bash
-nt recall --source claude --json    # tasks + notes you created before
-nt list --json                      # the user's current open tasks
+nt ready --json                     # open, UNBLOCKED tasks by urgency — start here
+nt recall --source claude --json    # the fuller context: tasks + notes you created before
 ```
+
+`nt ready` is your "pick up here" feed — it omits completed tasks and anything
+still waiting on a dependency, so you act on work that's genuinely available.
+`nt recall` is the broader read of everything captured. Lead with `ready`.
 
 ## Capture tasks
 
