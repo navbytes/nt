@@ -53,7 +53,14 @@ func (m *Model) headerView() string {
 	} else {
 		t1, t2 = stTabOff.Render(t1), stTabOn.Render(t2)
 	}
-	left := stHeader.Render("  ") + stBrand.Render(" nt ") + stHeader.Render("  ") + t1 + t2
+	p1, brand, p2 := stHeader.Render("  "), stBrand.Render(" nt "), stHeader.Render("  ")
+	left := p1 + brand + p2 + t1 + t2
+	// Record the clickable tab-label column ranges (header row 0) for the mouse.
+	tabStart := lipgloss.Width(p1) + lipgloss.Width(brand) + lipgloss.Width(p2)
+	m.tabHits = []tabHit{
+		{start: tabStart, end: tabStart + lipgloss.Width(t1), tab: tabTasks},
+		{start: tabStart + lipgloss.Width(t1), end: tabStart + lipgloss.Width(t1) + lipgloss.Width(t2), tab: tabNotes},
+	}
 
 	// Right side: muted "group + toggles" plus PROMINENT chips for any active
 	// filter / scope / marks, so the user always knows why the list is reduced.

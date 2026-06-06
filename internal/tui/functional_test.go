@@ -259,6 +259,28 @@ func TestMouseClickActivatesToken(t *testing.T) {
 	}
 }
 
+// TestClickTabSwitch: clicking the tab labels in the header switches tabs.
+func TestClickTabSwitch(t *testing.T) {
+	m := testModel(t)
+	m.width, m.height = 120, 30
+	m.View() // populate tabHits
+	if len(m.tabHits) != 2 {
+		t.Fatalf("expected 2 tab hits, got %d", len(m.tabHits))
+	}
+	notes := m.tabHits[1]
+	var model tea.Model = m
+	model, _ = model.Update(tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonLeft, X: notes.start + 1, Y: 0})
+	if model.(*Model).tab != tabNotes {
+		t.Fatal("clicking the notes label should switch to the notes tab")
+	}
+	model.(*Model).View() // refresh tabHits for the new tab
+	tasks := model.(*Model).tabHits[0]
+	model, _ = model.Update(tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonLeft, X: tasks.start + 1, Y: 0})
+	if model.(*Model).tab != tabTasks {
+		t.Fatal("clicking the tasks label should switch back")
+	}
+}
+
 // TestMouseWheelScrolls: wheel events move the selection.
 func TestMouseWheelScrolls(t *testing.T) {
 	m := testModel(t)

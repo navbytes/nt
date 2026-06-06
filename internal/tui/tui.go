@@ -92,6 +92,7 @@ type Model struct {
 	cursor   int          // index into flat (tasks) or notes (notes tab)
 	offset   int          // first visible line (scroll position)
 	hitLines []hitLine    // per-line click map from the last list render (mouse)
+	tabHits  []tabHit     // clickable tab-label ranges from the last header render
 
 	filter       string
 	scopeTag     string // active @tag scope (filters the list); "" = none

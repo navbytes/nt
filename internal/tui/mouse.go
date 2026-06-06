@@ -22,6 +22,12 @@ type hitLine struct {
 	tokens []tokenSpan
 }
 
+// tabHit is the column range of a clickable tab label in the header.
+type tabHit struct {
+	start, end int
+	tab        tab
+}
+
 // tokenOf classifies a word as a link/tag/project token.
 func tokenOf(w string) (followTarget, bool) {
 	switch {
@@ -79,12 +85,24 @@ func (m *Model) handleMouse(msg tea.MouseMsg) {
 // a token, activates it (scope/navigate). In wide mode, clicking the right pane
 // focuses the detail for scrolling.
 func (m *Model) click(x, y int) {
-	headerH := lipgloss.Height(m.headerView())
-	footerH := lipgloss.Height(m.footerView())
+	// Header row 0: clicking a tab label switches tabs.
+	if y == 0 {
+		for _, th := range m.tabHits {
+			if x >= th.start && x < th.end {
+				if m.tab != th.tab {
+					m.tab, m.cursor, m.offset, m.detailFocus = th.tab, 0, 0, false
+					m.markStatus()
+				}
+				return
+			}
+		}
+		return
+	}
+	const headerH, footerH = 2, 2 // bar + rule, each
 	bodyH := m.height - headerH - footerH
 	row := y - headerH
 	if row < 0 || row >= bodyH {
-		return // header or footer
+		return // header rule or footer
 	}
 	if m.width >= wideMin {
 		leftW := m.width * 58 / 100
