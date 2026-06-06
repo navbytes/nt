@@ -6,6 +6,8 @@ agents can all read and write it directly. Built to be the durable memory layer
 for AI sessions: action items an agent creates survive the session in text the
 next agent can read back.
 
+![nt — wide split with live detail pane](docs/screenshots/01-tasks-wide.png)
+
 See [SPEC.md](SPEC.md) for the full design.
 
 > **Status: all four phases implemented** — core + CLI + AI loop (P1), the Bubble Tea TUI
@@ -41,10 +43,25 @@ make test              # run the test suite
 Run `nt` with no arguments for the interactive terminal UI (Bubble Tea). It
 adapts to terminal width — compact strip / standard list / wide split with a
 live detail pane — and live-refreshes via fsnotify when another process (a CLI
-call, an AI session) writes the store. Press `?` for the full keymap. Essentials:
-`j/k` move · `enter` detail · `dd` done · `a/A` add · `e` edit · `p` priority ·
-`D` due · `t` tag · `l/L` link/follow · `/` filter · `v` group · `u` undo · `q` quit.
-See [docs/tui-mockup.html](docs/tui-mockup.html) for the visual design.
+call, an AI session) writes the store. Three tabs: tasks, notes, and a
+**Logbook** of completed work grouped by completion date. Mouse clicks select
+rows, activate `[[link]]`/`@tag`/`+project` tokens, and switch tabs. Press `?`
+for the full keymap. Essentials:
+`j/k` move · `enter` detail · `x` done · `a/A` add · `space`/`V` mark · `X` delete ·
+`p` priority · `D` due · `t` tag · `l/L` link/follow · `y` yank · `/` filter ·
+`v` group · `.` show done · `1`/`2`/`3` tasks/notes/logbook · `u` undo · `q` quit.
+
+### Screenshots
+
+|  |  |
+|---|---|
+| **Tasks** — wide split | **Logbook** — completed work by date |
+| ![tasks](docs/screenshots/01-tasks-wide.png) | ![logbook](docs/screenshots/08-logbook-wide.png) |
+| **Tasks** — done hidden (`✓ N done` chip) | **Notes** |
+| ![done hidden](docs/screenshots/03-tasks-done-hidden.png) | ![notes](docs/screenshots/06-notes.png) |
+
+More views in **[docs/screenshots/](docs/screenshots/)** — regenerate with
+`./scripts/screenshots.sh`.
 
 ## Store
 
@@ -74,6 +91,7 @@ nt list --show-blocked                               # reveal dependency-blocked
 nt search "auth"               # ripgrep over notes + substring over tasks
 nt links <id|task:N>           # forward links + backlinks (both directions)
 nt recall --source claude --json   # read items back — the AI loop
+nt log [--since|--days N] [--json]  # completed tasks, newest first (the Logbook)
 nt edit <id|task:N>            # safe $EDITOR round-trip (never touches the shared file directly)
 nt archive                     # move done tasks to done.txt
 nt undo                        # revert the last change (and undo-again to redo)
