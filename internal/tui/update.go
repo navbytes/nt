@@ -63,6 +63,12 @@ func (m *Model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
+	// A yank chord consumes the next key as the target (y/l/t).
+	if m.yankPending {
+		m.handleYankKey(key)
+		return m, nil
+	}
+
 	// Follow mode consumes the next key as a target label (or cancels).
 	if m.followMode {
 		m.handleFollowKey(key)
@@ -163,6 +169,8 @@ func (m *Model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.startVisual()
 	case "f":
 		m.startFollow()
+	case "y":
+		m.startYank()
 	case "x":
 		m.toggleDone()
 	case "X":

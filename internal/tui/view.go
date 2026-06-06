@@ -90,7 +90,13 @@ func (m *Model) headerView() string {
 func (m *Model) footerView() string {
 	rule := stRule.Render(strings.Repeat("─", m.width))
 	var content string
-	if m.confirm != nil {
+	if m.yankPending {
+		content = stKeyBg.Render("  yank ") + stBarBg.Render(" ") +
+			stKeyBg.Render("y") + stBarBg.Render(" id   ") +
+			stKeyBg.Render("l") + stBarBg.Render(" line   ") +
+			stKeyBg.Render("t") + stBarBg.Render(" text   ") +
+			lipgloss.NewStyle().Foreground(cDim).Background(cBarBg).Render("esc")
+	} else if m.confirm != nil {
 		content = lipgloss.NewStyle().Foreground(cOrange).Background(cBarBg).Render("  "+m.confirm.prompt+" ") +
 			stKeyBg.Render("(y/n)")
 	} else if m.followMode {
@@ -545,6 +551,7 @@ func (m *Model) helpView() string {
 		{"select", [][2]string{
 			{"space", "mark / unmark the current task"},
 			{"V", "visual range-select (move to extend)"},
+			{"y", "yank → y id · l line · t text (marks if any)"},
 			{"esc", "clear marks → filter → scope"},
 		}},
 		{"edit (acts on marks if any, else current)", [][2]string{

@@ -108,6 +108,7 @@ type Model struct {
 	visualMode   bool            // V range-select in progress
 	visualAnchor int             // cursor index where V started
 	confirm      *confirmState   // pending y/n confirmation for a destructive action
+	yankPending  bool            // 'y' pressed, awaiting the chord target (y/l/t)
 
 	input  textinput.Model
 	ik     inputKind

@@ -455,6 +455,47 @@ func TestBulkTag(t *testing.T) {
 	}
 }
 
+// TestYankString: the clipboard payload for id/line/text, single and bulk.
+func TestYankString(t *testing.T) {
+	m := testModel(t)
+	m.width, m.height = 100, 24
+	m.cursor = 0
+	t0 := m.flat[0]
+	if got, want := m.yankString("id"), shortCode(t0.ID()); got != want {
+		t.Errorf("yank id: got %q want %q", got, want)
+	}
+	if got := m.yankString("line"); got != t0.Line() {
+		t.Errorf("yank line: got %q", got)
+	}
+	if got := m.yankString("text"); got != t0.Text {
+		t.Errorf("yank text: got %q", got)
+	}
+	if len(m.flat) < 2 {
+		return
+	}
+	mm := press(m, " ", "j", " ").(*Model) // mark 2
+	if got := strings.Fields(mm.yankString("id")); len(got) != 2 {
+		t.Errorf("bulk id yank should be 2 space-joined, got %v", got)
+	}
+	if got := strings.Split(mm.yankString("line"), "\n"); len(got) != 2 {
+		t.Errorf("bulk line yank should be 2 newline-joined, got %d", len(got))
+	}
+}
+
+// TestYankChord: y arms the chord; a non-target key cancels it.
+func TestYankChord(t *testing.T) {
+	m := testModel(t)
+	m.width, m.height = 100, 24
+	mm := press(m, "y").(*Model)
+	if !mm.yankPending {
+		t.Fatal("y should arm the yank chord")
+	}
+	mm = press(mm, "g").(*Model)
+	if mm.yankPending {
+		t.Fatal("a non-target key should cancel the yank chord")
+	}
+}
+
 // TestImmediateActions exercises the non-prompt keys.
 func TestImmediateActions(t *testing.T) {
 	m := testModel(t)
