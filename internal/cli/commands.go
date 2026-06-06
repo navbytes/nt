@@ -1008,13 +1008,19 @@ type noteJSON struct {
 	Title  string   `json:"title"`
 	Tags   []string `json:"tags,omitempty"`
 	Source string   `json:"source,omitempty"`
+	Body   string   `json:"body,omitempty"`
 	Path   string   `json:"path"`
 }
 
 func notesToJSON(notes []*note.Note) []noteJSON {
 	out := make([]noteJSON, 0, len(notes))
 	for _, n := range notes {
-		out = append(out, noteJSON{ID: n.ID, Title: n.Title, Tags: n.Tags, Source: n.Source, Path: n.Path})
+		// Include the body: an agent recalling a note needs the finding itself,
+		// not just its title (Product #4 — "the most valuable memory is the body").
+		out = append(out, noteJSON{
+			ID: n.ID, Title: n.Title, Tags: n.Tags,
+			Source: n.Source, Body: strings.TrimSpace(n.Body), Path: n.Path,
+		})
 	}
 	return out
 }
