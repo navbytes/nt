@@ -356,6 +356,12 @@ nt recall --source claude --json
 - **Full-text search** — ripgrep over notes; structured filter/sort over tasks (§7.1).
 - **Linking & backlinks** — `[[…]]` cross-links any task or note in any direction; backlinks
   ("Linked from") computed on demand via ripgrep, no index (§5.1).
+- **Multi-select & bulk ops** (TUI) — `space`/`V` mark tasks (ULID-keyed, survive
+  regroup/filter); `x`/`p`/`D`/`t`/`X` act on the whole set in one undo transaction;
+  destructive bulk ops (done-with-recurrence, delete) confirm first.
+- **Delete** — `X` (TUI) / `nt rm <id…>` (CLI), journaled so `nt undo` restores.
+- **Token activation** — `f` (keyboard follow) or mouse-click a `[[link]]`/`@tag`/`+project`
+  to navigate or scope/regroup; **yank** (`y`) copies id/line/text to the clipboard.
 - **Flexible metadata** — tags, project, due, priority, links; use what helps, skip the rest.
 - **Recurring tasks** — `rec:weekly` / `rec:3d`; completing one spawns the next occurrence
   (advancing the due date) in the same undo transaction.
@@ -403,17 +409,23 @@ The **detail overlay** renders the item's forward `[[…]]` links and a **"Linke
 backlinks section (both from §5.1); `L` opens a picker to jump to any linked item.
 
 ### Essential keybindings (full list under `?`)
+Edit keys act on the **marked set** if any, else the current task.
+
 | Key | Action | • | Key | Action |
 |-----|--------|---|-----|--------|
 | `j`/`k`, `↑`/`↓` | navigate | | `t`/`T` | add / remove tag |
 | `Ctrl+d`/`Ctrl+u` | half-page scroll | | `D` | set due date |
-| `g`/`G` | top / bottom | | `p` | cycle priority |
-| `Enter` | toggle detail | | `l`/`L` | add link / follow link |
-| `x` (or `dd`) | toggle done | | `/` | filter (searches note bodies on notes tab) |
-| `a`/`A` | add task / note | | `v` | cycle grouping |
-| `r` | rename | | `.` / `b` | show-hide done / blocked |
-| `e`/`E` | edit (external/inline) | | `u` | undo (again = redo) |
+| `g`/`G` | top / bottom | | `p` | priority (cycle; absolute when marked) |
+| `Enter` | focus detail (j/k scroll body) | | `l`/`L` | add link / follow link |
+| `x` (or `dd`) | toggle done | | `f` | follow: label a token to activate |
+| `X` | delete (confirms; `u` undoes) | | `/` | filter (searches note bodies on notes) |
+| `space` / `V` | mark / visual range-select | | `v` | cycle grouping |
+| `y` | yank → `y` id · `l` line · `t` text | | `.` / `b` | show-hide done / blocked |
+| `a`/`A` `r` `e`/`E` | add / rename / edit | | `u` | undo (again = redo) |
 | `1`/`2`/`tab` | switch tasks / notes | | `?` / `q` | help / quit |
+
+**Mouse** (on by default; `NT_MOUSE=0` disables, Shift-drag = native selection):
+wheel scrolls, click selects a row, click a `[[link]]`/`@tag`/`+project` activates it.
 
 ---
 
