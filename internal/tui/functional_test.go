@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/navbytes/nt/internal/note"
 )
 
@@ -283,6 +284,43 @@ func TestLogbookShowsCompleted(t *testing.T) {
 	mm = press(mm, "x").(*Model) // reopen from the logbook
 	if len(mm.logFlat) != 0 {
 		t.Fatalf("reopening should empty the logbook, got %d", len(mm.logFlat))
+	}
+}
+
+// TestHelpScroll: the help overlay scrolls and captures keys from the list.
+func TestHelpScroll(t *testing.T) {
+	m := testModel(t)
+	m.width, m.height = 80, 16 // short enough that help must scroll
+	mm := press(m, "?").(*Model)
+	if !mm.help || mm.helpScroll != 0 {
+		t.Fatal("? should open help at the top")
+	}
+	if h := lipgloss.Height(mm.View()); h > mm.height {
+		t.Fatalf("help overlay (%d rows) overflows the %d-row terminal", h, mm.height)
+	}
+	mm = press(mm, "j", "j", "j").(*Model)
+	if mm.helpScroll != 3 {
+		t.Fatalf("j should scroll help, got %d", mm.helpScroll)
+	}
+	// j must scroll the popup, NOT move the hidden list cursor.
+	mm.cursor = 0
+	mm = press(mm, "j").(*Model)
+	if mm.cursor != 0 {
+		t.Fatal("help must capture j rather than moving the list")
+	}
+	// G → bottom (clamped at render), g → top.
+	mm = press(mm, "G").(*Model)
+	_ = mm.View()
+	if mm.helpScroll == 0 {
+		t.Fatal("G should jump to the bottom")
+	}
+	mm = press(mm, "g").(*Model)
+	if mm.helpScroll != 0 {
+		t.Fatal("g should jump to the top")
+	}
+	mm = press(mm, "esc").(*Model)
+	if mm.help {
+		t.Fatal("esc should close help")
 	}
 }
 

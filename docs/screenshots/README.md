@@ -20,3 +20,5 @@ Regenerate after a UI change:
 | **Notes — wide split** | ![notes wide](07-notes-wide.png) |
 | **Logbook — wide split** | ![logbook wide](08-logbook-wide.png) |
 | **Logbook — standard** | ![logbook](09-logbook.png) |
+| **Locked (read-only)** | ![locked](10-locked.png) |
+| **Help overlay (scrollable)** | ![help](11-help.png) |

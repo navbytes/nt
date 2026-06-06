@@ -108,6 +108,7 @@ type Model struct {
 	draggingSplit bool   // a mouse drag on the divider is in progress
 	locked        bool   // read-only lock: mutating keys are swallowed (ctrl+l)
 	help          bool
+	helpScroll    int  // scroll offset within the help overlay
 	ready         bool // gates key input until startup terminal-query noise settles
 
 	followMode    bool           // hint mode: tokens are labeled for keyboard activation

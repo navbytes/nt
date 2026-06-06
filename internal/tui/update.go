@@ -51,6 +51,12 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m *Model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	key := msg.String()
 
+	// The help overlay captures all keys: scroll it, or close on ? / esc / q.
+	if m.help {
+		m.handleHelpKey(key)
+		return m, nil
+	}
+
 	// A pending y/n confirmation consumes the next key.
 	if m.confirm != nil {
 		c := m.confirm
@@ -174,8 +180,6 @@ func (m *Model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.status = ""
 		case m.visualMode || len(m.marked) > 0:
 			m.clearMarks()
-		case m.help:
-			m.help = false
 		case m.filter != "":
 			m.filter = ""
 			m.rebuild()
@@ -214,7 +218,8 @@ func (m *Model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "L":
 		m.followLink()
 	case "?":
-		m.help = !m.help
+		m.help = true
+		m.helpScroll = 0
 
 	// prompt-opening keys
 	case "a":
@@ -466,6 +471,31 @@ var writeKeys = map[string]bool{
 }
 
 func isWriteKey(key string) bool { return writeKeys[key] }
+
+// handleHelpKey scrolls the help overlay or closes it. Overscroll is clamped in
+// helpView at render time (it knows the content/viewport heights).
+func (m *Model) handleHelpKey(key string) {
+	switch key {
+	case "?", "esc", "q":
+		m.help, m.helpScroll = false, 0
+	case "j", "down":
+		m.helpScroll++
+	case "k", "up":
+		if m.helpScroll > 0 {
+			m.helpScroll--
+		}
+	case "ctrl+d":
+		m.helpScroll += 5
+	case "ctrl+u":
+		if m.helpScroll -= 5; m.helpScroll < 0 {
+			m.helpScroll = 0
+		}
+	case "g", "home":
+		m.helpScroll = 0
+	case "G", "end":
+		m.helpScroll = 1 << 20 // clamped on render
+	}
+}
 
 func contains(ss []string, v string) bool {
 	for _, s := range ss {

@@ -713,17 +713,46 @@ func (m *Model) helpView() string {
 			{"?", "this help"}, {"q", "quit"},
 		}},
 	}
-	var b strings.Builder
-	b.WriteString(stTitle.Render("nt — keys") + "\n")
+	// Build every line first so we can window it to the terminal height.
+	lines := []string{stTitle.Render("nt — keys")}
 	for _, g := range groups {
-		b.WriteString("\n" + stSec.Render(strings.ToUpper(g.title)) + "\n")
+		lines = append(lines, "", stSec.Render(strings.ToUpper(g.title)))
 		for _, r := range g.rows {
-			b.WriteString("  " + stKey.Render(fmt.Sprintf("%-16s", r[0])) + stMuted.Render(r[1]) + "\n")
+			lines = append(lines, "  "+stKey.Render(fmt.Sprintf("%-16s", r[0]))+stMuted.Render(r[1]))
 		}
 	}
-	b.WriteString("\n" + stDim.Render("press ? or esc to close"))
+	// Keep the card width stable across scrolling (widest line, not just the window).
+	cardW := 0
+	for _, l := range lines {
+		if w := lipgloss.Width(l); w > cardW {
+			cardW = w
+		}
+	}
+
+	// Card chrome: border(2) + padding(2) + blank + footer + a row of outer margin.
+	bodyH := m.height - 7
+	if bodyH < 3 {
+		bodyH = 3
+	}
+	var footer string
+	if len(lines) > bodyH {
+		maxScroll := len(lines) - bodyH
+		if m.helpScroll > maxScroll {
+			m.helpScroll = maxScroll
+		}
+		if m.helpScroll < 0 {
+			m.helpScroll = 0
+		}
+		lines = lines[m.helpScroll : m.helpScroll+bodyH]
+		footer = stDim.Render(fmt.Sprintf("↑%d ↓%d · j/k scroll · ? esc close", m.helpScroll, maxScroll-m.helpScroll))
+	} else {
+		m.helpScroll = 0
+		footer = stDim.Render("press ? or esc to close")
+	}
+
+	body := strings.Join(lines, "\n") + "\n\n" + footer
 	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center,
-		stCard.Render(b.String()))
+		stCard.Width(cardW).Render(body))
 }
 
 // --- small render helpers ------------------------------------------------

@@ -59,6 +59,18 @@ func taskTokenSpans(t *task.Task, startCol int) []tokenSpan {
 // handleMouse routes a mouse event: wheel scrolls, left-click selects a row or
 // activates a clicked token.
 func (m *Model) handleMouse(msg tea.MouseMsg) {
+	// The help overlay captures the wheel for its own scroll.
+	if m.help {
+		switch msg.Button {
+		case tea.MouseButtonWheelUp:
+			if m.helpScroll > 0 {
+				m.helpScroll--
+			}
+		case tea.MouseButtonWheelDown:
+			m.helpScroll++
+		}
+		return
+	}
 	// A divider drag in progress swallows motion (resize) and release (end).
 	if m.draggingSplit {
 		switch msg.Action {

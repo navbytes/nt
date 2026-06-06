@@ -107,6 +107,9 @@ func renderFrames(t *testing.T) []frame {
 			m.tab, m.cursor, m.showDone, m.locked = tabTasks, 0, false, true
 			m.rebuild()
 		})},
+		{"Help overlay · scrollable (80 cols)", "11-help", render(80, 26, func() {
+			m.locked, m.help, m.helpScroll = false, true, 0
+		})},
 	}
 }
 
