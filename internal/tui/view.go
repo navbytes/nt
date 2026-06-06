@@ -47,15 +47,22 @@ func (m *Model) View() string {
 // --- header / footer -----------------------------------------------------
 
 func (m *Model) headerView() string {
-	tabSty := func(active bool, s string) string {
+	// Worded tabs when there's room; bare numbers in compact widths so the labels
+	// never crowd out (or overflow past) the metadata.
+	full := m.width > compactMax
+	tab := func(active bool, long, short string) string {
+		s := short
+		if full {
+			s = long
+		}
 		if active {
 			return stTabOn.Render(s)
 		}
 		return stTabOff.Render(s)
 	}
-	t1 := tabSty(m.tab == tabTasks, " 1 tasks ")
-	t2 := tabSty(m.tab == tabNotes, " 2 notes ")
-	t3 := tabSty(m.tab == tabLogbook, " 3 log ")
+	t1 := tab(m.tab == tabTasks, " 1 tasks ", " 1 ")
+	t2 := tab(m.tab == tabNotes, " 2 notes ", " 2 ")
+	t3 := tab(m.tab == tabLogbook, " 3 log ", " 3 ")
 	p1, brand, p2 := stHeader.Render("  "), stBrand.Render(" nt "), stHeader.Render("  ")
 	left := p1 + brand + p2 + t1 + t2 + t3
 	// Record the clickable tab-label column ranges (header row 0) for the mouse.
@@ -67,47 +74,74 @@ func (m *Model) headerView() string {
 		{start: tabStart + w1 + w2, end: tabStart + w1 + w2 + w3, tab: tabLogbook},
 	}
 
-	// Right side: muted "group + toggles" plus PROMINENT chips for any active
-	// filter / scope / marks, so the user always knows why the list is reduced.
-	var rb strings.Builder
-	muted := []string{"group:" + m.grp.String()}
-	if m.showBlocked {
-		muted = append(muted, "+blocked")
-	}
-	rb.WriteString(stBarBg.Render(strings.Join(muted, "  ·  ")))
+	// The right side has two tiers. CONTEXT (group mode, toggles, done count) is
+	// plain dim text and is dropped first when space is tight. STATE chips (lock,
+	// filter, scope, marks) are bright badges, kept as long as they fit. Tiering +
+	// measuring guarantees the header never exceeds its width — previously the
+	// compact header overflowed and rendered wider than the body.
 	sp := stBarBg.Render("  ")
-	if m.locked {
-		rb.WriteString(sp + chip("LOCKED", cRed))
+
+	context := stBarBg.Render("group:" + m.grp.String())
+	if m.showBlocked {
+		context += stBarBg.Render("  ·  +blocked")
 	}
-	// Done-count indicator (tasks tab): a bright chip when done are shown, a
-	// subtle one when they're hidden — so completed work is never invisible.
 	if m.tab == tabTasks {
 		if m.showDone {
-			rb.WriteString(sp + chip("✓ done shown", cGreen))
+			context += sp + chip("✓ done shown", cGreen)
 		} else if dc := m.doneCount(); dc > 0 {
-			rb.WriteString(sp + stGreen.Background(cBarBg).Render(" ✓ ") +
-				stBarBg.Render(fmt.Sprintf("%d done ", dc)))
+			context += sp + stGreen.Background(cBarBg).Render(" ✓ ") +
+				stBarBg.Render(fmt.Sprintf("%d done ", dc))
 		}
+	}
+
+	state := ""
+	if m.filter != "" {
+		state += sp + chip(fmt.Sprintf("⊃ filter: %s · %d", m.filter, m.selectableLen()), cOrange)
+	}
+	if m.scopeTag != "" {
+		state += sp + chip("@"+m.scopeTag, cMagenta)
+	}
+	if m.scopeProject != "" {
+		state += sp + chip("+"+m.scopeProject, cBlue)
 	}
 	if len(m.marked) > 0 {
 		lbl := fmt.Sprintf("● %d marked", len(m.marked))
 		if h := m.hiddenMarked(); h > 0 {
 			lbl += fmt.Sprintf(" · %d hidden", h)
 		}
-		rb.WriteString(sp + chip(lbl, cYellow))
+		state += sp + chip(lbl, cYellow)
 	}
-	if m.scopeTag != "" {
-		rb.WriteString(sp + chip("@"+m.scopeTag, cMagenta))
+	lockChip := ""
+	if m.locked {
+		lockChip = sp + chip("LOCKED", cRed)
+		state += lockChip
 	}
-	if m.scopeProject != "" {
-		rb.WriteString(sp + chip("+"+m.scopeProject, cBlue))
+
+	// Choose the richest right side that fits (reserve a 2-col gap + 2-col margin).
+	leftW := lipgloss.Width(left)
+	avail := m.width - leftW - 4
+	right := context + state
+	if avail < 1 || lipgloss.Width(right) > avail {
+		right = state // drop low-priority context first
+		if lipgloss.Width(right) > avail {
+			if m.locked && lipgloss.Width(lockChip) <= avail {
+				right = lockChip // at the extreme, the lock indicator still wins
+			} else {
+				right = ""
+			}
+		}
 	}
-	if m.filter != "" {
-		rb.WriteString(sp + chip(fmt.Sprintf("⊃ filter: %s · %d", m.filter, m.selectableLen()), cOrange))
+
+	var line string
+	if lipgloss.Width(right) == 0 {
+		line = left + barPad(m.width-leftW)
+	} else {
+		pad := m.width - leftW - lipgloss.Width(right) - 2
+		if pad < 1 {
+			pad = 1
+		}
+		line = left + barPad(pad) + right + barPad(2)
 	}
-	rightR := rb.String() + stBarBg.Render("  ")
-	gap := m.width - lipgloss.Width(left) - lipgloss.Width(rightR)
-	line := left + barPad(gap) + rightR
 	rule := stRule.Render(strings.Repeat("─", m.width))
 	return line + "\n" + rule
 }

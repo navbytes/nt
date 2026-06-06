@@ -287,6 +287,31 @@ func TestLogbookShowsCompleted(t *testing.T) {
 	}
 }
 
+// TestHeaderNeverOverflows: the header bar must fit its width at every size and
+// state (the compact header used to render wider than the body).
+func TestHeaderNeverOverflows(t *testing.T) {
+	m := testModel(t)
+	states := []struct {
+		name  string
+		apply func()
+	}{
+		{"plain", func() { m.locked, m.filter, m.scopeTag = false, "", "" }},
+		{"locked", func() { m.locked = true }},
+		{"filter+scope", func() { m.locked, m.filter, m.scopeTag = false, "auth", "backend" }},
+	}
+	for _, w := range []int{30, 34, 40, 56, 80, 120, 160} {
+		for _, s := range states {
+			m.width, m.height = w, 24
+			s.apply()
+			m.rebuild()
+			bar := strings.SplitN(m.headerView(), "\n", 2)[0]
+			if got := lipgloss.Width(bar); got > w {
+				t.Errorf("header bar width %d > terminal %d (w=%d, state=%s)", got, w, w, s.name)
+			}
+		}
+	}
+}
+
 // TestHelpScroll: the help overlay scrolls and captures keys from the list.
 func TestHelpScroll(t *testing.T) {
 	m := testModel(t)
