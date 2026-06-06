@@ -55,32 +55,35 @@ func (m *Model) headerView() string {
 	}
 	left := stHeader.Render("  ") + stBrand.Render(" nt ") + stHeader.Render("  ") + t1 + t2
 
-	// Persistently surface the view state (toggles + filter) in the header so
-	// the user always knows what they're looking at.
-	parts := []string{"group:" + m.grp.String()}
-	if len(m.marked) > 0 {
-		c := fmt.Sprintf("● %d marked", len(m.marked))
-		if h := m.hiddenMarked(); h > 0 {
-			c += fmt.Sprintf(" (%d hidden)", h)
-		}
-		parts = append(parts, c)
-	}
-	if m.scopeTag != "" {
-		parts = append(parts, "@"+m.scopeTag)
-	}
-	if m.scopeProject != "" {
-		parts = append(parts, "+"+m.scopeProject)
-	}
+	// Right side: muted "group + toggles" plus PROMINENT chips for any active
+	// filter / scope / marks, so the user always knows why the list is reduced.
+	var rb strings.Builder
+	muted := []string{"group:" + m.grp.String()}
 	if m.showDone {
-		parts = append(parts, "+done")
+		muted = append(muted, "+done")
 	}
 	if m.showBlocked {
-		parts = append(parts, "+blocked")
+		muted = append(muted, "+blocked")
+	}
+	rb.WriteString(stBarBg.Render(strings.Join(muted, "  ·  ")))
+	sp := stBarBg.Render("  ")
+	if len(m.marked) > 0 {
+		lbl := fmt.Sprintf("● %d marked", len(m.marked))
+		if h := m.hiddenMarked(); h > 0 {
+			lbl += fmt.Sprintf(" · %d hidden", h)
+		}
+		rb.WriteString(sp + chip(lbl, cYellow))
+	}
+	if m.scopeTag != "" {
+		rb.WriteString(sp + chip("@"+m.scopeTag, cMagenta))
+	}
+	if m.scopeProject != "" {
+		rb.WriteString(sp + chip("+"+m.scopeProject, cBlue))
 	}
 	if m.filter != "" {
-		parts = append(parts, fmt.Sprintf("/%s (%d)", m.filter, m.selectableLen()))
+		rb.WriteString(sp + chip(fmt.Sprintf("⊃ filter: %s · %d", m.filter, m.selectableLen()), cOrange))
 	}
-	rightR := stBarBg.Render(strings.Join(parts, "  ·  ") + "  ")
+	rightR := rb.String() + stBarBg.Render("  ")
 	gap := m.width - lipgloss.Width(left) - lipgloss.Width(rightR)
 	line := left + barPad(gap) + rightR
 	rule := stRule.Render(strings.Repeat("─", m.width))
@@ -137,6 +140,12 @@ func (m *Model) followBar() string {
 	}
 	out += sep + stBarBg.Render("(CAPS = group · esc)")
 	return out
+}
+
+// chip renders a prominent badge (dark text on a bright background) for active
+// view state — so a filter/scope can't silently shrink the list unnoticed.
+func chip(label string, bg lipgloss.Color) string {
+	return lipgloss.NewStyle().Foreground(lipgloss.Color("#16161e")).Background(bg).Bold(true).Render(" " + label + " ")
 }
 
 // barPad returns n background-styled spaces for filling a bar to full width.
