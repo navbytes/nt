@@ -45,6 +45,13 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m *Model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	key := msg.String()
+
+	// Follow mode consumes the next key as a target label (or cancels).
+	if m.followMode {
+		m.handleFollowKey(key)
+		return m, nil
+	}
+
 	// Clear the pending-'d' hint (and its status) on any other key. The status
 	// line is NOT wiped on every key, so action feedback persists until replaced.
 	if key != "d" && m.pendD {
@@ -118,12 +125,21 @@ func (m *Model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.setStatus("detail focused — j/k scroll · esc back")
 		}
 	case "esc":
-		if m.detailFocus {
+		switch {
+		case m.detailFocus:
 			m.detailFocus = false
 			m.status = ""
-		} else {
+		case m.help:
 			m.help = false
+		case m.filter != "":
+			m.filter = ""
+			m.rebuild()
+			m.setStatus("filter cleared")
+		default:
+			m.clearScope()
 		}
+	case "f":
+		m.startFollow()
 	case "x":
 		m.toggleDone()
 	case "d":

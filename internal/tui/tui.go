@@ -91,10 +91,15 @@ type Model struct {
 	offset int          // first visible line (scroll position)
 
 	filter       string
-	detailFocus  bool // detail pane is focused: j/k scroll the body, not the list
-	detailScroll int  // scroll offset within the focused detail pane
+	scopeTag     string // active @tag scope (filters the list); "" = none
+	scopeProject string // active +project scope; "" = none
+	detailFocus  bool   // detail pane is focused: j/k scroll the body, not the list
+	detailScroll int    // scroll offset within the focused detail pane
 	help         bool
 	ready        bool // gates key input until startup terminal-query noise settles
+
+	followMode    bool           // hint mode: tokens are labeled for keyboard activation
+	followTargets []followTarget // labeled actionable tokens (links/tags/projects)
 
 	input  textinput.Model
 	ik     inputKind
@@ -167,7 +172,7 @@ func (m *Model) rebuild() {
 	selID := m.selectedID()
 
 	m.blocked = task.BlockedIDs(m.tasks)
-	m.groups = buildGroups(m.tasks, m.grp, m.filter, m.showDone, m.showBlocked, m.blocked)
+	m.groups = buildGroups(m.scopedTasks(), m.grp, m.filter, m.showDone, m.showBlocked, m.blocked)
 	m.flat = m.flat[:0]
 	for _, g := range m.groups {
 		m.flat = append(m.flat, g.tasks...)
@@ -176,6 +181,9 @@ func (m *Model) rebuild() {
 	needle := strings.ToLower(strings.TrimSpace(m.filter))
 	m.notesView = m.notesView[:0]
 	for _, n := range m.notes {
+		if m.scopeTag != "" && !contains(n.Tags, m.scopeTag) {
+			continue
+		}
 		if noteMatches(n, needle) {
 			m.notesView = append(m.notesView, n)
 		}
@@ -227,6 +235,25 @@ func (m *Model) halfPage() int {
 		h = 1
 	}
 	return h
+}
+
+// scopedTasks applies the active @tag / +project scope to the task list, before
+// grouping/filtering. An empty scope returns all tasks.
+func (m *Model) scopedTasks() []*task.Task {
+	if m.scopeTag == "" && m.scopeProject == "" {
+		return m.tasks
+	}
+	out := make([]*task.Task, 0, len(m.tasks))
+	for _, t := range m.tasks {
+		if m.scopeTag != "" && !contains(t.Tags(), m.scopeTag) {
+			continue
+		}
+		if m.scopeProject != "" && !contains(t.Projects(), m.scopeProject) {
+			continue
+		}
+		out = append(out, t)
+	}
+	return out
 }
 
 // noteMatches reports whether a note matches the filter across title, tags,

@@ -58,6 +58,12 @@ func (m *Model) headerView() string {
 	// Persistently surface the view state (toggles + filter) in the header so
 	// the user always knows what they're looking at.
 	parts := []string{"group:" + m.grp.String()}
+	if m.scopeTag != "" {
+		parts = append(parts, "@"+m.scopeTag)
+	}
+	if m.scopeProject != "" {
+		parts = append(parts, "+"+m.scopeProject)
+	}
 	if m.showDone {
 		parts = append(parts, "+done")
 	}
@@ -77,7 +83,9 @@ func (m *Model) headerView() string {
 func (m *Model) footerView() string {
 	rule := stRule.Render(strings.Repeat("─", m.width))
 	var content string
-	if m.ik != inNone {
+	if m.followMode {
+		content = m.followBar()
+	} else if m.ik != inNone {
 		content = stKeyBg.Render("  "+promptLabel(m.ik)+" ") + m.input.View()
 	} else if m.status != "" {
 		content = padBetween(stBarBg.Render("  ")+m.keybar(m.width-len(m.status)-4), stKeyBg.Render(m.status+"  "), m.width)
@@ -89,6 +97,30 @@ func (m *Model) footerView() string {
 	// must carry the bar background itself.
 	content += barPad(m.width - lipgloss.Width(content))
 	return rule + "\n" + content
+}
+
+// followBar renders the follow-mode legend: each actionable token labeled with
+// a letter to press (uppercase = regroup by it).
+func (m *Model) followBar() string {
+	sep := lipgloss.NewStyle().Foreground(cBorder).Background(cBarBg).Render("   ")
+	out := stKeyBg.Render("  follow ") + stBarBg.Render(" ")
+	for i, ft := range m.followTargets {
+		if i > 0 {
+			out += sep
+		}
+		var tok string
+		switch ft.kind {
+		case "link":
+			tok = lipgloss.NewStyle().Foreground(cCyan).Background(cBarBg).Render("[[" + ft.value + "]]")
+		case "tag":
+			tok = lipgloss.NewStyle().Foreground(cMagenta).Background(cBarBg).Render("@" + ft.value)
+		case "project":
+			tok = lipgloss.NewStyle().Foreground(cBlue).Background(cBarBg).Render("+" + ft.value)
+		}
+		out += stKeyBg.Render(string(ft.label)) + stBarBg.Render(" ") + tok
+	}
+	out += sep + stBarBg.Render("(CAPS = group · esc)")
+	return out
 }
 
 // barPad returns n background-styled spaces for filling a bar to full width.
@@ -106,7 +138,7 @@ func (m *Model) keybar(width int) string {
 	pairs := [][2]string{
 		{"j/k", "move"}, {"enter", "detail"}, {"x", "done"}, {"a/A", "add"},
 		{"e", "edit"}, {"p", "pri"}, {"D", "due"}, {"t/T", "tag"}, {"l/L", "link"},
-		{"/", "filter"}, {"v", "group"}, {"b", "blocked"}, {"u", "undo"},
+		{"f", "follow"}, {"/", "filter"}, {"v", "group"}, {"b", "blocked"}, {"u", "undo"},
 	}
 	sep := lipgloss.NewStyle().Foreground(cBorder).Background(cBarBg).Render(" · ")
 	seg := func(p [2]string) string { return stKeyBg.Render(p[0]) + stBarBg.Render(" "+p[1]) }
@@ -495,7 +527,9 @@ func (m *Model) helpView() string {
 			{"l / L", "add link / follow link"}, {"u", "undo (again = redo)"},
 		}},
 		{"view", [][2]string{
+			{"f", "follow: label a [[link]]/@tag/+project to activate (CAPS = group)"},
 			{"/", "filter (searches note bodies on the notes tab)"},
+			{"esc", "clear filter / scope"},
 			{"v", "cycle grouping (date→project→tag)"},
 			{".", "show / hide done"}, {"b", "show / hide blocked"},
 			{"?", "this help"}, {"q", "quit"},

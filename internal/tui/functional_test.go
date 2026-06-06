@@ -153,6 +153,85 @@ func filepathBase(p string) string {
 	return p
 }
 
+// pickTask selects a task that has both a tag and a project; returns it.
+func selectTagProjTask(m *Model) (tag, proj string, ok bool) {
+	for i, tk := range m.flat {
+		if len(tk.Tags()) > 0 && len(tk.Projects()) > 0 {
+			m.cursor = i
+			return tk.Tags()[0], tk.Projects()[0], true
+		}
+	}
+	return "", "", false
+}
+
+func labelFor(m *Model, kind, value string) string {
+	for _, ft := range m.followTargets {
+		if ft.kind == kind && ft.value == value {
+			return string(ft.label)
+		}
+	}
+	return ""
+}
+
+// TestFollowScopeTag: f then the tag's label scopes the list to that tag.
+func TestFollowScopeTag(t *testing.T) {
+	m := testModel(t)
+	m.width, m.height = 100, 24
+	tag, _, ok := selectTagProjTask(m)
+	if !ok {
+		t.Skip("no tagged+projected task in fixture")
+	}
+	mm := press(m, "f").(*Model)
+	if !mm.followMode {
+		t.Fatal("f should enter follow mode")
+	}
+	lbl := labelFor(mm, "tag", tag)
+	mm = press(mm, lbl).(*Model)
+	if mm.followMode {
+		t.Fatal("follow mode should exit after a pick")
+	}
+	if mm.scopeTag != tag {
+		t.Fatalf("scope tag: got %q want %q", mm.scopeTag, tag)
+	}
+	// every visible task should now carry the tag
+	for _, tk := range mm.flat {
+		if !contains(tk.Tags(), tag) {
+			t.Fatalf("scoped list has a task without @%s", tag)
+		}
+	}
+}
+
+// TestFollowGroupProject: f then the UPPERCASE project label regroups by project.
+func TestFollowGroupProject(t *testing.T) {
+	m := testModel(t)
+	m.width, m.height = 100, 24
+	_, proj, ok := selectTagProjTask(m)
+	if !ok {
+		t.Skip("no suitable task")
+	}
+	mm := press(m, "f").(*Model)
+	lbl := labelFor(mm, "project", proj)
+	mm = press(mm, strings.ToUpper(lbl)).(*Model)
+	if mm.grp != groupProject {
+		t.Fatalf("uppercase project label should regroup by project, got %v", mm.grp)
+	}
+	if mm.scopeProject != "" {
+		t.Fatal("group variant should not also scope")
+	}
+}
+
+// TestEscClearsScope: esc clears an active scope.
+func TestEscClearsScope(t *testing.T) {
+	m := testModel(t)
+	m.width, m.height = 100, 24
+	m.scopeTag = "backend"
+	m.rebuild()
+	mm := press(m, "esc").(*Model)
+	if mm.scopeTag != "" {
+		t.Fatal("esc should clear the scope")
+	}
+}
+
 // TestImmediateActions exercises the non-prompt keys.
 func TestImmediateActions(t *testing.T) {
 	m := testModel(t)
