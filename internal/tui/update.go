@@ -165,6 +165,8 @@ func (m *Model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.startFollow()
 	case "x":
 		m.toggleDone()
+	case "X":
+		m.deleteTargets()
 	case "d":
 		if m.pendD {
 			m.pendD = false

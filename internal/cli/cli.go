@@ -38,6 +38,8 @@ func Run(args []string) int {
 		return cmdSearch(rest)
 	case "links":
 		return cmdLinks(rest)
+	case "rm", "delete":
+		return cmdRm(rest)
 	case "archive":
 		return cmdArchive(rest)
 	case "undo":
@@ -149,6 +151,7 @@ USAGE
   nt search "query" [flags]   full-text search       (alias: q)
   nt links <id|task:N>        forward links + backlinks
   nt edit <id|task:N>         edit a task/note in $EDITOR
+  nt rm <id…>                 delete tasks (undoable)
   nt archive                  move done tasks to done.txt
   nt undo                     revert the last change
   nt path                     print the store directory

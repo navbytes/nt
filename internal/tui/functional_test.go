@@ -337,6 +337,65 @@ func TestConfirmModal(t *testing.T) {
 	}
 }
 
+// TestDeleteWithConfirmAndUndo: X confirms, deletes on y, and u restores.
+func TestDeleteWithConfirmAndUndo(t *testing.T) {
+	m := testModel(t)
+	m.width, m.height = 100, 24
+	m.cursor = 0
+	id := m.flat[0].ID()
+	n0 := len(m.flat)
+
+	mm := press(m, "X").(*Model)
+	if mm.confirm == nil {
+		t.Fatal("X should ask for confirmation")
+	}
+	mm = press(mm, "y").(*Model)
+	d, _ := mm.eng.Read()
+	if d.FindByID(id) != nil {
+		t.Fatal("task should be deleted after confirm")
+	}
+	if len(mm.flat) != n0-1 {
+		t.Fatalf("flat should shrink by 1, got %d want %d", len(mm.flat), n0-1)
+	}
+	mm = press(mm, "u").(*Model)
+	d, _ = mm.eng.Read()
+	if d.FindByID(id) == nil {
+		t.Fatal("undo should restore the deleted task")
+	}
+}
+
+// TestDeleteCancelled: X then n leaves the task.
+func TestDeleteCancelled(t *testing.T) {
+	m := testModel(t)
+	m.width, m.height = 100, 24
+	id := m.selectedTask().ID()
+	mm := press(m, "X", "n").(*Model)
+	d, _ := mm.eng.Read()
+	if d.FindByID(id) == nil {
+		t.Fatal("n should cancel the delete")
+	}
+}
+
+// TestBulkDelete: mark two, X, y deletes both.
+func TestBulkDelete(t *testing.T) {
+	m := testModel(t)
+	m.width, m.height = 100, 24
+	if len(m.flat) < 2 {
+		t.Skip("need 2+ tasks")
+	}
+	m.cursor = 0
+	id0, id1 := m.flat[0].ID(), m.flat[1].ID()
+	mm := press(m, " ", "j", " ").(*Model) // mark row 0 and row 1
+	if len(mm.marked) != 2 {
+		t.Fatalf("expected 2 marked, got %d", len(mm.marked))
+	}
+	mm = press(mm, "X", "y").(*Model)
+	d, _ := mm.eng.Read()
+	if d.FindByID(id0) != nil || d.FindByID(id1) != nil {
+		t.Fatal("both marked tasks should be deleted")
+	}
+}
+
 // TestImmediateActions exercises the non-prompt keys.
 func TestImmediateActions(t *testing.T) {
 	m := testModel(t)

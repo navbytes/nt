@@ -476,6 +476,39 @@ func cmdLinks(args []string) int {
 	return 0
 }
 
+// cmdRm permanently removes tasks (journaled, so `nt undo` restores them).
+func cmdRm(args []string) int {
+	if len(args) == 0 {
+		return fail(fmt.Errorf("rm: need a task id"))
+	}
+	e, ok := engine()
+	if !ok {
+		return 1
+	}
+	count := 0
+	err := e.Apply("delete", func(d *task.Doc, rec *mutate.Recorder) error {
+		for _, h := range args {
+			t, amb := d.Resolve(h)
+			if amb {
+				return fmt.Errorf("rm: %q is ambiguous", h)
+			}
+			if t == nil {
+				return fmt.Errorf("rm: no task %q", h)
+			}
+			before := t.Line()
+			d.Remove(t.ID())
+			rec.Removed(t.ID(), before)
+			count++
+		}
+		return nil
+	})
+	if err != nil {
+		return fail(err)
+	}
+	fmt.Printf("removed %d (nt undo to restore)\n", count)
+	return 0
+}
+
 func cmdArchive(args []string) int {
 	e, ok := engine()
 	if !ok {
