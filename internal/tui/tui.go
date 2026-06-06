@@ -106,6 +106,7 @@ type Model struct {
 	detailScroll  int    // scroll offset within the focused detail pane
 	splitPct      int    // wide-mode list width as a % of the terminal (resizable)
 	draggingSplit bool   // a mouse drag on the divider is in progress
+	locked        bool   // read-only lock: mutating keys are swallowed (ctrl+l)
 	help          bool
 	ready         bool // gates key input until startup terminal-query noise settles
 

@@ -428,6 +428,7 @@ Edit keys act on the **marked set** if any, else the current task.
 | `y` | yank → `y` id · `l` line · `t` text | | `.` / `b` | show-hide done / blocked |
 | `a`/`A` `r` `e`/`E` | add / rename / edit | | `u` | undo (again = redo) |
 | `1`/`2`/`3`/`tab` | tasks / notes / logbook | | `‹`/`›` | resize the list/detail split |
+| `Ctrl+l` | lock (read-only: blocks writes) | | | |
 
 The **footer keybar is contextual** — it shows only the keys that apply to the
 current tab and selection (e.g. no due/tag on notes, `x reopen` in the logbook,

@@ -82,7 +82,21 @@ func (m *Model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.status = ""
 	}
 
+	// Read-only lock: swallow any mutating key until unlocked (ctrl+l).
+	// Navigation, filter/scope, grouping, follow, and yank stay available.
+	if m.locked && isWriteKey(key) {
+		m.setStatus("locked (read-only) — ctrl+l to unlock")
+		return m, nil
+	}
+
 	switch key {
+	case "ctrl+l":
+		m.locked = !m.locked
+		if m.locked {
+			m.setStatus("locked — writes disabled (ctrl+l to unlock)")
+		} else {
+			m.setStatus("unlocked — writes enabled")
+		}
 	case "q", "ctrl+c":
 		return m, tea.Quit
 	case "j", "down":
@@ -440,6 +454,18 @@ func (m *Model) removeTag(tag string) {
 		tk.SetText(strings.Join(out, " "))
 	})
 }
+
+// writeKeys are the keys that mutate the store; the read-only lock swallows them.
+// Selection (space/V), navigation, filter/scope, grouping, follow, and yank are
+// intentionally absent — they never touch disk.
+var writeKeys = map[string]bool{
+	"x": true, "X": true, "d": true, // done / delete / dd
+	"a": true, "A": true, "r": true, "e": true, "E": true, // add / rename / edit
+	"p": true, "D": true, "t": true, "T": true, "l": true, // priority / due / tag / link
+	"u": true, // undo (reverses a write)
+}
+
+func isWriteKey(key string) bool { return writeKeys[key] }
 
 func contains(ss []string, v string) bool {
 	for _, s := range ss {

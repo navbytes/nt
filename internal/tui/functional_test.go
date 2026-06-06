@@ -286,6 +286,52 @@ func TestLogbookShowsCompleted(t *testing.T) {
 	}
 }
 
+// TestReadOnlyLock: ctrl+l blocks writes but leaves navigation/yank/tab working.
+func TestReadOnlyLock(t *testing.T) {
+	m := testModel(t)
+	m.width, m.height = 100, 24
+	m.cursor = 0
+	id := m.flat[0].ID()
+
+	mm := press(m, "ctrl+l").(*Model)
+	if !mm.locked {
+		t.Fatal("ctrl+l should engage the lock")
+	}
+	// A write key (x = done) is swallowed: the task stays open.
+	mm = press(mm, "x").(*Model)
+	d, _ := mm.eng.Read()
+	if d.FindByID(id).Done {
+		t.Fatal("locked: 'x' must not complete the task")
+	}
+	// 'a' must not open the add prompt while locked.
+	mm = press(mm, "a").(*Model)
+	if mm.ik != inNone {
+		t.Fatal("locked: 'a' must not open an input prompt")
+	}
+	// Navigation still works.
+	mm.cursor = 0
+	mm = press(mm, "j").(*Model)
+	if mm.cursor != 1 {
+		t.Fatal("locked: navigation should still work")
+	}
+	// Tab switching still works.
+	mm = press(mm, "2").(*Model)
+	if mm.tab != tabNotes {
+		t.Fatal("locked: tab switching should still work")
+	}
+	// Unlock restores writes.
+	mm.tab, mm.cursor = tabTasks, 0
+	mm = press(mm, "ctrl+l").(*Model)
+	if mm.locked {
+		t.Fatal("ctrl+l should release the lock")
+	}
+	mm = press(mm, "x").(*Model)
+	d, _ = mm.eng.Read()
+	if !d.FindByID(id).Done {
+		t.Fatal("unlocked: 'x' should complete the task again")
+	}
+}
+
 // TestSplitResize: ‹ › keys move the divider and clamp at the bounds.
 func TestSplitResize(t *testing.T) {
 	m := testModel(t)

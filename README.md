@@ -49,7 +49,8 @@ rows, activate `[[link]]`/`@tag`/`+project` tokens, and switch tabs. Press `?`
 for the full keymap. Essentials:
 `j/k` move · `enter` detail · `x` done · `a/A` add · `space`/`V` mark · `X` delete ·
 `p` priority · `D` due · `t` tag · `l/L` link/follow · `y` yank · `/` filter ·
-`v` group · `.` show done · `1`/`2`/`3` tasks/notes/logbook · `u` undo · `q` quit.
+`v` group · `.` show done · `1`/`2`/`3` tasks/notes/logbook · `Ctrl+l` lock (read-only) ·
+`u` undo · `q` quit.
 
 ### Screenshots
 

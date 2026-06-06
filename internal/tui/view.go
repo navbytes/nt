@@ -76,6 +76,9 @@ func (m *Model) headerView() string {
 	}
 	rb.WriteString(stBarBg.Render(strings.Join(muted, "  ·  ")))
 	sp := stBarBg.Render("  ")
+	if m.locked {
+		rb.WriteString(sp + chip("LOCKED", cRed))
+	}
 	// Done-count indicator (tasks tab): a bright chip when done are shown, a
 	// subtle one when they're hidden — so completed work is never invisible.
 	if m.tab == tabTasks {
@@ -180,6 +183,15 @@ func barPad(n int) string {
 // rather than a fixed menu (e.g. no due/tag on notes, "reopen" not "done" in the
 // logbook, follow/link only when the selection has tokens to act on).
 func (m *Model) keybarPairs() [][2]string {
+	if m.locked {
+		// Read-only: advertise only what still works, plus the unlock key.
+		p := [][2]string{{"j/k", "move"}, {"enter", "detail"}, {"1/2/3", "tab"},
+			{"/", "filter"}, {"y", "yank"}}
+		if len(m.collectTargets()) > 0 {
+			p = append(p, [2]string{"f", "follow"})
+		}
+		return append(p, [2]string{"^L", "unlock"})
+	}
 	hasTokens := len(m.collectTargets()) > 0
 	switch m.tab {
 	case tabNotes:
@@ -696,6 +708,7 @@ func (m *Model) helpView() string {
 			{"esc", "clear filter / scope"},
 			{"v", "cycle grouping (date→project→tag)"},
 			{"‹ ›", "resize the list/detail split (or drag the divider)"},
+			{"ctrl+l", "lock / unlock (read-only: blocks all writes)"},
 			{".", "show / hide done"}, {"b", "show / hide blocked"},
 			{"?", "this help"}, {"q", "quit"},
 		}},

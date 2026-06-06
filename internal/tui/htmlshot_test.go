@@ -103,6 +103,10 @@ func renderFrames(t *testing.T) []frame {
 		{"Notes split (140 cols)", "07-notes-wide", render(140, 28, func() { m.tab, m.cursor = tabNotes, 0 })},
 		{"Logbook (140 cols)", "08-logbook-wide", render(140, 28, logbook)},
 		{"Logbook (80 cols)", "09-logbook", render(80, 24, logbook)},
+		{"Tasks · locked / read-only (80 cols)", "10-locked", render(80, 24, func() {
+			m.tab, m.cursor, m.showDone, m.locked = tabTasks, 0, false, true
+			m.rebuild()
+		})},
 	}
 }
 
