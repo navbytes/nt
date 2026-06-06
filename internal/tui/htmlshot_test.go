@@ -60,13 +60,21 @@ func TestRenderHTML(t *testing.T) {
 	cfg := add("update config +api", nil, 0)
 	add("write migration +api", map[string]string{"due": friday, "blocks": cfg}, 'B')
 	add("spike: rotate auth secrets [[jwt-expiry]]", nil, 'C')
-	doneID := add("ship release notes", nil, 0)
-	_ = eng.Apply("done", func(d *task.Doc, rec *mutate.Recorder) error {
-		tk := d.FindByID(doneID)
-		rec.Before(tk)
-		tk.SetDone(true, today)
-		return nil
-	})
+	yesterday := time.Now().AddDate(0, 0, -1).Format("2006-01-02")
+	addDone := func(text, src, completed string) {
+		id := add(text, map[string]string{"src": src}, 0)
+		_ = eng.Apply("done", func(d *task.Doc, rec *mutate.Recorder) error {
+			tk := d.FindByID(id)
+			rec.Before(tk)
+			tk.SetDone(true, completed)
+			return nil
+		})
+	}
+	addDone("ship release notes +release", "claude", today)
+	addDone("deploy API v2 +api", "cli", today)
+	addDone("close flaky-test issue @ci [[ci-runbook]]", "claude", today)
+	addDone("write API docs +docs", "cli", yesterday)
+	addDone("security audit @security +infra", "claude", yesterday)
 	_, _ = note.Create(eng.S, "JWT expiry", "Tokens last 24h; refresh after 7d.", []string{"auth", "backend"}, "claude")
 
 	m := &Model{eng: eng, input: textinput.New()}
@@ -82,13 +90,20 @@ func TestRenderHTML(t *testing.T) {
 		}
 		return ansiToHTML(m.View())
 	}
+	tasks := func(showDone bool) func() {
+		return func() { m.tab, m.detailFocus, m.cursor, m.showDone = tabTasks, false, 0, showDone; m.rebuild() }
+	}
+	logbook := func() { m.tab, m.cursor, m.detailFocus = tabLogbook, 0, false }
 	frames := []frame{
-		{"Wide split (140 cols)", render(140, 28, func() { m.tab, m.detailFocus = tabTasks, false })},
-		{"Standard (80 cols)", render(80, 24, func() { m.tab, m.detailFocus = tabTasks, false })},
+		{"Wide split · done shown (140 cols)", render(140, 28, tasks(true))},
+		{"Standard (80 cols)", render(80, 24, tasks(true))},
+		{"Tasks · done hidden, ✓ N done chip (80 cols)", render(80, 24, tasks(false))},
 		{"Detail overlay (80 cols)", render(80, 24, func() { m.detailFocus = true })},
 		{"Compact strip (34 cols)", render(34, 20, func() { m.detailFocus = false })},
 		{"Notes tab (80 cols)", render(80, 24, func() { m.tab, m.cursor = tabNotes, 0 })},
 		{"Notes split (140 cols)", render(140, 28, func() { m.tab, m.cursor = tabNotes, 0 })},
+		{"Logbook (140 cols)", render(140, 28, logbook)},
+		{"Logbook (80 cols)", render(80, 24, logbook)},
 	}
 
 	var b strings.Builder
