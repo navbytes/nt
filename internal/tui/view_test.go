@@ -26,7 +26,7 @@ func testModel(t *testing.T) *Model {
 			return nil
 		})
 	}
-	m := &Model{eng: eng, input: textinput.New()}
+	m := &Model{eng: eng, input: textinput.New(), marked: map[string]bool{}}
 	m.reload()
 	m.ready = true // skip the startup key-gate in tests
 	return m

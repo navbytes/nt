@@ -58,6 +58,13 @@ func (m *Model) headerView() string {
 	// Persistently surface the view state (toggles + filter) in the header so
 	// the user always knows what they're looking at.
 	parts := []string{"group:" + m.grp.String()}
+	if len(m.marked) > 0 {
+		c := fmt.Sprintf("● %d marked", len(m.marked))
+		if h := m.hiddenMarked(); h > 0 {
+			c += fmt.Sprintf(" (%d hidden)", h)
+		}
+		parts = append(parts, c)
+	}
 	if m.scopeTag != "" {
 		parts = append(parts, "@"+m.scopeTag)
 	}
@@ -83,7 +90,10 @@ func (m *Model) headerView() string {
 func (m *Model) footerView() string {
 	rule := stRule.Render(strings.Repeat("─", m.width))
 	var content string
-	if m.followMode {
+	if m.confirm != nil {
+		content = lipgloss.NewStyle().Foreground(cOrange).Background(cBarBg).Render("  "+m.confirm.prompt+" ") +
+			stKeyBg.Render("(y/n)")
+	} else if m.followMode {
 		content = m.followBar()
 	} else if m.ik != inNone {
 		content = stKeyBg.Render("  "+promptLabel(m.ik)+" ") + m.input.View()
@@ -138,7 +148,7 @@ func (m *Model) keybar(width int) string {
 	pairs := [][2]string{
 		{"j/k", "move"}, {"enter", "detail"}, {"x", "done"}, {"a/A", "add"},
 		{"e", "edit"}, {"p", "pri"}, {"D", "due"}, {"t/T", "tag"}, {"l/L", "link"},
-		{"f", "follow"}, {"/", "filter"}, {"v", "group"}, {"b", "blocked"}, {"u", "undo"},
+		{"spc", "mark"}, {"f", "follow"}, {"/", "filter"}, {"v", "group"}, {"b", "blocked"}, {"u", "undo"},
 	}
 	sep := lipgloss.NewStyle().Foreground(cBorder).Background(cBarBg).Render(" · ")
 	seg := func(p [2]string) string { return stKeyBg.Render(p[0]) + stBarBg.Render(" "+p[1]) }
@@ -248,11 +258,11 @@ func (m *Model) compactView(h int) string {
 				if p := plainMeta(t); p != "" {
 					body += " " + p
 				}
-				lines = append(lines, selRow(body, m.width))
+				lines = append(lines, selRow(body, m.width, m.marked[t.ID()]))
 				sel = len(lines) - 1
 			} else {
 				row := m.icon(t) + " " + truncate(colorizeStr(t.Text, t.Done), m.width-6) + " " + priStr(t.Priority)
-				lines = append(lines, " "+row)
+				lines = append(lines, m.markGutter(t)+row)
 			}
 			hits = append(hits, hitLine{item: idx})
 			idx++
@@ -334,7 +344,7 @@ func (m *Model) notesList(width, h int) string {
 			if len(n.Tags) > 0 {
 				body += "  @" + strings.Join(n.Tags, " @")
 			}
-			lines = append(lines, selRow(body, width))
+			lines = append(lines, selRow(body, width, false))
 		} else {
 			row := stDim.Render("▤") + " " + n.Title
 			if len(n.Tags) > 0 {
@@ -364,7 +374,7 @@ func (m *Model) taskRow(t *task.Task, sel bool, width int) string {
 		if gap < 1 {
 			gap = 1
 		}
-		return selRow(left+strings.Repeat(" ", gap)+meta, width)
+		return selRow(left+strings.Repeat(" ", gap)+meta, width, m.marked[t.ID()])
 	}
 	icon := iconFor(status)
 	meta := metaStr(t)
@@ -376,7 +386,7 @@ func (m *Model) taskRow(t *task.Task, sel bool, width int) string {
 	if lipgloss.Width(text) > avail {
 		text = truncate(text, avail)
 	}
-	left := "   " + icon + " " + text
+	left := m.markGutter(t) + "  " + icon + " " + text
 	gap := width - lipgloss.Width(left) - lipgloss.Width(meta) - 1
 	if gap < 1 {
 		gap = 1
@@ -532,7 +542,12 @@ func (m *Model) helpView() string {
 			{"g / G", "top / bottom"}, {"1 / 2 / tab", "switch tasks / notes"},
 			{"enter", "focus detail (then j/k scroll the body)"}, {"esc", "back to list"},
 		}},
-		{"edit", [][2]string{
+		{"select", [][2]string{
+			{"space", "mark / unmark the current task"},
+			{"V", "visual range-select (move to extend)"},
+			{"esc", "clear marks → filter → scope"},
+		}},
+		{"edit (acts on marks if any, else current)", [][2]string{
 			{"x  or  dd", "toggle done"}, {"a / A", "add task / note"},
 			{"r", "rename"}, {"e / E", "edit in $EDITOR"}, {"p", "cycle priority"},
 			{"D", "set due date"}, {"t / T", "add / remove tag"},
@@ -669,13 +684,26 @@ func glyphFor(status string) string {
 // the selection background, filled to the full width. Keeping the body plain
 // (no inner ANSI resets) lets lipgloss fill the background cleanly to the edge —
 // the fix for the ragged selection bar and the bad-color-blend artifact.
-func selRow(body string, width int) string {
-	bar := lipgloss.NewStyle().Foreground(cBlue).Background(cSelBg).Render(" ▌ ")
+func selRow(body string, width int, marked bool) string {
+	mark := " "
+	if marked {
+		mark = "●"
+	}
+	bar := lipgloss.NewStyle().Foreground(cYellow).Background(cSelBg).Render(mark) +
+		lipgloss.NewStyle().Foreground(cBlue).Background(cSelBg).Render("▌ ")
 	bw := lipgloss.Width(bar)
 	if lipgloss.Width(body) > width-bw {
 		body = truncate(body, width-bw)
 	}
 	return bar + lipgloss.NewStyle().Background(cSelBg).Foreground(cFg).Width(width-bw).Render(body)
+}
+
+// markGutter is the 1-col left gutter glyph for a non-selected row.
+func (m *Model) markGutter(t *task.Task) string {
+	if m.marked[t.ID()] {
+		return lipgloss.NewStyle().Foreground(cYellow).Render("●")
+	}
+	return " "
 }
 
 func colorizeStr(text string, done bool) string {

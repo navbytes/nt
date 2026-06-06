@@ -103,6 +103,11 @@ type Model struct {
 	followMode    bool           // hint mode: tokens are labeled for keyboard activation
 	followTargets []followTarget // labeled actionable tokens (links/tags/projects)
 
+	marked       map[string]bool // multi-select: marked task ULIDs (survives reload/regroup)
+	visualMode   bool            // V range-select in progress
+	visualAnchor int             // cursor index where V started
+	confirm      *confirmState   // pending y/n confirmation for a destructive action
+
 	input  textinput.Model
 	ik     inputKind
 	pendD  bool   // first 'd' of a 'dd'
@@ -125,7 +130,7 @@ func Run() error {
 	}
 	ti := textinput.New()
 	ti.Prompt = ""
-	m := &Model{eng: eng, input: ti}
+	m := &Model{eng: eng, input: ti, marked: map[string]bool{}}
 	m.reload()
 
 	ch, stop, err := watchStore(eng.S.Dir)

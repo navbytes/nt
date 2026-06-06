@@ -275,6 +275,68 @@ func TestMouseWheelScrolls(t *testing.T) {
 	}
 }
 
+// TestMarkAndTargets: space toggles a mark; targets() returns marks else current.
+func TestMarkAndTargets(t *testing.T) {
+	m := testModel(t)
+	m.width, m.height = 100, 24
+	m.cursor = 0
+	id0 := m.flat[0].ID()
+
+	mm := press(m, " ").(*Model) // mark current
+	if !mm.marked[id0] {
+		t.Fatal("space should mark the current task")
+	}
+	if got := mm.targets(); len(got) != 1 || got[0] != id0 {
+		t.Fatalf("targets should be the marked set: %v", got)
+	}
+	mm = press(mm, " ").(*Model) // unmark
+	if mm.marked[id0] {
+		t.Fatal("space should unmark")
+	}
+	if got := mm.targets(); len(got) != 1 || got[0] != mm.selectedTask().ID() {
+		t.Fatal("with no marks, targets is the current task")
+	}
+}
+
+// TestVisualRangeSelect: V then move paints a contiguous range.
+func TestVisualRangeSelect(t *testing.T) {
+	m := testModel(t)
+	m.width, m.height = 100, 24
+	if len(m.flat) < 3 {
+		t.Skip("need 3+ tasks")
+	}
+	m.cursor = 0
+	mm := press(m, "V").(*Model)
+	if !mm.visualMode {
+		t.Fatal("V should enter visual mode")
+	}
+	mm = press(mm, "j", "j").(*Model) // extend over 3 rows
+	if len(mm.marked) != 3 {
+		t.Fatalf("visual range should mark 3, got %d", len(mm.marked))
+	}
+	mm = press(mm, "esc").(*Model)
+	if mm.visualMode || len(mm.marked) != 0 {
+		t.Fatal("esc should exit visual and clear marks")
+	}
+}
+
+// TestConfirmModal: a confirmation runs its action on y, cancels otherwise.
+func TestConfirmModal(t *testing.T) {
+	m := testModel(t)
+	m.width, m.height = 100, 24
+	ran := false
+	m.askConfirm("Do it?", func() { ran = true })
+	mm := press(m, "n").(*Model)
+	if ran || mm.confirm != nil {
+		t.Fatal("n should cancel the confirmation")
+	}
+	m.askConfirm("Do it?", func() { ran = true })
+	mm = press(m, "y").(*Model)
+	if !ran || mm.confirm != nil {
+		t.Fatal("y should run the action and clear the confirm")
+	}
+}
+
 // TestImmediateActions exercises the non-prompt keys.
 func TestImmediateActions(t *testing.T) {
 	m := testModel(t)

@@ -51,6 +51,18 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m *Model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	key := msg.String()
 
+	// A pending y/n confirmation consumes the next key.
+	if m.confirm != nil {
+		c := m.confirm
+		m.confirm = nil
+		if key == "y" || key == "Y" || key == "enter" {
+			c.action()
+		} else {
+			m.setStatus("cancelled")
+		}
+		return m, nil
+	}
+
 	// Follow mode consumes the next key as a target label (or cancels).
 	if m.followMode {
 		m.handleFollowKey(key)
@@ -134,6 +146,8 @@ func (m *Model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case m.detailFocus:
 			m.detailFocus = false
 			m.status = ""
+		case m.visualMode || len(m.marked) > 0:
+			m.clearMarks()
 		case m.help:
 			m.help = false
 		case m.filter != "":
@@ -143,6 +157,10 @@ func (m *Model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		default:
 			m.clearScope()
 		}
+	case " ", "space":
+		m.toggleMark()
+	case "V":
+		m.startVisual()
 	case "f":
 		m.startFollow()
 	case "x":
@@ -206,6 +224,7 @@ func (m *Model) move(d int) {
 	m.cursor += d
 	m.clampCursor()
 	m.detailScroll = 0 // new selection → reset the detail pane scroll
+	m.paintVisual()    // extend the V range as the cursor moves
 }
 
 func (m *Model) startInput(ik inputKind, initial, placeholder string) tea.Cmd {
