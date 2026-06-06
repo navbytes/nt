@@ -379,16 +379,9 @@ func (m *Model) compactView(h int) string {
 	for _, g := range m.groups {
 		for _, t := range g.tasks {
 			cur := idx == m.cursor
+			lines = append(lines, m.compactRow(t, cur))
 			if cur {
-				body := glyphFor(m.effStatus(t)) + " " + truncate(t.Text, m.width-8)
-				if p := plainMeta(t); p != "" {
-					body += " " + p
-				}
-				lines = append(lines, selRow(body, m.width, m.marked[t.ID()]))
 				sel = len(lines) - 1
-			} else {
-				row := m.icon(t) + " " + truncate(colorizeStr(t.Text, t.Done), m.width-6) + " " + priStr(t.Priority)
-				lines = append(lines, m.markGutter(t)+row)
 			}
 			hits = append(hits, hitLine{item: idx})
 			idx++
@@ -399,6 +392,70 @@ func (m *Model) compactView(h int) string {
 		return stDim.Render(" no tasks")
 	}
 	return m.viewport(lines, sel, h)
+}
+
+// compactRow renders one task for the narrow monitoring strip. The title is the
+// row's identity, so it is protected: the priority column is dropped before the
+// title is cut, inline @tag/+project/[[link]] tokens are shed before the title
+// words are truncated, and only then is the title itself truncated.
+func (m *Model) compactRow(t *task.Task, cur bool) string {
+	if cur {
+		// selRow draws a 3-col bar; glyph + space take 2 more.
+		title, showMeta := fitTitleMeta(t.Text, plainMeta(t), m.width-5)
+		body := glyphFor(m.effStatus(t)) + " " + title
+		if showMeta {
+			body += " " + plainMeta(t)
+		}
+		return selRow(body, m.width, m.marked[t.ID()])
+	}
+	pri := priStr(t.Priority)
+	title, showMeta := fitTitleMeta(t.Text, pri, m.width-3) // gutter + glyph + space
+	row := m.markGutter(t) + m.icon(t) + " " + colorizeStr(title, t.Done)
+	if showMeta {
+		row += " " + pri
+	}
+	return row
+}
+
+// fitTitleMeta fits a plain title plus an optional right-aligned meta column into
+// budget columns. It returns the (possibly token-shed / truncated) title and
+// whether the meta still fits beside it — meta is dropped before the title is cut.
+func fitTitleMeta(text, meta string, budget int) (string, bool) {
+	if budget < 1 {
+		budget = 1
+	}
+	if meta != "" && lipgloss.Width(text)+lipgloss.Width(meta)+1 <= budget {
+		return text, true // both fit
+	}
+	return compactTitle(text, budget), false // protect the title, drop the meta
+}
+
+// compactTitle fits a title into avail columns, preferring to shed inline tokens
+// (@tag/+project/[[link]]) over cutting the title's words; truncates only if the
+// core words alone still overflow.
+func compactTitle(text string, avail int) string {
+	if lipgloss.Width(text) <= avail {
+		return text
+	}
+	if core := stripTokens(text); core != "" && core != text && lipgloss.Width(core) <= avail {
+		return core
+	}
+	return truncate(text, avail)
+}
+
+// stripTokens removes inline @tag / +project / [[link]] words from task text,
+// leaving the prose title.
+func stripTokens(text string) string {
+	fields := strings.Fields(text)
+	out := fields[:0]
+	for _, w := range fields {
+		if strings.HasPrefix(w, "@") || strings.HasPrefix(w, "+") ||
+			(strings.HasPrefix(w, "[[") && strings.HasSuffix(w, "]]")) {
+			continue
+		}
+		out = append(out, w)
+	}
+	return strings.Join(out, " ")
 }
 
 // rowRenderer draws one task line for a grouped list (sel = it's the cursor).

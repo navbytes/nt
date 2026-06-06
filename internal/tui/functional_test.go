@@ -287,6 +287,23 @@ func TestLogbookShowsCompleted(t *testing.T) {
 	}
 }
 
+// TestCompactTitleProtected: compact rows keep the title, dropping the meta
+// column and shedding tokens before the title is ever truncated.
+func TestCompactTitleProtected(t *testing.T) {
+	if title, showMeta := fitTitleMeta("buy milk", "(A)", 40); title != "buy milk" || !showMeta {
+		t.Fatalf("title+meta should both fit, got %q meta=%v", title, showMeta)
+	}
+	if title, showMeta := fitTitleMeta("fix the auth bug", "(A)", 16); title != "fix the auth bug" || showMeta {
+		t.Fatalf("meta should drop to keep the full title, got %q meta=%v", title, showMeta)
+	}
+	if got := compactTitle("fix auth bug @backend +api", 14); got != "fix auth bug" {
+		t.Fatalf("should shed tokens to protect the title, got %q", got)
+	}
+	if got := compactTitle("supercalifragilistic @tag", 10); lipgloss.Width(got) > 10 || !strings.Contains(got, "…") {
+		t.Fatalf("an over-long core should truncate within budget, got %q (w=%d)", got, lipgloss.Width(got))
+	}
+}
+
 // TestHeaderNeverOverflows: the header bar must fit its width at every size and
 // state (the compact header used to render wider than the body).
 func TestHeaderNeverOverflows(t *testing.T) {
