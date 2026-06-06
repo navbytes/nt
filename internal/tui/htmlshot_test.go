@@ -3,6 +3,7 @@ package tui
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -15,15 +16,14 @@ import (
 	"github.com/navbytes/nt/internal/task"
 )
 
-// TestRenderHTML renders real TUI frames to docs/tui-render.html for visual
-// review against the mockup. It is skipped unless NT_RENDER_HTML=1, so it never
-// runs in the normal suite.
-//
-//	NT_RENDER_HTML=1 go test ./internal/tui/ -run TestRenderHTML
-func TestRenderHTML(t *testing.T) {
-	if os.Getenv("NT_RENDER_HTML") == "" {
-		t.Skip("set NT_RENDER_HTML=1 to render")
-	}
+// frame is one rendered TUI view: a human title, a filename slug, and the raw
+// truecolor ANSI of View(). Both the HTML render and the PNG screenshots are
+// built from the same frames, so the two never drift.
+type frame struct{ title, slug, ansi string }
+
+// renderFrames seeds a store and renders every showcase view to raw ANSI. Single
+// source of truth for docs/tui-render.html and docs/screenshots/*.png.
+func renderFrames(t *testing.T) []frame {
 	lipgloss.SetColorProfile(termenv.TrueColor)
 
 	t.Setenv("NT_DIR", t.TempDir())
@@ -82,29 +82,39 @@ func TestRenderHTML(t *testing.T) {
 	m.showDone = true
 	m.reload()
 
-	type frame struct{ title, html string }
 	render := func(w, h int, setup func()) string {
 		m.width, m.height = w, h
 		if setup != nil {
 			setup()
 		}
-		return ansiToHTML(m.View())
+		return m.View()
 	}
 	tasks := func(showDone bool) func() {
 		return func() { m.tab, m.detailFocus, m.cursor, m.showDone = tabTasks, false, 0, showDone; m.rebuild() }
 	}
 	logbook := func() { m.tab, m.cursor, m.detailFocus = tabLogbook, 0, false }
-	frames := []frame{
-		{"Wide split · done shown (140 cols)", render(140, 28, tasks(true))},
-		{"Standard (80 cols)", render(80, 24, tasks(true))},
-		{"Tasks · done hidden, ✓ N done chip (80 cols)", render(80, 24, tasks(false))},
-		{"Detail overlay (80 cols)", render(80, 24, func() { m.detailFocus = true })},
-		{"Compact strip (34 cols)", render(34, 20, func() { m.detailFocus = false })},
-		{"Notes tab (80 cols)", render(80, 24, func() { m.tab, m.cursor = tabNotes, 0 })},
-		{"Notes split (140 cols)", render(140, 28, func() { m.tab, m.cursor = tabNotes, 0 })},
-		{"Logbook (140 cols)", render(140, 28, logbook)},
-		{"Logbook (80 cols)", render(80, 24, logbook)},
+	return []frame{
+		{"Wide split · done shown (140 cols)", "01-tasks-wide", render(140, 28, tasks(true))},
+		{"Standard (80 cols)", "02-tasks-standard", render(80, 24, tasks(true))},
+		{"Tasks · done hidden, ✓ N done chip (80 cols)", "03-tasks-done-hidden", render(80, 24, tasks(false))},
+		{"Detail overlay (80 cols)", "04-detail-overlay", render(80, 24, func() { m.detailFocus = true })},
+		{"Compact strip (34 cols)", "05-compact", render(34, 20, func() { m.detailFocus = false })},
+		{"Notes tab (80 cols)", "06-notes", render(80, 24, func() { m.tab, m.cursor = tabNotes, 0 })},
+		{"Notes split (140 cols)", "07-notes-wide", render(140, 28, func() { m.tab, m.cursor = tabNotes, 0 })},
+		{"Logbook (140 cols)", "08-logbook-wide", render(140, 28, logbook)},
+		{"Logbook (80 cols)", "09-logbook", render(80, 24, logbook)},
 	}
+}
+
+// TestRenderHTML renders the frames to docs/tui-render.html for visual review.
+// Skipped unless NT_RENDER_HTML=1.
+//
+//	NT_RENDER_HTML=1 go test ./internal/tui/ -run TestRenderHTML
+func TestRenderHTML(t *testing.T) {
+	if os.Getenv("NT_RENDER_HTML") == "" {
+		t.Skip("set NT_RENDER_HTML=1 to render")
+	}
+	frames := renderFrames(t)
 
 	var b strings.Builder
 	b.WriteString(`<!doctype html><meta charset="utf-8"><title>nt TUI — live render</title>
@@ -119,7 +129,7 @@ pre{margin:0;padding:0;background:#1a1b26;line-height:1.32;font-size:13px}</styl
 	for _, f := range frames {
 		b.WriteString("<h2>" + f.title + "</h2>\n")
 		b.WriteString(`<div class="term"><div class="chrome"><span class="dot" style="background:#ff5f57"></span><span class="dot" style="background:#febc2e"></span><span class="dot" style="background:#28c840"></span></div>`)
-		b.WriteString("<pre>" + f.html + "</pre></div>\n")
+		b.WriteString("<pre>" + ansiToHTML(f.ansi) + "</pre></div>\n")
 	}
 
 	out := "../../docs/tui-render.html"
@@ -127,6 +137,28 @@ pre{margin:0;padding:0;background:#1a1b26;line-height:1.32;font-size:13px}</styl
 		t.Fatal(err)
 	}
 	t.Logf("wrote %s", out)
+}
+
+// TestRenderScreenshots dumps each frame's raw ANSI to docs/screenshots/*.ansi,
+// which scripts/screenshots.sh feeds to `freeze` to produce the README PNGs.
+// Skipped unless NT_SCREENSHOTS=1.
+//
+//	NT_SCREENSHOTS=1 go test ./internal/tui/ -run TestRenderScreenshots
+func TestRenderScreenshots(t *testing.T) {
+	if os.Getenv("NT_SCREENSHOTS") == "" {
+		t.Skip("set NT_SCREENSHOTS=1 to dump ANSI frames")
+	}
+	dir := "../../docs/screenshots"
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range renderFrames(t) {
+		out := filepath.Join(dir, f.slug+".ansi")
+		if err := os.WriteFile(out, []byte(f.ansi), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		t.Logf("wrote %s", out)
+	}
 }
 
 // ansiToHTML converts truecolor ANSI SGR output into styled HTML spans.
