@@ -396,6 +396,65 @@ func TestBulkDelete(t *testing.T) {
 	}
 }
 
+// TestBulkDone: x over a marked set completes all in one undoable transaction.
+func TestBulkDone(t *testing.T) {
+	m := testModel(t)
+	m.width, m.height = 100, 24
+	if len(m.flat) < 2 {
+		t.Skip("need 2+ tasks")
+	}
+	m.cursor = 0
+	id0, id1 := m.flat[0].ID(), m.flat[1].ID()
+	mm := press(m, " ", "j", " ").(*Model)
+	mm = press(mm, "x").(*Model)
+	d, _ := mm.eng.Read()
+	if !d.FindByID(id0).Done || !d.FindByID(id1).Done {
+		t.Fatal("bulk x should complete both marked tasks")
+	}
+	mm = press(mm, "u").(*Model) // one transaction → one undo reopens both
+	d, _ = mm.eng.Read()
+	if d.FindByID(id0).Done || d.FindByID(id1).Done {
+		t.Fatal("one undo should reopen both")
+	}
+}
+
+// TestBulkPriorityAbsolute: bulk p prompts and SETS an absolute priority.
+func TestBulkPriorityAbsolute(t *testing.T) {
+	m := testModel(t)
+	m.width, m.height = 100, 24
+	if len(m.flat) < 2 {
+		t.Skip("need 2+ tasks")
+	}
+	m.cursor = 0
+	id0, id1 := m.flat[0].ID(), m.flat[1].ID()
+	mm := press(m, " ", "j", " ").(*Model)
+	mm = runInput(mm, "p", "high").(*Model) // p opens the priority prompt
+	d, _ := mm.eng.Read()
+	if d.FindByID(id0).Priority != 'A' || d.FindByID(id1).Priority != 'A' {
+		t.Fatalf("bulk priority should set A on both; got %q %q", d.FindByID(id0).Priority, d.FindByID(id1).Priority)
+	}
+}
+
+// TestBulkTag: t over a marked set tags all of them and clears the marks.
+func TestBulkTag(t *testing.T) {
+	m := testModel(t)
+	m.width, m.height = 100, 24
+	if len(m.flat) < 2 {
+		t.Skip("need 2+ tasks")
+	}
+	m.cursor = 0
+	id0, id1 := m.flat[0].ID(), m.flat[1].ID()
+	mm := press(m, " ", "j", " ").(*Model)
+	mm = runInput(mm, "t", "sprint").(*Model)
+	d, _ := mm.eng.Read()
+	if !contains(d.FindByID(id0).Tags(), "sprint") || !contains(d.FindByID(id1).Tags(), "sprint") {
+		t.Fatal("bulk tag should tag both")
+	}
+	if len(mm.marked) != 0 {
+		t.Fatal("marks should clear after a bulk mutation")
+	}
+}
+
 // TestImmediateActions exercises the non-prompt keys.
 func TestImmediateActions(t *testing.T) {
 	m := testModel(t)

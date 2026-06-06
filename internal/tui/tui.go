@@ -63,6 +63,7 @@ const (
 	inTag
 	inUntag
 	inLink
+	inSetPri
 )
 
 // group is a labelled bucket of tasks in display order.

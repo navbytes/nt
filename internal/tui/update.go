@@ -179,6 +179,9 @@ func (m *Model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "u":
 		m.undo()
 	case "p":
+		if len(m.marked) > 0 {
+			return m, m.startInput(inSetPri, "", "priority for marked: high/med/low/none")
+		}
 		m.cyclePriority()
 	case "L":
 		m.followLink()
@@ -287,6 +290,12 @@ func (m *Model) commitInput() (tea.Model, tea.Cmd) {
 		if val != "" {
 			m.removeTag(val)
 		}
+	case inSetPri:
+		if p, ok := dateparse.Priority(val); ok {
+			m.setPriority(p)
+		} else {
+			m.setStatus("invalid priority")
+		}
 	case inLink:
 		if val != "" {
 			m.addLinkTarget(val)
@@ -330,6 +339,10 @@ func (m *Model) addNote(title string) {
 }
 
 func (m *Model) toggleDone() {
+	if len(m.marked) > 0 {
+		m.bulkDone() // complete the marked set (confirms if recurring/hidden)
+		return
+	}
 	t := m.selectedTask()
 	if t == nil {
 		return
@@ -368,37 +381,41 @@ func (m *Model) rename(text string) {
 }
 
 func (m *Model) setDue(val string) {
-	t := m.selectedTask()
-	if t == nil {
-		return
-	}
 	d, ok := dateparse.Date(val)
 	if !ok {
 		m.setStatus("invalid date")
 		return
 	}
-	m.mutate("due", t.ID(), func(tk *task.Task) { tk.SetKey("due", d) })
+	if n := m.applyToTargets("due", func(tk *task.Task) { tk.SetKey("due", d) }); n > 1 {
+		m.setStatus(fmt.Sprintf("due set on %d", n))
+	}
+}
+
+// setPriority sets an absolute priority on the marked set (bulk `p` prompts a
+// letter; single `p` cycles via cyclePriority).
+func (m *Model) setPriority(p byte) {
+	if n := m.applyToTargets("priority", func(tk *task.Task) { tk.SetPriority(p) }); n > 1 {
+		m.setStatus(fmt.Sprintf("priority set on %d", n))
+	}
 }
 
 func (m *Model) addTag(tag string) {
-	t := m.selectedTask()
-	if t == nil {
+	tag = strings.TrimPrefix(tag, "@")
+	if tag == "" {
 		return
 	}
-	tag = strings.TrimPrefix(tag, "@")
-	if tag == "" || contains(t.Tags(), tag) {
-		return // ignore empty or duplicate
+	if n := m.applyToTargets("tag", func(tk *task.Task) {
+		if !contains(tk.Tags(), tag) {
+			tk.SetText(tk.Text + " @" + tag)
+		}
+	}); n > 1 {
+		m.setStatus(fmt.Sprintf("tagged %d", n))
 	}
-	m.mutate("tag", t.ID(), func(tk *task.Task) { tk.SetText(tk.Text + " @" + tag) })
 }
 
 func (m *Model) removeTag(tag string) {
-	t := m.selectedTask()
-	if t == nil {
-		return
-	}
 	tag = strings.TrimPrefix(tag, "@")
-	m.mutate("untag", t.ID(), func(tk *task.Task) {
+	m.applyToTargets("untag", func(tk *task.Task) {
 		words := strings.Fields(tk.Text)
 		out := words[:0]
 		for _, w := range words {

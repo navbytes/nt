@@ -741,6 +741,8 @@ func promptLabel(ik inputKind) string {
 		return "tag:"
 	case inUntag:
 		return "untag:"
+	case inSetPri:
+		return "priority:"
 	case inLink:
 		return "link:"
 	}
