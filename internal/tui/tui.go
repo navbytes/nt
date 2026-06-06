@@ -6,6 +6,7 @@
 package tui
 
 import (
+	"os"
 	"strings"
 	"time"
 
@@ -85,10 +86,11 @@ type Model struct {
 	notesView []*note.Note    // notes after the active filter
 	blocked   map[string]bool // task ULIDs blocked by an open dependency
 
-	groups []group      // tasks tab, current grouping
-	flat   []*task.Task // selectable tasks in display order
-	cursor int          // index into flat (tasks) or notes (notes tab)
-	offset int          // first visible line (scroll position)
+	groups   []group      // tasks tab, current grouping
+	flat     []*task.Task // selectable tasks in display order
+	cursor   int          // index into flat (tasks) or notes (notes tab)
+	offset   int          // first visible line (scroll position)
+	hitLines []hitLine    // per-line click map from the last list render (mouse)
 
 	filter       string
 	scopeTag     string // active @tag scope (filters the list); "" = none
@@ -132,7 +134,13 @@ func Run() error {
 		defer stop()
 	}
 
-	p := tea.NewProgram(m, tea.WithAltScreen())
+	opts := []tea.ProgramOption{tea.WithAltScreen()}
+	if os.Getenv("NT_MOUSE") != "0" {
+		// Mouse: wheel scroll + click-to-select/activate. Hold Shift to bypass
+		// for native text selection. Disable entirely with NT_MOUSE=0.
+		opts = append(opts, tea.WithMouseCellMotion())
+	}
+	p := tea.NewProgram(m, opts...)
 	_, err = p.Run()
 	if err != nil {
 		return err

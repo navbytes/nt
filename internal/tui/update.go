@@ -31,6 +31,11 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case readyMsg:
 		m.ready = true
 		return m, nil
+	case tea.MouseMsg:
+		if m.ready {
+			m.handleMouse(msg)
+		}
+		return m, nil
 	case tea.KeyMsg:
 		if !m.ready {
 			return m, nil // drop startup terminal-query noise

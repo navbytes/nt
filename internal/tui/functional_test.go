@@ -232,6 +232,49 @@ func TestEscClearsScope(t *testing.T) {
 	}
 }
 
+// TestMouseClickActivatesToken: clicking a @tag token scopes the list.
+func TestMouseClickActivatesToken(t *testing.T) {
+	m := testModel(t)
+	m.width, m.height = 130, 30 // wide split
+	m.View()                    // populate the click hit-map
+	var clickX, clickY int
+	var wantTag string
+	for li, hl := range m.hitLines {
+		for _, sp := range hl.tokens {
+			if sp.ft.kind == "tag" {
+				clickX, clickY, wantTag = sp.start, 2+(li-m.offset), sp.ft.value
+			}
+		}
+		if wantTag != "" {
+			break
+		}
+	}
+	if wantTag == "" {
+		t.Skip("no clickable tag token in fixture")
+	}
+	var model tea.Model = m
+	model, _ = model.Update(tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonLeft, X: clickX, Y: clickY})
+	if mm := model.(*Model); mm.scopeTag != wantTag {
+		t.Fatalf("clicking @%s should scope to it; got %q", wantTag, mm.scopeTag)
+	}
+}
+
+// TestMouseWheelScrolls: wheel events move the selection.
+func TestMouseWheelScrolls(t *testing.T) {
+	m := testModel(t)
+	m.width, m.height = 100, 24
+	m.cursor = 0
+	var model tea.Model = m
+	model, _ = model.Update(tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonWheelDown})
+	if model.(*Model).cursor != 1 {
+		t.Fatalf("wheel down should move cursor to 1, got %d", model.(*Model).cursor)
+	}
+	model, _ = model.Update(tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonWheelUp})
+	if model.(*Model).cursor != 0 {
+		t.Fatalf("wheel up should move cursor back to 0, got %d", model.(*Model).cursor)
+	}
+}
+
 // TestImmediateActions exercises the non-prompt keys.
 func TestImmediateActions(t *testing.T) {
 	m := testModel(t)

@@ -238,6 +238,7 @@ func (m *Model) compactView(h int) string {
 		return m.notesList(m.width, h)
 	}
 	var lines []string
+	var hits []hitLine
 	idx, sel := 0, -1
 	for _, g := range m.groups {
 		for _, t := range g.tasks {
@@ -253,9 +254,11 @@ func (m *Model) compactView(h int) string {
 				row := m.icon(t) + " " + truncate(colorizeStr(t.Text, t.Done), m.width-6) + " " + priStr(t.Priority)
 				lines = append(lines, " "+row)
 			}
+			hits = append(hits, hitLine{item: idx})
 			idx++
 		}
 	}
+	m.hitLines = hits
 	if len(lines) == 0 {
 		return stDim.Render(" no tasks")
 	}
@@ -265,27 +268,33 @@ func (m *Model) compactView(h int) string {
 // listView renders the grouped task list, windowed to h rows.
 func (m *Model) listView(width, h int) string {
 	if len(m.flat) == 0 {
+		m.hitLines = nil
 		if m.filter != "" {
 			return stDim.Render(fmt.Sprintf("  no tasks match %q", m.filter))
 		}
 		return stDim.Render("  no tasks — press 'a' to add one")
 	}
 	var lines []string
+	var hits []hitLine
 	idx, sel := 0, -1
 	for gi, g := range m.groups {
 		if gi > 0 {
 			lines = append(lines, "")
+			hits = append(hits, hitLine{item: -1})
 		}
 		lines = append(lines, groupHeader(g.name, len(g.tasks), width))
+		hits = append(hits, hitLine{item: -1})
 		for _, t := range g.tasks {
 			cur := idx == m.cursor
 			lines = append(lines, m.taskRow(t, cur, width))
+			hits = append(hits, hitLine{item: idx, tokens: taskTokenSpans(t, 5)})
 			if cur {
 				sel = len(lines) - 1
 			}
 			idx++
 		}
 	}
+	m.hitLines = hits
 	return m.viewport(lines, sel, h)
 }
 
@@ -318,6 +327,7 @@ func (m *Model) notesList(width, h int) string {
 		return stDim.Render("  no notes — press 'A' to add one")
 	}
 	var lines []string
+	var hits []hitLine
 	for i, n := range m.notesView {
 		if i == m.cursor {
 			body := "▤ " + n.Title
@@ -332,7 +342,9 @@ func (m *Model) notesList(width, h int) string {
 			}
 			lines = append(lines, "   "+row)
 		}
+		hits = append(hits, hitLine{item: i})
 	}
+	m.hitLines = hits
 	return m.viewport(lines, m.cursor, h)
 }
 
@@ -528,6 +540,7 @@ func (m *Model) helpView() string {
 		}},
 		{"view", [][2]string{
 			{"f", "follow: label a [[link]]/@tag/+project to activate (CAPS = group)"},
+			{"mouse", "wheel scrolls · click selects · click a token activates it"},
 			{"/", "filter (searches note bodies on the notes tab)"},
 			{"esc", "clear filter / scope"},
 			{"v", "cycle grouping (date→project→tag)"},
