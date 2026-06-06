@@ -427,10 +427,15 @@ Edit keys act on the **marked set** if any, else the current task.
 | `space` / `V` | mark / visual range-select | | `v` | cycle grouping |
 | `y` | yank → `y` id · `l` line · `t` text | | `.` / `b` | show-hide done / blocked |
 | `a`/`A` `r` `e`/`E` | add / rename / edit | | `u` | undo (again = redo) |
-| `1`/`2`/`3`/`tab` | tasks / notes / logbook | | `?` / `q` | help / quit |
+| `1`/`2`/`3`/`tab` | tasks / notes / logbook | | `‹`/`›` | resize the list/detail split |
+
+The **footer keybar is contextual** — it shows only the keys that apply to the
+current tab and selection (e.g. no due/tag on notes, `x reopen` in the logbook,
+`f follow` only when the selected item has tokens).
 
 **Mouse** (on by default; `NT_MOUSE=0` disables, Shift-drag = native selection):
-wheel scrolls, click selects a row, click a `[[link]]`/`@tag`/`+project` activates it.
+wheel scrolls, click selects a row, click a `[[link]]`/`@tag`/`+project` activates it,
+click a tab to switch, and drag the list/detail divider to resize it.
 
 ---
 

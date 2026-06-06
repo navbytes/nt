@@ -33,7 +33,7 @@ func (m *Model) collectTargets() []followTarget {
 	var raw []followTarget
 	add := func(kind, val string) { raw = append(raw, followTarget{kind: kind, value: val}) }
 
-	if m.tab == tabTasks {
+	if m.tab != tabNotes { // tasks or logbook both select a task
 		t := m.selectedTask()
 		if t == nil {
 			return nil

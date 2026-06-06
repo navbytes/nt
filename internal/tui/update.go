@@ -135,6 +135,10 @@ func (m *Model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.grp = (m.grp + 1) % 3
 		m.rebuild()
 		m.setStatus("group: " + m.grp.String())
+	case "<":
+		m.nudgeSplit(-4) // widen the detail pane (shrink the list)
+	case ">":
+		m.nudgeSplit(4) // widen the list
 	case ".":
 		m.showDone = !m.showDone
 		m.rebuild()

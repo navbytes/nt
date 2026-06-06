@@ -99,13 +99,15 @@ type Model struct {
 	hitLines  []hitLine    // per-line click map from the last list render (mouse)
 	tabHits   []tabHit     // clickable tab-label ranges from the last header render
 
-	filter       string
-	scopeTag     string // active @tag scope (filters the list); "" = none
-	scopeProject string // active +project scope; "" = none
-	detailFocus  bool   // detail pane is focused: j/k scroll the body, not the list
-	detailScroll int    // scroll offset within the focused detail pane
-	help         bool
-	ready        bool // gates key input until startup terminal-query noise settles
+	filter        string
+	scopeTag      string // active @tag scope (filters the list); "" = none
+	scopeProject  string // active +project scope; "" = none
+	detailFocus   bool   // detail pane is focused: j/k scroll the body, not the list
+	detailScroll  int    // scroll offset within the focused detail pane
+	splitPct      int    // wide-mode list width as a % of the terminal (resizable)
+	draggingSplit bool   // a mouse drag on the divider is in progress
+	help          bool
+	ready         bool // gates key input until startup terminal-query noise settles
 
 	followMode    bool           // hint mode: tokens are labeled for keyboard activation
 	followTargets []followTarget // labeled actionable tokens (links/tags/projects)
@@ -138,7 +140,7 @@ func Run() error {
 	}
 	ti := textinput.New()
 	ti.Prompt = ""
-	m := &Model{eng: eng, input: ti, marked: map[string]bool{}}
+	m := &Model{eng: eng, input: ti, marked: map[string]bool{}, splitPct: splitDefault}
 	m.reload()
 
 	ch, stop, err := watchStore(eng.S.Dir)

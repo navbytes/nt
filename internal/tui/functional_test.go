@@ -286,6 +286,99 @@ func TestLogbookShowsCompleted(t *testing.T) {
 	}
 }
 
+// TestSplitResize: ‹ › keys move the divider and clamp at the bounds.
+func TestSplitResize(t *testing.T) {
+	m := testModel(t)
+	m.width, m.height = 160, 30
+	base := m.splitWidth()
+	mm := press(m, ">").(*Model)
+	if mm.splitWidth() <= base {
+		t.Fatal("'>' should widen the list")
+	}
+	for i := 0; i < 40; i++ {
+		mm = press(mm, "<").(*Model)
+	}
+	if mm.splitPct != splitMin {
+		t.Fatalf("repeated '<' should clamp to %d, got %d", splitMin, mm.splitPct)
+	}
+	for i := 0; i < 40; i++ {
+		mm = press(mm, ">").(*Model)
+	}
+	if mm.splitPct != splitMax {
+		t.Fatalf("repeated '>' should clamp to %d, got %d", splitMax, mm.splitPct)
+	}
+}
+
+// TestSplitDrag: pressing the divider starts a drag, motion resizes, release ends.
+func TestSplitDrag(t *testing.T) {
+	m := testModel(t)
+	m.width, m.height = 160, 30
+	div := m.splitWidth()
+	var model tea.Model = m
+	model, _ = model.Update(tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonLeft, X: div, Y: 5})
+	if !model.(*Model).draggingSplit {
+		t.Fatal("pressing the divider column should start a drag")
+	}
+	model, _ = model.Update(tea.MouseMsg{Action: tea.MouseActionMotion, Button: tea.MouseButtonLeft, X: 64, Y: 5})
+	if got := model.(*Model).splitPct; got != 40 {
+		t.Fatalf("drag to col 64/160 should be 40%%, got %d", got)
+	}
+	model, _ = model.Update(tea.MouseMsg{Action: tea.MouseActionRelease, Button: tea.MouseButtonLeft, X: 64, Y: 5})
+	if model.(*Model).draggingSplit {
+		t.Fatal("release should end the drag")
+	}
+}
+
+// TestKeybarContext: the footer hints adapt to the tab and the selection.
+func TestKeybarContext(t *testing.T) {
+	m := testModel(t)
+	m.width, m.height = 100, 24
+	has := func(pairs [][2]string, label string) bool {
+		for _, p := range pairs {
+			if p[1] == label {
+				return true
+			}
+		}
+		return false
+	}
+
+	m.tab, m.cursor = tabTasks, 0
+	if tp := m.keybarPairs(); !has(tp, "due") || !has(tp, "done") {
+		t.Fatal("tasks keybar should show due + done")
+	}
+	// selection with tokens shows follow; a tokenless one does not.
+	if !has(m.keybarPairs(), "follow") {
+		t.Fatal("a task with @tag/+project should offer follow")
+	}
+	m.cursor = 2 // "deploy" — no tokens
+	if has(m.keybarPairs(), "follow") {
+		t.Fatal("a tokenless task should not offer follow")
+	}
+
+	m.tab, m.cursor = tabNotes, 0
+	np := m.keybarPairs()
+	if has(np, "due") || has(np, "done") {
+		t.Fatal("notes keybar should not show task-only keys")
+	}
+	if !has(np, "add note") {
+		t.Fatal("notes keybar should show add note")
+	}
+
+	done := press(testModelWide(t), "x").(*Model) // complete a task → logbook
+	done.tab, done.cursor = tabLogbook, 0
+	lp := done.keybarPairs()
+	if !has(lp, "reopen") || has(lp, "due") {
+		t.Fatal("logbook keybar should show reopen and not due")
+	}
+}
+
+func testModelWide(t *testing.T) *Model {
+	m := testModel(t)
+	m.width, m.height = 100, 24
+	m.cursor = 0
+	return m
+}
+
 // TestClickTabSwitch: clicking the tab labels in the header switches tabs.
 func TestClickTabSwitch(t *testing.T) {
 	m := testModel(t)

@@ -175,15 +175,52 @@ func barPad(n int) string {
 	return stBarBg.Render(strings.Repeat(" ", n))
 }
 
+// keybarPairs returns the key hints relevant to the current tab and selection,
+// most-important first — so the footer reflects what you can actually do here
+// rather than a fixed menu (e.g. no due/tag on notes, "reopen" not "done" in the
+// logbook, follow/link only when the selection has tokens to act on).
+func (m *Model) keybarPairs() [][2]string {
+	hasTokens := len(m.collectTargets()) > 0
+	switch m.tab {
+	case tabNotes:
+		p := [][2]string{{"j/k", "move"}, {"enter", "detail"}, {"A", "add note"}, {"e", "edit"}}
+		if hasTokens {
+			p = append(p, [2]string{"f", "follow"})
+		}
+		return append(p, [][2]string{{"/", "filter"}, {"1/2/3", "tab"}, {"u", "undo"}}...)
+	case tabLogbook:
+		p := [][2]string{{"j/k", "move"}, {"enter", "detail"}, {"x", "reopen"}, {"y", "yank"}}
+		if hasTokens {
+			p = append(p, [2]string{"f", "follow"})
+		}
+		return append(p, [][2]string{{"/", "search"}, {"1/2/3", "tab"}, {"u", "undo"}}...)
+	default: // tasks
+		p := [][2]string{{"j/k", "move"}, {"enter", "detail"}}
+		if len(m.marked) > 0 {
+			p = append(p, [][2]string{{"x", "done"}, {"X", "delete"}, {"p", "pri"},
+				{"D", "due"}, {"t/T", "tag"}, {"esc", "clear marks"}}...)
+		} else {
+			p = append(p, [][2]string{{"x", "done"}, {"X", "delete"}, {"a/A", "add"},
+				{"e", "edit"}, {"p", "pri"}, {"D", "due"}, {"t/T", "tag"}}...)
+		}
+		if hasTokens {
+			p = append(p, [][2]string{{"l/L", "link"}, {"f", "follow"}}...)
+		} else {
+			p = append(p, [2]string{"l", "link"})
+		}
+		p = append(p, [][2]string{{"spc", "mark"}, {"y", "yank"}, {"/", "filter"}, {"v", "group"}, {"b", "blocked"}}...)
+		if m.width >= wideMin {
+			p = append(p, [2]string{"‹ ›", "width"})
+		}
+		return append(p, [2]string{"u", "undo"})
+	}
+}
+
 // keybar renders key/label pairs (cyan key, dim label) up to a width budget.
 // `? help` and `q quit` are always reserved at the end so the discoverability
 // keys never get truncated off-screen, however narrow the terminal.
 func (m *Model) keybar(width int) string {
-	pairs := [][2]string{
-		{"j/k", "move"}, {"enter", "detail"}, {"x", "done"}, {"a/A", "add"},
-		{"e", "edit"}, {"p", "pri"}, {"D", "due"}, {"t/T", "tag"}, {"l/L", "link"},
-		{"spc", "mark"}, {"f", "follow"}, {"/", "filter"}, {"v", "group"}, {"b", "blocked"}, {"u", "undo"},
-	}
+	pairs := m.keybarPairs()
 	sep := lipgloss.NewStyle().Foreground(cBorder).Background(cBarBg).Render(" · ")
 	seg := func(p [2]string) string { return stKeyBg.Render(p[0]) + stBarBg.Render(" "+p[1]) }
 	tail := seg([2]string{"?", "help"}) + sep + seg([2]string{"q", "quit"})
@@ -209,7 +246,7 @@ func (m *Model) keybar(width int) string {
 // --- layouts -------------------------------------------------------------
 
 func (m *Model) wideView(h int) string {
-	leftW := m.width * 58 / 100
+	leftW := m.splitWidth()
 	rightW := m.width - leftW
 	var listContent string
 	switch m.tab {
@@ -658,6 +695,7 @@ func (m *Model) helpView() string {
 			{"/", "filter (searches note bodies on the notes tab)"},
 			{"esc", "clear filter / scope"},
 			{"v", "cycle grouping (date→project→tag)"},
+			{"‹ ›", "resize the list/detail split (or drag the divider)"},
 			{".", "show / hide done"}, {"b", "show / hide blocked"},
 			{"?", "this help"}, {"q", "quit"},
 		}},

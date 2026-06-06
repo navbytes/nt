@@ -59,6 +59,16 @@ func taskTokenSpans(t *task.Task, startCol int) []tokenSpan {
 // handleMouse routes a mouse event: wheel scrolls, left-click selects a row or
 // activates a clicked token.
 func (m *Model) handleMouse(msg tea.MouseMsg) {
+	// A divider drag in progress swallows motion (resize) and release (end).
+	if m.draggingSplit {
+		switch msg.Action {
+		case tea.MouseActionMotion:
+			m.setSplitFromX(msg.X)
+		case tea.MouseActionRelease:
+			m.draggingSplit = false
+		}
+		return
+	}
 	switch msg.Button {
 	case tea.MouseButtonWheelUp:
 		if m.detailFocus {
@@ -76,9 +86,21 @@ func (m *Model) handleMouse(msg tea.MouseMsg) {
 		}
 	case tea.MouseButtonLeft:
 		if msg.Action == tea.MouseActionPress {
+			// Pressing on the divider column starts a resize drag.
+			if m.width >= wideMin && abs(msg.X-m.splitWidth()) <= 1 {
+				m.draggingSplit = true
+				return
+			}
 			m.click(msg.X, msg.Y)
 		}
 	}
+}
+
+func abs(n int) int {
+	if n < 0 {
+		return -n
+	}
+	return n
 }
 
 // click resolves a left-click at (x,y) to a row selection and, if it landed on
@@ -105,8 +127,7 @@ func (m *Model) click(x, y int) {
 		return // header rule or footer
 	}
 	if m.width >= wideMin {
-		leftW := m.width * 58 / 100
-		if x >= leftW {
+		if x >= m.splitWidth() {
 			m.detailFocus, m.detailScroll = true, 0 // focus the detail pane
 			return
 		}
