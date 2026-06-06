@@ -476,6 +476,72 @@ func cmdLinks(args []string) int {
 	return 0
 }
 
+// cmdLog prints completed tasks newest-first (the Logbook, on the CLI) so an AI
+// session can recall "what we recently finished". Reuses task.CompletedSince —
+// the same domain rule the TUI Logbook uses.
+func cmdLog(args []string) int {
+	fs := flag.NewFlagSet("log", flag.ContinueOnError)
+	since := fs.String("since", "", "only completions on/after YYYY-MM-DD")
+	days := fs.Int("days", 0, "only completions in the last N days")
+	source := fs.String("source", "", "filter by source (e.g. claude)")
+	asJSON := fs.Bool("json", false, "machine-readable output")
+
+	flags, _ := splitArgs(args, map[string]bool{"json": true})
+	if err := fs.Parse(flags); err != nil {
+		return 2
+	}
+	e, ok := engine()
+	if !ok {
+		return 1
+	}
+	d, err := e.Read()
+	if err != nil {
+		return fail(err)
+	}
+
+	bound := *since
+	if *days > 0 {
+		if cut := time.Now().AddDate(0, 0, -*days).Format("2006-01-02"); bound == "" || cut > bound {
+			bound = cut
+		}
+	}
+	done := task.CompletedSince(d.Tasks(), bound)
+	if *source != "" {
+		kept := done[:0]
+		for _, t := range done {
+			if t.Source() == *source {
+				kept = append(kept, t)
+			}
+		}
+		done = kept
+	}
+
+	if *asJSON {
+		return printJSON(tasksToJSON(done, indexMap(d.Tasks())))
+	}
+	if len(done) == 0 {
+		fmt.Println("no completed tasks")
+		return 0
+	}
+	day := ""
+	for _, t := range done {
+		if t.Completed != day {
+			day = t.Completed
+			label := day
+			if label == "" {
+				label = "(no completion date)"
+			}
+			fmt.Printf("\n%s\n", label)
+		}
+		src := ""
+		if s := t.Source(); s != "" {
+			src = "  (" + s + ")" // @tags/+project are already inline in Text
+		}
+		fmt.Printf("  ✓ %s  %s%s\n", shortID(t.ID()), t.Text, src)
+	}
+	return 0
+}
+
 // cmdRm permanently removes tasks (journaled, so `nt undo` restores them).
 func cmdRm(args []string) int {
 	if len(args) == 0 {
@@ -846,30 +912,32 @@ func min(a, b int) int {
 // --- JSON output ---------------------------------------------------------
 
 type taskJSON struct {
-	Index    int      `json:"index"`
-	ID       string   `json:"id"`
-	Text     string   `json:"text"`
-	Status   string   `json:"status"`
-	Priority string   `json:"priority,omitempty"`
-	Due      string   `json:"due,omitempty"`
-	Project  string   `json:"project,omitempty"`
-	Tags     []string `json:"tags,omitempty"`
-	Source   string   `json:"source,omitempty"`
-	Links    []string `json:"links,omitempty"`
+	Index     int      `json:"index"`
+	ID        string   `json:"id"`
+	Text      string   `json:"text"`
+	Status    string   `json:"status"`
+	Priority  string   `json:"priority,omitempty"`
+	Due       string   `json:"due,omitempty"`
+	Completed string   `json:"completed,omitempty"`
+	Project   string   `json:"project,omitempty"`
+	Tags      []string `json:"tags,omitempty"`
+	Source    string   `json:"source,omitempty"`
+	Links     []string `json:"links,omitempty"`
 }
 
 func tasksToJSON(tasks []*task.Task, idx map[*task.Task]int) []taskJSON {
 	out := make([]taskJSON, 0, len(tasks))
 	for _, t := range tasks {
 		j := taskJSON{
-			Index:  idx[t],
-			ID:     t.ID(),
-			Text:   t.Text,
-			Status: t.Status(),
-			Due:    t.Due(),
-			Tags:   t.Tags(),
-			Source: t.Source(),
-			Links:  t.Links(),
+			Index:     idx[t],
+			ID:        t.ID(),
+			Text:      t.Text,
+			Status:    t.Status(),
+			Due:       t.Due(),
+			Completed: t.Completed,
+			Tags:      t.Tags(),
+			Source:    t.Source(),
+			Links:     t.Links(),
 		}
 		if t.Priority != 0 {
 			j.Priority = string(t.Priority)

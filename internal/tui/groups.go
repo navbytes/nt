@@ -45,6 +45,56 @@ func buildGroups(tasks []*task.Task, grp groupMode, filter string, showDone, sho
 	}
 }
 
+// buildLogbook groups the completed tasks by completion date (newest first) for
+// the Logbook view, plus the flat selectable list. Selection/ordering is the
+// domain rule (task.CompletedSince); this adapter adds only the interactive text
+// filter and the human-friendly date headers. Scope is applied by the caller.
+func buildLogbook(tasks []*task.Task, filter string) ([]group, []*task.Task) {
+	needle := strings.ToLower(strings.TrimSpace(filter))
+	var order []string
+	buckets := map[string][]*task.Task{}
+	for _, t := range task.CompletedSince(tasks, "") {
+		if needle != "" && !strings.Contains(strings.ToLower(t.Line()), needle) {
+			continue
+		}
+		k := t.Completed
+		if _, ok := buckets[k]; !ok {
+			order = append(order, k) // first-seen == date-desc (input is sorted)
+		}
+		buckets[k] = append(buckets[k], t)
+	}
+	var groups []group
+	var flat []*task.Task
+	for _, k := range order {
+		groups = append(groups, group{name: logDateLabel(k), tasks: buckets[k]})
+		flat = append(flat, buckets[k]...)
+	}
+	return groups, flat
+}
+
+// logDateLabel renders a friendly Logbook group header for a YYYY-MM-DD
+// completion date: Today / Yesterday / weekday (within a week) / Mon Jan 2.
+func logDateLabel(ymd string) string {
+	if ymd == "" {
+		return "Completion date unknown"
+	}
+	d, err := time.Parse("2006-01-02", ymd)
+	if err != nil {
+		return ymd
+	}
+	now := time.Now()
+	switch ymd {
+	case now.Format("2006-01-02"):
+		return "Today · " + d.Format("Mon Jan 2")
+	case now.AddDate(0, 0, -1).Format("2006-01-02"):
+		return "Yesterday · " + d.Format("Mon Jan 2")
+	}
+	if ymd >= now.AddDate(0, 0, -7).Format("2006-01-02") {
+		return d.Format("Monday · Jan 2")
+	}
+	return d.Format("Mon Jan 2, 2006")
+}
+
 // byDate buckets tasks into Overdue / Today / This week / Later / No date, with
 // a trailing Done bucket for any completed tasks present.
 func byDate(tasks []*task.Task) []group {

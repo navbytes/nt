@@ -47,33 +47,45 @@ func (m *Model) View() string {
 // --- header / footer -----------------------------------------------------
 
 func (m *Model) headerView() string {
-	t1, t2 := " 1 tasks ", " 2 notes "
-	if m.tab == tabTasks {
-		t1, t2 = stTabOn.Render(t1), stTabOff.Render(t2)
-	} else {
-		t1, t2 = stTabOff.Render(t1), stTabOn.Render(t2)
+	tabSty := func(active bool, s string) string {
+		if active {
+			return stTabOn.Render(s)
+		}
+		return stTabOff.Render(s)
 	}
+	t1 := tabSty(m.tab == tabTasks, " 1 tasks ")
+	t2 := tabSty(m.tab == tabNotes, " 2 notes ")
+	t3 := tabSty(m.tab == tabLogbook, " 3 log ")
 	p1, brand, p2 := stHeader.Render("  "), stBrand.Render(" nt "), stHeader.Render("  ")
-	left := p1 + brand + p2 + t1 + t2
+	left := p1 + brand + p2 + t1 + t2 + t3
 	// Record the clickable tab-label column ranges (header row 0) for the mouse.
 	tabStart := lipgloss.Width(p1) + lipgloss.Width(brand) + lipgloss.Width(p2)
+	w1, w2, w3 := lipgloss.Width(t1), lipgloss.Width(t2), lipgloss.Width(t3)
 	m.tabHits = []tabHit{
-		{start: tabStart, end: tabStart + lipgloss.Width(t1), tab: tabTasks},
-		{start: tabStart + lipgloss.Width(t1), end: tabStart + lipgloss.Width(t1) + lipgloss.Width(t2), tab: tabNotes},
+		{start: tabStart, end: tabStart + w1, tab: tabTasks},
+		{start: tabStart + w1, end: tabStart + w1 + w2, tab: tabNotes},
+		{start: tabStart + w1 + w2, end: tabStart + w1 + w2 + w3, tab: tabLogbook},
 	}
 
 	// Right side: muted "group + toggles" plus PROMINENT chips for any active
 	// filter / scope / marks, so the user always knows why the list is reduced.
 	var rb strings.Builder
 	muted := []string{"group:" + m.grp.String()}
-	if m.showDone {
-		muted = append(muted, "+done")
-	}
 	if m.showBlocked {
 		muted = append(muted, "+blocked")
 	}
 	rb.WriteString(stBarBg.Render(strings.Join(muted, "  ·  ")))
 	sp := stBarBg.Render("  ")
+	// Done-count indicator (tasks tab): a bright chip when done are shown, a
+	// subtle one when they're hidden — so completed work is never invisible.
+	if m.tab == tabTasks {
+		if m.showDone {
+			rb.WriteString(sp + chip("✓ done shown", cGreen))
+		} else if dc := m.doneCount(); dc > 0 {
+			rb.WriteString(sp + stGreen.Background(cBarBg).Render(" ✓ ") +
+				stBarBg.Render(fmt.Sprintf("%d done ", dc)))
+		}
+	}
 	if len(m.marked) > 0 {
 		lbl := fmt.Sprintf("● %d marked", len(m.marked))
 		if h := m.hiddenMarked(); h > 0 {
@@ -200,9 +212,12 @@ func (m *Model) wideView(h int) string {
 	leftW := m.width * 58 / 100
 	rightW := m.width - leftW
 	var listContent string
-	if m.tab == tabNotes {
+	switch m.tab {
+	case tabNotes:
 		listContent = m.notesList(leftW, h)
-	} else {
+	case tabLogbook:
+		listContent = m.logbookView(leftW, h)
+	default:
 		listContent = m.listView(leftW, h)
 	}
 	list := lipgloss.NewStyle().Width(leftW).Height(h).Render(listContent)
@@ -259,8 +274,11 @@ func (m *Model) rightDetail(w int) string {
 }
 
 func (m *Model) standardView(h int) string {
-	if m.tab == tabNotes {
+	switch m.tab {
+	case tabNotes:
 		return m.notesList(m.width, h)
+	case tabLogbook:
+		return m.logbookView(m.width, h)
 	}
 	return m.listView(m.width, h)
 }
@@ -268,6 +286,9 @@ func (m *Model) standardView(h int) string {
 func (m *Model) compactView(h int) string {
 	if m.tab == tabNotes {
 		return m.notesList(m.width, h)
+	}
+	if m.tab == tabLogbook {
+		return m.logbookView(m.width, h)
 	}
 	var lines []string
 	var hits []hitLine
@@ -297,19 +318,26 @@ func (m *Model) compactView(h int) string {
 	return m.viewport(lines, sel, h)
 }
 
-// listView renders the grouped task list, windowed to h rows.
-func (m *Model) listView(width, h int) string {
-	if len(m.flat) == 0 {
+// rowRenderer draws one task line for a grouped list (sel = it's the cursor).
+type rowRenderer func(t *task.Task, sel bool, width int) string
+
+// renderGroupedList renders grouped tasks windowed to h rows: a header per
+// group, each task via rowFn, building the per-line click map as it goes. Shared
+// by the Tasks list and the Logbook so the loop, hit-testing, and empty-state
+// handling live in exactly one place.
+func (m *Model) renderGroupedList(groups []group, width, h int, rowFn rowRenderer, empty string) string {
+	total := 0
+	for _, g := range groups {
+		total += len(g.tasks)
+	}
+	if total == 0 {
 		m.hitLines = nil
-		if m.filter != "" {
-			return stDim.Render(fmt.Sprintf("  no tasks match %q", m.filter))
-		}
-		return stDim.Render("  no tasks — press 'a' to add one")
+		return stDim.Render(empty)
 	}
 	var lines []string
 	var hits []hitLine
 	idx, sel := 0, -1
-	for gi, g := range m.groups {
+	for gi, g := range groups {
 		if gi > 0 {
 			lines = append(lines, "")
 			hits = append(hits, hitLine{item: -1})
@@ -318,7 +346,7 @@ func (m *Model) listView(width, h int) string {
 		hits = append(hits, hitLine{item: -1})
 		for _, t := range g.tasks {
 			cur := idx == m.cursor
-			lines = append(lines, m.taskRow(t, cur, width))
+			lines = append(lines, rowFn(t, cur, width))
 			hits = append(hits, hitLine{item: idx, tokens: taskTokenSpans(t, 5)})
 			if cur {
 				sel = len(lines) - 1
@@ -328,6 +356,47 @@ func (m *Model) listView(width, h int) string {
 	}
 	m.hitLines = hits
 	return m.viewport(lines, sel, h)
+}
+
+// listView renders the grouped task list, windowed to h rows.
+func (m *Model) listView(width, h int) string {
+	empty := "  no tasks — press 'a' to add one"
+	if m.filter != "" {
+		empty = fmt.Sprintf("  no tasks match %q", m.filter)
+	}
+	return m.renderGroupedList(m.groups, width, h, m.taskRow, empty)
+}
+
+// logbookView renders the Logbook: completed tasks grouped by completion date,
+// newest first, each row showing who the task came from (src).
+func (m *Model) logbookView(width, h int) string {
+	empty := "  no completed tasks yet — finish one with 'x'"
+	if m.filter != "" {
+		empty = fmt.Sprintf("  no completed tasks match %q", m.filter)
+	}
+	return m.renderGroupedList(m.logGroups, width, h, m.logRow, empty)
+}
+
+// logRow renders one Logbook line: green ✓, struck-through text, source on the
+// right.
+func (m *Model) logRow(t *task.Task, sel bool, width int) string {
+	if sel {
+		return selMetaRow("✓", t.Text, t.Source(), width, m.marked[t.ID()])
+	}
+	return listRow(m.markGutter(t), stGreen.Render("✓"), colorizeStr(t.Text, true), logSource(t), width)
+}
+
+// logSource styles a task's provenance for the Logbook (claude = magenta, any
+// other source = cyan, none = blank).
+func logSource(t *task.Task) string {
+	s := t.Source()
+	if s == "" {
+		return ""
+	}
+	if s == "claude" {
+		return stTag.Render(s)
+	}
+	return stLink.Render(s)
 }
 
 // groupHeader renders a labelled separator like "TODAY ──────────── (3)".
@@ -384,31 +453,37 @@ func (m *Model) notesList(width, h int) string {
 func (m *Model) taskRow(t *task.Task, sel bool, width int) string {
 	status := m.effStatus(t)
 	if sel {
-		// Plain content on a solid selection bar (see selRow).
-		meta := plainMeta(t)
-		avail := width - 5 - lipgloss.Width(meta) // 3 bar + glyph + space
-		if avail < 4 {
-			avail = 4
-		}
-		text := truncate(t.Text, avail)
-		left := glyphFor(status) + " " + text
-		gap := width - 3 - lipgloss.Width(left) - lipgloss.Width(meta)
-		if gap < 1 {
-			gap = 1
-		}
-		return selRow(left+strings.Repeat(" ", gap)+meta, width, m.marked[t.ID()])
+		return selMetaRow(glyphFor(status), t.Text, plainMeta(t), width, m.marked[t.ID()])
 	}
-	icon := iconFor(status)
-	meta := metaStr(t)
+	return listRow(m.markGutter(t), iconFor(status), colorizeStr(t.Text, t.Done), metaStr(t), width)
+}
+
+// selMetaRow lays out a selected "glyph text … meta" row on the solid selection
+// bar. text and meta must be plain (selRow renders plain content); see selRow.
+func selMetaRow(glyph, text, meta string, width int, marked bool) string {
+	avail := width - 5 - lipgloss.Width(meta) // 3 bar + glyph + space
+	if avail < 4 {
+		avail = 4
+	}
+	left := glyph + " " + truncate(text, avail)
+	gap := width - 3 - lipgloss.Width(left) - lipgloss.Width(meta)
+	if gap < 1 {
+		gap = 1
+	}
+	return selRow(left+strings.Repeat(" ", gap)+meta, width, marked)
+}
+
+// listRow lays out an unselected "gutter icon text … meta" row padded to width.
+// text and meta are already styled by the caller.
+func listRow(gutter, icon, text, meta string, width int) string {
 	avail := width - 6 - lipgloss.Width(meta)
 	if avail < 4 {
 		avail = 4
 	}
-	text := colorizeStr(t.Text, t.Done)
 	if lipgloss.Width(text) > avail {
 		text = truncate(text, avail)
 	}
-	left := m.markGutter(t) + "  " + icon + " " + text
+	left := gutter + "  " + icon + " " + text
 	gap := width - lipgloss.Width(left) - lipgloss.Width(meta) - 1
 	if gap < 1 {
 		gap = 1
@@ -561,7 +636,7 @@ func (m *Model) helpView() string {
 	}{
 		{"navigate", [][2]string{
 			{"j / k, ↑ ↓", "move"}, {"Ctrl+d / Ctrl+u", "half-page down / up"},
-			{"g / G", "top / bottom"}, {"1 / 2 / tab", "switch tasks / notes"},
+			{"g / G", "top / bottom"}, {"1 / 2 / 3 / tab", "tasks / notes / logbook"},
 			{"enter", "focus detail (then j/k scroll the body)"}, {"esc", "back to list"},
 		}},
 		{"select", [][2]string{

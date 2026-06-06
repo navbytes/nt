@@ -311,6 +311,7 @@ nt add "fix auth bug" --pri high --due today --tag backend --project api [--sour
 nt note "JWT expiry" --body "..." --tag auth [--source claude]
 nt list [--status open] [--tag bug] [--project api] [--sort urgency] [--json]   # (ls)
 nt recall [--source claude] [--since 2026-06-01] [--json]   # read back prior items (AI loop)
+nt log [--since 2026-06-01] [--days 7] [--source claude] [--json]   # completed tasks, newest first
 nt done <id|task:N>                  # mark done  (do)
 nt update <id|task:N> --status doing --pri med --due +3d     # (up)
 nt search "race condition" [--type note|task]                # (q)
@@ -360,6 +361,10 @@ nt recall --source claude --json
   regroup/filter); `x`/`p`/`D`/`t`/`X` act on the whole set in one undo transaction;
   destructive bulk ops (done-with-recurrence, delete) confirm first.
 - **Delete** — `X` (TUI) / `nt rm <id…>` (CLI), journaled so `nt undo` restores.
+- **Logbook** — completed tasks as a work-journal: a TUI tab (`3`) grouped by completion
+  date (newest first, with the source of each task), and `nt log` on the CLI — both read the
+  same domain rule (`task.CompletedSince`). The tasks list stays clean; a header `✓ N done`
+  chip keeps hidden-done visible. Doubles as the AI recall feed (`nt log --json`).
 - **Token activation** — `f` (keyboard follow) or mouse-click a `[[link]]`/`@tag`/`+project`
   to navigate or scope/regroup; **yank** (`y`) copies id/line/text to the clipboard.
 - **Flexible metadata** — tags, project, due, priority, links; use what helps, skip the rest.
@@ -422,7 +427,7 @@ Edit keys act on the **marked set** if any, else the current task.
 | `space` / `V` | mark / visual range-select | | `v` | cycle grouping |
 | `y` | yank → `y` id · `l` line · `t` text | | `.` / `b` | show-hide done / blocked |
 | `a`/`A` `r` `e`/`E` | add / rename / edit | | `u` | undo (again = redo) |
-| `1`/`2`/`tab` | switch tasks / notes | | `?` / `q` | help / quit |
+| `1`/`2`/`3`/`tab` | tasks / notes / logbook | | `?` / `q` | help / quit |
 
 **Mouse** (on by default; `NT_MOUSE=0` disables, Shift-drag = native selection):
 wheel scrolls, click selects a row, click a `[[link]]`/`@tag`/`+project` activates it.

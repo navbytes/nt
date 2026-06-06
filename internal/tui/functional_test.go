@@ -259,24 +259,55 @@ func TestMouseClickActivatesToken(t *testing.T) {
 	}
 }
 
+// TestLogbookShowsCompleted: completing a task moves it into the Logbook tab;
+// reopening it from there removes it again.
+func TestLogbookShowsCompleted(t *testing.T) {
+	m := testModel(t)
+	m.width, m.height = 100, 24
+	if len(m.logFlat) != 0 {
+		t.Fatal("logbook should start empty")
+	}
+	m.cursor = 0
+	id := m.flat[0].ID()
+	mm := press(m, "x").(*Model) // complete the current task
+	if len(mm.logFlat) != 1 || mm.logFlat[0].ID() != id {
+		t.Fatalf("completed task should appear in the logbook, got %d entries", len(mm.logFlat))
+	}
+	mm = press(mm, "3").(*Model)
+	if mm.tab != tabLogbook {
+		t.Fatal("'3' should switch to the logbook tab")
+	}
+	if st := mm.selectedTask(); st == nil || st.ID() != id {
+		t.Fatal("logbook selection should resolve to the completed task")
+	}
+	mm = press(mm, "x").(*Model) // reopen from the logbook
+	if len(mm.logFlat) != 0 {
+		t.Fatalf("reopening should empty the logbook, got %d", len(mm.logFlat))
+	}
+}
+
 // TestClickTabSwitch: clicking the tab labels in the header switches tabs.
 func TestClickTabSwitch(t *testing.T) {
 	m := testModel(t)
 	m.width, m.height = 120, 30
 	m.View() // populate tabHits
-	if len(m.tabHits) != 2 {
-		t.Fatalf("expected 2 tab hits, got %d", len(m.tabHits))
+	if len(m.tabHits) != 3 {
+		t.Fatalf("expected 3 tab hits, got %d", len(m.tabHits))
 	}
-	notes := m.tabHits[1]
+	clickTab := func(model tea.Model, i int) tea.Model {
+		th := model.(*Model).tabHits[i]
+		model.(*Model).View() // refresh tabHits for the current tab
+		out, _ := model.Update(tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonLeft, X: th.start + 1, Y: 0})
+		return out
+	}
 	var model tea.Model = m
-	model, _ = model.Update(tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonLeft, X: notes.start + 1, Y: 0})
-	if model.(*Model).tab != tabNotes {
+	if model = clickTab(model, 1); model.(*Model).tab != tabNotes {
 		t.Fatal("clicking the notes label should switch to the notes tab")
 	}
-	model.(*Model).View() // refresh tabHits for the new tab
-	tasks := model.(*Model).tabHits[0]
-	model, _ = model.Update(tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonLeft, X: tasks.start + 1, Y: 0})
-	if model.(*Model).tab != tabTasks {
+	if model = clickTab(model, 2); model.(*Model).tab != tabLogbook {
+		t.Fatal("clicking the log label should switch to the logbook tab")
+	}
+	if model = clickTab(model, 0); model.(*Model).tab != tabTasks {
 		t.Fatal("clicking the tasks label should switch back")
 	}
 }

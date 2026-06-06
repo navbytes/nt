@@ -126,8 +126,10 @@ func (m *Model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.tab, m.cursor, m.offset = tabTasks, 0, 0
 	case "2":
 		m.tab, m.cursor, m.offset = tabNotes, 0, 0
+	case "3":
+		m.tab, m.cursor, m.offset = tabLogbook, 0, 0
 	case "tab":
-		m.tab = tabTasks + tabNotes - m.tab
+		m.tab = (m.tab + 1) % tabCount
 		m.cursor, m.offset = 0, 0
 	case "v":
 		m.grp = (m.grp + 1) % 3

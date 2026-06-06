@@ -30,6 +30,8 @@ func Run(args []string) int {
 		return cmdList(rest)
 	case "recall":
 		return cmdRecall(rest)
+	case "log":
+		return cmdLog(rest)
 	case "done", "do":
 		return cmdDone(rest)
 	case "update", "up":
@@ -146,6 +148,7 @@ USAGE
   nt note "title" [flags]     capture a note
   nt list [flags]             list tasks            (alias: ls)
   nt recall [flags]           read back prior items (for AI sessions)
+  nt log [--since|--days N]    completed tasks, newest first (the Logbook)
   nt done <id|task:N>         mark a task done       (alias: do)
   nt update <id|task:N> ...   change a task          (alias: up)
   nt search "query" [flags]   full-text search       (alias: q)

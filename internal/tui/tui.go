@@ -29,7 +29,10 @@ type tab int
 const (
 	tabTasks tab = iota
 	tabNotes
+	tabLogbook
 )
+
+const tabCount = 3
 
 type groupMode int
 
@@ -87,12 +90,14 @@ type Model struct {
 	notesView []*note.Note    // notes after the active filter
 	blocked   map[string]bool // task ULIDs blocked by an open dependency
 
-	groups   []group      // tasks tab, current grouping
-	flat     []*task.Task // selectable tasks in display order
-	cursor   int          // index into flat (tasks) or notes (notes tab)
-	offset   int          // first visible line (scroll position)
-	hitLines []hitLine    // per-line click map from the last list render (mouse)
-	tabHits  []tabHit     // clickable tab-label ranges from the last header render
+	groups    []group      // tasks tab, current grouping
+	flat      []*task.Task // selectable tasks in display order
+	logGroups []group      // logbook tab: done tasks grouped by completion date
+	logFlat   []*task.Task // logbook tab: selectable done tasks in display order
+	cursor    int          // index into flat (tasks) or notes (notes tab)
+	offset    int          // first visible line (scroll position)
+	hitLines  []hitLine    // per-line click map from the last list render (mouse)
+	tabHits   []tabHit     // clickable tab-label ranges from the last header render
 
 	filter       string
 	scopeTag     string // active @tag scope (filters the list); "" = none
@@ -205,10 +210,21 @@ func (m *Model) rebuild() {
 		}
 	}
 
+	m.logGroups, m.logFlat = buildLogbook(m.scopedTasks(), m.filter)
+
 	if selID != "" {
 		m.selectByID(selID)
 	}
 	m.clampCursor()
+}
+
+// currentFlat returns the selectable task slice for the active task-like tab
+// (tasks or logbook). Notes are handled separately.
+func (m *Model) currentFlat() []*task.Task {
+	if m.tab == tabLogbook {
+		return m.logFlat
+	}
+	return m.flat
 }
 
 // selectedID returns the ULID of the currently-selected item in the active tab.
@@ -219,8 +235,8 @@ func (m *Model) selectedID() string {
 		}
 		return ""
 	}
-	if m.cursor >= 0 && m.cursor < len(m.flat) {
-		return m.flat[m.cursor].ID()
+	if fl := m.currentFlat(); m.cursor >= 0 && m.cursor < len(fl) {
+		return fl[m.cursor].ID()
 	}
 	return ""
 }
@@ -236,7 +252,7 @@ func (m *Model) selectByID(id string) {
 		}
 		return
 	}
-	for i, t := range m.flat {
+	for i, t := range m.currentFlat() {
 		if t.ID() == id {
 			m.cursor = i
 			return
@@ -293,17 +309,37 @@ func (m *Model) clampCursor() {
 }
 
 func (m *Model) selectableLen() int {
-	if m.tab == tabNotes {
+	switch m.tab {
+	case tabNotes:
 		return len(m.notesView)
+	case tabLogbook:
+		return len(m.logFlat)
+	default:
+		return len(m.flat)
 	}
-	return len(m.flat)
 }
 
 func (m *Model) selectedTask() *task.Task {
-	if m.tab != tabTasks || m.cursor < 0 || m.cursor >= len(m.flat) {
+	if m.tab == tabNotes {
 		return nil
 	}
-	return m.flat[m.cursor]
+	fl := m.currentFlat()
+	if m.cursor < 0 || m.cursor >= len(fl) {
+		return nil
+	}
+	return fl[m.cursor]
+}
+
+// doneCount is the number of completed tasks in the current scope — surfaced as
+// a header chip so hidden-done isn't invisible.
+func (m *Model) doneCount() int {
+	n := 0
+	for _, t := range m.scopedTasks() {
+		if t.Done {
+			n++
+		}
+	}
+	return n
 }
 
 func (m *Model) selectedNote() *note.Note {
@@ -363,6 +399,7 @@ var (
 	stProj       = lipgloss.NewStyle().Foreground(cBlue)
 	stLink       = lipgloss.NewStyle().Foreground(cCyan)
 	stDone       = lipgloss.NewStyle().Foreground(cDim).Strikethrough(true)
+	stGreen      = lipgloss.NewStyle().Foreground(cGreen)
 	stPanel      = lipgloss.NewStyle().Border(lipgloss.NormalBorder(), false, false, false, true).BorderForeground(cBorder).Padding(0, 2)
 	stPanelFocus = lipgloss.NewStyle().Border(lipgloss.NormalBorder(), false, false, false, true).BorderForeground(cBlue).Padding(0, 2)
 	stCard       = lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(cBlue).Padding(1, 2)

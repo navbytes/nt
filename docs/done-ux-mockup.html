@@ -1,0 +1,306 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>nt — done-tasks UX exploration</title>
+<style>
+  :root{
+    --bg:#1a1b26; --panel:#16161e; --bar:#1f2335; --sel:#283457;
+    --fg:#c0caf5; --dim:#565f89; --muted:#787c99;
+    --red:#f7768e; --orange:#ff9e64; --yellow:#e0af68;
+    --green:#9ece6a; --cyan:#7dcfff; --blue:#7aa2f7; --magenta:#bb9af7;
+    --border:#3b4261;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0; background:#0d0e14; color:var(--fg);
+    font-family:ui-monospace,"SF Mono","JetBrains Mono",Menlo,Consolas,monospace;
+    font-size:13px; line-height:1.5; padding:32px 24px 80px;
+  }
+  h1{font-size:20px;margin:0 0 4px;color:#fff;font-weight:600}
+  .lede{color:var(--muted);max-width:820px;margin:0 0 14px;font-size:13px;line-height:1.65}
+  .lede b{color:var(--cyan);font-weight:600}
+  .lede code{color:var(--yellow);background:#1f2335;padding:1px 5px;border-radius:4px}
+  h2{font-size:13px;text-transform:uppercase;letter-spacing:.12em;color:var(--blue);
+     margin:40px 0 6px;font-weight:600}
+  .cap{color:var(--muted);margin:0 0 14px;max-width:820px;font-size:12.5px;line-height:1.6}
+  .cap code{color:var(--yellow);background:#1f2335;padding:1px 5px;border-radius:4px}
+  .cap b{color:var(--fg)}
+
+  /* terminal frame */
+  .term{background:var(--bg);border:1px solid var(--border);border-radius:10px;
+        overflow:hidden;box-shadow:0 10px 40px rgba(0,0,0,.45);margin-bottom:8px}
+  .chrome{display:flex;align-items:center;gap:7px;padding:8px 12px;background:#11121a;
+          border-bottom:1px solid var(--border)}
+  .dot{width:11px;height:11px;border-radius:50%}
+  .dot.r{background:#ff5f57}.dot.y{background:#febc2e}.dot.g{background:#28c840}
+  .chrome .t{margin-left:8px;color:var(--dim);font-size:11.5px}
+
+  /* app header bar */
+  .appbar{display:flex;justify-content:space-between;align-items:center;
+          padding:6px 12px;background:var(--bar);border-bottom:1px solid var(--border);
+          color:var(--muted);font-size:12px}
+  .appbar .brand{color:var(--magenta);font-weight:700;letter-spacing:.04em}
+  .appbar .tab{color:var(--dim);margin-right:10px;cursor:default}
+  .appbar .tab.on{color:var(--fg);border-bottom:1px solid var(--blue);padding-bottom:2px}
+  .appbar .right{display:flex;align-items:center;gap:10px}
+
+  /* chips */
+  .chip{font-weight:700;border-radius:4px;padding:1px 7px;font-size:11.5px;color:#16161e}
+  .chip.done{background:var(--green)}
+  .chip.filter{background:var(--orange)}
+  .ghost{border:1px solid var(--border);border-radius:4px;padding:1px 7px;font-size:11.5px;
+         color:var(--muted);background:transparent}
+  .ghost .ck{color:var(--green)}
+
+  /* list */
+  .pane{padding:6px 0}
+  .group{color:var(--dim);font-size:11px;text-transform:uppercase;letter-spacing:.1em;
+         padding:9px 12px 3px;display:flex;align-items:center;gap:8px}
+  .group .ln{flex:1;height:1px;background:var(--border)}
+  .group .n{color:var(--dim);font-size:11px}
+  .row{display:grid;grid-template-columns:14px 16px 1fr auto;gap:8px;
+       padding:2px 12px;align-items:center;white-space:nowrap}
+  .row .mk{color:var(--blue);font-weight:700}
+  .row.sel{background:var(--sel)}
+  .row.sel .mk::before{content:"▌";color:var(--blue)}
+  .ico.open{color:var(--dim)} .ico.doing{color:var(--green)}
+  .ico.block{color:var(--red)} .ico.done{color:var(--green)} .ico.cancel{color:var(--red)}
+  .txt{overflow:hidden;text-overflow:ellipsis}
+  .txt .lnk{color:var(--cyan)} .txt .tag{color:var(--magenta)} .txt .proj{color:var(--blue)}
+  .done .txt{color:var(--dim);text-decoration:line-through}
+  .done .txt .tag,.done .txt .proj,.done .txt .lnk{color:var(--dim)}
+  .cancel-row .txt{color:var(--dim);text-decoration:line-through}
+  .sub{color:var(--dim)}
+  .meta{display:flex;gap:10px;align-items:center;color:var(--dim);font-size:12px;justify-self:end}
+  .pa{color:var(--red)} .pb{color:var(--yellow)} .pc{color:var(--blue)}
+  .due{color:var(--orange)} .due.soon{color:var(--yellow)} .due.none{color:var(--dim)}
+  .at{color:var(--dim);font-size:11.5px}
+  .src{font-size:11px;border-radius:3px;padding:0 5px}
+  .src.claude{color:var(--magenta);background:#231a33}
+  .src.you{color:var(--cyan);background:#16242b}
+
+  /* keybar */
+  .keybar{display:flex;flex-wrap:wrap;gap:2px 14px;padding:7px 12px;background:var(--bar);
+          border-top:1px solid var(--border);color:var(--muted);font-size:11.5px}
+  .keybar b{color:var(--cyan);font-weight:600}
+
+  /* cli */
+  .cli{background:#0f1018;padding:12px 14px;font-size:12.5px;line-height:1.7;white-space:pre;overflow:auto}
+  .cli .p{color:var(--green)} .cli .fl{color:var(--cyan)} .cli .cm{color:var(--dim)}
+  .cli .ck{color:var(--green)} .cli .id{color:var(--dim)} .cli .tag{color:var(--magenta)}
+  .cli .proj{color:var(--blue)} .cli .lnk{color:var(--cyan)} .cli .hd{color:var(--yellow)}
+
+  .note{color:var(--dim);font-size:11.5px;margin:8px 2px 8px;display:flex;gap:8px;max-width:820px;line-height:1.6}
+  .note .pin{color:var(--blue)}
+  .note b{color:var(--fg)} .note code{color:var(--yellow)}
+  .legend{color:var(--muted);font-size:12px;display:flex;flex-wrap:wrap;gap:6px 18px;margin:6px 0 24px}
+  .legend b{font-weight:600}
+  .two{display:flex;gap:18px;flex-wrap:wrap;align-items:flex-start}
+  .pill{display:inline-block;border:1px solid var(--blue);color:var(--blue);border-radius:20px;
+        padding:1px 10px;font-size:11px;margin-left:8px}
+  .reco{background:#12131c;border:1px solid var(--border);border-left:3px solid var(--green);
+        border-radius:8px;padding:12px 16px;max-width:820px;margin:10px 0 4px;font-size:12.5px;line-height:1.65}
+  .reco b{color:var(--green)}
+</style>
+</head>
+<body>
+
+<h1>nt — completed-tasks UX <span class="pill">exploration</span></h1>
+<p class="lede">
+  Four directions for how <b>done tasks</b> show up in nt, drawn from the research
+  (Todoist hide-at-bottom, Things&nbsp;3 <b>Logbook</b>, Kanban collapsed-count, and Anthropic's
+  long-running-agent guidance where completed work = <b>validated context</b> for Claude).
+  Nothing here is built yet — it's to react to. Two audiences: <b>you</b> (review / work-journal)
+  and <b>Claude</b> (recall what we finished). Colors approximate the Tokyo-Night terminal theme.
+</p>
+
+<div class="legend">
+  <span><b style="color:var(--dim)">○</b> open</span>
+  <span><b style="color:var(--green)">◐</b> doing</span>
+  <span><b style="color:var(--green)">✓</b> done</span>
+  <span><b style="color:var(--red)">⊘</b> blocked / cancelled</span>
+  <span><b class="tag" style="color:var(--magenta)">@tag</b></span>
+  <span><b class="proj" style="color:var(--blue)">+project</b></span>
+  <span><b class="src claude">claude</b> / <b class="src you">you</b> — who completed it</span>
+</div>
+
+<!-- ============ A · COUNT CHIP ============ -->
+<h2>A · The cheap fix — a “done” count chip (active list stays clean)</h2>
+<p class="cap">Today done is hidden but <b>invisible</b> — you can't tell any exist. Same problem we just
+  fixed for filters. A subtle <b>✓ 12 done</b> chip top-right signals they're there and one keypress away.
+  Nothing else changes. <code>.</code> reveals them (frame B), <code>3</code> opens the Logbook (frame C).</p>
+<div class="term" style="max-width:620px">
+  <div class="chrome"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span>
+    <span class="t">nt — 78×30</span></div>
+  <div class="appbar">
+    <span><span class="brand">nt</span> &nbsp;<span class="tab on">1 tasks</span><span class="tab">2 notes</span><span class="tab">3 logbook</span></span>
+    <span class="right"><span class="mode">group: date</span><span class="ghost"><span class="ck">✓</span> 12 done</span></span>
+  </div>
+  <div class="pane">
+    <div class="group">Today <span class="ln"></span><span class="n">3</span></div>
+    <div class="row sel doing"><span class="mk"></span><span class="ico doing">◐</span>
+      <span class="txt">fix auth bug <span class="tag">@backend</span> <span class="lnk">[[jwt-expiry]]</span></span>
+      <span class="meta"><span class="pa">(A)</span><span class="due">today</span></span></div>
+    <div class="row"><span class="mk"></span><span class="ico open">○</span>
+      <span class="txt">deploy API v2 <span class="proj">+api</span></span>
+      <span class="meta"><span class="pa">(A)</span><span class="due">today</span></span></div>
+    <div class="row"><span class="mk"></span><span class="ico block">⊘</span>
+      <span class="txt">run load tests <span class="sub">— blocked by deploy</span></span>
+      <span class="meta"><span class="due none">—</span></span></div>
+    <div class="group">This week <span class="ln"></span><span class="n">2</span></div>
+    <div class="row"><span class="mk"></span><span class="ico open">○</span>
+      <span class="txt">write migration <span class="proj">+api</span></span>
+      <span class="meta"><span class="pb">(B)</span><span class="due soon">Fri</span></span></div>
+    <div class="row"><span class="mk"></span><span class="ico open">○</span>
+      <span class="txt">update config <span class="proj">+api</span></span>
+      <span class="meta"><span class="due soon">Fri</span></span></div>
+  </div>
+  <div class="keybar">
+    <span><b>j/k</b> move</span><span><b>x</b> done</span><span><b>.</b> show done</span>
+    <span><b>3</b> logbook</span><span><b>/</b> filter</span><span><b>v</b> group</span><span><b>?</b> help</span>
+  </div>
+</div>
+
+<!-- ============ B · INLINE REVEALED ============ -->
+<h2>B · <code>.</code> toggled on — done revealed inline, dimmed at the bottom of its group</h2>
+<p class="cap">Todoist's pattern: completed items sink to the <b>bottom of their group</b>, struck-through and
+  greyed, so you keep the <b>context</b> ("I finished this here") without it crowding what's left.
+  The chip flips to a bright <b>✓ 12 shown</b> so the toggle state is obvious.</p>
+<div class="term" style="max-width:620px">
+  <div class="chrome"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span>
+    <span class="t">nt — 78×30</span></div>
+  <div class="appbar">
+    <span><span class="brand">nt</span> &nbsp;<span class="tab on">1 tasks</span><span class="tab">2 notes</span><span class="tab">3 logbook</span></span>
+    <span class="right"><span class="mode">group: date</span><span class="chip done">✓ done shown</span></span>
+  </div>
+  <div class="pane">
+    <div class="group">Today <span class="ln"></span><span class="n">3 + 3 done</span></div>
+    <div class="row sel doing"><span class="mk"></span><span class="ico doing">◐</span>
+      <span class="txt">fix auth bug <span class="tag">@backend</span></span>
+      <span class="meta"><span class="pa">(A)</span><span class="due">today</span></span></div>
+    <div class="row"><span class="mk"></span><span class="ico open">○</span>
+      <span class="txt">deploy API v2 <span class="proj">+api</span></span>
+      <span class="meta"><span class="pa">(A)</span><span class="due">today</span></span></div>
+    <div class="row"><span class="mk"></span><span class="ico block">⊘</span>
+      <span class="txt">run load tests</span><span class="meta"><span class="due none">—</span></span></div>
+    <div class="row done"><span class="mk"></span><span class="ico done">✓</span>
+      <span class="txt">ship release notes <span class="proj">+release</span></span>
+      <span class="meta"><span class="src claude">claude</span></span></div>
+    <div class="row done"><span class="mk"></span><span class="ico done">✓</span>
+      <span class="txt">tag v0.4.0 <span class="proj">+release</span></span>
+      <span class="meta"><span class="src you">you</span></span></div>
+    <div class="row done"><span class="mk"></span><span class="ico done">✓</span>
+      <span class="txt">close flaky-test issue <span class="tag">@ci</span></span>
+      <span class="meta"><span class="src claude">claude</span></span></div>
+  </div>
+  <div class="keybar">
+    <span><b>j/k</b> move</span><span><b>x</b> done</span><span><b>.</b> hide done</span>
+    <span><b>3</b> logbook</span><span><b>/</b> filter</span><span><b>?</b> help</span>
+  </div>
+</div>
+
+<!-- ============ C · LOGBOOK ============ -->
+<h2>C · The Logbook — a dedicated “what got done” view ⭐</h2>
+<p class="cap">A third tab (<code>3</code>, clickable) — Things&nbsp;3's Logbook. Done &amp; cancelled items grouped by
+  <b>completion date</b>, newest first. The header carries the streak; each row shows <b>who</b> closed it
+  (<span class="src claude">claude</span>/<span class="src you">you</span>). This is your <b>work journal</b> and
+  the exact thing Claude reads to recall recent progress — one view, both audiences.</p>
+<div class="term" style="max-width:680px">
+  <div class="chrome"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span>
+    <span class="t">nt — 84×32</span></div>
+  <div class="appbar">
+    <span><span class="brand">nt</span> &nbsp;<span class="tab">1 tasks</span><span class="tab">2 notes</span><span class="tab on">3 logbook</span></span>
+    <span class="right"><span class="mode">group: completed</span><span class="chip done">8 today · 31 this week</span></span>
+  </div>
+  <div class="pane">
+    <div class="group">Today · Fri Jun 6 <span class="ln"></span><span class="n">3</span></div>
+    <div class="row sel done"><span class="mk"></span><span class="ico done">✓</span>
+      <span class="txt">ship release notes <span class="proj">+release</span></span>
+      <span class="meta"><span class="src claude">claude</span></span></div>
+    <div class="row done"><span class="mk"></span><span class="ico done">✓</span>
+      <span class="txt">deploy API v2 <span class="proj">+api</span></span>
+      <span class="meta"><span class="src you">you</span></span></div>
+    <div class="row done"><span class="mk"></span><span class="ico done">✓</span>
+      <span class="txt">close flaky-test issue <span class="tag">@ci</span> <span class="lnk">[[ci-runbook]]</span></span>
+      <span class="meta"><span class="src claude">claude</span></span></div>
+    <div class="group">Yesterday · Thu Jun 5 <span class="ln"></span><span class="n">3</span></div>
+    <div class="row done"><span class="mk"></span><span class="ico done">✓</span>
+      <span class="txt">write API docs <span class="proj">+docs</span></span>
+      <span class="meta"><span class="src you">you</span></span></div>
+    <div class="row done"><span class="mk"></span><span class="ico done">✓</span>
+      <span class="txt">security audit <span class="tag">@security</span> <span class="proj">+infra</span></span>
+      <span class="meta"><span class="src claude">claude</span></span></div>
+    <div class="row cancel-row"><span class="mk"></span><span class="ico cancel">⊘</span>
+      <span class="txt">spike: rotate auth secrets <span class="sub">— cancelled</span></span>
+      <span class="meta"><span class="src you">you</span></span></div>
+    <div class="group">Wed Jun 4 <span class="ln"></span><span class="n">2</span></div>
+    <div class="row done"><span class="mk"></span><span class="ico done">✓</span>
+      <span class="txt">refactor token refresh <span class="proj">+api</span> <span class="lnk">[[jwt-expiry]]</span></span>
+      <span class="meta"><span class="src claude">claude</span></span></div>
+    <div class="row done"><span class="mk"></span><span class="ico done">✓</span>
+      <span class="txt">onboard new engineer <span class="tag">@people</span></span>
+      <span class="meta"><span class="src you">you</span></span></div>
+  </div>
+  <div class="keybar">
+    <span><b>j/k</b> move</span><span><b>enter</b> detail</span><span><b>x</b> reopen</span>
+    <span><b>/</b> search log</span><span><b>1/2</b> back to tasks</span><span><b>y</b> yank</span><span><b>?</b> help</span>
+  </div>
+</div>
+<p class="note"><span class="pin">▎</span><span>On disk this is just the existing todo.txt completion marker —
+  <code>x 2026-06-06 … src:claude</code>. Grouping by the <code>x</code> date is nearly free since nt already
+  groups by date. Older entries roll off to <code>done.txt</code> via <code>nt archive</code> (cold storage),
+  keeping the Logbook to "recent".</span></p>
+
+<!-- ============ D · AI RECALL ============ -->
+<h2>D · The Claude-facing side — <code>nt log</code> as a recall feed</h2>
+<p class="cap">The same completion data, as an append-only CLI feed Claude reads at session start to "get up to
+  speed on what we recently finished" — Anthropic's progress-file pattern. Plain text for the prompt,
+  <code>--json</code> for structured ingest. Completed items stay <b>read-only history</b> (don't rewrite).</p>
+<div class="two">
+  <div class="term" style="flex:1;min-width:340px">
+    <div class="chrome"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span>
+      <span class="t">zsh — nt log</span></div>
+    <div class="cli"><span class="p">$</span> nt log <span class="fl">--since</span> 2d
+<span class="hd">Fri Jun 6</span>
+  <span class="ck">✓</span> ship release notes        <span class="proj">+release</span>  <span class="id">a1f3c2</span>
+  <span class="ck">✓</span> deploy API v2             <span class="proj">+api</span>      <span class="id">9d0e7b</span>
+  <span class="ck">✓</span> close flaky-test issue    <span class="tag">@ci</span>       <span class="id">4c81aa</span>
+<span class="hd">Thu Jun 5</span>
+  <span class="ck">✓</span> write API docs            <span class="proj">+docs</span>     <span class="id">71b9f0</span>
+  <span class="ck">✓</span> security audit            <span class="tag">@security</span> <span class="id">e0af68</span>
+  <span class="cm">⊘ spike: rotate auth secrets  (cancelled)</span>
+</div>
+  </div>
+  <div class="term" style="flex:1;min-width:340px">
+    <div class="chrome"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span>
+      <span class="t">zsh — nt log --json</span></div>
+    <div class="cli"><span class="p">$</span> nt log <span class="fl">--since</span> 1d <span class="fl">--json</span>
+<span class="cm">[</span>
+  <span class="cm">{</span>
+    <span class="lnk">"id"</span>: <span class="hd">"…a1f3c2"</span>,
+    <span class="lnk">"text"</span>: <span class="hd">"ship release notes"</span>,
+    <span class="lnk">"done"</span>: <span class="hd">"2026-06-06"</span>,
+    <span class="lnk">"project"</span>: <span class="hd">"release"</span>,
+    <span class="lnk">"src"</span>: <span class="hd">"claude"</span>,
+    <span class="lnk">"links"</span>: <span class="cm">[</span><span class="hd">"changelog"</span><span class="cm">]</span>
+  <span class="cm">}, …</span>
+<span class="cm">]</span>
+</div>
+  </div>
+</div>
+<p class="note"><span class="pin">▎</span><span>Pairs with the planned <code>nt recall</code>: <code>recall</code> answers
+  "what do we know about X", <code>log</code> answers "what did we just finish" — together they're the
+  read-side of nt's AI-memory thesis.</span></p>
+
+<div class="reco">
+  <b>Recommended path:</b> ship <b>A</b> (the count chip — tiny, fixes the invisibility) and <b>C</b>
+  (the Logbook tab — highest value, nearly free given date-grouping, serves both you and Claude).
+  Treat <b>B</b> as optional polish and <b>D</b> (<code>nt log</code>) as the fast-follow that makes the
+  same data useful to Claude. The active list never gets more cluttered; "done" lives where it's
+  reviewed, not where you work.
+</div>
+
+</body>
+</html>
