@@ -52,6 +52,16 @@ func TestResolveSuffixAndAmbiguity(t *testing.T) {
 	}
 }
 
+func TestResolveByShortID(t *testing.T) {
+	// shortID is the 6-char suffix of the ULID that `nt note`/`nt list` print.
+	notes := []*note.Note{mkNote("auth.md", "01HZQWERTYABSS06", "Auth")}
+	for _, h := range []string{"ABSS06", "abss06", "01HZQWERTYABSS06"} {
+		if it, ok := Resolve(h, nil, notes); !ok || it.ID != "01HZQWERTYABSS06" {
+			t.Fatalf("resolve short id %q = %+v ok=%v", h, it, ok)
+		}
+	}
+}
+
 func TestReferences(t *testing.T) {
 	if !references("see [[work/auth]] today", "", "work/auth.md") {
 		t.Error("qualified link should reference work/auth")

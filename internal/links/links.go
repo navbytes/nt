@@ -57,9 +57,18 @@ func Resolve(target string, doc *task.Doc, notes []*note.Note) (Item, bool) {
 			return noteItem(n), true
 		}
 	}
-	for _, n := range notes {
-		if strings.EqualFold(n.ID, key) {
-			return noteItem(n), true
+	// id: the full ULID, or the short code (its 6-char suffix) that `nt note` and
+	// `nt list` print — so an agent can reuse the handle it was just given.
+	if len(key) >= 4 {
+		ku := strings.ToUpper(key)
+		var idHits []*note.Note
+		for _, n := range notes {
+			if n.ID != "" && strings.HasSuffix(strings.ToUpper(n.ID), ku) {
+				idHits = append(idHits, n)
+			}
+		}
+		if len(idHits) == 1 {
+			return noteItem(idHits[0]), true
 		}
 	}
 	if doc != nil {

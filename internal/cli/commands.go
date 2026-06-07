@@ -524,13 +524,21 @@ func cmdLinks(args []string) int {
 				break
 			}
 		}
-	} else {
-		t, err := resolveHandle(d, handle)
-		if err != nil {
-			return fail(fmt.Errorf("links: %w", err))
-		}
+	} else if t, terr := resolveHandle(d, handle); terr == nil {
 		id, title, self = t.ID(), t.Text, t
 		forward = t.Links()
+	} else if it, ok := links.Resolve(handle, nil, notes); ok && it.Kind == "note" {
+		// Bare handle didn't match a task — accept a note handle (slug/title or the
+		// short id `nt note` prints) so all verbs take the same handle.
+		for _, n := range notes {
+			if n.Path == it.Path {
+				id, title, noteRel = n.ID, n.Title, n.Rel
+				forward = extractLinks(n.Body)
+				break
+			}
+		}
+	} else {
+		return fail(fmt.Errorf("links: %w", terr))
 	}
 
 	fmt.Printf("%s  %s\n", shortID(id), title)
