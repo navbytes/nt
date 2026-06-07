@@ -15,77 +15,88 @@ func obj(props map[string]any, required ...string) map[string]any {
 	return m
 }
 
+// Schema helpers. Bare forms (st/at/it) omit per-property descriptions where the
+// property name is self-documenting — every dropped description removes the whole
+// "description" key from the advertised schema, shrinking the per-session token
+// cost. sp/enum carry meaning the model would otherwise get wrong (formats,
+// closed value sets), so those stay.
+func st() map[string]any            { return map[string]any{"type": "string"} }
 func sp(desc string) map[string]any { return map[string]any{"type": "string", "description": desc} }
-func ap(desc string) map[string]any {
-	return map[string]any{"type": "array", "items": map[string]any{"type": "string"}, "description": desc}
+func enum(vals ...string) map[string]any {
+	return map[string]any{"type": "string", "enum": vals}
 }
-func ip(desc string) map[string]any { return map[string]any{"type": "integer", "description": desc} }
+func at() map[string]any {
+	return map[string]any{"type": "array", "items": map[string]any{"type": "string"}}
+}
+func it() map[string]any { return map[string]any{"type": "integer"} }
 
 // toolDefs is the catalog advertised to the agent. Descriptions are written for
-// the model: they say when to reach for each tool, not just what it does.
+// the model — they say when to reach for each tool — and kept terse: prose that
+// only restates an obvious property name is dropped (the name carries it), while
+// behavioral cues and value formats are kept.
 var toolDefs = []toolDef{
 	{
 		Name:        "nt_ready",
-		Description: "Start here when resuming work: list open, UNBLOCKED tasks (no done, no dependency-blocked) ordered by urgency. Returns stable task ids to use with nt_done/nt_update.",
+		Description: "Resuming work: open, unblocked tasks by urgency. Returns stable ids for nt_done/nt_update.",
 		InputSchema: obj(map[string]any{
-			"source":  sp("only tasks from this origin, e.g. \"claude\""),
-			"tag":     sp("only tasks with this @tag"),
-			"project": sp("only tasks in this +project"),
+			"source":  st(),
+			"tag":     st(),
+			"project": st(),
 		}),
 	},
 	{
 		Name:        "nt_add",
-		Description: "Capture a task so it survives the session. Use --discovered_from to chain work you surfaced while doing another task.",
+		Description: "Capture a task. discovered_from chains work surfaced while doing another task.",
 		InputSchema: obj(map[string]any{
-			"text":            sp("the task description (may include inline @tag/+project)"),
-			"priority":        sp("high | med | low"),
-			"due":             sp("today | tomorrow | fri | +3d | YYYY-MM-DD"),
-			"project":         sp("project name (without the +)"),
-			"tags":            ap("tag names (without the @)"),
-			"discovered_from": sp("id of the task this was surfaced while working on"),
-			"source":          sp("origin; defaults to \"claude\""),
+			"text":            st(),
+			"priority":        enum("high", "med", "low"),
+			"due":             sp("today|tomorrow|fri|+3d|YYYY-MM-DD"),
+			"project":         st(),
+			"tags":            at(),
+			"discovered_from": sp("id of the originating task"),
+			"source":          st(),
 		}, "text"),
 	},
 	{
 		Name:        "nt_done",
-		Description: "Mark a task complete by id (spawns the next occurrence if it recurs).",
-		InputSchema: obj(map[string]any{"id": sp("the task id from nt_ready/nt_recall")}, "id"),
+		Description: "Complete a task by id (spawns next occurrence if recurring).",
+		InputSchema: obj(map[string]any{"id": st()}, "id"),
 	},
 	{
 		Name:        "nt_update",
-		Description: "Change a task's status, priority, or due date by id.",
+		Description: "Change a task's status, priority, or due by id.",
 		InputSchema: obj(map[string]any{
-			"id":       sp("the task id"),
-			"status":   sp("open | doing | blocked | done"),
-			"priority": sp("high | med | low"),
-			"due":      sp("today | tomorrow | +3d | YYYY-MM-DD"),
+			"id":       st(),
+			"status":   enum("open", "doing", "blocked", "done"),
+			"priority": enum("high", "med", "low"),
+			"due":      sp("today|+3d|YYYY-MM-DD"),
 		}, "id"),
 	},
 	{
 		Name:        "nt_note",
-		Description: "Save a note — a finding, decision, constraint, or dead-end. Capture the WHY here, not just todos; recall returns the full body next session.",
+		Description: "Save a note (finding/decision/dead-end). Capture the WHY; recall returns the body.",
 		InputSchema: obj(map[string]any{
-			"title":  sp("short title"),
-			"body":   sp("the note content (markdown)"),
-			"tags":   ap("tag names (without the @)"),
-			"source": sp("origin; defaults to \"claude\""),
+			"title":  st(),
+			"body":   sp("markdown"),
+			"tags":   at(),
+			"source": st(),
 		}, "title"),
 	},
 	{
 		Name:        "nt_recall",
-		Description: "Read back tasks and notes captured earlier (note bodies included) to restore context from prior sessions.",
+		Description: "Read back earlier tasks and notes (bodies included) to restore prior-session context.",
 		InputSchema: obj(map[string]any{
-			"source": sp("only items from this origin, e.g. \"claude\""),
-			"since":  sp("only items created on/after YYYY-MM-DD"),
+			"source": st(),
+			"since":  sp("on/after YYYY-MM-DD"),
 		}),
 	},
 	{
 		Name:        "nt_log",
-		Description: "List completed tasks, newest first — what was recently finished.",
+		Description: "Completed tasks, newest first.",
 		InputSchema: obj(map[string]any{
-			"since":  sp("completions on/after YYYY-MM-DD"),
-			"days":   ip("completions in the last N days"),
-			"source": sp("only completions from this origin"),
+			"since":  sp("on/after YYYY-MM-DD"),
+			"days":   it(),
+			"source": st(),
 		}),
 	},
 }
