@@ -77,6 +77,9 @@ One global store at `$NT_DIR` (default `~/.local/share/nt`):
 ```
 
 Everything is plain text — open it in any editor, `grep` it, or `git init` it.
+To version-control the store, run `nt git-init` (sets up `merge=union` so branches
+don't conflict on every add, plus a `.gitignore` for transient files); after a
+merge, `nt doctor` reconciles any duplicates.
 
 ## Usage
 

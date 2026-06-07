@@ -762,6 +762,89 @@ func cmdPath(args []string) int {
 	return 0
 }
 
+// cmdDoctor reconciles tasks.txt after a git merge or a hand-edit: it drops
+// duplicate-ULID lines (which a `merge=union` merge can leave) and assigns ids to
+// any task line missing one. --check reports without fixing (exit 1 if any).
+func cmdDoctor(args []string) int {
+	fs := flag.NewFlagSet("doctor", flag.ContinueOnError)
+	check := fs.Bool("check", false, "report problems without fixing (exit 1 if any)")
+	flags, _ := splitArgs(args, map[string]bool{"check": true})
+	if err := fs.Parse(flags); err != nil {
+		return 2
+	}
+	e, ok := engine()
+	if !ok {
+		return 1
+	}
+	rep, err := e.Doctor(!*check)
+	if err != nil {
+		return fail(err)
+	}
+	for _, a := range rep.Actions {
+		fmt.Println("  " + a)
+	}
+	if rep.Issues() == 0 {
+		fmt.Println("store is healthy — no issues found")
+		return 0
+	}
+	if *check {
+		fmt.Printf("found %d issue(s): %d duplicate id(s), %d missing id(s) — run `nt doctor` to fix\n",
+			rep.Issues(), rep.DupIDsRemoved, rep.IDsAssigned)
+		return 1
+	}
+	fmt.Printf("fixed %d issue(s): %d duplicate id(s) removed, %d id(s) assigned\n",
+		rep.Issues(), rep.DupIDsRemoved, rep.IDsAssigned)
+	return 0
+}
+
+// cmdGitInit prepares $NT_DIR for version control: a .gitattributes so the
+// append-mostly task files union-merge across branches (instead of conflicting),
+// a .gitignore for machine-local/transient files, and `git init` if needed.
+// Reconcile any union-merge duplicates afterwards with `nt doctor`.
+func cmdGitInit(args []string) int {
+	e, ok := engine()
+	if !ok {
+		return 1
+	}
+	dir := e.S.Dir
+
+	const attrs = "# nt: union-merge the append-mostly task files so concurrent branches\n" +
+		"# don't conflict on every add; run `nt doctor` after a merge to dedup.\n" +
+		"tasks.txt merge=union\n" +
+		"done.txt merge=union\n"
+	if err := os.WriteFile(filepath.Join(dir, ".gitattributes"), []byte(attrs), 0o644); err != nil {
+		return fail(err)
+	}
+	const ignore = "# nt: machine-local / transient state — don't sync\n" +
+		"undo.jsonl\n" +
+		"tasks.txt.lock\n" +
+		"nt.log\n" +
+		".claude-sync.json\n"
+	if err := os.WriteFile(filepath.Join(dir, ".gitignore"), []byte(ignore), 0o644); err != nil {
+		return fail(err)
+	}
+
+	created := false
+	if _, err := os.Stat(filepath.Join(dir, ".git")); os.IsNotExist(err) {
+		cmd := exec.Command("git", "init")
+		cmd.Dir = dir
+		if out, err := cmd.CombinedOutput(); err != nil {
+			return fail(fmt.Errorf("git init: %v: %s", err, strings.TrimSpace(string(out))))
+		}
+		created = true
+	}
+
+	fmt.Printf("wrote .gitattributes + .gitignore in %s\n", dir)
+	if created {
+		fmt.Println("initialized a git repo there")
+	} else {
+		fmt.Println("(already a git repo)")
+	}
+	fmt.Printf("next:  (cd %s && git add -A && git commit -m \"nt store\")\n", dir)
+	fmt.Println("after a merge:  nt doctor")
+	return 0
+}
+
 // cmdHook reads a Claude Code PostToolUse JSON event from stdin and syncs the
 // session's TodoWrite list into nt (SPEC §8). It is deliberately silent and
 // always exits 0 — a hook must never break or slow the Claude session.

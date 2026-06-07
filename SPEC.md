@@ -262,9 +262,18 @@ mutation writes, atomically and under the same lock, a transaction record:
   local FS for concurrent access to be safe; this is documented loudly.
 - **Multi-machine sync is last-writer-wins.** Dropbox/iCloud/Syncthing do their own
   atomic-rename and conflict-copy creation; `flock` means nothing to them. Honest story:
-  single-machine concurrency is locked and safe; cross-machine is **git-based (`NT_GIT=1`,
-  §11)** or last-writer-wins with possible conflict files. We do not advertise "just sync the
+  single-machine concurrency is locked and safe; cross-machine is **git-based** or
+  last-writer-wins with possible conflict files. We do not advertise "just sync the
   file" as safe.
+- **Git-tracked stores (opt-in).** `nt git-init` drops a `.gitattributes`
+  (`tasks.txt`/`done.txt` `merge=union`) so concurrent branches don't conflict on every
+  append — git keeps both sides' lines instead of emitting markers — plus a `.gitignore` for
+  local/transient files (`undo.jsonl`, `tasks.txt.lock`, `nt.log`, `.claude-sync.json`), and
+  `git init`s the store. Union merges can leave duplicate-ULID lines, so **`nt doctor`**
+  reconciles after a merge: it drops duplicate ids (keeping a completed line over an open one)
+  and assigns ids to any id-less line, under the lock. Not journaled — git is the recovery
+  path; `nt doctor --check` is a non-mutating dry run (exit 1 if issues) for pre-commit/CI.
+  This keeps the single greppable `tasks.txt`; per-task file sharding is deferred (§15).
 
 ### 6.5 fsnotify refresh
 

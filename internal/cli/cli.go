@@ -53,6 +53,10 @@ func Run(args []string) int {
 		return cmdEdit(rest)
 	case "path":
 		return cmdPath(rest)
+	case "doctor":
+		return cmdDoctor(rest)
+	case "git-init":
+		return cmdGitInit(rest)
 	case "hook":
 		return cmdHook(rest)
 	case "version", "--version", "-v":
@@ -193,6 +197,8 @@ USAGE
   nt archive                  move done tasks to done.txt
   nt undo                     revert the last change
   nt path                     print the store directory
+  nt git-init                 set up the store for git (union-merge + .gitignore)
+  nt doctor [--check]         reconcile tasks.txt (dedup ids) after a git merge
   nt hook                     sync a Claude Code TodoWrite event (PostToolUse hook)
 
 ADD/UPDATE FLAGS
