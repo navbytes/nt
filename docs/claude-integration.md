@@ -80,6 +80,32 @@ Install it by keeping `.claude/skills/nt/` in your project, or copy it to
 
 ---
 
+## 3. Typed tools — the MCP server
+
+For clients that speak the **Model Context Protocol** (Claude Code, Cursor, …),
+`nt mcp` runs a stdio MCP server so the agent calls **typed tools** instead of
+constructing CLI strings — more reliable, and discoverable via `tools/list`.
+
+Register it (Claude Code `~/.claude/settings.json` or a project `.mcp.json`):
+
+```json
+{
+  "mcpServers": {
+    "nt": { "command": "nt", "args": ["mcp"] }
+  }
+}
+```
+
+Tools exposed: `nt_ready` (start here — open, unblocked work by urgency),
+`nt_add`, `nt_done`, `nt_update`, `nt_note`, `nt_recall` (incl. note bodies),
+`nt_log`. They go through the same locked, journaled engine as the CLI, default
+`source` to `claude`, and require **stable task ids** (positional `task:N` is
+refused — the index isn't safe for an agent).
+
+Hook, skill, and MCP compose: the hook mirrors the todo list automatically, the
+skill/MCP capture notes and recall context. Use the MCP server if your client
+supports it; the CLI + skill work everywhere.
+
 ## Hook vs. skill — when each fires
 
 - **Hook** = passive, automatic. Mirrors Claude's *own* todo list. Best for

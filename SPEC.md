@@ -493,6 +493,10 @@ click a tab to switch, and drag the list/detail divider to resize it.
 - `nt hook` (PostToolUse) mirrors `TodoWrite` into the store idempotently (per-session
   todo→ULID map, status-mapped, `src:claude`); the bundled `/nt` skill teaches Claude to
   capture and `nt recall`. Setup: docs/claude-integration.md.
+- `nt mcp` runs a stdio **MCP server** (newline-delimited JSON-RPC 2.0, no SDK dep) exposing
+  typed tools — `nt_ready`/`nt_add`/`nt_done`/`nt_update`/`nt_note`/`nt_recall`/`nt_log` —
+  for MCP clients. A thin driving adapter over the same engine/domain as the CLI and TUI;
+  defaults `source` to `claude` and refuses positional handles.
 
 ---
 

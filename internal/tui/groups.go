@@ -160,39 +160,4 @@ func byKey(tasks []*task.Task, key func(*task.Task) string) []group {
 	return out
 }
 
-func sortByUrgency(ts []*task.Task) {
-	sort.SliceStable(ts, func(i, j int) bool { return urgency(ts[i]) > urgency(ts[j]) })
-}
-
-// urgency scores a task by priority, due-date proximity, and doing-state — the
-// same shape as the CLI's --sort urgency (SPEC §9).
-func urgency(t *task.Task) float64 {
-	var s float64
-	switch t.Priority {
-	case 'A':
-		s += 6
-	case 'B':
-		s += 4
-	case 'C':
-		s += 2
-	}
-	if due := t.Due(); due != "" {
-		if dt, err := time.Parse("2006-01-02", due); err == nil {
-			days := time.Until(dt).Hours() / 24
-			switch {
-			case days < 0:
-				s += 12
-			case days < 1:
-				s += 8
-			case days < 3:
-				s += 5
-			case days < 7:
-				s += 3
-			}
-		}
-	}
-	if t.State() == "doing" {
-		s += 3
-	}
-	return s
-}
+func sortByUrgency(ts []*task.Task) { task.SortByUrgency(ts) }

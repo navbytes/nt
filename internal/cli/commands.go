@@ -923,44 +923,12 @@ func keep(t *task.Task, status, tag, project string, all, showBlocked bool, bloc
 func sortTasks(rows []*task.Task, by string) {
 	switch by {
 	case "urgency":
-		sort.SliceStable(rows, func(i, j int) bool { return urgency(rows[i]) > urgency(rows[j]) })
+		task.SortByUrgency(rows)
 	case "due":
 		sort.SliceStable(rows, func(i, j int) bool { return dueKey(rows[i]) < dueKey(rows[j]) })
 	case "created":
 		sort.SliceStable(rows, func(i, j int) bool { return rows[i].Created < rows[j].Created })
 	}
-}
-
-// urgency is a simple score: priority weight plus due-date proximity (SPEC §9).
-func urgency(t *task.Task) float64 {
-	var s float64
-	switch t.Priority {
-	case 'A':
-		s += 6
-	case 'B':
-		s += 4
-	case 'C':
-		s += 2
-	}
-	if due := t.Due(); due != "" {
-		if dt, err := time.Parse("2006-01-02", due); err == nil {
-			days := time.Until(dt).Hours() / 24
-			switch {
-			case days < 0:
-				s += 12 // overdue
-			case days < 1:
-				s += 8
-			case days < 3:
-				s += 5
-			case days < 7:
-				s += 3
-			}
-		}
-	}
-	if t.State() == "doing" {
-		s += 3
-	}
-	return s
 }
 
 func dueKey(t *task.Task) string {

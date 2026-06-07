@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/navbytes/nt/internal/dateparse"
+	"github.com/navbytes/nt/internal/mcp"
 	"github.com/navbytes/nt/internal/mutate"
 	"github.com/navbytes/nt/internal/task"
 )
@@ -59,6 +60,11 @@ func Run(args []string) int {
 		return cmdGitInit(rest)
 	case "hook":
 		return cmdHook(rest)
+	case "mcp":
+		if err := mcp.Serve(Version); err != nil {
+			return fail(err)
+		}
+		return 0
 	case "version", "--version", "-v":
 		fmt.Println("nt " + Version)
 		return 0
@@ -200,6 +206,7 @@ USAGE
   nt git-init                 set up the store for git (union-merge + .gitignore)
   nt doctor [--check]         reconcile tasks.txt (dedup ids) after a git merge
   nt hook                     sync a Claude Code TodoWrite event (PostToolUse hook)
+  nt mcp                      run the MCP server (stdio) — typed tools for agents
 
 ADD/UPDATE FLAGS
   --pri high|med|low   --due today|tomorrow|fri|+3d|YYYY-MM-DD
