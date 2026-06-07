@@ -7,7 +7,9 @@
 package web
 
 import (
+	"crypto/rand"
 	"embed"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"html/template"
@@ -27,6 +29,7 @@ import (
 	"github.com/navbytes/nt/internal/mutate"
 	"github.com/navbytes/nt/internal/note"
 	"github.com/navbytes/nt/internal/search"
+	"github.com/navbytes/nt/internal/store"
 	"github.com/navbytes/nt/internal/task"
 )
 
@@ -36,11 +39,13 @@ var assetsFS embed.FS
 // Server holds the shared state for the viewer. (Editing, when added, hangs
 // write routes and a CSRF token here — seam #1.)
 type Server struct {
-	eng     *mutate.Engine
-	version string
-	tmpl    *template.Template
-	hub     *hub
-	hlCSS   string // generated Chroma syntax-highlight stylesheet (theme-scoped)
+	eng       *mutate.Engine
+	version   string
+	tmpl      *template.Template
+	hub       *hub
+	hlCSS     string // generated Chroma syntax-highlight stylesheet (theme-scoped)
+	allowEdit bool   // writes enabled (nt web --edit); read-only by default
+	csrf      string // per-process token required on save (blocks cross-site POSTs)
 }
 
 // NewServer parses the embedded template and prepares the viewer.
@@ -57,11 +62,20 @@ func NewServer(eng *mutate.Engine, version string) (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Server{eng: eng, version: version, tmpl: tmpl, hub: newHub(), hlCSS: highlightCSS()}, nil
+	return &Server{eng: eng, version: version, tmpl: tmpl, hub: newHub(), hlCSS: highlightCSS(), csrf: randToken()}, nil
+}
+
+func randToken() string {
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		return "nt-static-token" // dev fallback; localhost only
+	}
+	return hex.EncodeToString(b)
 }
 
 // Serve opens the store and serves the viewer on addr (e.g. "127.0.0.1:0").
-func Serve(version, addr string) error {
+// allowEdit enables note editing in the browser (read-only when false).
+func Serve(version, addr string, allowEdit bool) error {
 	eng, err := mutate.Open()
 	if err != nil {
 		return err
@@ -70,13 +84,18 @@ func Serve(version, addr string) error {
 	if err != nil {
 		return err
 	}
+	s.allowEdit = allowEdit
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
 		return err
 	}
 	s.watch()
 	fmt.Printf("nt web — serving notes at http://%s\n", ln.Addr().String())
-	fmt.Println("(localhost only · live-reloads on change · Ctrl+C to stop)")
+	mode := "read-only"
+	if allowEdit {
+		mode = "editing enabled (--edit)"
+	}
+	fmt.Printf("(localhost only · %s · live-reloads on change · Ctrl+C to stop)\n", mode)
 	return http.Serve(ln, s.routes()) //nolint:gosec // localhost dev server, no timeouts needed
 }
 
@@ -137,6 +156,9 @@ type pageData struct {
 	TaskGroups []taskGroup
 	IsGraph    bool
 	GraphSrc   string // mermaid source for the link graph
+
+	CanEdit bool   // editing enabled (nt web --edit)
+	CSRF    string // token the editor sends back on save
 }
 
 type linkRow struct{ URL, Title, Path string }
@@ -188,12 +210,27 @@ func (s *Server) handleNote(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/", http.StatusFound)
 		return
 	}
+	if r.Method == http.MethodPost { // save (editing)
+		s.handleSave(w, r, handle)
+		return
+	}
 	doc, notes := s.load()
 	if r.URL.Query().Get("missing") != "1" {
 		if n := findByHandle(notes, handle); n != nil {
 			if r.URL.Query().Get("preview") == "1" { // hover preview
 				w.Header().Set("Content-Type", "application/json")
 				_ = json.NewEncoder(w).Encode(map[string]string{"title": n.Title, "snippet": previewSnippet(n.Body)})
+				return
+			}
+			if r.URL.Query().Get("raw") == "1" { // raw source for the editor
+				if !s.allowEdit {
+					http.NotFound(w, r)
+					return
+				}
+				if data, err := store.ReadFile(n.Path); err == nil {
+					w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+					_, _ = w.Write(data)
+				}
 				return
 			}
 			s.renderNote(w, n, doc, notes)
@@ -237,7 +274,42 @@ func (s *Server) renderNote(w http.ResponseWriter, n *note.Note, doc *task.Doc, 
 		TaskRefs:    tasksReferencing(doc, n, notes),
 		Prev:        prev,
 		Next:        next,
+		CanEdit:     s.allowEdit,
+		CSRF:        s.csrf,
 	})
+}
+
+// handleSave writes an edited note back to disk (nt web --edit). It is guarded by
+// a per-process CSRF token (sent as a custom header, which forces a CORS preflight
+// that a cross-site page can't satisfy) — and editing is off unless --edit.
+func (s *Server) handleSave(w http.ResponseWriter, r *http.Request, handle string) {
+	if !s.allowEdit {
+		http.Error(w, "editing is disabled — start with `nt web --edit`", http.StatusForbidden)
+		return
+	}
+	if r.Header.Get("X-CSRF") != s.csrf {
+		http.Error(w, "bad or missing CSRF token", http.StatusForbidden)
+		return
+	}
+	_, notes := s.load()
+	n := findByHandle(notes, handle)
+	if n == nil {
+		http.NotFound(w, r)
+		return
+	}
+	body, err := io.ReadAll(io.LimitReader(r.Body, 4<<20)) // 4 MiB cap
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	if len(body) > 0 && body[len(body)-1] != '\n' {
+		body = append(body, '\n')
+	}
+	if err := store.WriteAtomic(n.Path, body, 0o644); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // siblings returns the previous/next notes in the same folder (Rel order).

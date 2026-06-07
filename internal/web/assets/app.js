@@ -282,6 +282,65 @@
     });
   })();
 
+  // ---- Editing (nt web --edit): raw-file textarea, CSRF-guarded save ----
+  (function () {
+    var btn = document.getElementById("edit-btn");
+    var md = document.querySelector(".md");
+    if (!btn || !md) return;
+    var csrf = (document.querySelector('meta[name="csrf"]') || {}).content || "";
+    function openEditor() {
+      if (document.querySelector(".editor")) return;
+      fetch(location.pathname + "?raw=1").then(function (r) { return r.text(); }).then(function (text) {
+        var wrap = document.createElement("div");
+        wrap.className = "editwrap";
+        var ta = document.createElement("textarea");
+        ta.className = "editor";
+        ta.value = text;
+        ta.spellcheck = false;
+        var bar = document.createElement("div");
+        bar.className = "editbar";
+        var status = document.createElement("span");
+        status.className = "editbar__status";
+        var cancel = document.createElement("button");
+        cancel.className = "btn btn--ghost";
+        cancel.textContent = "Cancel";
+        var save = document.createElement("button");
+        save.className = "btn";
+        save.textContent = "Save";
+        bar.appendChild(status);
+        bar.appendChild(cancel);
+        bar.appendChild(save);
+        wrap.appendChild(ta);
+        wrap.appendChild(bar);
+        md.style.display = "none";
+        md.parentNode.insertBefore(wrap, md.nextSibling);
+        ta.focus();
+        function close() { wrap.remove(); md.style.display = ""; }
+        function commit() {
+          save.disabled = true;
+          status.textContent = "Saving…";
+          fetch(location.pathname, { method: "POST", headers: { "X-CSRF": csrf, "Content-Type": "text/plain" }, body: ta.value })
+            .then(function (r) {
+              if (r.ok) { location.reload(); }
+              else { save.disabled = false; status.textContent = "Save failed (" + r.status + ")"; }
+            }).catch(function () { save.disabled = false; status.textContent = "Save failed"; });
+        }
+        cancel.addEventListener("click", close);
+        save.addEventListener("click", commit);
+        ta.addEventListener("keydown", function (e) {
+          if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "s") { e.preventDefault(); commit(); }
+          else if (e.key === "Escape") { close(); }
+        });
+      });
+    }
+    btn.addEventListener("click", openEditor);
+    document.addEventListener("keydown", function (e) {
+      if (e.key === "e" && !/^(INPUT|TEXTAREA)$/.test(document.activeElement.tagName) && !document.querySelector(".editor")) {
+        e.preventDefault(); openEditor();
+      }
+    });
+  })();
+
   enhanceReading();
   revealCurrent();
   renderMermaid();

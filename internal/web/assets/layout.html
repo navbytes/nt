@@ -6,6 +6,7 @@
   <title>{{.Title}} · nt</title>
   <link rel="stylesheet" href="/static/style.css">
   <link rel="stylesheet" href="/static/highlight.css">
+  {{if .CanEdit}}<meta name="csrf" content="{{.CSRF}}">{{end}}
   <script>try{var d=document.documentElement;var t=localStorage.getItem("nt-theme");if(t)d.setAttribute("data-theme",t);var w=localStorage.getItem("nt-width");if(w&&w!=="cozy")d.setAttribute("data-width",w);}catch(e){}</script>
 </head>
 <body>
@@ -54,6 +55,7 @@
         </nav>
         {{else}}<a href="/" class="crumb-home">nt</a>{{end}}
         <div class="topbar__spacer"></div>
+        {{if and .CanEdit .IsNote}}<button class="icon-btn" id="edit-btn" aria-label="Edit note" title="Edit (e)">✎</button>{{end}}
         <button class="icon-btn" id="width-toggle" aria-label="Cycle reading width" title="Reading width (cozy / wide / full)">⇆</button>
         <button class="icon-btn" id="theme-toggle" aria-label="Toggle light/dark theme" title="Toggle theme">◐</button>
       </div>

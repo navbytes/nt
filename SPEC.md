@@ -477,6 +477,13 @@ click a tab to switch, and drag the list/detail divider to resize it.
 
 ### 12.1 Web viewer (`nt web`)
 
+Read-only by default; `nt web --edit` enables in-browser note editing (raw-file
+textarea → atomic write, frontmatter preserved verbatim), guarded by a
+per-process CSRF token sent as a custom header (cross-site POSTs fail the CORS
+preflight). The seams designed for this: a `Server` struct holding the token,
+id-addressed notes, one reusable render path, and the frontmatter-safe write.
+
+
 A localhost HTTP adapter (`internal/web`) for browsing/reading notes in a
 browser — a read-only fourth adapter over the same `note`/`links` domain as the
 CLI/TUI/MCP. Binds `127.0.0.1` only (no network exposure, no auth). Serves a

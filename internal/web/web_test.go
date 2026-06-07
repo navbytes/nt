@@ -337,3 +337,50 @@ func TestGraphView(t *testing.T) {
 		t.Fatalf("graph page missing graphview:\n%s", body)
 	}
 }
+
+func postNote(s *Server, id, csrf, body string) int {
+	rec := httptest.NewRecorder()
+	r := httptest.NewRequest("POST", "/n/"+id, strings.NewReader(body))
+	if csrf != "" {
+		r.Header.Set("X-CSRF", csrf)
+	}
+	s.routes().ServeHTTP(rec, r)
+	return rec.Code
+}
+
+func TestEditingDisabledByDefault(t *testing.T) {
+	s := newTestServer(t) // allowEdit defaults false
+	n, _ := note.Create(s.eng.S, "X", "body", nil, "cli", "")
+	if resp, _ := get(t, s, "/n/"+n.ID+"?raw=1"); resp.StatusCode != 404 {
+		t.Errorf("raw should 404 when read-only, got %d", resp.StatusCode)
+	}
+	if code := postNote(s, n.ID, "", "x"); code != 403 {
+		t.Errorf("POST should 403 when read-only, got %d", code)
+	}
+	if _, body := get(t, s, "/n/"+n.ID); strings.Contains(body, `id="edit-btn"`) {
+		t.Error("edit button must be hidden when read-only")
+	}
+}
+
+func TestEditingSave(t *testing.T) {
+	s := newTestServer(t)
+	s.allowEdit = true
+	n, _ := note.Create(s.eng.S, "X", "old body here", nil, "cli", "")
+	resp, raw := get(t, s, "/n/"+n.ID+"?raw=1")
+	if resp.StatusCode != 200 || !strings.Contains(raw, "old body here") {
+		t.Fatalf("raw not served: %d", resp.StatusCode)
+	}
+	if code := postNote(s, n.ID, "", "x"); code != 403 {
+		t.Errorf("POST without CSRF should 403, got %d", code)
+	}
+	if code := postNote(s, n.ID, "wrong", "x"); code != 403 {
+		t.Errorf("POST with wrong CSRF should 403, got %d", code)
+	}
+	if code := postNote(s, n.ID, s.csrf, "---\nid: keep\n---\n\nbrand new body\n"); code != 204 {
+		t.Fatalf("POST with CSRF should 204, got %d", code)
+	}
+	b, _ := os.ReadFile(n.Path)
+	if !strings.Contains(string(b), "brand new body") || !strings.Contains(string(b), "id: keep") {
+		t.Fatalf("file not updated as written:\n%s", b)
+	}
+}
