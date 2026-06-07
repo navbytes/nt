@@ -717,6 +717,26 @@ func (m *Model) detailContent(w int) string {
 			b.WriteString("  " + stTag.Render("←") + " " + stDim.Render("["+kind+"]") + " " + truncate(title, w-10) + "\n")
 		}
 	}
+
+	// Provenance: where this task came from, and what was discovered from it.
+	if df := t.Discovered(); df != "" {
+		if origin := d.FindByID(df); origin != nil {
+			b.WriteString("\n" + sectionHeader("DISCOVERED FROM ↑", w) + "\n")
+			b.WriteString("  " + stProj.Render("↑") + " " + truncate(origin.Text, w-4) + "\n")
+		}
+	}
+	var spawned []*task.Task
+	for _, o := range d.Tasks() {
+		if o.Discovered() == t.ID() {
+			spawned = append(spawned, o)
+		}
+	}
+	if len(spawned) > 0 {
+		b.WriteString("\n" + sectionHeader("DISCOVERED HERE ↳", w) + "\n")
+		for _, o := range spawned {
+			b.WriteString("  " + stTag.Render("↳") + " " + truncate(o.Text, w-4) + "\n")
+		}
+	}
 	return b.String()
 }
 

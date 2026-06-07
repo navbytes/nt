@@ -46,6 +46,7 @@ func cmdAdd(args []string) int {
 	source := fs.String("source", "cli", "origin")
 	parent := fs.String("parent", "", "parent task id")
 	blocks := fs.String("blocks", "", "blocks task id")
+	discovered := fs.String("discovered-from", "", "task this was discovered while working on")
 	recur := fs.String("recur", "", "recurrence: weekly|3d|…")
 	noteSlug := fs.String("note", "", "link to a note slug")
 	fs.Var(&tags, "tag", "tag (repeatable)")
@@ -92,6 +93,11 @@ func cmdAdd(args []string) int {
 		if *blocks != "" {
 			if bt, amb := d.Resolve(*blocks); bt != nil && !amb {
 				t.SetKey("blocks", bt.ID())
+			}
+		}
+		if *discovered != "" {
+			if dt, amb := d.Resolve(*discovered); dt != nil && !amb {
+				t.SetKey("discovered", dt.ID())
 			}
 		}
 		d.Append(t)
@@ -481,6 +487,7 @@ func cmdLinks(args []string) int {
 
 	var id, slug, title string
 	var forward []string
+	var self *task.Task
 	if strings.HasPrefix(handle, "note:") {
 		want := strings.TrimPrefix(handle, "note:")
 		for _, n := range notes {
@@ -501,7 +508,7 @@ func cmdLinks(args []string) int {
 		if t == nil {
 			return fail(fmt.Errorf("links: no task %q", handle))
 		}
-		id, title = t.ID(), t.Text
+		id, title, self = t.ID(), t.Text, t
 		forward = t.Links()
 	}
 
@@ -525,6 +532,28 @@ func cmdLinks(args []string) int {
 	for _, h := range back {
 		rel, _ := filepath.Rel(e.S.Dir, h.Path)
 		fmt.Printf("  ← %s:%d  %s\n", rel, h.Line, strings.TrimSpace(h.Text))
+	}
+
+	// Typed provenance: discovered-from (this task's origin) and the reverse
+	// (work discovered while this task was being done).
+	if self != nil {
+		if df := self.Discovered(); df != "" {
+			if origin := d.FindByID(df); origin != nil {
+				fmt.Printf("discovered from:\n  ↑ %s  %s\n", shortID(origin.ID()), origin.Text)
+			}
+		}
+		var spawned []*task.Task
+		for _, o := range d.Tasks() {
+			if o.Discovered() == self.ID() {
+				spawned = append(spawned, o)
+			}
+		}
+		if len(spawned) > 0 {
+			fmt.Println("discovered here:")
+			for _, o := range spawned {
+				fmt.Printf("  ↳ %s  %s\n", shortID(o.ID()), o.Text)
+			}
+		}
 	}
 	return 0
 }

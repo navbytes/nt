@@ -55,8 +55,8 @@ func renderFrames(t *testing.T) []frame {
 		})
 		return id
 	}
-	add("fix auth bug @backend +api [[jwt-expiry]]", map[string]string{"due": today, "src": "claude", "s": "doing"}, 'A')
-	add("deploy API v2 +api", map[string]string{"due": today}, 'A')
+	authID := add("fix auth bug @backend +api [[jwt-expiry]]", map[string]string{"due": today, "src": "claude", "s": "doing"}, 'A')
+	add("deploy API v2 +api", map[string]string{"due": today, "discovered": authID}, 'A')
 	cfg := add("update config +api", nil, 0)
 	add("write migration +api", map[string]string{"due": friday, "blocks": cfg}, 'B')
 	add("spike: rotate auth secrets [[jwt-expiry]]", nil, 'C')

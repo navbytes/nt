@@ -167,6 +167,7 @@ ADD/UPDATE FLAGS
   --pri high|med|low   --due today|tomorrow|fri|+3d|YYYY-MM-DD
   --tag NAME (repeat)  --project NAME   --source NAME
   --parent <id>        --blocks <id>    --note <slug>   (link to a note)
+  --discovered-from <id>   record that this task was surfaced while doing another
 
 LIST/RECALL FLAGS
   --status open|doing|blocked|done   --tag NAME   --project NAME

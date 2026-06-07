@@ -35,7 +35,35 @@ nt add "refactor auth middleware" --source claude --pri high --due today --tag b
 
 Flags: `--pri high|med|low`, `--due today|tomorrow|fri|+3d|YYYY-MM-DD`,
 `--tag NAME` (repeatable), `--project NAME`, `--blocks <id>` (this task blocks
-another), `--recur weekly|3d|…`, `--note <slug>` (link to a note).
+another), `--discovered-from <id>` (see below), `--recur weekly|3d|…`,
+`--note <slug>` (link to a note).
+
+## Capture the *why*, not just the *what*
+
+A todo list records what's left to do; durable memory also needs the reasoning a
+future session would otherwise have to rediscover. Capture two things as you work:
+
+- **Discovered work** — when you surface a *new* task while doing another, link it
+  to its origin so the chain of work is recoverable:
+
+  ```bash
+  nt add "backfill user.tier column" --discovered-from <current-task-id> --source claude
+  ```
+
+  `nt links <id>` then shows "discovered from ↑" and "discovered here ↳" both ways.
+
+- **Decisions, constraints, dead-ends** — when you make a non-obvious call or rule
+  something out, write a note (not a task) so the *why* survives:
+
+  ```bash
+  nt note "Chose flock+atomic-rename over SQLite" \
+    --body "Store must stay greppable/git-able; WAL would hide state. Tried X, too slow." \
+    --source claude --tag decision
+  ```
+
+  Treat this like leaving a code comment for the next engineer — it's the highest-
+  value memory, and `nt recall --json` now returns note bodies so the next session
+  reads it back in full.
 
 ## Capture notes
 

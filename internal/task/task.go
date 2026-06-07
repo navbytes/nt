@@ -184,6 +184,10 @@ func (t *Task) Parent() string { v, _ := t.get("parent"); return v }
 func (t *Task) Recur() string  { v, _ := t.get("rec"); return v }
 func (t *Task) Blocks() string { v, _ := t.get("blocks"); return v }
 
+// Discovered is the ULID of the task this one was discovered while working on —
+// provenance for work an agent surfaced mid-task (key: discovered:<ULID>).
+func (t *Task) Discovered() string { v, _ := t.get("discovered"); return v }
+
 // EnsureID assigns a ULID if the task lacks one (SPEC §4: hand-added lines get
 // an id on the next mutation that touches them).
 func (t *Task) EnsureID() {

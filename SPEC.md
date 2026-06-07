@@ -113,6 +113,7 @@ x 2026-06-05 2026-06-01 write migration +api parent:01JZ8RT3 id:01JZ8RT9
 | recurrence        | `rec:weekly`, `rec:3d`               | Completing spawns the next |
 | subtask           | `parent:<id>`                        | Typed task→task; one level only |
 | dependency        | `blocks:<id>`                        | Typed task→task; hides blocked |
+| provenance        | `discovered:<id>`                    | Work surfaced while doing another task (AI memory) |
 | link (untyped)    | `[[note-slug]]` / `[[<ULID>]]`       | Cross-link to any note or task (§5.1) |
 | AI / origin       | `src:claude`                         | Defaults to `src:cli` / `src:tui` |
 | stable id         | `id:<ULID>`                          | Primary handle (§7.2) |
