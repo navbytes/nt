@@ -173,6 +173,12 @@ match the TUI. It also surfaces nt's task↔note graph — **tasks that referenc
 note**, backlinks with context snippets, an in-note table of contents, and
 `src:claude` provenance — over the same `notes/` files everything else uses.
 
+It's built for moving fast: a **⌘K command palette** to jump to any note,
+**search-as-you-type**, a **`/tasks`** dashboard (open work grouped by status,
+urgency-sorted), a **`/tags`** browser, prev/next sibling navigation, and an
+adaptive reading width (`⇆`) that keeps prose comfortable while code and diagrams
+use the screen. Read-only and localhost-only; live-reloads on file change.
+
 |  |  |
 |---|---|
 | **Light** — TOC, breadcrumb, tasks & backlinks | **Dark** — Tokyo Night |
