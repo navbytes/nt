@@ -303,6 +303,10 @@ mutation writes, atomically and under the same lock, a transaction record:
   current file at execution time and explicitly best-effort (a concurrent archive can shift
   what `task:3` means between two commands). `nt list` prints short ULID prefixes so
   scripts/agents can capture a stable handle.
+- **Enforced:** `task:N` / bare `N` is *refused for non-interactive callers* — if stdin or
+  stdout isn't a TTY (an agent or script), the command errors and tells the caller to use the
+  id. This makes the read-then-act footgun impossible for agents while keeping the shortcut
+  for humans.
 
 ### 7.3 Commands
 

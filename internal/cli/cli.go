@@ -10,6 +10,7 @@ import (
 
 	"github.com/navbytes/nt/internal/dateparse"
 	"github.com/navbytes/nt/internal/mutate"
+	"github.com/navbytes/nt/internal/task"
 )
 
 // Version is the build version, set from main (via -ldflags).
@@ -79,6 +80,37 @@ func engine() (*mutate.Engine, bool) {
 func fail(err error) int {
 	fmt.Fprintf(os.Stderr, "nt: %v\n", err)
 	return 1
+}
+
+// interactive reports whether nt is driven by a human at a terminal — both stdin
+// AND stdout must be TTYs. Agents and scripts almost always pipe at least one
+// (to feed input or capture output), so they read as non-interactive.
+func interactive() bool {
+	return isCharDevice(os.Stdin) && isCharDevice(os.Stdout)
+}
+
+func isCharDevice(f *os.File) bool {
+	fi, err := f.Stat()
+	return err == nil && fi.Mode()&os.ModeCharDevice != 0
+}
+
+// resolveHandle maps a user-supplied task handle to a task, refusing a positional
+// "task:N" / bare "N" from non-interactive callers: the index is recomputed each
+// run, so an agent that read the list a moment ago may act on the wrong task
+// after any concurrent write. Stable ULIDs have no such gap. (Product #8 / §7.2.)
+func resolveHandle(d *task.Doc, handle string) (*task.Task, error) {
+	if task.IsPositional(handle) && !interactive() {
+		return nil, fmt.Errorf("%q is interactive-only — scripts and agents must use the task id "+
+			"from `nt list` (the short code or full id:), which is stable across concurrent edits", handle)
+	}
+	t, amb := d.Resolve(handle)
+	if amb {
+		return nil, fmt.Errorf("%q is ambiguous", handle)
+	}
+	if t == nil {
+		return nil, fmt.Errorf("no task %q", handle)
+	}
+	return t, nil
 }
 
 // --- argument splitting --------------------------------------------------

@@ -320,12 +320,9 @@ func cmdDone(args []string) int {
 	count := 0
 	err := e.Apply("done", func(d *task.Doc, rec *mutate.Recorder) error {
 		for _, h := range args {
-			t, amb := d.Resolve(h)
-			if amb {
-				return fmt.Errorf("done: %q is ambiguous", h)
-			}
-			if t == nil {
-				return fmt.Errorf("done: no task %q", h)
+			t, err := resolveHandle(d, h)
+			if err != nil {
+				return fmt.Errorf("done: %w", err)
 			}
 			mutate.Complete(d, rec, t, mutate.Today()) // spawns next if recurring
 			count++
@@ -380,12 +377,9 @@ func cmdUpdate(args []string) int {
 		return 1
 	}
 	err := e.Apply("update", func(d *task.Doc, rec *mutate.Recorder) error {
-		t, amb := d.Resolve(handle)
-		if amb {
-			return fmt.Errorf("update: %q is ambiguous", handle)
-		}
-		if t == nil {
-			return fmt.Errorf("update: no task %q", handle)
+		t, err := resolveHandle(d, handle)
+		if err != nil {
+			return fmt.Errorf("update: %w", err)
 		}
 		rec.Before(t)
 		switch *status {
@@ -501,12 +495,9 @@ func cmdLinks(args []string) int {
 			return fail(fmt.Errorf("links: no note %q", want))
 		}
 	} else {
-		t, amb := d.Resolve(handle)
-		if amb {
-			return fail(fmt.Errorf("links: %q is ambiguous", handle))
-		}
-		if t == nil {
-			return fail(fmt.Errorf("links: no task %q", handle))
+		t, err := resolveHandle(d, handle)
+		if err != nil {
+			return fail(fmt.Errorf("links: %w", err))
 		}
 		id, title, self = t.ID(), t.Text, t
 		forward = t.Links()
@@ -636,12 +627,9 @@ func cmdRm(args []string) int {
 	count := 0
 	err := e.Apply("delete", func(d *task.Doc, rec *mutate.Recorder) error {
 		for _, h := range args {
-			t, amb := d.Resolve(h)
-			if amb {
-				return fmt.Errorf("rm: %q is ambiguous", h)
-			}
-			if t == nil {
-				return fmt.Errorf("rm: no task %q", h)
+			t, err := resolveHandle(d, h)
+			if err != nil {
+				return fmt.Errorf("rm: %w", err)
 			}
 			before := t.Line()
 			d.Remove(t.ID())
@@ -718,12 +706,9 @@ func cmdEdit(args []string) int {
 	if err != nil {
 		return fail(err)
 	}
-	t, amb := d.Resolve(handle)
-	if amb {
-		return fail(fmt.Errorf("edit: %q is ambiguous", handle))
-	}
-	if t == nil {
-		return fail(fmt.Errorf("edit: no task %q", handle))
+	t, rerr := resolveHandle(d, handle)
+	if rerr != nil {
+		return fail(fmt.Errorf("edit: %w", rerr))
 	}
 	id := t.ID()
 	tmp, err := os.CreateTemp("", "nt-edit-*.txt")

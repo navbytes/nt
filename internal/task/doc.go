@@ -123,6 +123,14 @@ func (d *Doc) Resolve(handle string) (t *Task, ambiguous bool) {
 	}
 }
 
+// IsPositional reports whether a handle is a positional "task:N" / "N" reference
+// rather than a stable ULID — so adapters can refuse it from non-interactive
+// callers, where the list index may have shifted between read and act (§7.2).
+func IsPositional(handle string) bool {
+	_, ok := parsePositional(handle)
+	return ok
+}
+
 // parsePositional parses "task:N" / "N" into a 1-based index.
 func parsePositional(h string) (int, bool) {
 	h = strings.TrimPrefix(h, "task:")

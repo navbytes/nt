@@ -8,9 +8,9 @@ import (
 	"testing"
 )
 
-// captureRun runs a CLI invocation against a fresh store, returning stdout.
-func captureRun(t *testing.T, args ...string) string {
-	t.Helper()
+// runWithStdout runs a CLI invocation with stdout piped (so it reads as
+// non-interactive, like an agent), returning its output and exit code.
+func runWithStdout(args ...string) (string, int) {
 	old := os.Stdout
 	r, w, _ := os.Pipe()
 	os.Stdout = w
@@ -18,10 +18,18 @@ func captureRun(t *testing.T, args ...string) string {
 	w.Close()
 	os.Stdout = old
 	out, _ := io.ReadAll(r)
+	return string(out), code
+}
+
+// captureRun runs a CLI invocation against a fresh store, returning stdout and
+// failing the test on a non-zero exit.
+func captureRun(t *testing.T, args ...string) string {
+	t.Helper()
+	out, code := runWithStdout(args...)
 	if code != 0 {
 		t.Fatalf("nt %s exited %d: %s", strings.Join(args, " "), code, out)
 	}
-	return string(out)
+	return out
 }
 
 func TestCmdLog(t *testing.T) {
