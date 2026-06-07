@@ -497,6 +497,11 @@ a:hover { text-decoration: underline; }
 .palette__list li .results__path { display: block; font-size: 11px; color: var(--muted); }
 .palette__list li.sel, .palette__list li:hover { background: var(--bg-sel); color: var(--fg); }
 
+/* Graph view (/graph) */
+.graphview { overflow: auto; border: 1px solid var(--border-soft); border-radius: var(--radius); padding: var(--s4); }
+.graphview .mermaid { background: transparent; border: 0; padding: 0; }
+.graphview .mermaid .node { cursor: pointer; }
+
 /* Hover link previews */
 .linkpop {
   position: absolute; z-index: 50; width: 320px; max-width: 90vw;

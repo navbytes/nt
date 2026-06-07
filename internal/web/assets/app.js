@@ -13,7 +13,10 @@
 
   function renderMermaid() {
     if (!window.mermaid) return;
-    mermaid.initialize({ startOnLoad: false, securityLevel: "strict", theme: isDark() ? "dark" : "neutral" });
+    // The /graph page needs "loose" so its server-generated click links work;
+    // note-embedded diagrams stay "strict" (untrusted-ish note content).
+    var graph = !!document.querySelector(".graphview");
+    mermaid.initialize({ startOnLoad: false, securityLevel: graph ? "loose" : "strict", theme: isDark() ? "dark" : "neutral" });
     var nodes = document.querySelectorAll(".mermaid");
     nodes.forEach(function (n) {
       if (!n.dataset.src) n.dataset.src = n.textContent;   // stash source once

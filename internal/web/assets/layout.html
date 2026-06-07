@@ -25,7 +25,7 @@
           <ul class="search-dropdown" id="search-dropdown" hidden></ul>
         </div>
         <nav class="sidenav" aria-label="Sections">
-          <a href="/tasks">Tasks</a><a href="/tags">Tags</a><a href="/orphans">Orphans</a>
+          <a href="/tasks">Tasks</a><a href="/tags">Tags</a><a href="/graph">Graph</a><a href="/orphans">Orphans</a>
         </nav>
       </div>
       <nav class="sidebar__tree" aria-label="Notes">
@@ -98,6 +98,16 @@
         <div class="tagcloud">
           {{range .TagRows}}<a class="tag tag--lg" href="{{.URL}}">{{.Name}}<span class="tag__count">{{.Count}}</span></a>{{else}}<p class="backlinks__empty">No tags yet.</p>{{end}}
         </div>
+      </article>
+
+      {{else if .IsGraph}}
+      <article class="note">
+        <header class="note__header"><h1 class="note__title">Graph</h1></header>
+        {{if .GraphSrc}}
+        <div class="graphview"><div class="mermaid">{{.GraphSrc}}</div></div>
+        {{else}}
+        <p class="backlinks__empty">No notes to graph yet.</p>
+        {{end}}
       </article>
 
       {{else if .IsNote}}

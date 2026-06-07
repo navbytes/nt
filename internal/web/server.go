@@ -88,6 +88,7 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("/orphans", s.handleOrphans)
 	mux.HandleFunc("/tags", s.handleTags)
 	mux.HandleFunc("/tasks", s.handleTasks)
+	mux.HandleFunc("/graph", s.handleGraph)
 	mux.HandleFunc("/events", s.handleSSE)
 	mux.HandleFunc("/static/", s.handleStatic)
 	return mux
@@ -134,6 +135,8 @@ type pageData struct {
 	TagRows    []tagRow
 	IsTasks    bool
 	TaskGroups []taskGroup
+	IsGraph    bool
+	GraphSrc   string // mermaid source for the link graph
 }
 
 type linkRow struct{ URL, Title, Path string }
@@ -404,6 +407,53 @@ func (s *Server) handleTasks(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	s.render(w, notes, &pageData{Title: "Tasks", Tree: buildTree(notes, ""), IsTasks: true, TaskGroups: groups})
+}
+
+// handleGraph renders the note link graph as a clickable Mermaid diagram (reuses
+// the vendored mermaid; the source is built from wikilink adjacency).
+func (s *Server) handleGraph(w http.ResponseWriter, r *http.Request) {
+	_, notes := s.load()
+	s.render(w, notes, &pageData{Title: "Graph", Tree: buildTree(notes, ""), IsGraph: true, GraphSrc: graphSource(notes)})
+}
+
+func graphSource(notes []*note.Note) string {
+	if len(notes) == 0 {
+		return ""
+	}
+	idOf := make(map[string]string, len(notes))
+	var b strings.Builder
+	b.WriteString("graph LR\n")
+	for i, n := range notes {
+		nid := fmt.Sprintf("n%d", i)
+		idOf[n.Path] = nid
+		fmt.Fprintf(&b, "  %s[\"%s\"]\n", nid, graphLabel(n.Title))
+	}
+	seen := map[string]bool{}
+	for _, n := range notes {
+		from := idOf[n.Path]
+		for _, raw := range links.Wikilinks(n.Body) {
+			if it, ok := links.Resolve(raw, nil, notes); ok && it.Kind == "note" {
+				to := idOf[it.Path]
+				if to == "" || to == from || seen[from+">"+to] {
+					continue
+				}
+				seen[from+">"+to] = true
+				fmt.Fprintf(&b, "  %s --> %s\n", from, to)
+			}
+		}
+	}
+	for i, n := range notes {
+		fmt.Fprintf(&b, "  click n%d \"/n/%s\"\n", i, url.PathEscape(noteHandle(n)))
+	}
+	return b.String()
+}
+
+func graphLabel(s string) string {
+	s = strings.ReplaceAll(strings.ReplaceAll(s, "\"", "'"), "\n", " ")
+	if len(s) > 40 {
+		s = s[:40] + "…"
+	}
+	return s
 }
 
 func contains(ss []string, want string) bool {
