@@ -165,8 +165,14 @@ keep links intact. (Logseq's outliner model is not a target.)
 `nt web` starts a **localhost** server to browse and read your notes in a
 browser — a folder tree, rendered Markdown with `[[wikilink]]` navigation and
 backlinks, full-text search, **Mermaid diagrams**, and light/dark themes that
-match the TUI. It reads the same `notes/` files everything else uses, so it
-shows exactly what you've captured.
+match the TUI. It also surfaces nt's task↔note graph — **tasks that reference a
+note**, backlinks with context snippets, an in-note table of contents, and
+`src:claude` provenance — over the same `notes/` files everything else uses.
+
+|  |  |
+|---|---|
+| **Light** — TOC, breadcrumb, tasks & backlinks | **Dark** — Tokyo Night |
+| ![nt web — light](docs/screenshots/web-light.png) | ![nt web — dark](docs/screenshots/web-dark.png) |
 
 ```bash
 nt web              # pick a free port, print the URL (127.0.0.1)
