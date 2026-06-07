@@ -103,8 +103,14 @@ func (m *Model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		} else {
 			m.setStatus("unlocked — writes enabled")
 		}
-	case "q", "ctrl+c":
+	case "ctrl+c":
 		return m, tea.Quit
+	case "q":
+		// Back out of any active view state first; quit only from a clean list,
+		// so a stray q can't drop you out mid-filter/detail/selection.
+		if !m.backOut() {
+			return m, tea.Quit
+		}
 	case "j", "down":
 		if m.detailFocus {
 			m.detailScroll++
@@ -174,19 +180,7 @@ func (m *Model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.setStatus("detail focused — j/k scroll · esc back")
 		}
 	case "esc":
-		switch {
-		case m.detailFocus:
-			m.detailFocus = false
-			m.status = ""
-		case m.visualMode || len(m.marked) > 0:
-			m.clearMarks()
-		case m.filter != "":
-			m.filter = ""
-			m.rebuild()
-			m.setStatus("filter cleared")
-		default:
-			m.clearScope()
-		}
+		m.backOut()
 	case " ", "space":
 		m.toggleMark()
 	case "V":
@@ -471,6 +465,30 @@ var writeKeys = map[string]bool{
 }
 
 func isWriteKey(key string) bool { return writeKeys[key] }
+
+// backOut pops one layer of active view state (detail focus → marks/visual →
+// filter → scope), returning true if it dismissed something. Shared by `esc`
+// (always backs out) and `q` (quits only when there's nothing left to back out).
+// Modal states (help, confirm, yank/follow chords) are handled earlier in
+// updateNormal, so they never reach here.
+func (m *Model) backOut() bool {
+	switch {
+	case m.detailFocus:
+		m.detailFocus = false
+		m.status = ""
+	case m.visualMode || len(m.marked) > 0:
+		m.clearMarks()
+	case m.filter != "":
+		m.filter = ""
+		m.rebuild()
+		m.setStatus("filter cleared")
+	case m.scopeTag != "" || m.scopeProject != "":
+		m.clearScope()
+	default:
+		return false
+	}
+	return true
+}
 
 // handleHelpKey scrolls the help overlay or closes it. Overscroll is clamped in
 // helpView at render time (it knows the content/viewport heights).

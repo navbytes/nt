@@ -836,7 +836,7 @@ func (m *Model) helpView() string {
 			{"‹ ›", "resize the list/detail split (or drag the divider)"},
 			{"ctrl+l", "lock / unlock (read-only: blocks all writes)"},
 			{".", "show / hide done"}, {"b", "show / hide blocked"},
-			{"?", "this help"}, {"q", "quit"},
+			{"?", "this help"}, {"q", "back out one level, then quit"},
 		}},
 	}
 	// Build every line first so we can window it to the terminal height.

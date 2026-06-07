@@ -392,6 +392,42 @@ func TestHelpScroll(t *testing.T) {
 	}
 }
 
+// TestQuitBacksOutFirst: q dismisses active view state one layer at a time and
+// only quits from a clean list; ctrl+c always quits.
+func TestQuitBacksOutFirst(t *testing.T) {
+	m := testModel(t)
+	m.width, m.height = 100, 24
+	q := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")}
+
+	// q while a filter is active clears the filter instead of quitting.
+	m.filter = "auth"
+	m.rebuild()
+	if _, cmd := m.Update(q); cmd != nil {
+		t.Fatal("q should back out of the filter, not quit")
+	}
+	if m.filter != "" {
+		t.Fatal("q should have cleared the filter")
+	}
+
+	// q while detail is focused unfocuses it.
+	m.detailFocus = true
+	if _, cmd := m.Update(q); cmd != nil || m.detailFocus {
+		t.Fatal("q should unfocus the detail pane, not quit")
+	}
+
+	// From a clean list, q quits.
+	if _, cmd := m.Update(q); cmd == nil {
+		t.Fatal("q from a clean list should quit")
+	}
+
+	// ctrl+c always quits, even mid-filter.
+	m.filter = "auth"
+	m.rebuild()
+	if _, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlC}); cmd == nil {
+		t.Fatal("ctrl+c should always quit")
+	}
+}
+
 // TestReadOnlyLock: ctrl+l blocks writes but leaves navigation/yank/tab working.
 func TestReadOnlyLock(t *testing.T) {
 	m := testModel(t)
