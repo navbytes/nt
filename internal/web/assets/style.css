@@ -391,7 +391,14 @@ a:hover { text-decoration: underline; }
 .toc a { display: block; padding: 2px 0 2px var(--s3); color: var(--muted); border-left: 2px solid var(--border-soft); }
 .toc a:hover, .toc a.toc--active { color: var(--fg); border-left-color: var(--accent); text-decoration: none; }
 .toc a.toc--h3 { padding-left: var(--s5); font-size: 12px; }
-@media (min-width: 1400px) { .toc { display: block; } }
+/* Show the TOC and reserve a right rail for it, so the centered `.note`
+   (margin: 0 auto) lays out within the remaining space instead of colliding with
+   the fixed TOC. The topbar stays full-bleed via a matching negative margin. */
+@media (min-width: 1400px) {
+  .toc { display: block; }
+  .main { padding-right: 250px; }
+  .topbar { margin-right: -250px; }
+}
 
 /* ---- Heading anchors ---- */
 .md :is(h1,h2,h3,h4) .heading-anchor { opacity: 0; margin-left: .3em; color: var(--muted); font-weight: 400; text-decoration: none; }
