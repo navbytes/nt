@@ -308,3 +308,18 @@ func TestSyntaxHighlight(t *testing.T) {
 		t.Errorf("highlight CSS should not set backgrounds (keeps --bg-inset)")
 	}
 }
+
+func TestNotePreview(t *testing.T) {
+	s := newTestServer(t)
+	n, _ := note.Create(s.eng.S, "Token Rotation", "# Token Rotation\n\nRotates weekly. Idempotent job.", nil, "cli", "")
+	resp, body := get(t, s, "/n/"+n.ID+"?preview=1")
+	if resp.Header.Get("Content-Type") != "application/json" {
+		t.Fatalf("preview content-type %q", resp.Header.Get("Content-Type"))
+	}
+	if !strings.Contains(body, "Token Rotation") || !strings.Contains(body, "Rotates weekly") {
+		t.Fatalf("preview json: %s", body)
+	}
+	if strings.Contains(body, `# Token`) {
+		t.Error("snippet should strip the leading H1")
+	}
+}

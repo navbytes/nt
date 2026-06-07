@@ -241,6 +241,44 @@
     document.addEventListener("click", function (e) { if (!dd.contains(e.target) && e.target !== inp) hide(); });
   })();
 
+  // ---- Hover link previews ----
+  (function () {
+    var SEL = ".md a.wikilink, .backlinks a, .pager a";
+    var pop, timer, cache = {};
+    function popover() {
+      if (!pop) { pop = document.createElement("div"); pop.className = "linkpop"; pop.hidden = true; document.body.appendChild(pop); }
+      return pop;
+    }
+    function place(a, d) {
+      if (!d || (!d.title && !d.snippet)) return;
+      var p = popover();
+      p.innerHTML = '<div class="linkpop__title"></div><div class="linkpop__body"></div>';
+      p.querySelector(".linkpop__title").textContent = d.title || "";
+      p.querySelector(".linkpop__body").textContent = d.snippet || "";
+      var r = a.getBoundingClientRect();
+      p.style.left = Math.max(8, Math.min(r.left, window.innerWidth - 340)) + "px";
+      p.style.top = (r.bottom + 6 + window.scrollY) + "px";
+      p.hidden = false;
+    }
+    function show(a) {
+      var href = a.getAttribute("href");
+      if (!href || href.indexOf("/n/") !== 0 || href.indexOf("missing=1") >= 0) return;
+      if (cache[href]) { place(a, cache[href]); return; }
+      fetch(href + (href.indexOf("?") >= 0 ? "&" : "?") + "preview=1")
+        .then(function (r) { return r.json(); })
+        .then(function (d) { cache[href] = d; place(a, d); }).catch(function () { /* */ });
+    }
+    function hide() { if (pop) pop.hidden = true; }
+    document.addEventListener("mouseover", function (e) {
+      var a = e.target.closest && e.target.closest(SEL);
+      if (!a) return;
+      clearTimeout(timer); timer = setTimeout(function () { show(a); }, 350);
+    });
+    document.addEventListener("mouseout", function (e) {
+      if (e.target.closest && e.target.closest(SEL)) { clearTimeout(timer); hide(); }
+    });
+  })();
+
   enhanceReading();
   revealCurrent();
   renderMermaid();

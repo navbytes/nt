@@ -497,6 +497,16 @@ a:hover { text-decoration: underline; }
 .palette__list li .results__path { display: block; font-size: 11px; color: var(--muted); }
 .palette__list li.sel, .palette__list li:hover { background: var(--bg-sel); color: var(--fg); }
 
+/* Hover link previews */
+.linkpop {
+  position: absolute; z-index: 50; width: 320px; max-width: 90vw;
+  background: var(--bg-elev); border: 1px solid var(--border); border-radius: var(--radius);
+  box-shadow: var(--shadow); padding: var(--s3); font-size: 13px; pointer-events: none;
+}
+.linkpop[hidden] { display: none; }
+.linkpop__title { font-weight: 600; color: var(--fg); margin-bottom: var(--s1); }
+.linkpop__body { color: var(--fg-soft); line-height: 1.5; }
+
 /* Print — just the content */
 @media print {
   .sidebar, .topbar, .toc, .palette, .pager, .skip-link, .backdrop { display: none !important; }

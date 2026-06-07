@@ -188,6 +188,11 @@ func (s *Server) handleNote(w http.ResponseWriter, r *http.Request) {
 	doc, notes := s.load()
 	if r.URL.Query().Get("missing") != "1" {
 		if n := findByHandle(notes, handle); n != nil {
+			if r.URL.Query().Get("preview") == "1" { // hover preview
+				w.Header().Set("Content-Type", "application/json")
+				_ = json.NewEncoder(w).Encode(map[string]string{"title": n.Title, "snippet": previewSnippet(n.Body)})
+				return
+			}
 			s.renderNote(w, n, doc, notes)
 			return
 		}
@@ -600,6 +605,24 @@ func sortTree(n *treeNode) {
 			sortTree(c)
 		}
 	}
+}
+
+var mdNoise = strings.NewReplacer("[[", "", "]]", "", "#", "", "*", "", "`", "", ">", "")
+
+// previewSnippet builds a short plain-text excerpt of a note body for the hover
+// popover: drops a leading H1, strips light Markdown noise, collapses whitespace.
+func previewSnippet(body string) string {
+	s := strings.TrimSpace(body)
+	if strings.HasPrefix(s, "# ") {
+		if i := strings.IndexByte(s, '\n'); i >= 0 {
+			s = s[i+1:]
+		}
+	}
+	s = strings.Join(strings.Fields(mdNoise.Replace(s)), " ")
+	if len(s) > 220 {
+		s = s[:220] + "…"
+	}
+	return s
 }
 
 // dateOnly trims an RFC3339 timestamp to its YYYY-MM-DD date for display.
