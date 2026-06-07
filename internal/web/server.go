@@ -99,6 +99,20 @@ func Serve(version, addr string, allowEdit bool) error {
 	return http.Serve(ln, s.routes()) //nolint:gosec // localhost dev server, no timeouts needed
 }
 
+// Handler returns the viewer's HTTP handler so another host can serve the UI
+// without nt binding a TCP port — e.g. a Wails desktop shell wiring it into
+// assetserver.Options.Handler. This is the seam that lets the exact same
+// server-rendered UI run as a native app. Call SetEdit/StartWatch first if you
+// want editing or live-reload.
+func (s *Server) Handler() http.Handler { return s.routes() }
+
+// SetEdit toggles in-app editing (CSRF-guarded). Read-only by default.
+func (s *Server) SetEdit(v bool) { s.allowEdit = v }
+
+// StartWatch begins watching the store and pushing SSE live-reload events.
+// Serve calls this itself; embedders call it when they want live-reload.
+func (s *Server) StartWatch() { s.watch() }
+
 func (s *Server) routes() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", s.handleIndex)

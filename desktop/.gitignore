@@ -1,0 +1,4 @@
+# Wails build output and the compiled spike binary
+/build/
+/nt-desktop
+nt
