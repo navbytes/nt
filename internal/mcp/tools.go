@@ -100,4 +100,26 @@ var toolDefs = []toolDef{
 			"source": st(),
 		}),
 	},
+	{
+		Name:        "nt_search",
+		Description: "Find notes and tasks by text and/or tag — the KB's retrieval verb. Pass query, tag, or both.",
+		InputSchema: obj(map[string]any{
+			"query": sp("text to match in titles + bodies (optional if tag is set)"),
+			"tag":   sp("only items with this tag"),
+			"type":  enum("note", "task", "all"),
+		}),
+	},
+	{
+		Name:        "nt_links",
+		Description: "Forward links and backlinks for a note or task — follow the knowledge graph.",
+		InputSchema: obj(map[string]any{"handle": sp("a note handle (slug/title/id) or task id")}, "handle"),
+	},
+	{
+		Name:        "nt_mv",
+		Description: "Refile a note: rename or move it into a folder, rewriting every [[link]] to it.",
+		InputSchema: obj(map[string]any{
+			"handle": sp("the note to move (slug/title/id)"),
+			"dest":   sp("new name or folder/path under notes/, e.g. ref/auth"),
+		}, "handle", "dest"),
+	},
 }

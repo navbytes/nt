@@ -98,3 +98,46 @@ func TestMCPProtocol(t *testing.T) {
 		t.Error("unknown method should return an error")
 	}
 }
+
+func TestMCPRetrievalTools(t *testing.T) {
+	s := newServer(t)
+	mustDispatch := func(name string, a map[string]any) string {
+		t.Helper()
+		out, err := s.dispatch(name, a)
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		return out
+	}
+	mustDispatch("nt_note", map[string]any{"title": "Auth Design", "folder": "ref", "tags": []any{"auth"}, "body": "see [[token-rotation]]"})
+	mustDispatch("nt_note", map[string]any{"title": "Token Rotation", "folder": "ref", "tags": []any{"auth"}, "body": "rotate weekly"})
+	mustDispatch("nt_add", map[string]any{"text": "implement [[auth-design]]", "tags": []any{"auth"}})
+
+	// nt_search by tag → both notes; by query → the matching one.
+	var sr struct {
+		Notes []noteOut `json:"notes"`
+	}
+	json.Unmarshal([]byte(mustDispatch("nt_search", map[string]any{"tag": "auth", "type": "note"})), &sr)
+	if len(sr.Notes) != 2 {
+		t.Fatalf("nt_search tag=auth → %d notes, want 2", len(sr.Notes))
+	}
+	if out := mustDispatch("nt_search", map[string]any{"query": "rotate"}); !strings.Contains(out, "Token Rotation") {
+		t.Fatalf("nt_search query missed the note: %s", out)
+	}
+	if _, err := s.dispatch("nt_search", map[string]any{}); err == nil {
+		t.Error("nt_search should require query or tag")
+	}
+
+	// nt_links: forward (note) + backlink (task).
+	if out := mustDispatch("nt_links", map[string]any{"handle": "auth-design"}); !strings.Contains(out, "Token Rotation") || !strings.Contains(out, "implement [[auth-design]]") {
+		t.Fatalf("nt_links missing forward/backlink: %s", out)
+	}
+
+	// nt_mv: refile, and dest is required.
+	if out := mustDispatch("nt_mv", map[string]any{"handle": "auth-design", "dest": "archive/auth-design"}); !strings.Contains(out, "archive/auth-design.md") {
+		t.Fatalf("nt_mv result: %s", out)
+	}
+	if _, err := s.dispatch("nt_mv", map[string]any{"handle": "x"}); err == nil {
+		t.Error("nt_mv should require dest")
+	}
+}

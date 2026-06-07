@@ -16,8 +16,10 @@ import (
 	"time"
 
 	"github.com/navbytes/nt/internal/dateparse"
+	"github.com/navbytes/nt/internal/links"
 	"github.com/navbytes/nt/internal/mutate"
 	"github.com/navbytes/nt/internal/note"
+	"github.com/navbytes/nt/internal/search"
 	"github.com/navbytes/nt/internal/task"
 )
 
@@ -147,6 +149,12 @@ func (s *server) dispatch(name string, a map[string]any) (string, error) {
 		return s.recall(a)
 	case "nt_log":
 		return s.log(a)
+	case "nt_search":
+		return s.search(a)
+	case "nt_links":
+		return s.links(a)
+	case "nt_mv":
+		return s.mv(a)
 	default:
 		return "", fmt.Errorf("unknown tool %q", name)
 	}
@@ -374,6 +382,126 @@ func (s *server) log(a map[string]any) (string, error) {
 	return jsonText(tasksOut(done)), nil
 }
 
+func (s *server) search(a map[string]any) (string, error) {
+	q := strings.TrimSpace(str(a, "query"))
+	tag := strings.TrimSpace(str(a, "tag"))
+	if q == "" && tag == "" {
+		return "", fmt.Errorf("query or tag is required")
+	}
+	typ := str(a, "type")
+	if typ == "" {
+		typ = "all"
+	}
+	d, err := s.eng.Read()
+	if err != nil {
+		return "", err
+	}
+	notes, _ := note.List(s.eng.S)
+	ql := strings.ToLower(q)
+
+	var nout []noteOut
+	if typ == "all" || typ == "note" {
+		bodyHit := map[string]bool{}
+		if q != "" {
+			if hits, e := search.Literal(q, s.eng.S.NotesDir()); e == nil {
+				for _, h := range hits {
+					bodyHit[h.Path] = true
+				}
+			}
+		}
+		for _, n := range notes {
+			if tag != "" && !contains(n.Tags, tag) {
+				continue
+			}
+			if q == "" || strings.Contains(strings.ToLower(n.Title), ql) || bodyHit[n.Path] {
+				nout = append(nout, noteToOut(n))
+			}
+		}
+	}
+	var tout []taskOut
+	if typ == "all" || typ == "task" {
+		for _, t := range d.Tasks() {
+			if tag != "" && !contains(t.Tags(), tag) {
+				continue
+			}
+			if q == "" || strings.Contains(strings.ToLower(t.Text), ql) {
+				tout = append(tout, taskToOut(t))
+			}
+		}
+	}
+	return jsonText(map[string]any{"notes": nout, "tasks": tout}), nil
+}
+
+func (s *server) links(a map[string]any) (string, error) {
+	handle := strings.TrimSpace(str(a, "handle"))
+	if handle == "" {
+		return "", fmt.Errorf("handle is required")
+	}
+	d, err := s.eng.Read()
+	if err != nil {
+		return "", err
+	}
+	notes, _ := note.List(s.eng.S)
+
+	forward := func(raws []string) []linkOut {
+		out := make([]linkOut, 0, len(raws))
+		for _, raw := range raws {
+			if it, ok := links.Resolve(raw, d, notes); ok {
+				out = append(out, linkOut{Kind: it.Kind, ID: it.ID, Title: it.Title})
+			} else {
+				out = append(out, linkOut{Kind: "unresolved", Target: raw})
+			}
+		}
+		return out
+	}
+
+	if t, terr := resolve(d, handle); terr == nil {
+		return jsonText(map[string]any{
+			"handle": t.ID(), "kind": "task", "title": t.Text,
+			"forward": forward(t.Links()), "backlinks": backlinksOut(links.Backlinks(s.eng.S, t.ID(), ""), notes),
+		}), nil
+	}
+	if it, ok := links.Resolve(handle, d, notes); ok && it.Kind == "note" {
+		for _, n := range notes {
+			if n.Path == it.Path {
+				return jsonText(map[string]any{
+					"handle": noteHandle(n), "kind": "note", "title": n.Title,
+					"forward": forward(links.Wikilinks(n.Body)), "backlinks": backlinksOut(links.Backlinks(s.eng.S, n.ID, n.Rel), notes),
+				}), nil
+			}
+		}
+	}
+	return "", fmt.Errorf("no task or note %q", handle)
+}
+
+func (s *server) mv(a map[string]any) (string, error) {
+	handle := strings.TrimSpace(str(a, "handle"))
+	dest := strings.TrimSpace(str(a, "dest"))
+	if handle == "" || dest == "" {
+		return "", fmt.Errorf("handle and dest are required")
+	}
+	notes, _ := note.List(s.eng.S)
+	it, ok := links.Resolve(handle, nil, notes)
+	if !ok || it.Kind != "note" {
+		if it.Kind == "ambiguous" {
+			return "", fmt.Errorf("%q is ambiguous (%s) — qualify with a folder", handle, it.Title)
+		}
+		return "", fmt.Errorf("no note %q", handle)
+	}
+	var src *note.Note
+	for _, n := range notes {
+		if n.Path == it.Path {
+			src = n
+			break
+		}
+	}
+	newRel, updated, err := s.eng.RenameNote(src, notes, dest)
+	if err != nil {
+		return "", err
+	}
+	return jsonText(map[string]any{"moved_to": newRel, "updated_refs": updated}), nil
+}
+
 // --- output shapes (id-first; no positional index — agents use ids) ------
 
 type taskOut struct {
@@ -412,7 +540,8 @@ func tasksOut(ts []*task.Task) []taskOut {
 }
 
 type noteOut struct {
-	ID     string   `json:"id"`
+	ID     string   `json:"id,omitempty"`
+	Rel    string   `json:"rel,omitempty"` // path handle (notes authored outside nt have no id)
 	Title  string   `json:"title"`
 	Tags   []string `json:"tags,omitempty"`
 	Source string   `json:"source,omitempty"`
@@ -420,7 +549,46 @@ type noteOut struct {
 }
 
 func noteToOut(n *note.Note) noteOut {
-	return noteOut{ID: n.ID, Title: n.Title, Tags: n.Tags, Source: n.Source, Body: strings.TrimSpace(n.Body)}
+	return noteOut{ID: n.ID, Rel: n.Rel, Title: n.Title, Tags: n.Tags, Source: n.Source, Body: strings.TrimSpace(n.Body)}
+}
+
+// linkOut is one forward link in the nt_links result.
+type linkOut struct {
+	Kind   string `json:"kind"`
+	ID     string `json:"id,omitempty"`
+	Title  string `json:"title,omitempty"`
+	Target string `json:"target,omitempty"` // raw [[…]] when unresolved
+}
+
+// noteHandle is a note's id, or its path when authored outside nt (no id).
+func noteHandle(n *note.Note) string {
+	if n.ID != "" {
+		return n.ID
+	}
+	return n.Rel
+}
+
+// backlinksOut maps backlink hits to notes (linkable) or task lines.
+func backlinksOut(hits []search.Hit, notes []*note.Note) []map[string]string {
+	byPath := make(map[string]*note.Note, len(notes))
+	for _, n := range notes {
+		byPath[n.Path] = n
+	}
+	seen := map[string]bool{}
+	out := []map[string]string{}
+	for _, h := range hits {
+		if n, ok := byPath[h.Path]; ok {
+			hk := noteHandle(n)
+			if seen[hk] {
+				continue
+			}
+			seen[hk] = true
+			out = append(out, map[string]string{"kind": "note", "handle": hk, "title": n.Title})
+		} else {
+			out = append(out, map[string]string{"kind": "task", "text": strings.TrimSpace(h.Text)})
+		}
+	}
+	return out
 }
 
 // --- small helpers -------------------------------------------------------

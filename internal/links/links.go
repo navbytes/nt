@@ -136,6 +136,10 @@ func segs(p string) []string {
 
 var linkRe = regexp.MustCompile(`\[\[([^\]]+)\]\]`)
 
+// Wikilinks returns the raw inner strings of every [[…]] in s (exported for
+// adapters that need a note's outbound links, e.g. the MCP nt_links tool).
+func Wikilinks(s string) []string { return wikilinks(s) }
+
 // wikilinks returns the raw inner strings of every [[…]] in s.
 func wikilinks(s string) []string {
 	var out []string
