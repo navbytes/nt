@@ -124,6 +124,24 @@ are computed on demand by scanning files — no index to maintain.
 
 ### Notes ↔ Obsidian
 
+**The trend is "use Obsidian as your AI knowledge base." The substance behind it
+is plain markdown — not the app.** What actually helps an LLM is the
+[Karpathy "LLM wiki" pattern](https://venturebeat.com/data/karpathy-shares-llm-knowledge-base-architecture-that-bypasses-rag-with-an):
+a library of plain `.md` the model reads and maintains directly. For a personal
+knowledge base that beats RAG on reliability (the model reads the real file, not
+an embedding's best guess), token cost (open only what's relevant), and
+auditability (`git diff` it, roll it back). nt **is** that pattern, with tasks
+and an AI-memory loop on top.
+
+So nt talks to Claude by letting it **read scoped files directly** — `nt recall`,
+`nt ready`, and the `nt mcp` typed tools hand back exactly the relevant items.
+It deliberately does **not** route the agent through Obsidian's REST-API MCP,
+which practitioners find slow, token-heavy, and a whole-vault privacy exposure
+that experienced users won't run in their main vault
+([forum consensus](https://forum.obsidian.md/t/obsidian-mcp-servers-experiences-and-recommendations/99936)).
+Obsidian stays an **optional human GUI** pointed at `notes/` — never a dependency
+and never in the agent's path.
+
 nt has no notes GUI of its own — and doesn't need one. Notes are plain `.md` +
 YAML frontmatter + `[[wikilinks]]`, so you can **point an Obsidian vault at the
 `notes/` folder and use Obsidian as the GUI** while nt owns tasks, the CLI/TUI,

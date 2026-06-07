@@ -12,6 +12,12 @@ persist as plain text that the user — and the next session — can read back.
 Everything is the `nt` CLI. Always pass `--source claude` so AI-created items are
 distinguishable from what the user typed by hand.
 
+> If the `nt` MCP server is registered with your client (typed `nt_*` tools like
+> `nt_ready`, `nt_add`, `nt_note`, `nt_recall`), **prefer those over shelling out** —
+> they go through the same store, default `source` to `claude`, and avoid
+> CLI-string mistakes. Fall back to the `nt` commands below when the tools aren't
+> available. Either way the workflow is identical.
+
 ## Start here: `nt ready`
 
 At the start of substantive work, find what's actionable and reload prior context:
@@ -89,6 +95,13 @@ nt search "race condition" [--type note|task]
 
 Use `[[note-slug]]` or `[[<task-id>]]` inside task text or note bodies to
 cross-link tasks and notes; backlinks are found automatically.
+
+**Read links before starting related work, not just when writing them.** Before
+picking up a task, run `nt links <id>` to reconstruct its context: "discovered
+from ↑" walks back to *why* the task exists, "discovered here ↳" and backlinks
+surface the decisions, notes, and sibling work already captured around it. That
+recovers the reasoning a prior session left behind — the whole point of durable
+memory — instead of re-deriving it.
 
 ## Conventions
 
