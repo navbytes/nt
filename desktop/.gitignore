@@ -1,4 +1,9 @@
-# Wails build output and the compiled spike binary
-/build/
+# Wails build output (the compiled .app / .exe / binaries)
+/build/bin/
+
+# Wails-generated JS runtime bindings (recreated by `wails build`)
+/frontend/wailsjs/
+
+# The compiled spike binary from `make desktop-build`
 /nt-desktop
 nt

@@ -7,7 +7,24 @@ its `http.Handler` to Wails' asset server, so the native WebKit window renders
 the identical server-rendered pages (notes, search, `/tasks`, `/graph`, mermaid,
 themes, command palette, live-reload).
 
-The spike exists to **measure effort**, not to ship.
+The spike exists to **measure effort** — but it is now also **distributable**:
+tagging a release builds and uploads native bundles (see below).
+
+## Install (prebuilt)
+
+Each `vX.Y.Z` release attaches native bundles built by the `desktop` job in
+[`.github/workflows/release.yml`](../.github/workflows/release.yml):
+
+- **macOS** — `nt_<ver>_macos_universal.zip` (universal; signed + notarized once
+  the Apple secrets in [RELEASING.md](RELEASING.md) are set, otherwise ad-hoc:
+  right-click → Open the first time).
+- **Linux** — `nt_<ver>_linux_amd64.tar.gz` (needs `libgtk-3` +
+  `libwebkit2gtk-4.1`).
+- **Windows** — `nt_<ver>_windows_amd64.zip` (uses the Edge WebView2 runtime).
+
+This is separate from the `nt` **CLI**, which installs via `go install` / curl /
+Homebrew. A GUI app can't ship through `go install` (CGO + a build tag + a
+WebView runtime are required), so the two have different channels by design.
 
 ## Why it's a separate module
 
@@ -77,7 +94,9 @@ but that is an *additive* evolution, not a prerequisite. See
 
 - No Go↔JS bindings yet — the window is the web UI verbatim; it doesn't call
   native methods.
-- Not wired into CI or GoReleaser (deliberately — keeps the CLI release clean).
-- macOS-tested only; Linux/Windows need their WebView runtimes installed.
+- Release bundles are built in CI, but the macOS app is only signed/notarized
+  once the Apple secrets ([RELEASING.md](RELEASING.md)) are configured.
+- Built/tested on macOS; the Linux/Windows matrix legs are wired but need a real
+  tagged run (and their WebView runtimes) to exercise end-to-end.
 - SSE live-reload works in the webview; the editor (`SetEdit(true)`) is left
   off by default.

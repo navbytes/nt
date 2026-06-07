@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- Hardened runtime entitlements for notarization. WKWebView runs JS in a
+         separate, Apple-signed WebContent process, so the app itself needs no
+         JIT/network entitlements for the embedded UI. Keep this minimal; add
+         entries only if a future native binding requires them. -->
+    <key>com.apple.security.cs.allow-jit</key>
+    <true/>
+</dict>
+</plist>

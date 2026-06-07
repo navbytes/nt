@@ -1,0 +1,18 @@
+{
+  "$schema": "https://wails.io/schemas/config.v2.json",
+  "name": "nt",
+  "outputfilename": "nt",
+  "frontend:install": "",
+  "frontend:build": "",
+  "frontend:dir": "frontend",
+  "info": {
+    "companyName": "navbytes",
+    "productName": "nt",
+    "productVersion": "0.0.0",
+    "copyright": "MIT",
+    "comments": "nt — terminal task and note manager, desktop shell"
+  },
+  "author": {
+    "name": "navbytes"
+  }
+}

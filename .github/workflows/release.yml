@@ -29,3 +29,126 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # When you enable the Homebrew tap later (RELEASING.md), also set:
           # HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
+
+  # Native desktop bundles (Wails) for the /desktop module. Runs AFTER the
+  # GoReleaser job so it uploads into the Release that job already created — no
+  # race over who creates the Release. A failure here never unpublishes the CLI
+  # release (already done). macOS signing+notarization is gated on secrets being
+  # present; without them the macOS app is uploaded ad-hoc-signed (users then
+  # right-click → Open once). See desktop/RELEASING.md for the secret setup.
+  desktop:
+    needs: goreleaser
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            label: macos_universal
+            platform: darwin/universal
+            tags: production
+          - os: ubuntu-latest
+            label: linux_amd64
+            platform: linux/amd64
+            tags: production webkit2_41
+          - os: windows-latest
+            label: windows_amd64
+            platform: windows/amd64
+            tags: production
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: desktop
+    env:
+      # Job-level env may reference secrets; steps gate on these being non-empty.
+      APPLE_DEVELOPER_ID: ${{ secrets.APPLE_DEVELOPER_ID }}
+      APPLE_CERT_P12: ${{ secrets.APPLE_CERT_P12 }}
+      APPLE_CERT_PASSWORD: ${{ secrets.APPLE_CERT_PASSWORD }}
+      APPLE_ID: ${{ secrets.APPLE_ID }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      APPLE_NOTARY_PASSWORD: ${{ secrets.APPLE_NOTARY_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: desktop/go.mod
+          cache: true
+          cache-dependency-path: desktop/go.sum
+
+      - name: Compute version
+        shell: bash
+        run: echo "VER=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+
+      - name: Install Linux WebKit/GTK deps
+        if: matrix.os == 'ubuntu-latest'
+        run: sudo apt-get update && sudo apt-get install -y libgtk-3-dev libwebkit2gtk-4.1-dev
+
+      - name: Install Wails CLI
+        shell: bash
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.12.0
+
+      - name: Stamp version into wails.json
+        shell: bash
+        run: |
+          node -e "const fs=require('fs');const p='wails.json';const j=JSON.parse(fs.readFileSync(p,'utf8'));j.info.productVersion=process.argv[1]||'0.0.0';fs.writeFileSync(p,JSON.stringify(j,null,2)+'\n')" "$VER"
+
+      - name: Build app
+        shell: bash
+        run: wails build -tags "${{ matrix.tags }}" -platform ${{ matrix.platform }} -s
+
+      # --- macOS: sign + notarize (only when signing secrets are configured) ---
+      - name: Import signing certificate
+        if: matrix.os == 'macos-latest' && env.APPLE_CERT_P12 != ''
+        shell: bash
+        run: |
+          KEYCHAIN="$RUNNER_TEMP/app.keychain-db"
+          KPASS="$(openssl rand -base64 16)"
+          security create-keychain -p "$KPASS" "$KEYCHAIN"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN"
+          security unlock-keychain -p "$KPASS" "$KEYCHAIN"
+          echo "$APPLE_CERT_P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security import "$RUNNER_TEMP/cert.p12" -k "$KEYCHAIN" -P "$APPLE_CERT_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KPASS" "$KEYCHAIN"
+          security list-keychains -d user -s "$KEYCHAIN" $(security list-keychains -d user | tr -d '"')
+          rm -f "$RUNNER_TEMP/cert.p12"
+
+      - name: Codesign (hardened runtime)
+        if: matrix.os == 'macos-latest' && env.APPLE_CERT_P12 != ''
+        shell: bash
+        run: |
+          codesign --force --options runtime --timestamp \
+            --entitlements build/darwin/entitlements.plist \
+            --sign "$APPLE_DEVELOPER_ID" build/bin/nt.app
+          codesign --verify --strict --verbose=2 build/bin/nt.app
+
+      - name: Notarize and staple
+        if: matrix.os == 'macos-latest' && env.APPLE_NOTARY_PASSWORD != ''
+        shell: bash
+        run: |
+          ditto -c -k --keepParent build/bin/nt.app "$RUNNER_TEMP/notarize.zip"
+          xcrun notarytool submit "$RUNNER_TEMP/notarize.zip" \
+            --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" \
+            --password "$APPLE_NOTARY_PASSWORD" --wait
+          xcrun stapler staple build/bin/nt.app
+
+      # --- Package per platform ---
+      - name: Package (macOS)
+        if: matrix.os == 'macos-latest'
+        shell: bash
+        run: ditto -c -k --keepParent build/bin/nt.app "nt_${VER}_${{ matrix.label }}.zip"
+
+      - name: Package (Linux)
+        if: matrix.os == 'ubuntu-latest'
+        shell: bash
+        run: tar -C build/bin -czf "nt_${VER}_${{ matrix.label }}.tar.gz" nt
+
+      - name: Package (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: bash
+        run: cd build/bin && 7z a "../../nt_${VER}_${{ matrix.label }}.zip" nt.exe
+
+      - name: Upload to Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload "$GITHUB_REF_NAME" nt_${VER}_${{ matrix.label }}.* --clobber
