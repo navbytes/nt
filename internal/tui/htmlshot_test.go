@@ -75,7 +75,7 @@ func renderFrames(t *testing.T) []frame {
 	addDone("close flaky-test issue @ci [[ci-runbook]]", "claude", today)
 	addDone("write API docs +docs", "cli", yesterday)
 	addDone("security audit @security +infra", "claude", yesterday)
-	_, _ = note.Create(eng.S, "JWT expiry", "Tokens last 24h; refresh after 7d. See [[jwt-rotation|the rotation plan]].", []string{"auth", "backend"}, "claude")
+	_, _ = note.Create(eng.S, "JWT expiry", "Tokens last 24h; refresh after 7d. See [[jwt-rotation|the rotation plan]].", []string{"auth", "backend"}, "claude", "")
 
 	m := &Model{eng: eng, input: textinput.New()}
 	m.showBlocked = true

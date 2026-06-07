@@ -71,8 +71,8 @@ func TestHalfPageScroll(t *testing.T) {
 func TestNotesFilterSearchesBody(t *testing.T) {
 	m := testModel(t)
 	m.width, m.height = 100, 24
-	_, _ = note.Create(m.eng.S, "Alpha", "the quick brown fox", nil, "tui")
-	_, _ = note.Create(m.eng.S, "Beta", "lazy dog sleeps", nil, "tui")
+	_, _ = note.Create(m.eng.S, "Alpha", "the quick brown fox", nil, "tui", "")
+	_, _ = note.Create(m.eng.S, "Beta", "lazy dog sleeps", nil, "tui", "")
 	m.reload()
 	m.tab = tabNotes
 	m.filter = "brown"

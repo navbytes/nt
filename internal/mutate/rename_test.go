@@ -24,8 +24,8 @@ func findNote(t *testing.T, e *Engine, name string) *note.Note {
 
 func TestRenameNoteRewritesLinks(t *testing.T) {
 	e := newEngine(t)
-	_, _ = note.Create(e.S, "Old Note", "the note body", nil, "cli")
-	ref, _ := note.Create(e.S, "Ref", "see [[old-note]] and [[old-note#sec|plan]]", nil, "cli")
+	_, _ = note.Create(e.S, "Old Note", "the note body", nil, "cli", "")
+	ref, _ := note.Create(e.S, "Ref", "see [[old-note]] and [[old-note#sec|plan]]", nil, "cli", "")
 	_ = e.Apply("add", func(d *task.Doc, rec *Recorder) error {
 		tk := task.New("do [[old-note]] thing")
 		d.Append(tk)
@@ -59,8 +59,8 @@ func TestRenameNoteRewritesLinks(t *testing.T) {
 
 func TestRenameNoteCollisionRefused(t *testing.T) {
 	e := newEngine(t)
-	_, _ = note.Create(e.S, "Alpha", "", nil, "cli")
-	_, _ = note.Create(e.S, "Beta", "", nil, "cli")
+	_, _ = note.Create(e.S, "Alpha", "", nil, "cli", "")
+	_, _ = note.Create(e.S, "Beta", "", nil, "cli", "")
 	all, _ := note.List(e.S)
 	if _, _, err := e.RenameNote(findNote(t, e, "alpha"), all, "beta"); err == nil {
 		t.Fatal("alpha→beta should be refused (basename collision)")
@@ -69,7 +69,7 @@ func TestRenameNoteCollisionRefused(t *testing.T) {
 
 func TestPureMoveNoRewrite(t *testing.T) {
 	e := newEngine(t)
-	_, _ = note.Create(e.S, "Spec", "no links here", nil, "cli")
+	_, _ = note.Create(e.S, "Spec", "no links here", nil, "cli", "")
 	all, _ := note.List(e.S)
 	newRel, updated, err := e.RenameNote(findNote(t, e, "spec"), all, "archive/spec")
 	if err != nil {

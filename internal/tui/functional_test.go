@@ -95,7 +95,7 @@ func TestDetailScroll(t *testing.T) {
 	m := testModel(t)
 	m.width, m.height = 100, 24
 	body := strings.Repeat("a line of note body\n", 80)
-	if _, err := note.Create(m.eng.S, "Long Note", body, nil, "tui"); err != nil {
+	if _, err := note.Create(m.eng.S, "Long Note", body, nil, "tui", ""); err != nil {
 		t.Fatal(err)
 	}
 	m.reload()
@@ -125,7 +125,7 @@ func TestDetailScroll(t *testing.T) {
 func TestFollowLink(t *testing.T) {
 	m := testModel(t)
 	m.width, m.height = 100, 30
-	n, err := note.Create(m.eng.S, "Target Note", "body", nil, "tui")
+	n, err := note.Create(m.eng.S, "Target Note", "body", nil, "tui", "")
 	if err != nil {
 		t.Fatal(err)
 	}

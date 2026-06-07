@@ -163,6 +163,11 @@ Tokens expire after 24h; refresh window is 7d. See [[oauth-flow]].
 - Frontmatter is optional metadata; the body is free markdown (Glamour-rendered in the TUI,
   editable with `$EDITOR`).
 - Filename is a slug of the title (or a datetime when untitled, à la `nb`).
+- Notes may live in **subfolders** of `notes/`. Create into one with
+  `nt note "…" --folder work/auth` (or path-style `nt note "work/auth/…"`); the
+  folder is created as needed, and folders that would escape `notes/` (absolute or
+  `..`) are refused. `List` recurses the tree, and `[[bare-name]]` links resolve
+  across folders by shortest path-suffix (§5.1), so foldering never breaks links.
 - `[[…]]` links resolve to a **note** (by filename, title, or `id:`) or a **task** (by
   ULID / short prefix) — see §5.1. Tags come from frontmatter `tags:` (inline body `#tags`
   are not parsed).
@@ -339,7 +344,7 @@ mutation writes, atomically and under the same lock, a transaction record:
 ```bash
 nt                                   # launch the TUI
 nt add "fix auth bug" --pri high --due today --tag backend --project api [--source claude]
-nt note "JWT expiry" --body "..." --tag auth [--source claude]
+nt note "JWT expiry" --body "..." --tag auth [--folder work] [--source claude]
 nt list [--status open] [--tag bug] [--project api] [--sort urgency] [--json]   # (ls)
 nt recall [--source claude] [--since 2026-06-01] [--json]   # read back prior items (AI loop)
 nt log [--since 2026-06-01] [--days 7] [--source claude] [--json]   # completed tasks, newest first

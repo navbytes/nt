@@ -194,7 +194,7 @@ const helpText = `nt — terminal task & note manager (durable memory for AI ses
 USAGE
   nt                          open the interactive TUI
   nt add "title" [flags]      add a task
-  nt note "title" [flags]     capture a note
+  nt note "title" [flags]     capture a note (--folder work files it in notes/work/)
   nt list [flags]             list tasks            (alias: ls)
   nt ready [flags]            open, unblocked tasks by urgency — start here
   nt recall [flags]           read back prior items (for AI sessions)

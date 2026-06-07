@@ -117,6 +117,7 @@ func cmdNote(args []string) int {
 	var tags stringSlice
 	body := fs.String("body", "", "note body")
 	source := fs.String("source", "cli", "origin")
+	folder := fs.String("folder", "", "subfolder under notes/ (e.g. work or work/auth)")
 	fs.Var(&tags, "tag", "tag (repeatable)")
 
 	flags, positional := splitArgs(args, nil)
@@ -124,6 +125,15 @@ func cmdNote(args []string) int {
 		return 2
 	}
 	title := strings.Join(positional, " ")
+	fold := *folder
+	// Path-style shorthand: `nt note "work/Auth design"` files it under work/
+	// when no explicit --folder was given.
+	if fold == "" {
+		if i := strings.LastIndex(title, "/"); i >= 0 {
+			fold = strings.TrimSpace(title[:i])
+			title = strings.TrimSpace(title[i+1:])
+		}
+	}
 	if strings.TrimSpace(title) == "" {
 		return fail(fmt.Errorf("note: a title is required"))
 	}
@@ -131,7 +141,7 @@ func cmdNote(args []string) int {
 	if !ok {
 		return 1
 	}
-	n, err := note.Create(e.S, title, *body, tags, *source)
+	n, err := note.Create(e.S, title, *body, tags, *source, fold)
 	if err != nil {
 		return fail(err)
 	}
@@ -932,7 +942,7 @@ func onboard(e *mutate.Engine) {
 		return nil
 	})
 	_, _ = note.Create(e.S, "Welcome to nt",
-		"nt stores tasks in tasks.txt (todo.txt format) and notes here as markdown.\n\nTry:\n- `nt add \"my first task\" --due today`\n- `nt recall` to read items back later\n", []string{"nt"}, "nt")
+		"nt stores tasks in tasks.txt (todo.txt format) and notes here as markdown.\n\nTry:\n- `nt add \"my first task\" --due today`\n- `nt recall` to read items back later\n", []string{"nt"}, "nt", "")
 	fmt.Printf(`Welcome to nt. Your store is %s
 
   nt add "title"   add a task

@@ -56,7 +56,11 @@ func Slug(title string) string {
 
 // Create builds and writes a new note, returning it. The body is prefixed with
 // an H1 title when it doesn't already start with one.
-func Create(s *store.Store, title, body string, tags []string, source string) (*Note, error) {
+// Create writes a new note. folder, when non-empty, is a slash-separated
+// subfolder under notes/ (e.g. "work" or "work/auth"); it is created as needed.
+// The filename is slugged from the title; the body and frontmatter are written
+// by Save.
+func Create(s *store.Store, title, body string, tags []string, source, folder string) (*Note, error) {
 	n := &Note{
 		ID:      ulid.New(),
 		Title:   title,
@@ -65,12 +69,38 @@ func Create(s *store.Store, title, body string, tags []string, source string) (*
 		Created: time.Now().Format(time.RFC3339),
 		Body:    body,
 	}
-	slug := Slug(title)
-	n.Path = uniquePath(s.NotesDir(), slug)
+	dir := s.NotesDir()
+	if clean, err := cleanFolder(folder); err != nil {
+		return nil, err
+	} else if clean != "" {
+		dir = filepath.Join(dir, filepath.FromSlash(clean))
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return nil, fmt.Errorf("create folder: %w", err)
+		}
+	}
+	n.Path = uniquePath(dir, Slug(title))
 	if err := n.Save(); err != nil {
 		return nil, err
 	}
 	return n, nil
+}
+
+// cleanFolder normalizes a slash-separated subfolder and refuses paths that
+// would escape notes/ (absolute, or containing "." / ".." segments).
+func cleanFolder(folder string) (string, error) {
+	if filepath.IsAbs(folder) {
+		return "", fmt.Errorf("folder must be relative to notes/: %q", folder)
+	}
+	f := strings.Trim(filepath.ToSlash(strings.TrimSpace(folder)), "/")
+	if f == "" {
+		return "", nil
+	}
+	for _, seg := range strings.Split(f, "/") {
+		if seg == "" || seg == "." || seg == ".." {
+			return "", fmt.Errorf("invalid folder %q", folder)
+		}
+	}
+	return f, nil
 }
 
 // uniquePath avoids clobbering an existing note with the same slug.

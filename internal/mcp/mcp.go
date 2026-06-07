@@ -313,7 +313,7 @@ func (s *server) note(a map[string]any) (string, error) {
 	if source == "" {
 		source = "claude"
 	}
-	n, err := note.Create(s.eng.S, title, str(a, "body"), strSlice(a, "tags"), source)
+	n, err := note.Create(s.eng.S, title, str(a, "body"), strSlice(a, "tags"), source, str(a, "folder"))
 	if err != nil {
 		return "", err
 	}

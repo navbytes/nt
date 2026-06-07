@@ -33,7 +33,7 @@ func write(t *testing.T, s *store.Store, rel, content string) {
 // the hand-rolled parser changes against the native inline-tag format).
 func TestRoundTripNative(t *testing.T) {
 	s := testStore(t)
-	n, err := Create(s, "JWT Expiry", "Tokens last 24h.", []string{"auth", "backend"}, "claude")
+	n, err := Create(s, "JWT Expiry", "Tokens last 24h.", []string{"auth", "backend"}, "claude", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -46,6 +46,47 @@ func TestRoundTripNative(t *testing.T) {
 	}
 	if len(got.Tags) != 2 || got.Tags[0] != "auth" || got.Tags[1] != "backend" {
 		t.Fatalf("inline tags should round-trip, got %v", got.Tags)
+	}
+}
+
+// TestCreateInFolder: Create writes into a subfolder, the file lands there, and
+// List discovers it with the expected slash-separated Rel.
+func TestCreateInFolder(t *testing.T) {
+	s := testStore(t)
+	n, err := Create(s, "Auth Design", "scoped", nil, "cli", "work/auth")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := filepath.Join(s.NotesDir(), "work", "auth", "auth-design.md")
+	if n.Path != want {
+		t.Fatalf("note path = %q, want %q", n.Path, want)
+	}
+	if _, err := os.Stat(want); err != nil {
+		t.Fatalf("file not created in subfolder: %v", err)
+	}
+	all, _ := List(s)
+	var found bool
+	for _, x := range all {
+		if x.Rel == "work/auth/auth-design.md" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("List did not surface the folder note; got %d notes", len(all))
+	}
+}
+
+// TestCreateFolderEscapeRefused: folders that would escape notes/ are rejected.
+func TestCreateFolderEscapeRefused(t *testing.T) {
+	s := testStore(t)
+	for _, bad := range []string{"../etc", "a/../../b", "/abs/path", "work/./x"} {
+		if _, err := Create(s, "x", "", nil, "cli", bad); err == nil {
+			t.Errorf("folder %q should be refused", bad)
+		}
+	}
+	// A clean nested folder is allowed.
+	if _, err := Create(s, "ok", "", nil, "cli", "a/b/c"); err != nil {
+		t.Errorf("clean nested folder should be allowed: %v", err)
 	}
 }
 

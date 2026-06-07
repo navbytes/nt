@@ -361,7 +361,7 @@ func (m *Model) addTask(text string) {
 }
 
 func (m *Model) addNote(title string) {
-	n, err := note.Create(m.eng.S, title, "", nil, "tui")
+	n, err := note.Create(m.eng.S, title, "", nil, "tui", "")
 	if err != nil {
 		m.setStatus("note error")
 		return

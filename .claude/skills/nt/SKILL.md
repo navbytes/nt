@@ -79,6 +79,11 @@ For findings, context, or anything longer than a task line:
 nt note "JWT tokens expire after 24h" --body "Refresh window is 7d. See auth.go." --source claude --tag auth
 ```
 
+Use `--folder <path>` to file a note in a subfolder (created as needed), e.g.
+`--folder work/auth` → `notes/work/auth/…`. The `nt_note` MCP tool takes the same
+`folder` argument. Bare `[[name]]` links still resolve across folders by
+shortest path-suffix, so foldering notes doesn't break linking.
+
 ## Update / complete
 
 ```bash

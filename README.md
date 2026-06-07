@@ -89,6 +89,7 @@ merge, `nt doctor` reconciles any duplicates.
 ```bash
 nt add "fix auth bug" --pri high --due today --tag backend --project api
 nt note "JWT expiry" --body "tokens last 24h" --tag auth
+nt note "Auth design" --folder work          # file it in notes/work/ (or: nt note "work/Auth design")
 nt ready [--source claude] [--json]   # open, unblocked tasks by urgency — start here
 nt list [--status open|doing|blocked|done] [--tag T] [--sort urgency] [--all] [--json]
 nt done <id|task:N>            # also accepts the 6-char short code shown in list
@@ -147,7 +148,9 @@ and never in the agent's path.
 nt has no notes GUI of its own — and doesn't need one. Notes are plain `.md` +
 YAML frontmatter + `[[wikilinks]]`, so you can **point an Obsidian vault at the
 `notes/` folder and use Obsidian as the GUI** while nt owns tasks, the CLI/TUI,
-and the AI-memory loop. nt reads back what Obsidian writes: nested subfolders,
+and the AI-memory loop. Folders work both ways: create into one with `nt note "…" --folder work` (or the
+path-style `nt note "work/…"`), move with `nt mv`, and nt reads back what Obsidian
+writes: nested subfolders,
 block-list `tags:`/`aliases:`, notes without an H1 (title falls back to the
 filename), and link variants (`[[folder/note]]`, `[[note#heading]]`,
 `[[note|alias]]`) resolved by shortest path-suffix — a bare name colliding across

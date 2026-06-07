@@ -79,6 +79,7 @@ var toolDefs = []toolDef{
 			"title":  st(),
 			"body":   sp("markdown"),
 			"tags":   at(),
+			"folder": sp("subfolder under notes/, e.g. work or work/auth"),
 			"source": st(),
 		}, "title"),
 	},
