@@ -230,6 +230,12 @@ ADD/UPDATE FLAGS
   --parent <id>        --blocks <id>    --note <slug>   (link to a note)
   --discovered-from <id>   record that this task was surfaced while doing another
 
+NOTE FLAGS (nt note)
+  --body TEXT   --tag NAME (repeat)   --source NAME
+  --folder DIR        file under notes/DIR/ (created as needed; or path-style:
+                      nt note "decisions/Chose flock over SQLite")
+  --field key=value   set extra frontmatter at capture (repeatable, preserved)
+
 LIST/RECALL FLAGS
   --status open|doing|blocked|done   --tag NAME   --project NAME
   --sort urgency|due|created         --all        --json

@@ -74,12 +74,12 @@ var toolDefs = []toolDef{
 	},
 	{
 		Name:        "nt_note",
-		Description: "Save a note (finding/decision/dead-end). Capture the WHY; recall returns the body.",
+		Description: "Save a note (finding/decision/dead-end) — capture the WHY. Set folder to file it under notes/<folder>/; recall returns the body.",
 		InputSchema: obj(map[string]any{
 			"title":  st(),
 			"body":   sp("markdown"),
 			"tags":   at(),
-			"folder": sp("subfolder under notes/, e.g. work or work/auth"),
+			"folder": sp("subfolder to file under, e.g. ref or decisions/auth (created as needed)"),
 			"source": st(),
 		}, "title"),
 	},
