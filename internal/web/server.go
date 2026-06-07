@@ -8,6 +8,7 @@ package web
 
 import (
 	"embed"
+	"encoding/json"
 	"fmt"
 	"html/template"
 	"net"
@@ -42,7 +43,15 @@ type Server struct {
 
 // NewServer parses the embedded template and prepares the viewer.
 func NewServer(eng *mutate.Engine, version string) (*Server, error) {
-	tmpl, err := template.ParseFS(assetsFS, "assets/*.html")
+	funcs := template.FuncMap{
+		// json marshals a value for safe embedding in a <script> tag (Go's
+		// encoder escapes <, >, & so a note title can't break out).
+		"json": func(v any) template.JS {
+			b, _ := json.Marshal(v)
+			return template.JS(b) //nolint:gosec // HTML-escaped JSON, data only
+		},
+	}
+	tmpl, err := template.New("nt").Funcs(funcs).ParseFS(assetsFS, "assets/*.html")
 	if err != nil {
 		return nil, err
 	}
@@ -75,6 +84,8 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("/n/", s.handleNote)
 	mux.HandleFunc("/search", s.handleSearch)
 	mux.HandleFunc("/orphans", s.handleOrphans)
+	mux.HandleFunc("/tags", s.handleTags)
+	mux.HandleFunc("/tasks", s.handleTasks)
 	mux.HandleFunc("/events", s.handleSSE)
 	mux.HandleFunc("/static/", s.handleStatic)
 	return mux
@@ -91,8 +102,10 @@ func (s *Server) load() (*task.Doc, []*note.Note) {
 type pageData struct {
 	Title       string
 	Tree        []*treeNode
+	NoteIndex   []linkRow // flat list of every note, for the ⌘K palette
 	ShowResults bool
 	SearchQuery string
+	SearchTag   string
 	Results     []linkRow
 
 	IsNote      bool
@@ -106,16 +119,47 @@ type pageData struct {
 	BodyHTML    template.HTML
 	Backlinks   []Backlink
 	TaskRefs    []TaskRef
+	Prev        *linkRow
+	Next        *linkRow
 
 	IsState    bool
 	StateTitle string
 	Target     string
 	Candidates []linkRow
+
+	Empty      bool // store has no notes (onboarding state)
+	IsTags     bool
+	TagRows    []tagRow
+	IsTasks    bool
+	TaskGroups []taskGroup
 }
 
 type linkRow struct{ URL, Title, Path string }
+type tagRow struct {
+	Name  string
+	Count int
+	URL   string
+}
+type taskGroup struct {
+	Status string
+	Tasks  []taskRow
+}
+type taskRow struct {
+	Text, Status, Due, Source, Project string
+	Tags                               []string
+}
 
-func (s *Server) render(w http.ResponseWriter, d *pageData) {
+// flatNotes is the note index the ⌘K palette filters over.
+func flatNotes(notes []*note.Note) []linkRow {
+	out := make([]linkRow, 0, len(notes))
+	for _, n := range notes {
+		out = append(out, linkRow{URL: "/n/" + url.PathEscape(noteHandle(n)), Title: n.Title, Path: n.Rel})
+	}
+	return out
+}
+
+func (s *Server) render(w http.ResponseWriter, notes []*note.Note, d *pageData) {
+	d.NoteIndex = flatNotes(notes)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := s.tmpl.ExecuteTemplate(w, "layout.html", d); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -130,7 +174,7 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	_, notes := s.load()
-	s.render(w, &pageData{Title: "nt notes", Tree: buildTree(notes, "")})
+	s.render(w, notes, &pageData{Title: "nt notes", Tree: buildTree(notes, ""), Empty: len(notes) == 0})
 }
 
 func (s *Server) handleNote(w http.ResponseWriter, r *http.Request) {
@@ -166,7 +210,8 @@ func (s *Server) renderNote(w http.ResponseWriter, n *note.Note, doc *task.Doc, 
 	if folder != "" {
 		crumbs = strings.Split(folder, "/")
 	}
-	s.render(w, &pageData{
+	prev, next := siblings(notes, n, folder)
+	s.render(w, notes, &pageData{
 		Title:       n.Title,
 		Tree:        buildTree(notes, noteHandle(n)),
 		IsNote:      true,
@@ -180,7 +225,35 @@ func (s *Server) renderNote(w http.ResponseWriter, n *note.Note, doc *task.Doc, 
 		BodyHTML:    body,
 		Backlinks:   backlinksFor(s.eng.S, n, notes),
 		TaskRefs:    tasksReferencing(doc, n, notes),
+		Prev:        prev,
+		Next:        next,
 	})
+}
+
+// siblings returns the previous/next notes in the same folder (Rel order).
+func siblings(notes []*note.Note, n *note.Note, folder string) (prev, next *linkRow) {
+	var sibs []*note.Note
+	for _, x := range notes {
+		if f, _ := splitRel(x.Rel); f == folder {
+			sibs = append(sibs, x) // notes arrive sorted by Rel
+		}
+	}
+	for i, x := range sibs {
+		if x.Path != n.Path {
+			continue
+		}
+		row := func(m *note.Note) *linkRow {
+			return &linkRow{URL: "/n/" + url.PathEscape(noteHandle(m)), Title: m.Title}
+		}
+		if i > 0 {
+			prev = row(sibs[i-1])
+		}
+		if i < len(sibs)-1 {
+			next = row(sibs[i+1])
+		}
+		break
+	}
+	return prev, next
 }
 
 func (s *Server) renderMissing(w http.ResponseWriter, handle string, notes []*note.Note) {
@@ -195,7 +268,7 @@ func (s *Server) renderMissing(w http.ResponseWriter, handle string, notes []*no
 	if len(cands) > 1 {
 		title = "Ambiguous link"
 	}
-	s.render(w, &pageData{
+	s.render(w, notes, &pageData{
 		Title:      title,
 		Tree:       buildTree(notes, ""),
 		IsState:    true,
@@ -207,8 +280,9 @@ func (s *Server) renderMissing(w http.ResponseWriter, handle string, notes []*no
 
 func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	q := strings.TrimSpace(r.URL.Query().Get("q"))
+	tag := strings.TrimSpace(r.URL.Query().Get("tag"))
 	_, notes := s.load()
-	if q == "" {
+	if q == "" && tag == "" {
 		http.Redirect(w, r, "/", http.StatusFound)
 		return
 	}
@@ -219,29 +293,44 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	seen := map[string]bool{}
 	var results []linkRow
 	add := func(n *note.Note) {
-		if n == nil || seen[noteHandle(n)] {
+		if n == nil || seen[noteHandle(n)] || (tag != "" && !contains(n.Tags, tag)) {
 			return
 		}
 		seen[noteHandle(n)] = true
 		results = append(results, linkRow{URL: "/n/" + url.PathEscape(noteHandle(n)), Title: n.Title, Path: n.Rel})
 	}
-	// title matches first (cheap, most relevant), then full-text body hits.
-	ql := strings.ToLower(q)
-	for _, n := range notes {
-		if strings.Contains(strings.ToLower(n.Title), ql) {
+	if q == "" { // tag-only: list every note carrying the tag
+		for _, n := range notes {
 			add(n)
 		}
-	}
-	if hits, err := search.Literal(q, s.eng.S.NotesDir()); err == nil {
-		for _, h := range hits {
-			add(byPath[h.Path])
+	} else {
+		ql := strings.ToLower(q)
+		for _, n := range notes { // title matches first (most relevant)
+			if strings.Contains(strings.ToLower(n.Title), ql) {
+				add(n)
+			}
+		}
+		if hits, err := search.Literal(q, s.eng.S.NotesDir()); err == nil {
+			for _, h := range hits {
+				add(byPath[h.Path])
+			}
 		}
 	}
-	s.render(w, &pageData{
-		Title:       "Search: " + q,
+	if r.URL.Query().Get("json") == "1" { // search-as-you-type
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(results)
+		return
+	}
+	label := "Search: " + q
+	if q == "" {
+		label = "Tag: " + tag
+	}
+	s.render(w, notes, &pageData{
+		Title:       label,
 		Tree:        buildTree(notes, ""),
 		ShowResults: true,
 		SearchQuery: q,
+		SearchTag:   tag,
 		Results:     results,
 	})
 }
@@ -255,7 +344,68 @@ func (s *Server) handleOrphans(w http.ResponseWriter, r *http.Request) {
 			results = append(results, linkRow{URL: "/n/" + url.PathEscape(noteHandle(n)), Title: n.Title, Path: n.Rel})
 		}
 	}
-	s.render(w, &pageData{Title: "Orphans", Tree: buildTree(notes, ""), ShowResults: true, Results: results})
+	s.render(w, notes, &pageData{Title: "Orphans", Tree: buildTree(notes, ""), ShowResults: true, Results: results})
+}
+
+// handleTags lists the tag vocabulary with counts; each links to its filtered set.
+func (s *Server) handleTags(w http.ResponseWriter, r *http.Request) {
+	doc, notes := s.load()
+	counts := map[string]int{}
+	for _, n := range notes {
+		for _, t := range n.Tags {
+			counts[t]++
+		}
+	}
+	if doc != nil {
+		for _, tk := range doc.Tasks() {
+			for _, t := range tk.Tags() {
+				counts[t]++
+			}
+		}
+	}
+	names := make([]string, 0, len(counts))
+	for k := range counts {
+		names = append(names, k)
+	}
+	sort.Strings(names)
+	rows := make([]tagRow, 0, len(names))
+	for _, k := range names {
+		rows = append(rows, tagRow{Name: k, Count: counts[k], URL: "/search?tag=" + url.QueryEscape(k)})
+	}
+	s.render(w, notes, &pageData{Title: "Tags", Tree: buildTree(notes, ""), IsTags: true, TagRows: rows})
+}
+
+// handleTasks is the agent-memory dashboard: tasks grouped by status, urgency-sorted.
+func (s *Server) handleTasks(w http.ResponseWriter, r *http.Request) {
+	doc, notes := s.load()
+	var groups []taskGroup
+	if doc != nil {
+		tasks := doc.Tasks()
+		task.SortByUrgency(tasks)
+		byStatus := map[string][]taskRow{}
+		for _, t := range tasks {
+			row := taskRow{Text: cleanTaskText(t.Text), Status: t.Status(), Due: t.Due(), Source: t.Source(), Tags: t.Tags()}
+			if p := t.Projects(); len(p) > 0 {
+				row.Project = p[0]
+			}
+			byStatus[t.Status()] = append(byStatus[t.Status()], row)
+		}
+		for _, st := range []string{"doing", "open", "blocked", "done"} {
+			if rows := byStatus[st]; len(rows) > 0 {
+				groups = append(groups, taskGroup{Status: st, Tasks: rows})
+			}
+		}
+	}
+	s.render(w, notes, &pageData{Title: "Tasks", Tree: buildTree(notes, ""), IsTasks: true, TaskGroups: groups})
+}
+
+func contains(ss []string, want string) bool {
+	for _, s := range ss {
+		if s == want {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *Server) handleStatic(w http.ResponseWriter, r *http.Request) {
@@ -390,6 +540,7 @@ func addDirs(wt *fsnotify.Watcher, root string) {
 
 type treeNode struct {
 	Name     string
+	Path     string // folder path (persistence key for collapse state); "" for notes
 	URL      string
 	IsNote   bool
 	Current  bool
@@ -425,7 +576,7 @@ func ensureDir(dirs map[string]*treeNode, root *treeNode, path string) *treeNode
 	}
 	parentPath, name := splitRel(path)
 	parent := ensureDir(dirs, root, parentPath)
-	node := &treeNode{Name: name}
+	node := &treeNode{Name: name, Path: path}
 	parent.Children = append(parent.Children, node)
 	dirs[path] = node
 	return node

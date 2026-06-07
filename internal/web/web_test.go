@@ -224,3 +224,68 @@ func TestStaticAssets(t *testing.T) {
 		t.Errorf("mermaid should be gzip-encoded: %d %q", resp.StatusCode, resp.Header.Get("Content-Encoding"))
 	}
 }
+
+func TestTagsPage(t *testing.T) {
+	s := newTestServer(t)
+	_, _ = note.Create(s.eng.S, "A", "", []string{"auth", "ref"}, "cli", "")
+	_, _ = note.Create(s.eng.S, "B", "", []string{"auth"}, "cli", "")
+	_, body := get(t, s, "/tags")
+	if !strings.Contains(body, `href="/search?tag=auth"`) || !strings.Contains(body, `class="tag__count">2`) {
+		t.Fatalf("tags page wrong:\n%s", body)
+	}
+}
+
+func TestSearchTagFilterJSON(t *testing.T) {
+	s := newTestServer(t)
+	_, _ = note.Create(s.eng.S, "Auth Design", "", []string{"auth"}, "cli", "")
+	_, _ = note.Create(s.eng.S, "Other Note", "", []string{"misc"}, "cli", "")
+	resp, body := get(t, s, "/search?json=1&tag=auth")
+	if resp.Header.Get("Content-Type") != "application/json" {
+		t.Fatalf("json search content-type %q", resp.Header.Get("Content-Type"))
+	}
+	if !strings.Contains(body, "Auth Design") || strings.Contains(body, "Other Note") {
+		t.Fatalf("tag filter wrong: %s", body)
+	}
+}
+
+func TestTasksDashboard(t *testing.T) {
+	s := newTestServer(t)
+	if err := s.eng.Apply("add", func(d *task.Doc, rec *mutate.Recorder) error {
+		o := task.New("open thing")
+		d.Append(o)
+		rec.Added(o)
+		dn := task.New("done thing")
+		dn.SetDone(true, "2026-01-01")
+		d.Append(dn)
+		rec.Added(dn)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	_, body := get(t, s, "/tasks")
+	if !strings.Contains(body, "taskgroup") || !strings.Contains(body, "s-open") || !strings.Contains(body, "s-done") {
+		t.Fatalf("tasks dashboard missing groups:\n%s", body)
+	}
+}
+
+func TestPaletteIndexAndOnboarding(t *testing.T) {
+	s := newTestServer(t)
+	if _, body := get(t, s, "/"); !strings.Contains(body, "No notes yet") {
+		t.Fatalf("empty onboarding missing:\n%s", body)
+	}
+	_, _ = note.Create(s.eng.S, "Findme", "", nil, "cli", "")
+	_, body := get(t, s, "/")
+	if !strings.Contains(body, `id="nt-notes"`) || !strings.Contains(body, `id="palette"`) || !strings.Contains(body, "Findme") {
+		t.Fatalf("palette/note-index missing:\n%s", body)
+	}
+}
+
+func TestSiblingPager(t *testing.T) {
+	s := newTestServer(t)
+	a, _ := note.Create(s.eng.S, "Alpha", "", nil, "cli", "ref")
+	_, _ = note.Create(s.eng.S, "Beta", "", nil, "cli", "ref")
+	_, body := get(t, s, "/n/"+a.ID)
+	if !strings.Contains(body, `class="pager"`) || !strings.Contains(body, `class="pager__next"`) {
+		t.Fatalf("sibling pager missing:\n%s", body)
+	}
+}

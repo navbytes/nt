@@ -8,18 +8,24 @@
   <script>try{var d=document.documentElement;var t=localStorage.getItem("nt-theme");if(t)d.setAttribute("data-theme",t);var w=localStorage.getItem("nt-width");if(w&&w!=="cozy")d.setAttribute("data-width",w);}catch(e){}</script>
 </head>
 <body>
-  <a class="skip-link" href="#main">Skip to note</a>
+  <a class="skip-link" href="#main">Skip to content</a>
   <div class="app" id="app">
     <div class="backdrop" data-nav-close></div>
 
     <aside class="sidebar" id="sidebar">
       <div class="sidebar__head">
-        <div class="brand">nt</div>
-        <form action="/search" method="get" role="search">
-          <input class="search" id="search" name="q" type="search"
-                 placeholder="Search notes…" autocomplete="off"
-                 aria-label="Search notes" value="{{.SearchQuery}}">
-        </form>
+        <a class="brand" href="/">nt</a>
+        <div class="search-wrap">
+          <form action="/search" method="get" role="search">
+            <input class="search" id="search" name="q" type="search"
+                   placeholder="Search…  ⌘K" autocomplete="off"
+                   aria-label="Search notes" value="{{.SearchQuery}}">
+          </form>
+          <ul class="search-dropdown" id="search-dropdown" hidden></ul>
+        </div>
+        <nav class="sidenav" aria-label="Sections">
+          <a href="/tasks">Tasks</a><a href="/tags">Tags</a><a href="/orphans">Orphans</a>
+        </nav>
       </div>
       <nav class="sidebar__tree" aria-label="Notes">
         {{if .ShowResults}}
@@ -63,6 +69,36 @@
           {{end}}
         </div>
       </article>
+
+      {{else if .IsTasks}}
+      <article class="note">
+        <header class="note__header"><h1 class="note__title">Tasks</h1></header>
+        {{range .TaskGroups}}
+        <section class="taskgroup">
+          <h2 class="taskgroup__title"><span class="taskref__status s-{{.Status}}">{{.Status}}</span> · {{len .Tasks}}</h2>
+          <ul>
+            {{range .Tasks}}
+            <li class="taskrow">
+              <span class="taskrow__text">{{.Text}}</span>
+              {{if .Due}}<span class="taskrow__due">{{.Due}}</span>{{end}}
+              {{if .Source}}<span class="taskref__src">{{.Source}}</span>{{end}}
+            </li>
+            {{end}}
+          </ul>
+        </section>
+        {{else}}
+        <p class="backlinks__empty">No tasks captured yet.</p>
+        {{end}}
+      </article>
+
+      {{else if .IsTags}}
+      <article class="note">
+        <header class="note__header"><h1 class="note__title">Tags</h1></header>
+        <div class="tagcloud">
+          {{range .TagRows}}<a class="tag tag--lg" href="{{.URL}}">{{.Name}}<span class="tag__count">{{.Count}}</span></a>{{else}}<p class="backlinks__empty">No tags yet.</p>{{end}}
+        </div>
+      </article>
+
       {{else if .IsNote}}
       <article class="note">
         <header class="note__header">
@@ -74,7 +110,7 @@
           </div>
           {{if .Tags}}
           <div class="note__tags">
-            {{range .Tags}}<a class="tag" href="/search?q={{.}}">{{.}}</a>{{end}}
+            {{range .Tags}}<a class="tag" href="/search?tag={{.}}">{{.}}</a>{{end}}
           </div>
           {{end}}
         </header>
@@ -107,19 +143,48 @@
           <p class="backlinks__empty">Nothing links here yet.</p>
           {{end}}
         </footer>
+
+        {{if or .Prev .Next}}
+        <nav class="pager" aria-label="Sibling notes">
+          {{if .Prev}}<a class="pager__prev" href="{{.Prev.URL}}">← {{.Prev.Title}}</a>{{else}}<span></span>{{end}}
+          {{if .Next}}<a class="pager__next" href="{{.Next.URL}}">{{.Next.Title}} →</a>{{end}}
+        </nav>
+        {{end}}
       </article>
+
       {{else}}
       <article class="note">
+        {{if .Empty}}
+        <div class="state">
+          <div class="state__icon">▌</div>
+          <h1>No notes yet</h1>
+          <p>Create one from the terminal:</p>
+          <p><code>nt note "My first note" --folder ref</code></p>
+        </div>
+        {{else}}
         <div class="state">
           <div class="state__icon">▌</div>
           <h1>nt notes</h1>
-          <p>Pick a note from the sidebar, or press <code>/</code> to search.</p>
+          <p>Pick a note from the sidebar, press <code>⌘K</code> to jump, or <code>/</code> to search.</p>
         </div>
+        <div class="recent" id="recent" hidden>
+          <h2 class="recent__title">Recently viewed</h2>
+          <ul id="recent-list"></ul>
+        </div>
+        {{end}}
       </article>
       {{end}}
     </main>
   </div>
 
+  <div class="palette" id="palette" hidden>
+    <div class="palette__box">
+      <input class="palette__input" id="palette-input" type="text" placeholder="Jump to a note…" autocomplete="off" aria-label="Jump to note">
+      <ul class="palette__list" id="palette-list"></ul>
+    </div>
+  </div>
+
+  <script id="nt-notes" type="application/json">{{json .NoteIndex}}</script>
   <script src="/static/mermaid.min.js"></script>
   <script src="/static/app.js"></script>
 </body>
@@ -131,7 +196,7 @@
   {{if .IsNote}}
   <li><a class="tree__link{{if .Current}} is-current{{end}}" href="{{.URL}}"{{if .Current}} aria-current="page"{{end}}>{{.Name}}</a></li>
   {{else}}
-  <li><details class="folder" open><summary>{{.Name}}</summary>{{template "tree" .Children}}</details></li>
+  <li><details class="folder" data-path="{{.Path}}" open><summary>{{.Name}}</summary>{{template "tree" .Children}}</details></li>
   {{end}}
   {{end}}
 </ul>
