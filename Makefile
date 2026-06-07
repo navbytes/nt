@@ -4,7 +4,7 @@ NT_INSTALL_DIR ?= $(HOME)/.local/bin
 INSTALL_DIR    := $(NT_INSTALL_DIR)
 LDFLAGS        := -s -w -X main.version=$(VERSION)
 
-.PHONY: build install uninstall test vet fmt render clean release snapshot
+.PHONY: build install uninstall test vet fmt render clean release snapshot desktop desktop-build
 
 build:
 	go build -ldflags "$(LDFLAGS)" -o $(BINARY) .
@@ -41,3 +41,17 @@ release:
 # Build local release artifacts without publishing.
 snapshot:
 	goreleaser release --snapshot --clean
+
+# --- Wails desktop spike -----------------------------------------------------
+# desktop/ is a SEPARATE nested module: its Wails/CGO/WebKit deps never enter
+# the CLI's go.mod, and `go install github.com/navbytes/nt@latest` never builds
+# it. These targets opt in explicitly. `-tags production` selects Wails' native
+# webview (a bare `go run .` compiles a build-tag stub that exits).
+
+# Run the native window over your real store ($NT_DIR).
+desktop:
+	cd desktop && go run -tags production .
+
+# Compile the desktop binary to desktop/nt-desktop (gitignored).
+desktop-build:
+	cd desktop && go build -tags production -o nt-desktop . && echo "built desktop/nt-desktop"
