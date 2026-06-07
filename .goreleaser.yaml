@@ -43,6 +43,10 @@ brews:
     repository:
       owner: navbytes
       name: homebrew-tap
+      # A PAT with write access to the tap repo — the default GITHUB_TOKEN can't
+      # push to a *different* repository. Provide it as the secret
+      # HOMEBREW_TAP_GITHUB_TOKEN (see RELEASING.md).
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
     homepage: "https://github.com/navbytes/nt"
     description: "Terminal task & note manager — durable memory for AI coding sessions"
     license: MIT
