@@ -299,7 +299,7 @@ func noteMatches(n *note.Note, needle string) bool {
 	if needle == "" {
 		return true
 	}
-	hay := strings.ToLower(n.Title + " " + strings.Join(n.Tags, " ") + " " + n.Body + " " + n.Source)
+	hay := strings.ToLower(n.Title + " " + n.Rel + " " + strings.Join(n.Tags, " ") + " " + n.Body + " " + n.Source)
 	return strings.Contains(hay, needle)
 }
 

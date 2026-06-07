@@ -51,6 +51,45 @@ func TestAddNoteFromTUI(t *testing.T) {
 	}
 }
 
+// TestFolderShownInTUI: a note in a subfolder shows its folder prefix in the
+// notes list, its path in the detail header, and is reachable via a folder
+// filter.
+func TestFolderShownInTUI(t *testing.T) {
+	m := testModel(t)
+	m.width, m.height = 100, 30
+	if _, err := note.Create(m.eng.S, "Auth Design", "scoped body", nil, "cli", "work/auth"); err != nil {
+		t.Fatal(err)
+	}
+	m.reload()
+	m = press(m, "2").(*Model) // notes tab
+
+	// List shows the folder prefix.
+	if list := m.notesList(m.width, m.height); !strings.Contains(list, "work/auth/") {
+		t.Fatalf("notes list missing folder prefix:\n%s", list)
+	}
+
+	// Detail header shows the folder.
+	var folderNote *note.Note
+	for _, n := range m.notesView {
+		if n.Title == "Auth Design" {
+			folderNote = n
+		}
+	}
+	if folderNote == nil {
+		t.Fatal("folder note not in notesView")
+	}
+	if det := m.noteDetail(folderNote, m.width); !strings.Contains(det, "work/auth/") {
+		t.Fatalf("detail missing folder line:\n%s", det)
+	}
+
+	// Filtering by folder name keeps the folder note.
+	m.filter = "work/auth"
+	m.rebuild()
+	if len(m.notesView) != 1 || m.notesView[0].Title != "Auth Design" {
+		t.Fatalf("folder filter should isolate the note; got %d", len(m.notesView))
+	}
+}
+
 // TestAllInputFlows exercises every prompt-based action.
 func TestAllInputFlows(t *testing.T) {
 	m := testModel(t)

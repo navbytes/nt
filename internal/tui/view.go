@@ -585,14 +585,23 @@ func (m *Model) notesList(width, h int) string {
 	var lines []string
 	var hits []hitLine
 	for i, n := range m.notesView {
+		folder := relFolder(n.Rel)
 		if i == m.cursor {
-			body := "▤ " + n.Title
+			body := "▤ "
+			if folder != "" {
+				body += folder + "/"
+			}
+			body += n.Title
 			if len(n.Tags) > 0 {
 				body += "  @" + strings.Join(n.Tags, " @")
 			}
 			lines = append(lines, selRow(body, width, false))
 		} else {
-			row := stDim.Render("▤") + " " + n.Title
+			row := stDim.Render("▤") + " "
+			if folder != "" {
+				row += stDim.Render(folder + "/")
+			}
+			row += n.Title
 			if len(n.Tags) > 0 {
 				row += "  " + stTag.Render("@"+strings.Join(n.Tags, " @"))
 			}
@@ -780,9 +789,21 @@ func (m *Model) backlinkLabel(path, text string) (kind, title string) {
 	return "task", strings.TrimSpace(text)
 }
 
+// relFolder returns a note's slash-separated parent folder (relative to notes/),
+// or "" for a note in the root. Rel is "" for an unsaved/in-memory note.
+func relFolder(rel string) string {
+	if i := strings.LastIndex(rel, "/"); i >= 0 {
+		return rel[:i]
+	}
+	return ""
+}
+
 func (m *Model) noteDetail(n *note.Note, w int) string {
 	var b strings.Builder
 	b.WriteString(stTitle.Render(truncate(n.Title, w)) + "\n\n")
+	if folder := relFolder(n.Rel); folder != "" {
+		b.WriteString(stDim.Render("folder   ") + stMuted.Render(folder+"/") + "\n")
+	}
 	if len(n.Tags) > 0 {
 		b.WriteString(stDim.Render("tags     ") + stTag.Render("@"+strings.Join(n.Tags, " @")) + "\n")
 	}
