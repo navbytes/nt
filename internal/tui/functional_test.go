@@ -287,6 +287,32 @@ func TestLogbookShowsCompleted(t *testing.T) {
 	}
 }
 
+// TestKeybarOverflowAffordance: the footer pins ?/q at every width and shows a
+// "…" when it has to drop lower-priority verbs — never silently.
+func TestKeybarOverflowAffordance(t *testing.T) {
+	m := testModel(t)
+	m.tab, m.cursor = tabTasks, 0
+
+	wide := m.keybar(200)
+	if strings.Contains(wide, "…") {
+		t.Error("a wide keybar should not show the … overflow marker")
+	}
+	if !strings.Contains(wide, "help") || !strings.Contains(wide, "quit") {
+		t.Error("keybar must always pin ? help and q quit")
+	}
+
+	narrow := m.keybar(40)
+	if !strings.Contains(narrow, "…") {
+		t.Error("a narrow keybar must show … rather than silently dropping verbs")
+	}
+	if !strings.Contains(narrow, "help") || !strings.Contains(narrow, "quit") {
+		t.Error("narrow keybar must still pin ? help and q quit")
+	}
+	if w := lipgloss.Width(narrow); w > 40 {
+		t.Errorf("keybar width %d exceeds the budget 40", w)
+	}
+}
+
 // TestCompactTitleProtected: compact rows keep the title, dropping the meta
 // column and shedding tokens before the title is ever truncated.
 func TestCompactTitleProtected(t *testing.T) {

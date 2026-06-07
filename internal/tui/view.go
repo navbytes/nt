@@ -262,26 +262,41 @@ func (m *Model) keybarPairs() [][2]string {
 	}
 }
 
-// keybar renders key/label pairs (cyan key, dim label) up to a width budget.
-// `? help` and `q quit` are always reserved at the end so the discoverability
-// keys never get truncated off-screen, however narrow the terminal.
+// keybar renders key/label pairs (cyan key, dim label) in a fixed priority
+// order. `? help` and `q quit` are always pinned at the end; when the remaining
+// keys don't fit they are dropped from the low-priority end and a `…` is shown
+// so it's clear more exist (under `?`) — the footer never silently loses verbs.
 func (m *Model) keybar(width int) string {
 	pairs := m.keybarPairs()
 	sep := lipgloss.NewStyle().Foreground(cBorder).Background(cBarBg).Render(" · ")
+	ell := lipgloss.NewStyle().Foreground(cDim).Background(cBarBg).Render("…")
 	seg := func(p [2]string) string { return stKeyBg.Render(p[0]) + stBarBg.Render(" "+p[1]) }
 	tail := seg([2]string{"?", "help"}) + sep + seg([2]string{"q", "quit"})
-	budget := width - lipgloss.Width(tail) - lipgloss.Width(sep)
+
+	tailW := lipgloss.Width(sep) + lipgloss.Width(tail) // " · ? help · q quit"
+	ellW := lipgloss.Width(sep) + lipgloss.Width(ell)   // " · …"
 
 	out := ""
-	for _, p := range pairs {
+	allFit := true
+	for i, p := range pairs {
 		s := seg(p)
 		if out != "" {
 			s = sep + s
 		}
-		if lipgloss.Width(out)+lipgloss.Width(s) > budget {
+		// Keep room for the pinned tail, plus the "…" marker unless this is the
+		// last pair (nothing left to hide after it).
+		reserve := tailW
+		if i < len(pairs)-1 {
+			reserve += ellW
+		}
+		if lipgloss.Width(out)+lipgloss.Width(s)+reserve > width {
+			allFit = false
 			break
 		}
 		out += s
+	}
+	if !allFit {
+		out += sep + ell // signal that more keys are available under ?
 	}
 	if out != "" {
 		out += sep
