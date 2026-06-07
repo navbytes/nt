@@ -121,6 +121,18 @@ nt path                        # print $NT_DIR
 `[[ ]]` cross-links tasks and notes in any direction. Backlinks ("linked from")
 are computed on demand by scanning files — no index to maintain.
 
+### Notes ↔ Obsidian
+
+nt has no notes GUI of its own — and doesn't need one. Notes are plain `.md` +
+YAML frontmatter + `[[wikilinks]]`, so you can **point an Obsidian vault at the
+`notes/` folder and use Obsidian as the GUI** while nt owns tasks, the CLI/TUI,
+and the AI-memory loop. nt reads back what Obsidian writes: nested subfolders,
+block-list `tags:`/`aliases:`, notes without an H1 (title falls back to the
+filename), and link variants (`[[folder/note]]`, `[[note#heading]]`,
+`[[note|alias]]`) resolved by shortest path-suffix — a bare name colliding across
+folders is flagged ambiguous rather than guessed. (Logseq's outliner model is not
+a target.)
+
 ## Claude Code integration
 
 `nt` is built to be the durable memory layer for AI sessions. Two integration points:

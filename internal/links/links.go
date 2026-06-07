@@ -6,6 +6,7 @@ package links
 
 import (
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/navbytes/nt/internal/note"
@@ -22,39 +23,112 @@ type Item struct {
 	Path  string // notes only
 }
 
-// Resolve maps a [[target]] to an item, following the SPEC §5.1 order:
-// note slug → note title → note id → task ULID (full or unambiguous prefix).
+// Resolve maps a [[target]] to an item: note by path-suffix → note title → note
+// id → task ULID. Obsidian resolves links by filename and disambiguates by the
+// shortest path, so `[[auth]]` matches any note named auth.md while
+// `[[work/auth]]` matches only one under work/. A bare name that matches several
+// notes resolves to an Item{Kind:"ambiguous"} with ok=false (callers surface it
+// for the user to qualify) rather than silently guessing.
 func Resolve(target string, doc *task.Doc, notes []*note.Note) (Item, bool) {
-	t := strings.TrimSpace(target)
-	// note slug (filename without .md)
+	key, _ := NormalizeTarget(target)
+	if key == "" {
+		return Item{}, false
+	}
+	var hits []*note.Note
 	for _, n := range notes {
-		if slugOf(n) == t {
+		if suffixMatch(relOf(n), key) {
+			hits = append(hits, n)
+		}
+	}
+	switch len(hits) {
+	case 1:
+		return noteItem(hits[0]), true
+	case 0:
+		// fall through to title / id / task
+	default:
+		names := make([]string, len(hits))
+		for i, n := range hits {
+			names[i] = relOf(n)
+		}
+		return Item{Kind: "ambiguous", Title: strings.Join(names, ", ")}, false
+	}
+	for _, n := range notes {
+		if strings.EqualFold(n.Title, key) {
 			return noteItem(n), true
 		}
 	}
-	// note title (case-insensitive)
 	for _, n := range notes {
-		if strings.EqualFold(n.Title, t) {
+		if strings.EqualFold(n.ID, key) {
 			return noteItem(n), true
 		}
 	}
-	// note id
-	for _, n := range notes {
-		if n.ID == t {
-			return noteItem(n), true
-		}
-	}
-	// task ULID full or unambiguous short prefix
 	if doc != nil {
-		if tk, amb := doc.Resolve(t); tk != nil && !amb {
+		if tk, amb := doc.Resolve(key); tk != nil && !amb {
 			return Item{Kind: "task", ID: tk.ID(), Title: tk.Text}, true
 		}
 	}
 	return Item{}, false
 }
 
-func slugOf(n *note.Note) string {
-	return strings.TrimSuffix(filepath.Base(n.Path), ".md")
+// NormalizeTarget reduces a raw [[…]] inner string to a resolution key and the
+// optional display alias: it strips a |alias, a #heading / #^block fragment, and
+// a trailing .md, but KEEPS any folder/ prefix so suffix matching can use it.
+func NormalizeTarget(raw string) (key, alias string) {
+	s := strings.TrimSpace(raw)
+	if i := strings.IndexByte(s, '|'); i >= 0 {
+		alias = strings.TrimSpace(s[i+1:])
+		s = s[:i]
+	}
+	if i := strings.IndexByte(s, '#'); i >= 0 {
+		s = s[:i] // drop #heading and #^block
+	}
+	s = strings.TrimSpace(s)
+	s = strings.TrimSuffix(s, ".md")
+	return strings.Trim(s, "/"), alias
+}
+
+// relOf is a note's path relative to notes/ (slash-separated); falls back to the
+// basename when Rel wasn't set (e.g. a note loaded outside List).
+func relOf(n *note.Note) string {
+	if n.Rel != "" {
+		return n.Rel
+	}
+	return filepath.Base(n.Path)
+}
+
+// suffixMatch reports whether targetKey's path segments are a tail of the note's
+// path segments (case-insensitive), both with .md stripped — Obsidian's
+// shortest-path resolution.
+func suffixMatch(noteRel, targetKey string) bool {
+	ns, ts := segs(noteRel), segs(targetKey)
+	if len(ts) == 0 || len(ts) > len(ns) {
+		return false
+	}
+	for i := 1; i <= len(ts); i++ {
+		if ns[len(ns)-i] != ts[len(ts)-i] {
+			return false
+		}
+	}
+	return true
+}
+
+func segs(p string) []string {
+	p = strings.Trim(strings.TrimSuffix(strings.ToLower(p), ".md"), "/")
+	if p == "" {
+		return nil
+	}
+	return strings.Split(p, "/")
+}
+
+var linkRe = regexp.MustCompile(`\[\[([^\]]+)\]\]`)
+
+// wikilinks returns the raw inner strings of every [[…]] in s.
+func wikilinks(s string) []string {
+	var out []string
+	for _, m := range linkRe.FindAllStringSubmatch(s, -1) {
+		out = append(out, m[1])
+	}
+	return out
 }
 
 func noteItem(n *note.Note) Item {
@@ -62,33 +136,37 @@ func noteItem(n *note.Note) Item {
 }
 
 // Backlinks finds lines across tasks.txt and notes/ that link TO the item with
-// the given id and slug (slug may be empty for tasks). It excludes the item's
-// own defining line. Uses ripgrep when available, refining matches in Go so
-// `id:` self-definitions and substring false-positives are filtered out.
-func Backlinks(s *store.Store, id, slug string) []search.Hit {
+// the given id and rel (rel = a note's path relative to notes/, empty for
+// tasks). It excludes the item's own defining line. A coarse ripgrep pass is
+// refined in Go so `id:` self-definitions and substring false-positives are
+// filtered out, and so a [[work/auth]] / [[auth|alias]] link to this note counts.
+func Backlinks(s *store.Store, id, rel string) []search.Hit {
 	seen := map[string]bool{}
 	var out []search.Hit
 	add := func(hits []search.Hit) {
 		for _, h := range hits {
 			key := h.Path + ":" + itoa(h.Line)
-			if seen[key] || !references(h.Text, id, slug) {
+			if seen[key] || !references(h.Text, id, rel) {
 				continue
 			}
 			seen[key] = true
 			out = append(out, h)
 		}
 	}
-	coarse, _ := search.Literal(id, s.TasksFile(), s.NotesDir())
-	add(coarse)
-	if slug != "" {
-		bySlug, _ := search.Literal("[["+slug+"]]", s.TasksFile(), s.NotesDir())
-		add(bySlug)
+	if id != "" {
+		h, _ := search.Literal(id, s.TasksFile(), s.NotesDir())
+		add(h)
+	}
+	if rel != "" {
+		// Any wikilink is a candidate; references() does the precise suffix check.
+		h, _ := search.Literal("[[", s.TasksFile(), s.NotesDir())
+		add(h)
 	}
 	return out
 }
 
 // references reports whether a line links to the target (not merely defines it).
-func references(line, id, slug string) bool {
+func references(line, id, rel string) bool {
 	if id != "" {
 		if strings.Contains(line, "[["+id+"]]") ||
 			strings.Contains(line, "parent:"+id) ||
@@ -96,7 +174,14 @@ func references(line, id, slug string) bool {
 			return true
 		}
 	}
-	return slug != "" && strings.Contains(line, "[["+slug+"]]")
+	if rel != "" {
+		for _, raw := range wikilinks(line) {
+			if key, _ := NormalizeTarget(raw); key != "" && suffixMatch(rel, key) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func itoa(n int) string {

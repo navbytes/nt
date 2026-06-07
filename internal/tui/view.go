@@ -702,10 +702,18 @@ func (m *Model) detailContent(w int) string {
 	if fwd := t.Links(); len(fwd) > 0 {
 		b.WriteString("\n" + sectionHeader("LINKS →", w) + "\n")
 		for _, target := range fwd {
-			if it, ok := links.Resolve(target, d, m.notes); ok {
+			key, alias := links.NormalizeTarget(target)
+			disp := key
+			if alias != "" {
+				disp = alias
+			}
+			switch it, ok := links.Resolve(target, d, m.notes); {
+			case ok:
 				b.WriteString("  " + stProj.Render("→") + " " + stDim.Render("["+it.Kind+"]") + " " + truncate(it.Title, w-10) + "\n")
-			} else {
-				b.WriteString("  " + stWarn.Render("→") + " " + stWarn.Render("[["+target+"]]") + stDim.Render(" (unresolved)") + "\n")
+			case it.Kind == "ambiguous":
+				b.WriteString("  " + stWarn.Render("→") + " " + stWarn.Render("[["+disp+"]]") + stDim.Render(" (ambiguous)") + "\n")
+			default:
+				b.WriteString("  " + stWarn.Render("→") + " " + stWarn.Render("[["+disp+"]]") + stDim.Render(" (unresolved)") + "\n")
 			}
 		}
 	}

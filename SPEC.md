@@ -163,10 +163,23 @@ Tokens expire after 24h; refresh window is 7d. See [[oauth-flow]].
 - Frontmatter is optional metadata; the body is free markdown (Glamour-rendered in the TUI,
   editable with `$EDITOR`).
 - Filename is a slug of the title (or a datetime when untitled, à la `nb`).
-- `[[…]]` links resolve to a **note** (by filename slug, title, or `id:`) or a **task** (by
-  ULID / short prefix) — see §5.1. `#tag` inline and frontmatter `tags:` are both honored.
+- `[[…]]` links resolve to a **note** (by filename, title, or `id:`) or a **task** (by
+  ULID / short prefix) — see §5.1. Tags come from frontmatter `tags:` (inline body `#tags`
+  are not parsed).
 - Notes are one file each, so editing a note directly in `$EDITOR` is safe (atomic save, no
   shared-file lock needed).
+
+**Obsidian-compatible (use Obsidian as the notes GUI).** Point an Obsidian vault at `notes/`
+and it works both ways — nt already writes plain `.md` + YAML frontmatter + `[[wikilinks]]`
+Obsidian reads, and nt *reads* Obsidian's conventions: notes are discovered **recursively**
+through subfolders (`.obsidian/`, hidden dirs, and non-`.md` files skipped); frontmatter
+`tags`/`aliases` parse in inline, bare-comma, and **YAML block-list** forms (plus the
+deprecated singular `tag:`); a missing H1 falls back to a `title:`/`aliases:` value or the
+filename; and links resolve by **shortest path-suffix** like Obsidian — `[[note]]`,
+`[[folder/note]]`, `[[note#heading]]`, `[[note|alias]]`, `[[note.md]]` all resolve, a bare
+name that collides across folders is reported as **ambiguous** (qualify it with a folder)
+rather than silently guessed. Out of scope: inline `#tags`, embeds `![[…]]`, block-ref
+navigation, Logseq's outliner model.
 
 ---
 

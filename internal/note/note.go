@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -18,9 +19,11 @@ import (
 // Note is a parsed markdown note.
 type Note struct {
 	Path    string
+	Rel     string // path relative to notes/ (slash-separated), set by List
 	ID      string
 	Title   string
 	Tags    []string
+	Aliases []string
 	Source  string
 	Created string
 	Body    string
@@ -133,39 +136,102 @@ func Load(path string) (*Note, error) {
 	} else {
 		n.Body = text
 	}
+	// Title precedence: frontmatter title (set during parse) → first alias →
+	// first H1 → humanized filename. Covers Obsidian notes that have no H1.
+	if n.Title == "" && len(n.Aliases) > 0 {
+		n.Title = n.Aliases[0]
+	}
 	if n.Title == "" {
 		n.Title = firstHeading(n.Body)
+	}
+	if n.Title == "" {
+		n.Title = humanizeFilename(path)
 	}
 	return n, nil
 }
 
 var listRe = regexp.MustCompile(`\[(.*)\]`)
 
+// parseFrontmatter reads the keys nt understands from a YAML-ish frontmatter
+// block. Beyond nt's own output it tolerates Obsidian conventions: block-list
+// and bare-comma tags/aliases, a title:/aliases: key, and the deprecated
+// singular tag:. Unknown keys are ignored.
 func parseFrontmatter(fm string, n *Note) {
-	for _, line := range strings.Split(fm, "\n") {
-		i := strings.IndexByte(line, ':')
-		if i < 0 {
+	lines := strings.Split(fm, "\n")
+	for i := 0; i < len(lines); i++ {
+		ci := strings.IndexByte(lines[i], ':')
+		if ci < 0 {
 			continue
 		}
-		key := strings.TrimSpace(line[:i])
-		val := strings.TrimSpace(line[i+1:])
+		key := strings.TrimSpace(lines[i][:ci])
+		val := strings.TrimSpace(lines[i][ci+1:])
 		switch key {
 		case "id":
-			n.ID = val
+			n.ID = unquote(val)
 		case "source":
-			n.Source = val
+			n.Source = unquote(val)
 		case "created":
-			n.Created = val
-		case "tags":
-			if m := listRe.FindStringSubmatch(val); m != nil {
-				for _, t := range strings.Split(m[1], ",") {
-					if t = strings.TrimSpace(t); t != "" {
-						n.Tags = append(n.Tags, t)
-					}
-				}
+			n.Created = unquote(val)
+		case "title":
+			if v := unquote(val); v != "" {
+				n.Title = v
 			}
+		case "tag": // deprecated singular form
+			n.Tags = appendClean(n.Tags, val)
+		case "tags":
+			n.Tags = append(n.Tags, parseList(val, lines, &i)...)
+		case "alias", "aliases":
+			n.Aliases = append(n.Aliases, parseList(val, lines, &i)...)
 		}
 	}
+}
+
+// parseList reads a YAML list value in any of the forms Obsidian/nt emit: inline
+// flow `[a, b]`, bare comma `a, b`, or a block list of following `- item` lines
+// (consuming them, advancing *i).
+func parseList(val string, lines []string, i *int) []string {
+	var out []string
+	switch {
+	case strings.HasPrefix(val, "["):
+		if m := listRe.FindStringSubmatch(val); m != nil {
+			for _, t := range strings.Split(m[1], ",") {
+				out = appendClean(out, t)
+			}
+		}
+	case val != "":
+		for _, t := range strings.Split(val, ",") {
+			out = appendClean(out, t)
+		}
+	default: // block list: indented "- item" lines on following rows
+		for *i+1 < len(lines) {
+			t := strings.TrimSpace(lines[*i+1])
+			if !strings.HasPrefix(t, "- ") {
+				break
+			}
+			out = appendClean(out, t[2:])
+			*i++
+		}
+	}
+	return out
+}
+
+// appendClean trims quotes/whitespace and a stray leading '#', dropping empties.
+func appendClean(out []string, s string) []string {
+	s = strings.TrimPrefix(unquote(strings.TrimSpace(s)), "#")
+	if s = strings.TrimSpace(s); s != "" {
+		out = append(out, s)
+	}
+	return out
+}
+
+func unquote(s string) string {
+	s = strings.TrimSpace(s)
+	if len(s) >= 2 {
+		if (s[0] == '"' && s[len(s)-1] == '"') || (s[0] == '\'' && s[len(s)-1] == '\'') {
+			return s[1 : len(s)-1]
+		}
+	}
+	return s
 }
 
 func firstHeading(body string) string {
@@ -177,22 +243,48 @@ func firstHeading(body string) string {
 	return ""
 }
 
-// List loads all notes in the store's notes directory.
+// humanizeFilename turns a note filename into a readable title fallback.
+func humanizeFilename(path string) string {
+	base := strings.TrimSuffix(filepath.Base(path), ".md")
+	base = strings.ReplaceAll(base, "-", " ")
+	base = strings.ReplaceAll(base, "_", " ")
+	return strings.TrimSpace(base)
+}
+
+// List loads all notes in the store's notes directory, recursing into
+// subfolders so an Obsidian-style nested vault works. Hidden dirs (.obsidian/,
+// .trash/, .git/) and non-.md files are skipped. Each note's Rel (path relative
+// to notes/, slash-separated) is set for link resolution; results are sorted by
+// Rel for deterministic ordering.
 func List(s *store.Store) ([]*Note, error) {
-	entries, err := os.ReadDir(s.NotesDir())
+	dir := s.NotesDir()
+	var out []*Note
+	err := filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return nil // tolerate unreadable entries rather than aborting the walk
+		}
+		if d.IsDir() {
+			if path != dir && strings.HasPrefix(d.Name(), ".") {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !strings.HasSuffix(d.Name(), ".md") {
+			return nil
+		}
+		n, e := Load(path)
+		if e != nil {
+			return nil
+		}
+		if rel, e := filepath.Rel(dir, path); e == nil {
+			n.Rel = filepath.ToSlash(rel)
+		}
+		out = append(out, n)
+		return nil
+	})
 	if err != nil {
 		return nil, err
 	}
-	var out []*Note
-	for _, e := range entries {
-		if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") {
-			continue
-		}
-		n, err := Load(filepath.Join(s.NotesDir(), e.Name()))
-		if err != nil {
-			continue
-		}
-		out = append(out, n)
-	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Rel < out[j].Rel })
 	return out, nil
 }

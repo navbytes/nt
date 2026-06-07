@@ -479,20 +479,24 @@ func cmdLinks(args []string) int {
 	}
 	notes, _ := note.List(e.S)
 
-	var id, slug, title string
+	var id, title, noteRel string
 	var forward []string
 	var self *task.Task
 	if strings.HasPrefix(handle, "note:") {
 		want := strings.TrimPrefix(handle, "note:")
+		it, ok := links.Resolve(want, nil, notes)
+		if !ok {
+			if it.Kind == "ambiguous" {
+				return fail(fmt.Errorf("links: %q is ambiguous (%s) — qualify with a folder", want, it.Title))
+			}
+			return fail(fmt.Errorf("links: no note %q", want))
+		}
 		for _, n := range notes {
-			if strings.TrimSuffix(filepath.Base(n.Path), ".md") == want || n.ID == want {
-				id, slug, title = n.ID, want, n.Title
+			if n.Path == it.Path {
+				id, title, noteRel = n.ID, n.Title, n.Rel
 				forward = extractLinks(n.Body)
 				break
 			}
-		}
-		if id == "" && slug == "" {
-			return fail(fmt.Errorf("links: no note %q", want))
 		}
 	} else {
 		t, err := resolveHandle(d, handle)
@@ -509,14 +513,22 @@ func cmdLinks(args []string) int {
 		fmt.Println("  (none)")
 	}
 	for _, target := range forward {
-		if it, ok := links.Resolve(target, d, notes); ok {
+		key, alias := links.NormalizeTarget(target)
+		disp := key
+		if alias != "" {
+			disp = alias
+		}
+		switch it, ok := links.Resolve(target, d, notes); {
+		case ok:
 			fmt.Printf("  → [%s] %s  %s\n", it.Kind, shortID(it.ID), it.Title)
-		} else {
-			fmt.Printf("  → [[%s]] (unresolved)\n", target)
+		case it.Kind == "ambiguous":
+			fmt.Printf("  → [[%s]] (ambiguous: %s)\n", disp, it.Title)
+		default:
+			fmt.Printf("  → [[%s]] (unresolved)\n", disp)
 		}
 	}
 	fmt.Println("linked from:")
-	back := links.Backlinks(e.S, id, slug)
+	back := links.Backlinks(e.S, id, noteRel)
 	if len(back) == 0 {
 		fmt.Println("  (none)")
 	}
@@ -1069,12 +1081,13 @@ func tasksToJSON(tasks []*task.Task, idx map[*task.Task]int) []taskJSON {
 }
 
 type noteJSON struct {
-	ID     string   `json:"id"`
-	Title  string   `json:"title"`
-	Tags   []string `json:"tags,omitempty"`
-	Source string   `json:"source,omitempty"`
-	Body   string   `json:"body,omitempty"`
-	Path   string   `json:"path"`
+	ID      string   `json:"id"`
+	Title   string   `json:"title"`
+	Tags    []string `json:"tags,omitempty"`
+	Source  string   `json:"source,omitempty"`
+	Created string   `json:"created,omitempty"`
+	Body    string   `json:"body,omitempty"`
+	Path    string   `json:"path"`
 }
 
 func notesToJSON(notes []*note.Note) []noteJSON {
@@ -1083,8 +1096,8 @@ func notesToJSON(notes []*note.Note) []noteJSON {
 		// Include the body: an agent recalling a note needs the finding itself,
 		// not just its title (Product #4 — "the most valuable memory is the body").
 		out = append(out, noteJSON{
-			ID: n.ID, Title: n.Title, Tags: n.Tags,
-			Source: n.Source, Body: strings.TrimSpace(n.Body), Path: n.Path,
+			ID: n.ID, Title: n.Title, Tags: n.Tags, Source: n.Source,
+			Created: n.Created, Body: strings.TrimSpace(n.Body), Path: n.Path,
 		})
 	}
 	return out
