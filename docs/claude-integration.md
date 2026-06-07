@@ -86,26 +86,35 @@ For clients that speak the **Model Context Protocol** (Claude Code, Cursor, …)
 `nt mcp` runs a stdio MCP server so the agent calls **typed tools** instead of
 constructing CLI strings — more reliable, and discoverable via `tools/list`.
 
-Register it in one command — it writes the entry below with the **absolute**
-binary path (GUI clients often launch without `~/.local/bin` on `PATH`, so a bare
-`nt` wouldn't resolve), and is idempotent:
+Register it in one command. It uses the **absolute** binary path (GUI clients
+often launch without `~/.local/bin` on `PATH`, so a bare `nt` wouldn't resolve)
+and is idempotent:
 
 ```bash
-nt mcp install                          # Claude Code (~/.claude/settings.json)
+nt mcp install                          # Claude Code (user scope)
 nt mcp install --client claude-desktop  # Claude Desktop
-nt mcp install --print                  # print the snippet for any other client
+nt mcp install --print                  # show what it would do, change nothing
 ```
 
-Or register it by hand (Claude Code `~/.claude/settings.json`, Claude Desktop
-`claude_desktop_config.json`, or a project `.mcp.json`):
+- **Claude Code** does *not* read MCP servers from `settings.json`. `nt mcp
+  install` shells out to `claude mcp add-json nt … --scope user` (the supported
+  path) when the `claude` CLI is on `PATH`, and otherwise merges the correct file,
+  `~/.claude.json`, directly. Equivalent by hand:
 
-```json
-{
-  "mcpServers": {
-    "nt": { "command": "nt", "args": ["mcp"] }
-  }
-}
-```
+  ```bash
+  claude mcp add-json nt '{"type":"stdio","command":"/abs/path/to/nt","args":["mcp"]}' --scope user
+  ```
+
+- **Claude Desktop** has no CLI, so it edits `claude_desktop_config.json`
+  (macOS: `~/Library/Application Support/Claude/`). By hand, add under a
+  top-level `mcpServers`:
+
+  ```json
+  { "mcpServers": { "nt": { "type": "stdio", "command": "/abs/path/to/nt", "args": ["mcp"] } } }
+  ```
+
+For any other client (Cursor, a project `.mcp.json`, …), `nt mcp install --print`
+emits the snippet to paste.
 
 Tools exposed: `nt_ready` (start here — open, unblocked work by urgency),
 `nt_add`, `nt_done`, `nt_update`, `nt_note`, `nt_recall` (incl. note bodies),

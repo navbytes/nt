@@ -4,20 +4,28 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"runtime"
 )
 
-// cmdMcpInstall registers `nt mcp` with an AI client by merging an mcpServers.nt
-// entry into the client's config, using the *absolute* path to this binary (GUI
-// clients often launch without ~/.local/bin on PATH, so a bare "nt" wouldn't
-// resolve). It is idempotent: re-running is a no-op when the entry already
-// matches, and updates in place when the binary has moved.
+// cmdMcpInstall registers `nt mcp` with an AI client.
 //
-//	nt mcp install                      # Claude Code (~/.claude/settings.json)
+// Claude Code does NOT read MCP servers from ~/.claude/settings.json — they live
+// in ~/.claude.json (user scope) or a project .mcp.json, and the supported,
+// version-stable way to write them is the `claude` CLI. So for Claude Code we
+// shell out to `claude mcp add-json` when that CLI is available, and fall back to
+// a direct merge of ~/.claude.json's top-level mcpServers when it isn't. Claude
+// Desktop has no CLI, so it's always a direct merge of claude_desktop_config.json.
+//
+// Either way we use the *absolute* path to this binary (GUI clients launch
+// without ~/.local/bin on PATH, so a bare "nt" wouldn't resolve), and the
+// operation is idempotent.
+//
+//	nt mcp install                      # Claude Code (claude CLI, user scope)
 //	nt mcp install --client claude-desktop
-//	nt mcp install --print              # show the snippet, write nothing
+//	nt mcp install --print              # show what would be done, change nothing
 func cmdMcpInstall(args []string) int {
 	client := "claude-code"
 	printOnly := false
@@ -36,9 +44,32 @@ func cmdMcpInstall(args []string) int {
 		}
 	}
 
+	bin, err := ntBinaryPath()
+	if err != nil {
+		return fail(err)
+	}
+	// The stdio server spec, shared by every client/path.
+	entry := map[string]any{"type": "stdio", "command": bin, "args": []any{"mcp"}}
+
+	switch client {
+	case "claude-code", "claude", "code":
+		return installClaudeCode(bin, entry, printOnly)
+	case "claude-desktop", "desktop":
+		path, err := desktopConfigPath()
+		if err != nil {
+			return fail(err)
+		}
+		return installFileMerge(path, "Claude Desktop", entry, printOnly)
+	default:
+		return fail(fmt.Errorf("unknown client %q (supported: claude-code, claude-desktop; or use --print)", client))
+	}
+}
+
+// ntBinaryPath returns the absolute, symlink-resolved path to this executable.
+func ntBinaryPath() (string, error) {
 	bin, err := os.Executable()
 	if err != nil {
-		return fail(fmt.Errorf("locate nt binary: %w", err))
+		return "", fmt.Errorf("locate nt binary: %w", err)
 	}
 	if resolved, err := filepath.EvalSymlinks(bin); err == nil {
 		bin = resolved
@@ -46,34 +77,68 @@ func cmdMcpInstall(args []string) int {
 	if abs, err := filepath.Abs(bin); err == nil {
 		bin = abs
 	}
+	return bin, nil
+}
 
-	// The entry every client uses (Claude Code and Desktop share the schema).
-	entry := map[string]any{"command": bin, "args": []any{"mcp"}}
+// installClaudeCode registers with Claude Code, preferring the `claude` CLI
+// (which writes the correct file for the chosen scope) and falling back to a
+// direct merge of ~/.claude.json when the CLI isn't on PATH.
+func installClaudeCode(bin string, entry map[string]any, printOnly bool) int {
+	spec, _ := json.Marshal(entry)
 
 	if printOnly {
-		snippet := map[string]any{"mcpServers": map[string]any{"nt": entry}}
-		out, _ := json.MarshalIndent(snippet, "", "  ")
-		fmt.Println(string(out))
+		fmt.Println("With the Claude Code CLI:")
+		fmt.Printf("  claude mcp add-json nt '%s' --scope user\n\n", spec)
+		fmt.Println("Or add this to ~/.claude.json under a top-level \"mcpServers\":")
+		out, _ := json.MarshalIndent(map[string]any{"nt": entry}, "  ", "  ")
+		fmt.Printf("  %s\n", out)
 		return 0
 	}
 
-	cfgPath, err := clientConfigPath(client)
+	if claude, err := exec.LookPath("claude"); err == nil {
+		// Idempotent upsert: remove any stale entry first (ignore its result),
+		// then add the current one.
+		_ = exec.Command(claude, "mcp", "remove", "nt", "--scope", "user").Run() //nolint:errcheck
+		cmd := exec.Command(claude, "mcp", "add-json", "nt", string(spec), "--scope", "user")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			return fail(fmt.Errorf("claude mcp add-json: %v: %s", err, out))
+		}
+		fmt.Printf("registered nt with Claude Code (user scope) via the claude CLI\n  command: %s mcp\n", bin)
+		fmt.Println("open a new Claude Code session (or run /mcp) to pick it up.")
+		return 0
+	}
+
+	// Fallback: no claude CLI — merge the correct file directly.
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return fail(fmt.Errorf("locate home dir: %w", err))
+	}
+	path := filepath.Join(home, ".claude.json")
+	fmt.Println("note: the `claude` CLI wasn't found on PATH; editing ~/.claude.json directly.")
+	return installFileMerge(path, "Claude Code", entry, false)
+}
+
+// installFileMerge writes mcpServers.nt into a JSON config file, preserving every
+// other key, and reports what changed.
+func installFileMerge(path, label string, entry map[string]any, printOnly bool) int {
+	if printOnly {
+		snippet := map[string]any{"mcpServers": map[string]any{"nt": entry}}
+		out, _ := json.MarshalIndent(snippet, "", "  ")
+		fmt.Printf("Add to %s (%s):\n%s\n", path, label, out)
+		return 0
+	}
+	changed, prev, err := mergeMCPEntry(path, "nt", entry)
 	if err != nil {
 		return fail(err)
 	}
-
-	changed, prev, err := mergeMCPEntry(cfgPath, "nt", entry)
-	if err != nil {
-		return fail(err)
-	}
-
+	bin, _ := entry["command"].(string)
 	switch {
 	case !changed && prev != nil:
-		fmt.Printf("nt is already registered in %s (no change)\n", cfgPath)
+		fmt.Printf("nt is already registered in %s (no change)\n", path)
 	case prev != nil:
-		fmt.Printf("updated nt registration in %s\n  command: %s mcp\n", cfgPath, bin)
+		fmt.Printf("updated nt registration in %s\n  command: %s mcp\n", path, bin)
 	default:
-		fmt.Printf("registered nt in %s\n  command: %s mcp\n", cfgPath, bin)
+		fmt.Printf("registered nt in %s (%s)\n  command: %s mcp\n", path, label, bin)
 	}
 	if changed {
 		fmt.Println("restart the client (or reload its MCP servers) to pick it up.")
@@ -81,26 +146,27 @@ func cmdMcpInstall(args []string) int {
 	return 0
 }
 
-// clientConfigPath resolves the settings file for a known AI client.
-func clientConfigPath(client string) (string, error) {
+// desktopConfigPath resolves Claude Desktop's config file for the current OS.
+func desktopConfigPath() (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", fmt.Errorf("locate home dir: %w", err)
 	}
-	switch client {
-	case "claude-code", "claude", "code":
-		return filepath.Join(home, ".claude", "settings.json"), nil
-	case "claude-desktop", "desktop":
-		if runtime.GOOS == "darwin" {
-			return filepath.Join(home, "Library", "Application Support", "Claude", "claude_desktop_config.json"), nil
+	switch runtime.GOOS {
+	case "darwin":
+		return filepath.Join(home, "Library", "Application Support", "Claude", "claude_desktop_config.json"), nil
+	case "windows":
+		base := os.Getenv("APPDATA")
+		if base == "" {
+			base = filepath.Join(home, "AppData", "Roaming")
 		}
+		return filepath.Join(base, "Claude", "claude_desktop_config.json"), nil
+	default:
 		base := os.Getenv("XDG_CONFIG_HOME")
 		if base == "" {
 			base = filepath.Join(home, ".config")
 		}
 		return filepath.Join(base, "Claude", "claude_desktop_config.json"), nil
-	default:
-		return "", fmt.Errorf("unknown client %q (supported: claude-code, claude-desktop; or use --print for others)", client)
 	}
 }
 
