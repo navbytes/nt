@@ -699,32 +699,8 @@ func (m *Model) detailContent(w int) string {
 
 	// Links + backlinks (SPEC §5.1).
 	d, _ := m.eng.Read()
-	if fwd := t.Links(); len(fwd) > 0 {
-		b.WriteString("\n" + sectionHeader("LINKS →", w) + "\n")
-		for _, target := range fwd {
-			key, alias := links.NormalizeTarget(target)
-			disp := key
-			if alias != "" {
-				disp = alias
-			}
-			switch it, ok := links.Resolve(target, d, m.notes); {
-			case ok:
-				b.WriteString("  " + stProj.Render("→") + " " + stDim.Render("["+it.Kind+"]") + " " + truncate(it.Title, w-10) + "\n")
-			case it.Kind == "ambiguous":
-				b.WriteString("  " + stWarn.Render("→") + " " + stWarn.Render("[["+disp+"]]") + stDim.Render(" (ambiguous)") + "\n")
-			default:
-				b.WriteString("  " + stWarn.Render("→") + " " + stWarn.Render("[["+disp+"]]") + stDim.Render(" (unresolved)") + "\n")
-			}
-		}
-	}
-	back := links.Backlinks(m.eng.S, t.ID(), "")
-	if len(back) > 0 {
-		b.WriteString("\n" + sectionHeader("LINKED FROM ←", w) + "\n")
-		for _, h := range back {
-			kind, title := m.backlinkLabel(h.Path, h.Text)
-			b.WriteString("  " + stTag.Render("←") + " " + stDim.Render("["+kind+"]") + " " + truncate(title, w-10) + "\n")
-		}
-	}
+	m.renderForwardLinks(&b, d, t.Links(), w)
+	m.renderBacklinks(&b, t.ID(), "", w)
 
 	// Provenance: where this task came from, and what was discovered from it.
 	if df := t.Discovered(); df != "" {
@@ -746,6 +722,45 @@ func (m *Model) detailContent(w int) string {
 		}
 	}
 	return b.String()
+}
+
+// renderForwardLinks appends a "LINKS →" section resolving each [[target]],
+// showing the alias when present and flagging ambiguous / unresolved targets.
+// Shared by the task and note detail panes.
+func (m *Model) renderForwardLinks(b *strings.Builder, d *task.Doc, targets []string, w int) {
+	if len(targets) == 0 {
+		return
+	}
+	b.WriteString("\n" + sectionHeader("LINKS →", w) + "\n")
+	for _, target := range targets {
+		key, alias := links.NormalizeTarget(target)
+		disp := key
+		if alias != "" {
+			disp = alias
+		}
+		switch it, ok := links.Resolve(target, d, m.notes); {
+		case ok:
+			b.WriteString("  " + stProj.Render("→") + " " + stDim.Render("["+it.Kind+"]") + " " + truncate(it.Title, w-10) + "\n")
+		case it.Kind == "ambiguous":
+			b.WriteString("  " + stWarn.Render("→") + " " + stWarn.Render("[["+disp+"]]") + stDim.Render(" (ambiguous)") + "\n")
+		default:
+			b.WriteString("  " + stWarn.Render("→") + " " + stWarn.Render("[["+disp+"]]") + stDim.Render(" (unresolved)") + "\n")
+		}
+	}
+}
+
+// renderBacklinks appends a "LINKED FROM ←" section for the item (id for tasks,
+// id+rel for notes). Shared by both detail panes.
+func (m *Model) renderBacklinks(b *strings.Builder, id, rel string, w int) {
+	back := links.Backlinks(m.eng.S, id, rel)
+	if len(back) == 0 {
+		return
+	}
+	b.WriteString("\n" + sectionHeader("LINKED FROM ←", w) + "\n")
+	for _, h := range back {
+		kind, title := m.backlinkLabel(h.Path, h.Text)
+		b.WriteString("  " + stTag.Render("←") + " " + stDim.Render("["+kind+"]") + " " + truncate(title, w-10) + "\n")
+	}
 }
 
 // backlinkLabel turns a backlink hit (file path + matching line) into a human
@@ -771,11 +786,20 @@ func (m *Model) noteDetail(n *note.Note, w int) string {
 	if len(n.Tags) > 0 {
 		b.WriteString(stDim.Render("tags     ") + stTag.Render("@"+strings.Join(n.Tags, " @")) + "\n")
 	}
+	if len(n.Aliases) > 0 {
+		b.WriteString(stDim.Render("aliases  ") + stMuted.Render(strings.Join(n.Aliases, ", ")) + "\n")
+	}
 	if n.Source != "" {
 		b.WriteString(stDim.Render("source   ") + n.Source + "\n")
 	}
 	b.WriteString("\n" + sectionHeader("BODY", w) + "\n")
 	b.WriteString(m.renderMarkdown(n.ID, n.Body, w))
+
+	// Surface the note's outgoing links (resolved / aliased / ambiguous) and its
+	// backlinks — the same treatment the task detail gets.
+	d, _ := m.eng.Read()
+	m.renderForwardLinks(&b, d, extractLinks(n.Body), w)
+	m.renderBacklinks(&b, n.ID, n.Rel, w)
 	return b.String()
 }
 
