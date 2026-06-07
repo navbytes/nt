@@ -53,12 +53,12 @@ func TestSyncUpsertsIdempotently(t *testing.T) {
 	}
 	var done, doing, open int
 	for _, s := range got {
-		switch {
-		case s == "done:implement auth:claude":
+		switch s {
+		case "done:implement auth:claude":
 			done++
-		case s == "doing:deploy:claude":
+		case "doing:deploy:claude":
 			doing++
-		case s == "open:write tests:claude":
+		case "open:write tests:claude":
 			open++
 		}
 	}

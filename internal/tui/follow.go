@@ -14,19 +14,6 @@ type followTarget struct {
 	value string
 }
 
-// display renders the target as it appears in the task text.
-func (ft followTarget) display() string {
-	switch ft.kind {
-	case "link":
-		return "[[" + ft.value + "]]"
-	case "tag":
-		return "@" + ft.value
-	case "project":
-		return "+" + ft.value
-	}
-	return ft.value
-}
-
 // collectTargets gathers the actionable tokens of the selected item and assigns
 // each a single-letter label (a, b, c, …), capped at 26.
 func (m *Model) collectTargets() []followTarget {

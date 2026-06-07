@@ -1,0 +1,22 @@
+version: "2"
+
+run:
+  timeout: 5m
+
+linters:
+  # Default set: errcheck, govet, ineffassign, staticcheck, unused.
+  exclusions:
+    rules:
+      # Tests intentionally ignore unmarshal/IO errors on known-good fixtures.
+      - path: _test\.go
+        linters: [errcheck]
+  settings:
+    errcheck:
+      # Best-effort cleanup / lock-release calls whose failure we deliberately
+      # don't act on (the surrounding op already errored or is exiting).
+      exclude-functions:
+        - (*os.File).Close
+        - (*os.File).WriteString
+        - os.Remove
+        - path/filepath.WalkDir
+        - (*github.com/navbytes/nt/internal/lock.Handle).Release
