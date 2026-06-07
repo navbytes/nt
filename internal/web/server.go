@@ -140,13 +140,15 @@ func (s *Server) handleNote(w http.ResponseWriter, r *http.Request) {
 	}
 	doc, notes := s.load()
 	if r.URL.Query().Get("missing") != "1" {
-		if n := findByID(notes, handle); n != nil {
+		if n := findByHandle(notes, handle); n != nil {
 			s.renderNote(w, n, doc, notes)
 			return
 		}
 		if it, ok := links.Resolve(handle, doc, notes); ok && it.Kind == "note" {
-			http.Redirect(w, r, "/n/"+url.PathEscape(it.ID), http.StatusFound)
-			return
+			if n := findByPath(notes, it.Path); n != nil {
+				http.Redirect(w, r, "/n/"+url.PathEscape(noteHandle(n)), http.StatusFound)
+				return
+			}
 		}
 	}
 	s.renderMissing(w, handle, notes)
@@ -165,7 +167,7 @@ func (s *Server) renderNote(w http.ResponseWriter, n *note.Note, doc *task.Doc, 
 	}
 	s.render(w, &pageData{
 		Title:       n.Title,
-		Tree:        buildTree(notes, n.ID),
+		Tree:        buildTree(notes, noteHandle(n)),
 		IsNote:      true,
 		NoteTitle:   n.Title,
 		FolderPath:  folder,
@@ -185,7 +187,7 @@ func (s *Server) renderMissing(w http.ResponseWriter, handle string, notes []*no
 	var cands []linkRow
 	for _, n := range notes {
 		if links.SuffixMatch(n.Rel, key) {
-			cands = append(cands, linkRow{URL: "/n/" + url.PathEscape(n.ID), Title: n.Title, Path: n.Rel})
+			cands = append(cands, linkRow{URL: "/n/" + url.PathEscape(noteHandle(n)), Title: n.Title, Path: n.Rel})
 		}
 	}
 	title := "Note not found"
@@ -216,11 +218,11 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 	seen := map[string]bool{}
 	var results []linkRow
 	add := func(n *note.Note) {
-		if n == nil || seen[n.ID] {
+		if n == nil || seen[noteHandle(n)] {
 			return
 		}
-		seen[n.ID] = true
-		results = append(results, linkRow{URL: "/n/" + url.PathEscape(n.ID), Title: n.Title, Path: n.Rel})
+		seen[noteHandle(n)] = true
+		results = append(results, linkRow{URL: "/n/" + url.PathEscape(noteHandle(n)), Title: n.Title, Path: n.Rel})
 	}
 	// title matches first (cheap, most relevant), then full-text body hits.
 	ql := strings.ToLower(q)
@@ -382,17 +384,19 @@ type treeNode struct {
 }
 
 // buildTree groups notes into a nested folder tree from their Rel paths.
-func buildTree(notes []*note.Note, activeID string) []*treeNode {
+// activeHandle is the handle of the note currently being viewed ("" on index).
+func buildTree(notes []*note.Note, activeHandle string) []*treeNode {
 	root := &treeNode{}
 	dirs := map[string]*treeNode{"": root}
 	for _, n := range notes {
 		folder, _ := splitRel(n.Rel)
+		h := noteHandle(n)
 		parent := ensureDir(dirs, root, folder)
 		parent.Children = append(parent.Children, &treeNode{
 			Name:    n.Title,
-			URL:     "/n/" + url.PathEscape(n.ID),
+			URL:     "/n/" + url.PathEscape(h),
 			IsNote:  true,
-			Current: n.ID == activeID,
+			Current: activeHandle != "" && h == activeHandle,
 		})
 	}
 	sortTree(root)
@@ -445,9 +449,30 @@ func splitRel(rel string) (parent, last string) {
 	return "", rel
 }
 
-func findByID(notes []*note.Note, id string) *note.Note {
+// noteHandle is a note's stable URL handle: its ULID when it has one, else its
+// notes/-relative path. Notes authored outside nt (e.g. in Obsidian/an editor)
+// have no id, so they're addressed by path — otherwise their URL would be the
+// broken "/n/".
+func noteHandle(n *note.Note) string {
+	if n.ID != "" {
+		return n.ID
+	}
+	return n.Rel
+}
+
+// findByHandle matches a note by its id or its relative path.
+func findByHandle(notes []*note.Note, h string) *note.Note {
 	for _, n := range notes {
-		if n.ID == id {
+		if (n.ID != "" && n.ID == h) || n.Rel == h {
+			return n
+		}
+	}
+	return nil
+}
+
+func findByPath(notes []*note.Note, path string) *note.Note {
+	for _, n := range notes {
+		if n.Path == path {
 			return n
 		}
 	}

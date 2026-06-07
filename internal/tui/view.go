@@ -841,8 +841,12 @@ func (m *Model) renderMarkdown(id, body string, w int) string {
 	if w < 8 {
 		w = 8
 	}
-	if len(body) > 4000 {
-		body = body[:4000] + "\n\n…"
+	// Render the full body — the result is cached (keyed by id/width/body) and
+	// scrollDetail windows the output, so cost is paid once. The cap is only a
+	// guard against a pathologically huge file freezing the one-time render.
+	const maxBody = 1 << 20 // 1 MiB
+	if len(body) > maxBody {
+		body = body[:maxBody] + "\n\n… (truncated)"
 	}
 	if m.md.id == id && m.md.w == w && m.md.body == body {
 		return m.md.out

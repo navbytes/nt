@@ -91,7 +91,16 @@ func mdLink(inner string, doc *task.Doc, notes []*note.Note) string {
 	}
 	label = mdEscapeLabel(label)
 	if ok && it.Kind == "note" {
-		return "[" + label + "](/n/" + url.PathEscape(it.ID) + ")"
+		h := it.ID
+		if h == "" { // id-less note (authored outside nt) — route by its path
+			for _, n := range notes {
+				if n.Path == it.Path {
+					h = n.Rel
+					break
+				}
+			}
+		}
+		return "[" + label + "](/n/" + url.PathEscape(h) + ")"
 	}
 	// unresolved, ambiguous, or a task (no web page in v1) → dim "missing" link
 	// that lands on a lookup/disambiguation page.
@@ -124,14 +133,14 @@ func backlinksFor(s *store.Store, n *note.Note, notes []*note.Note) []Backlink {
 		// panel (tasksReferencing), so they're excluded here to avoid showing
 		// the same task in two places.
 		src, isNote := byPath[h.Path]
-		if !isNote || src.ID == n.ID || seen[src.ID] {
+		if !isNote || src.Path == n.Path || seen[noteHandle(src)] {
 			continue
 		}
-		seen[src.ID] = true
+		seen[noteHandle(src)] = true
 		// Keep the matching line as a snippet (Notion-style context).
 		out = append(out, Backlink{
 			Title:  src.Title,
-			URL:    "/n/" + url.PathEscape(src.ID),
+			URL:    "/n/" + url.PathEscape(noteHandle(src)),
 			Text:   snippet(h.Text),
 			IsNote: true,
 		})
@@ -166,7 +175,7 @@ func tasksReferencing(doc *task.Doc, n *note.Note, notes []*note.Note) []TaskRef
 	var out []TaskRef
 	for _, t := range doc.Tasks() {
 		for _, raw := range t.Links() {
-			if it, ok := links.Resolve(raw, doc, notes); ok && it.Kind == "note" && it.ID == n.ID {
+			if it, ok := links.Resolve(raw, doc, notes); ok && it.Kind == "note" && it.Path == n.Path {
 				out = append(out, TaskRef{Text: cleanTaskText(t.Text), Status: t.Status(), Source: t.Source()})
 				break
 			}

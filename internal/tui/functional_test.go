@@ -26,6 +26,21 @@ func notesCount(t *testing.T, m *Model) int {
 	return len(ns)
 }
 
+// TestLongNoteRendersFully guards against the body-truncation regression: a note
+// longer than the old 4000-byte cap must render past it (the tail marker beyond
+// ~6 KB must survive into the rendered output).
+func TestLongNoteRendersFully(t *testing.T) {
+	m := testModel(t)
+	body := strings.Repeat("filler paragraph line of text here.\n\n", 300) + "\nTAILMARKERXYZ\n"
+	if len(body) < 6000 {
+		t.Fatalf("test body too short (%d bytes)", len(body))
+	}
+	out := m.renderMarkdown("note-long", body, 80)
+	if !strings.Contains(out, "TAILMARKERXYZ") {
+		t.Fatalf("long note truncated: tail marker missing from %d-byte render", len(out))
+	}
+}
+
 // TestAddNoteFromTUI is the user-reported failure: A → type → enter should
 // create a note and surface it on the notes tab.
 func TestAddNoteFromTUI(t *testing.T) {

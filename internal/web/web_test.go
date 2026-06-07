@@ -3,6 +3,8 @@ package web
 import (
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -10,6 +12,27 @@ import (
 	"github.com/navbytes/nt/internal/note"
 	"github.com/navbytes/nt/internal/task"
 )
+
+// TestIdlessNoteRoutesByPath: a note authored outside nt (no id: frontmatter,
+// e.g. from Obsidian) must still be browsable — routed by its path, not the
+// broken "/n/".
+func TestIdlessNoteRoutesByPath(t *testing.T) {
+	s := newTestServer(t)
+	dir := filepath.Join(s.eng.S.NotesDir(), "deep", "nested")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "big.md"), []byte("# Big Doc\n\nbody here\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, idx := get(t, s, "/"); !strings.Contains(idx, `/n/deep%2Fnested%2Fbig.md`) {
+		t.Fatalf("id-less note not path-routed in tree:\n%s", idx)
+	}
+	resp, body := get(t, s, "/n/deep%2Fnested%2Fbig.md")
+	if resp.StatusCode != 200 || !strings.Contains(body, ">Big Doc<") {
+		t.Fatalf("id-less note page didn't load: status=%d", resp.StatusCode)
+	}
+}
 
 func newTestServer(t *testing.T) *Server {
 	t.Helper()
