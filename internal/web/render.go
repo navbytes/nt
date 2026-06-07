@@ -2,11 +2,15 @@ package web
 
 import (
 	"bytes"
+	"html"
 	"html/template"
 	"net/url"
 	"regexp"
 	"strings"
 
+	chromahtml "github.com/alecthomas/chroma/v2/formatters/html"
+	"github.com/alecthomas/chroma/v2/lexers"
+	"github.com/alecthomas/chroma/v2/styles"
 	"github.com/yuin/goldmark"
 	"github.com/yuin/goldmark/extension"
 	"github.com/yuin/goldmark/parser"
@@ -49,13 +53,69 @@ func renderBody(body string, doc *task.Doc, notes []*note.Note) (template.HTML, 
 	// Tag resolved wikilinks (query-less /n/ hrefs) so CSS can style them;
 	// ?missing=1 links are skipped here and styled via the attribute selector.
 	out = wikiClassRe.ReplaceAllString(out, `<a class="wikilink" href="$1">`)
-	return template.HTML(out), nil //nolint:gosec // goldmark output is escaped (safe renderer)
+	// Syntax-highlight fenced code with a known language (Chroma — already in the
+	// module graph via Glamour). Emits classed spans; colors come from the
+	// theme-scoped CSS at /static/highlight.css.
+	out = highlightCode(out)
+	return template.HTML(out), nil //nolint:gosec // goldmark output + Chroma classes are escaped
 }
 
 var (
 	mermaidBlockRe = regexp.MustCompile(`(?s)<pre><code class="language-mermaid">(.*?)</code></pre>`)
 	wikiClassRe    = regexp.MustCompile(`<a href="(/n/[^"?]+)">`)
+	codeBlockRe    = regexp.MustCompile(`(?s)<pre><code class="language-([\w+#.-]+)">(.*?)</code></pre>`)
+	bgColorRe      = regexp.MustCompile(`background-color:[^;}]*;?`)
 )
+
+// chromaFormatter emits class names (not inline styles), so one render serves
+// both light and dark — the colors live in theme-scoped CSS.
+var chromaFormatter = chromahtml.New(chromahtml.WithClasses(true))
+
+// highlightCode replaces ```lang fenced blocks with Chroma-highlighted markup.
+// Unknown languages and plain ``` blocks are left as goldmark emitted them.
+func highlightCode(s string) string {
+	return codeBlockRe.ReplaceAllStringFunc(s, func(m string) string {
+		sub := codeBlockRe.FindStringSubmatch(m)
+		lexer := lexers.Get(sub[1])
+		if lexer == nil {
+			return m
+		}
+		it, err := lexer.Tokenise(nil, html.UnescapeString(sub[2]))
+		if err != nil {
+			return m
+		}
+		var buf bytes.Buffer
+		if err := chromaFormatter.Format(&buf, styles.Fallback, it); err != nil {
+			return m
+		}
+		return buf.String()
+	})
+}
+
+// highlightCSS builds the theme-scoped stylesheet for the Chroma classes: a light
+// palette by default, a dark one under both prefers-color-scheme and the manual
+// [data-theme="dark"] toggle.
+func highlightCSS() string {
+	light := styles.Get("github")
+	dark := styles.Get("github-dark")
+	if dark == nil {
+		dark = styles.Fallback
+	}
+	var lb, db bytes.Buffer
+	_ = chromaFormatter.WriteCSS(&lb, light)
+	_ = chromaFormatter.WriteCSS(&db, dark)
+	// Drop Chroma's own backgrounds so code blocks keep nt's --bg-inset surface
+	// (consistent with inline code); only the token colors are themed.
+	lightCSS := bgColorRe.ReplaceAllString(lb.String(), "")
+	darkCSS := bgColorRe.ReplaceAllString(db.String(), "")
+	var b strings.Builder
+	b.WriteString(lightCSS)
+	b.WriteString("@media (prefers-color-scheme: dark){")
+	b.WriteString(strings.ReplaceAll(darkCSS, ".chroma", `:root:not([data-theme="light"]) .chroma`))
+	b.WriteString("}")
+	b.WriteString(strings.ReplaceAll(darkCSS, ".chroma", `[data-theme="dark"] .chroma`))
+	return b.String()
+}
 
 // rewriteWikilinks replaces [[target]] with Markdown links, but never inside a
 // fenced code block (so mermaid sources and code samples are preserved).

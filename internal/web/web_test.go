@@ -289,3 +289,22 @@ func TestSiblingPager(t *testing.T) {
 		t.Fatalf("sibling pager missing:\n%s", body)
 	}
 }
+
+func TestSyntaxHighlight(t *testing.T) {
+	s := newTestServer(t)
+	doc, notes := s.load()
+	html, _ := renderBody("```go\nfunc main() {}\n```\n", doc, notes)
+	if !strings.Contains(string(html), `class="chroma"`) || !strings.Contains(string(html), `class="kd"`) {
+		t.Fatalf("go code not highlighted:\n%s", html)
+	}
+	if plain, _ := renderBody("```nosuchlang\nx\n```\n", doc, notes); strings.Contains(string(plain), "chroma") {
+		t.Errorf("unknown language should be left unhighlighted")
+	}
+	css := highlightCSS()
+	if !strings.Contains(css, ".chroma") || !strings.Contains(css, "prefers-color-scheme") {
+		t.Errorf("highlight CSS missing scoping")
+	}
+	if strings.Contains(css, "background-color") {
+		t.Errorf("highlight CSS should not set backgrounds (keeps --bg-inset)")
+	}
+}

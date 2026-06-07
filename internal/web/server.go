@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"html/template"
+	"io"
 	"net"
 	"net/http"
 	"net/url"
@@ -39,6 +40,7 @@ type Server struct {
 	version string
 	tmpl    *template.Template
 	hub     *hub
+	hlCSS   string // generated Chroma syntax-highlight stylesheet (theme-scoped)
 }
 
 // NewServer parses the embedded template and prepares the viewer.
@@ -55,7 +57,7 @@ func NewServer(eng *mutate.Engine, version string) (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Server{eng: eng, version: version, tmpl: tmpl, hub: newHub()}, nil
+	return &Server{eng: eng, version: version, tmpl: tmpl, hub: newHub(), hlCSS: highlightCSS()}, nil
 }
 
 // Serve opens the store and serves the viewer on addr (e.g. "127.0.0.1:0").
@@ -413,6 +415,9 @@ func (s *Server) handleStatic(w http.ResponseWriter, r *http.Request) {
 	case "style.css":
 		w.Header().Set("Content-Type", "text/css; charset=utf-8")
 		s.writeAsset(w, "assets/style.css")
+	case "highlight.css":
+		w.Header().Set("Content-Type", "text/css; charset=utf-8")
+		_, _ = io.WriteString(w, s.hlCSS)
 	case "app.js":
 		w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
 		s.writeAsset(w, "assets/app.js")
