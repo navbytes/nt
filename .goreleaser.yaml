@@ -36,21 +36,20 @@ changelog:
       - "^docs:"
       - "^test:"
 
-# Publishes a formula to github.com/navbytes/homebrew-tap so users can
-# `brew install navbytes/tap/nt`. Requires that tap repo to exist.
-brews:
-  - name: nt
-    repository:
-      owner: navbytes
-      name: homebrew-tap
-      # A PAT with write access to the tap repo — the default GITHUB_TOKEN can't
-      # push to a *different* repository. Provide it as the secret
-      # HOMEBREW_TAP_GITHUB_TOKEN (see RELEASING.md).
-      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
-    homepage: "https://github.com/navbytes/nt"
-    description: "Terminal task & note manager — durable memory for AI coding sessions"
-    license: MIT
-    install: |
-      bin.install "nt"
-    test: |
-      system "#{bin}/nt", "--version"
+# Homebrew is deferred — day-1 install is the curl script + `go install` +
+# release binaries. To enable a tap later: create the navbytes/homebrew-tap repo,
+# add the HOMEBREW_TAP_GITHUB_TOKEN secret (RELEASING.md), and uncomment below.
+#
+# brews:
+#   - name: nt
+#     repository:
+#       owner: navbytes
+#       name: homebrew-tap
+#       token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+#     homepage: "https://github.com/navbytes/nt"
+#     description: "Terminal task & note manager — durable memory for AI coding sessions"
+#     license: MIT
+#     install: |
+#       bin.install "nt"
+#     test: |
+#       system "#{bin}/nt", "--version"

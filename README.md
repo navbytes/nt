@@ -16,19 +16,19 @@ See [SPEC.md](SPEC.md) for the full design.
 ## Install
 
 ```bash
-# Homebrew (once a release is tagged — see RELEASING.md)
-brew install navbytes/tap/nt
+# Curl — downloads the latest release binary to ~/.local/bin (no Go needed)
+curl -fsSL https://raw.githubusercontent.com/navbytes/nt/main/install.sh | bash
 
 # Go (installs the latest tagged release to $GOBIN)
 go install github.com/navbytes/nt@latest
 
 # From source — builds and installs to ~/.local/bin (override with NT_INSTALL_DIR)
 git clone https://github.com/navbytes/nt && cd nt && make install
-# or: ./install.sh
 ```
 
-Releases are automated: pushing a `vX.Y.Z` tag runs GoReleaser via GitHub
-Actions to build the binaries and update the Homebrew tap ([RELEASING.md](RELEASING.md)).
+Releases are automated: pushing a `vX.Y.Z` tag runs GoReleaser via GitHub Actions
+to build the cross-platform binaries + checksums ([RELEASING.md](RELEASING.md)).
+Homebrew is planned for later (`brew install navbytes/tap/nt`).
 
 Pure Go, single static binary, no system dependencies. `nt --version` reports the build.
 

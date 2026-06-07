@@ -25,7 +25,7 @@ jobs:
           version: "~> v2"
           args: release --clean
         env:
-          # Creates the GitHub Release on this repo.
+          # Creates the GitHub Release (binaries + checksums) on this repo.
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # PAT with write access to navbytes/homebrew-tap (the formula push).
-          HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
+          # When you enable the Homebrew tap later (RELEASING.md), also set:
+          # HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
