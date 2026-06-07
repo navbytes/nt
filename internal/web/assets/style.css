@@ -335,6 +335,80 @@ a:hover { text-decoration: underline; }
 .state ul { list-style: none; padding: 0; margin: var(--s4) 0 0; display: grid; gap: var(--s1); }
 
 /* ==========================================================================
+   Phase 1 enrichments
+   ========================================================================== */
+
+/* ---- Skip link ---- */
+.skip-link {
+  position: absolute; left: -9999px; top: 0; z-index: 100;
+  background: var(--accent); color: #fff; padding: var(--s2) var(--s4);
+  border-radius: 0 0 var(--radius-sm) 0;
+}
+.skip-link:focus { left: 0; }
+
+/* ---- Breadcrumb (topbar) ---- */
+.crumbs { display: flex; align-items: center; gap: var(--s2); font-size: 13px; min-width: 0; overflow: hidden; }
+.crumb-home { font-family: var(--font-mono); font-weight: 700; color: var(--magenta); flex: 0 0 auto; }
+.crumb-home::before { content: "▌ "; color: var(--accent); }
+.crumb-sep { color: var(--muted); flex: 0 0 auto; }
+.crumb-dir { color: var(--muted); flex: 0 0 auto; }
+.crumb-file { color: var(--fg-soft); font-family: var(--font-mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* ---- Note meta (src badge + created + path) ---- */
+.note__meta { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s2); }
+.src-badge {
+  font-family: var(--font-mono); font-size: 11px; text-transform: uppercase; letter-spacing: .04em;
+  color: var(--muted); background: var(--bg-inset); padding: 1px var(--s2); border-radius: var(--radius-sm);
+}
+.src-badge--claude { color: var(--accent-2); background: color-mix(in srgb, var(--accent-2) 16%, transparent); }
+.note__created { font-family: var(--font-mono); font-size: 12px; color: var(--muted); }
+
+/* ---- Backlink snippet ---- */
+.backlinks li { display: block; }
+.backlinks__snippet { display: block; font-size: 12.5px; color: var(--muted); margin: 2px 0 0 var(--s4); }
+
+/* ---- Referenced-by-tasks ---- */
+.taskrefs { margin-top: var(--s7); padding-top: var(--s4); border-top: 1px solid var(--border); }
+.taskrefs ul { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--s2); }
+.taskref { display: flex; align-items: baseline; gap: var(--s3); font-size: 14px; }
+.taskref__status {
+  font-family: var(--font-mono); font-size: 10.5px; text-transform: uppercase; letter-spacing: .04em;
+  padding: 1px var(--s2); border-radius: 999px; flex: 0 0 auto;
+}
+.s-open    { color: var(--accent);   background: color-mix(in srgb, var(--accent) 14%, transparent); }
+.s-doing   { color: var(--accent-2); background: color-mix(in srgb, var(--accent-2) 16%, transparent); }
+.s-blocked { color: var(--broken);   background: color-mix(in srgb, var(--broken) 16%, transparent); }
+.s-done    { color: var(--muted);    background: var(--bg-inset); }
+.taskref__text { color: var(--fg-soft); }
+.taskref__src { font-family: var(--font-mono); font-size: 11px; color: var(--muted); margin-left: auto; flex: 0 0 auto; }
+
+/* ---- In-note Table of Contents (right rail, wide screens only) ---- */
+.toc {
+  position: fixed; top: 96px; right: var(--s6); width: 190px; max-height: 72vh; overflow-y: auto;
+  font-size: 12.5px; display: none;
+}
+.toc__title { text-transform: uppercase; letter-spacing: .08em; font-size: 11px; color: var(--muted); margin-bottom: var(--s2); }
+.toc a { display: block; padding: 2px 0 2px var(--s3); color: var(--muted); border-left: 2px solid var(--border-soft); }
+.toc a:hover, .toc a.toc--active { color: var(--fg); border-left-color: var(--accent); text-decoration: none; }
+.toc a.toc--h3 { padding-left: var(--s5); font-size: 12px; }
+@media (min-width: 1400px) { .toc { display: block; } }
+
+/* ---- Heading anchors ---- */
+.md :is(h1,h2,h3,h4) .heading-anchor { opacity: 0; margin-left: .3em; color: var(--muted); font-weight: 400; text-decoration: none; }
+.md :is(h1,h2,h3,h4):hover .heading-anchor { opacity: 1; }
+
+/* ---- Copy-code button ---- */
+.md pre { position: relative; }
+.copy-btn {
+  position: absolute; top: var(--s2); right: var(--s2);
+  font-family: var(--font-mono); font-size: 11px; color: var(--fg-soft);
+  background: var(--bg-elev); border: 1px solid var(--border); border-radius: var(--radius-sm);
+  padding: 2px var(--s2); cursor: pointer; opacity: 0; transition: opacity .12s;
+}
+.md pre:hover .copy-btn, .copy-btn:focus { opacity: 1; }
+.copy-btn.copied { color: var(--accent-2); border-color: var(--accent-2); }
+
+/* ==========================================================================
    Responsive — sidebar collapses behind toggle
    ========================================================================== */
 .backdrop { display: none; }

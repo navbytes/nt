@@ -8,6 +8,7 @@
   <script>try{var t=localStorage.getItem("nt-theme");if(t)document.documentElement.setAttribute("data-theme",t);}catch(e){}</script>
 </head>
 <body>
+  <a class="skip-link" href="#main">Skip to note</a>
   <div class="app" id="app">
     <div class="backdrop" data-nav-close></div>
 
@@ -35,9 +36,16 @@
       </nav>
     </aside>
 
-    <main class="main">
+    <main class="main" id="main">
       <div class="topbar">
         <button class="icon-btn menu-btn" data-nav-toggle aria-label="Toggle navigation" aria-controls="sidebar">☰</button>
+        {{if .IsNote}}
+        <nav class="crumbs" aria-label="Breadcrumb">
+          <a href="/" class="crumb-home">nt</a>
+          {{range .Crumbs}}<span class="crumb-sep">/</span><span class="crumb-dir">{{.}}</span>{{end}}
+          <span class="crumb-sep">/</span><span class="crumb-file">{{.FileName}}</span>
+        </nav>
+        {{else}}<a href="/" class="crumb-home">nt</a>{{end}}
         <div class="topbar__spacer"></div>
         <button class="icon-btn" id="theme-toggle" aria-label="Toggle light/dark theme" title="Toggle theme">◐</button>
       </div>
@@ -58,7 +66,11 @@
       <article class="note">
         <header class="note__header">
           <h1 class="note__title">{{.NoteTitle}}</h1>
-          <div class="note__path">{{if .FolderPath}}{{.FolderPath}}/{{end}}{{.FileName}}</div>
+          <div class="note__meta">
+            {{if .NoteSource}}<span class="src-badge{{if eq .NoteSource "claude"}} src-badge--claude{{end}}">{{.NoteSource}}</span>{{end}}
+            {{if .NoteCreated}}<span class="note__created">{{.NoteCreated}}</span>{{end}}
+            <span class="note__path">{{if .FolderPath}}{{.FolderPath}}/{{end}}{{.FileName}}</span>
+          </div>
           {{if .Tags}}
           <div class="note__tags">
             {{range .Tags}}<a class="tag" href="/search?q={{.}}">{{.}}</a>{{end}}
@@ -66,13 +78,28 @@
           {{end}}
         </header>
         <div class="md">{{.BodyHTML}}</div>
+
+        {{if .TaskRefs}}
+        <section class="taskrefs">
+          <h2 class="backlinks__title">Referenced by tasks · {{len .TaskRefs}}</h2>
+          <ul>
+            {{range .TaskRefs}}
+            <li class="taskref">
+              <span class="taskref__status s-{{.Status}}">{{.Status}}</span>
+              <span class="taskref__text">{{.Text}}</span>
+              {{if .Source}}<span class="taskref__src">{{.Source}}</span>{{end}}
+            </li>
+            {{end}}
+          </ul>
+        </section>
+        {{end}}
+
         <footer class="backlinks">
-          <h2 class="backlinks__title">Linked from</h2>
+          <h2 class="backlinks__title">Linked from{{if .Backlinks}} · {{len .Backlinks}}{{end}}</h2>
           {{if .Backlinks}}
           <ul>
             {{range .Backlinks}}
-            {{if .IsNote}}<li><a href="{{.URL}}">{{.Title}}</a></li>
-            {{else}}<li><span class="backlinks__task">{{.Text}}</span></li>{{end}}
+            <li><a href="{{.URL}}">{{.Title}}</a>{{if .Text}}<span class="backlinks__snippet">{{.Text}}</span>{{end}}</li>
             {{end}}
           </ul>
           {{else}}

@@ -8,6 +8,7 @@ import (
 
 	"github.com/navbytes/nt/internal/mutate"
 	"github.com/navbytes/nt/internal/note"
+	"github.com/navbytes/nt/internal/task"
 )
 
 func newTestServer(t *testing.T) *Server {
@@ -140,6 +141,52 @@ func TestAmbiguousCandidates(t *testing.T) {
 	}
 	if strings.Count(body, `<code>`) < 2 { // two candidate paths listed
 		t.Errorf("expected candidate list:\n%s", body)
+	}
+}
+
+func TestNoteMetadataAndBreadcrumb(t *testing.T) {
+	s := newTestServer(t)
+	n, _ := note.Create(s.eng.S, "Auth Design", "body", nil, "claude", "work/auth")
+	_, body := get(t, s, "/n/"+n.ID)
+	if !strings.Contains(body, "src-badge--claude") || !strings.Contains(body, ">claude<") {
+		t.Errorf("src:claude badge missing:\n%s", body)
+	}
+	if !strings.Contains(body, `class="crumbs"`) || !strings.Contains(body, ">work<") || !strings.Contains(body, ">auth<") {
+		t.Errorf("breadcrumb missing folder segments:\n%s", body)
+	}
+	if !strings.Contains(body, `class="skip-link"`) {
+		t.Error("skip-link missing")
+	}
+}
+
+func TestReferencedByTasksPanel(t *testing.T) {
+	s := newTestServer(t)
+	n, _ := note.Create(s.eng.S, "Architecture", "the design", nil, "claude", "")
+	// a task that links to the note
+	if err := s.eng.Apply("add", func(d *task.Doc, rec *mutate.Recorder) error {
+		tk := task.New("implement [[architecture]] @backend")
+		d.Append(tk)
+		rec.Added(tk)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	_, body := get(t, s, "/n/"+n.ID)
+	if !strings.Contains(body, "Referenced by tasks") {
+		t.Fatalf("task-refs panel missing:\n%s", body)
+	}
+	if !strings.Contains(body, "implement") || !strings.Contains(body, "s-open") {
+		t.Errorf("task ref text/status missing:\n%s", body)
+	}
+}
+
+func TestBacklinkSnippet(t *testing.T) {
+	s := newTestServer(t)
+	target, _ := note.Create(s.eng.S, "Target", "body", nil, "cli", "")
+	_, _ = note.Create(s.eng.S, "Source", "context before [[target]] context after", nil, "cli", "")
+	_, body := get(t, s, "/n/"+target.ID)
+	if !strings.Contains(body, "backlinks__snippet") || !strings.Contains(body, "context before") {
+		t.Errorf("backlink snippet missing:\n%s", body)
 	}
 }
 

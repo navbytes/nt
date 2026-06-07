@@ -120,15 +120,65 @@ func backlinksFor(s *store.Store, n *note.Note, notes []*note.Note) []Backlink {
 	seen := map[string]bool{}
 	var out []Backlink
 	for _, h := range links.Backlinks(s, n.ID, n.Rel) {
-		if src, isNote := byPath[h.Path]; isNote {
-			if src.ID == n.ID || seen[src.ID] {
-				continue // skip self-links and duplicates
-			}
-			seen[src.ID] = true
-			out = append(out, Backlink{Title: src.Title, URL: "/n/" + url.PathEscape(src.ID), IsNote: true})
+		// Note → note only; task references get their own "Referenced by tasks"
+		// panel (tasksReferencing), so they're excluded here to avoid showing
+		// the same task in two places.
+		src, isNote := byPath[h.Path]
+		if !isNote || src.ID == n.ID || seen[src.ID] {
 			continue
 		}
-		out = append(out, Backlink{Text: strings.TrimSpace(h.Text)})
+		seen[src.ID] = true
+		// Keep the matching line as a snippet (Notion-style context).
+		out = append(out, Backlink{
+			Title:  src.Title,
+			URL:    "/n/" + url.PathEscape(src.ID),
+			Text:   snippet(h.Text),
+			IsNote: true,
+		})
 	}
 	return out
+}
+
+// snippet trims a matched line to a compact one-liner for context display.
+func snippet(s string) string {
+	s = strings.TrimSpace(s)
+	const max = 120
+	if len(s) > max {
+		s = s[:max] + "…"
+	}
+	return s
+}
+
+// TaskRef is one task that links to the note (the task↔note moat).
+type TaskRef struct {
+	Text   string
+	Status string
+	Source string
+}
+
+// tasksReferencing returns tasks whose [[links]] resolve to this note — the
+// "Referenced by tasks" panel. Reuses links.Resolve, the same resolution the
+// CLI/TUI use, over the task Doc already loaded for the request.
+func tasksReferencing(doc *task.Doc, n *note.Note, notes []*note.Note) []TaskRef {
+	if doc == nil {
+		return nil
+	}
+	var out []TaskRef
+	for _, t := range doc.Tasks() {
+		for _, raw := range t.Links() {
+			if it, ok := links.Resolve(raw, doc, notes); ok && it.Kind == "note" && it.ID == n.ID {
+				out = append(out, TaskRef{Text: cleanTaskText(t.Text), Status: t.Status(), Source: t.Source()})
+				break
+			}
+		}
+	}
+	return out
+}
+
+var taskTokenRe = regexp.MustCompile(`\s+(id|src|due|s|pri|parent|blocks|rec|discovered|completed):[^\s]+`)
+
+// cleanTaskText strips todo.txt bookkeeping key:value tokens for display,
+// keeping the human-readable description (and +project/@tag/[[link]] words).
+func cleanTaskText(text string) string {
+	return strings.TrimSpace(taskTokenRe.ReplaceAllString(" "+text, ""))
 }

@@ -94,13 +94,17 @@ type pageData struct {
 	SearchQuery string
 	Results     []linkRow
 
-	IsNote     bool
-	NoteTitle  string
-	FolderPath string
-	FileName   string
-	Tags       []string
-	BodyHTML   template.HTML
-	Backlinks  []Backlink
+	IsNote      bool
+	NoteTitle   string
+	FolderPath  string
+	FileName    string
+	Crumbs      []string
+	NoteSource  string
+	NoteCreated string
+	Tags        []string
+	BodyHTML    template.HTML
+	Backlinks   []Backlink
+	TaskRefs    []TaskRef
 
 	IsState    bool
 	StateTitle string
@@ -155,16 +159,24 @@ func (s *Server) renderNote(w http.ResponseWriter, n *note.Note, doc *task.Doc, 
 		return
 	}
 	folder, file := splitRel(n.Rel)
+	var crumbs []string
+	if folder != "" {
+		crumbs = strings.Split(folder, "/")
+	}
 	s.render(w, &pageData{
-		Title:      n.Title,
-		Tree:       buildTree(notes, n.ID),
-		IsNote:     true,
-		NoteTitle:  n.Title,
-		FolderPath: folder,
-		FileName:   file,
-		Tags:       n.Tags,
-		BodyHTML:   body,
-		Backlinks:  backlinksFor(s.eng.S, n, notes),
+		Title:       n.Title,
+		Tree:        buildTree(notes, n.ID),
+		IsNote:      true,
+		NoteTitle:   n.Title,
+		FolderPath:  folder,
+		FileName:    file,
+		Crumbs:      crumbs,
+		NoteSource:  n.Source,
+		NoteCreated: dateOnly(n.Created),
+		Tags:        n.Tags,
+		BodyHTML:    body,
+		Backlinks:   backlinksFor(s.eng.S, n, notes),
+		TaskRefs:    tasksReferencing(doc, n, notes),
 	})
 }
 
@@ -415,6 +427,14 @@ func sortTree(n *treeNode) {
 			sortTree(c)
 		}
 	}
+}
+
+// dateOnly trims an RFC3339 timestamp to its YYYY-MM-DD date for display.
+func dateOnly(ts string) string {
+	if len(ts) >= 10 {
+		return ts[:10]
+	}
+	return ts
 }
 
 // splitRel splits a slash path into (parent, last). "work/auth/x.md" → ("work/auth","x.md").
