@@ -705,7 +705,7 @@ func (m *Model) detailContent(w int) string {
 			if it, ok := links.Resolve(target, d, m.notes); ok {
 				b.WriteString("  " + stProj.Render("→") + " " + stDim.Render("["+it.Kind+"]") + " " + truncate(it.Title, w-10) + "\n")
 			} else {
-				b.WriteString("  " + stProj.Render("→") + " " + stLink.Render("[["+target+"]]") + stDim.Render(" (unresolved)") + "\n")
+				b.WriteString("  " + stWarn.Render("→") + " " + stWarn.Render("[["+target+"]]") + stDim.Render(" (unresolved)") + "\n")
 			}
 		}
 	}
@@ -825,10 +825,10 @@ func (m *Model) helpView() string {
 			{"a / A", "add task / note"},
 			{"r", "rename"}, {"e / E", "edit in $EDITOR"}, {"p", "cycle priority"},
 			{"D", "set due date"}, {"t / T", "add / remove tag"},
-			{"l / L", "add link / follow link"}, {"u", "undo (again = redo)"},
+			{"l / L", "add a [[link]] / jump to the first link"}, {"u", "undo (again = redo)"},
 		}},
 		{"view", [][2]string{
-			{"f", "follow: label a [[link]]/@tag/+project to activate (CAPS = group)"},
+			{"f", "follow: pick any [[link]]/@tag/+project to open or scope (CAPS = group)"},
 			{"mouse", "wheel scrolls · click selects · click a token activates it"},
 			{"/", "filter (searches note bodies on the notes tab)"},
 			{"esc", "clear filter / scope"},
@@ -1023,7 +1023,7 @@ func colorizeStr(text string, done bool) string {
 		case strings.HasPrefix(w, "+") && len(w) > 1:
 			words[i] = stProj.Render(w)
 		case strings.HasPrefix(w, "[["):
-			words[i] = stLink.Render(w)
+			words[i] = stLinkU.Render(w) // underline: reads as a followable link
 		}
 	}
 	return strings.Join(words, " ")

@@ -402,6 +402,8 @@ var (
 	stTag        = lipgloss.NewStyle().Foreground(cMagenta)
 	stProj       = lipgloss.NewStyle().Foreground(cBlue)
 	stLink       = lipgloss.NewStyle().Foreground(cCyan)
+	stLinkU      = lipgloss.NewStyle().Foreground(cCyan).Underline(true) // followable [[link]]
+	stWarn       = lipgloss.NewStyle().Foreground(cYellow)               // unresolved / attention
 	stDone       = lipgloss.NewStyle().Foreground(cDim).Strikethrough(true)
 	stGreen      = lipgloss.NewStyle().Foreground(cGreen)
 	stPanel      = lipgloss.NewStyle().Border(lipgloss.NormalBorder(), false, false, false, true).BorderForeground(cBorder).Padding(0, 2)
