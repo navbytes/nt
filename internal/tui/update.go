@@ -223,7 +223,15 @@ func (m *Model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "/":
 		return m, m.startInput(inFilter, m.filter, "filter")
 	case "r":
-		if t := m.selectedTask(); t != nil {
+		if m.tab == tabNotes {
+			if n := m.selectedNote(); n != nil {
+				cur := n.Rel
+				if i := strings.LastIndex(cur, "/"); i >= 0 {
+					cur = cur[i+1:]
+				}
+				return m, m.startInput(inRenameNote, strings.TrimSuffix(cur, ".md"), "rename/move note (name or folder/path)")
+			}
+		} else if t := m.selectedTask(); t != nil {
 			return m, m.startInput(inRename, t.Text, "rename")
 		}
 	case "D":
@@ -306,6 +314,10 @@ func (m *Model) commitInput() (tea.Model, tea.Cmd) {
 	case inRename:
 		if val != "" {
 			m.rename(val)
+		}
+	case inRenameNote:
+		if val != "" {
+			m.renameNote(val)
 		}
 	case inDue:
 		m.setDue(val)
@@ -405,6 +417,26 @@ func (m *Model) rename(text string) {
 		return
 	}
 	m.mutate("rename", t.ID(), func(tk *task.Task) { tk.SetText(text) })
+}
+
+// renameNote renames/moves the selected note and rewrites every [[link]] to it,
+// then reselects it (its ULID is unchanged).
+func (m *Model) renameNote(dest string) {
+	n := m.selectedNote()
+	if n == nil {
+		return
+	}
+	id := n.ID
+	newRel, updated, err := m.eng.RenameNote(n, m.notes, dest)
+	if err != nil {
+		m.setStatus(err.Error())
+		return
+	}
+	m.reload()
+	if id != "" {
+		m.selectByID(id)
+	}
+	m.setStatus(fmt.Sprintf("renamed → %s (%d reference(s))", newRel, updated))
 }
 
 func (m *Model) setDue(val string) {

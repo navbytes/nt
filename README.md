@@ -101,6 +101,7 @@ nt links <id|task:N>           # forward links + backlinks (both directions)
 nt recall --source claude --json   # read items back — the AI loop
 nt log [--since|--days N] [--json]  # completed tasks, newest first (the Logbook)
 nt edit <id|task:N>            # safe $EDITOR round-trip (never touches the shared file directly)
+nt mv <note> <new-name|folder/path>   # rename/move a note, rewriting all [[links]] to it
 nt archive                     # move done tasks to done.txt
 nt undo                        # revert the last change (and undo-again to redo)
 nt path                        # print $NT_DIR
@@ -130,8 +131,10 @@ and the AI-memory loop. nt reads back what Obsidian writes: nested subfolders,
 block-list `tags:`/`aliases:`, notes without an H1 (title falls back to the
 filename), and link variants (`[[folder/note]]`, `[[note#heading]]`,
 `[[note|alias]]`) resolved by shortest path-suffix — a bare name colliding across
-folders is flagged ambiguous rather than guessed. (Logseq's outliner model is not
-a target.)
+folders is flagged ambiguous rather than guessed. Rename/move is **nt-native**:
+`nt mv <note> <new>` (or `r` in the TUI notes tab) renames the file and rewrites
+every `[[link]]` to it across tasks and notes, so you don't depend on Obsidian to
+keep links intact. (Logseq's outliner model is not a target.)
 
 ## Claude Code integration
 

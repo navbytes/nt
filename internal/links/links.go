@@ -131,6 +131,39 @@ func wikilinks(s string) []string {
 	return out
 }
 
+// RewriteLine rewrites every [[…]] in s that resolves (by path-suffix) to the
+// note at oldRel so its basename becomes newBase, preserving any folder prefix,
+// #fragment, and |alias. Returns the new string and whether anything changed.
+func RewriteLine(s, oldRel, newBase string) (string, bool) {
+	changed := false
+	out := linkRe.ReplaceAllStringFunc(s, func(m string) string {
+		inner := m[2 : len(m)-2]
+		if key, _ := NormalizeTarget(inner); key == "" || !suffixMatch(oldRel, key) {
+			return m
+		}
+		changed = true
+		path, frag, alias := splitInner(inner)
+		seg := strings.Split(path, "/")
+		seg[len(seg)-1] = newBase
+		return "[[" + strings.Join(seg, "/") + frag + alias + "]]"
+	})
+	return out, changed
+}
+
+// splitInner separates a [[…]] inner string into its path (folder/name, .md and
+// surrounding slashes trimmed), its #fragment, and its |alias (each kept with its
+// leading delimiter, or empty).
+func splitInner(inner string) (path, frag, alias string) {
+	s := inner
+	if i := strings.IndexByte(s, '|'); i >= 0 {
+		alias, s = s[i:], s[:i]
+	}
+	if i := strings.IndexByte(s, '#'); i >= 0 {
+		frag, s = s[i:], s[:i]
+	}
+	return strings.Trim(strings.TrimSuffix(strings.TrimSpace(s), ".md"), "/"), frag, alias
+}
+
 func noteItem(n *note.Note) Item {
 	return Item{Kind: "note", ID: n.ID, Title: n.Title, Path: n.Path}
 }

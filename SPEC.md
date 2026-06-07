@@ -178,8 +178,12 @@ deprecated singular `tag:`); a missing H1 falls back to a `title:`/`aliases:` va
 filename; and links resolve by **shortest path-suffix** like Obsidian — `[[note]]`,
 `[[folder/note]]`, `[[note#heading]]`, `[[note|alias]]`, `[[note.md]]` all resolve, a bare
 name that collides across folders is reported as **ambiguous** (qualify it with a folder)
-rather than silently guessed. Out of scope: inline `#tags`, embeds `![[…]]`, block-ref
-navigation, Logseq's outliner model.
+rather than silently guessed. **Renaming is nt-native** — `nt mv <note> <new>` (or `r` on the
+TUI notes tab) renames/moves the file and rewrites every `[[link]]` to it across tasks and
+notes (preserving each link's folder/`#fragment`/`|alias`), so you don't depend on Obsidian to
+keep links intact. A pure folder move needs no rewrite (resolution is path-suffix); a rename
+that would collide with another note's name is refused. Out of scope: inline `#tags`, embeds
+`![[…]]`, block-ref navigation, Logseq's outliner model.
 
 ---
 
@@ -346,6 +350,7 @@ nt links <id|task:N> [--json]        # forward links + backlinks for an item (§
 nt archive                           # move done tasks → done.txt
 nt undo                              # revert the last transaction
 nt edit <id|task:N> | nt edit note:<slug>   # safe edit via temp file (§6.2)
+nt mv <note> <new-name|folder/path>  # rename/move a note, rewriting all [[links]] to it
 nt path                              # print $NT_DIR
 ```
 

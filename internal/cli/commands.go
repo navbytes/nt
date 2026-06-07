@@ -774,6 +774,41 @@ func cmdPath(args []string) int {
 	return 0
 }
 
+// cmdMv renames or moves a note and rewrites every [[link]] to it across tasks
+// and notes. dest is a new name or a folder/path (relative to notes/).
+func cmdMv(args []string) int {
+	if len(args) < 2 {
+		return fail(fmt.Errorf("mv: usage: nt mv <note> <new-name|folder/path>"))
+	}
+	src, dest := args[0], strings.Join(args[1:], " ")
+	e, ok := engine()
+	if !ok {
+		return 1
+	}
+	notes, _ := note.List(e.S)
+	want := strings.TrimPrefix(src, "note:")
+	it, ok := links.Resolve(want, nil, notes)
+	if !ok {
+		if it.Kind == "ambiguous" {
+			return fail(fmt.Errorf("mv: %q is ambiguous (%s) — qualify with a folder", want, it.Title))
+		}
+		return fail(fmt.Errorf("mv: no note %q", want))
+	}
+	var n *note.Note
+	for _, x := range notes {
+		if x.Path == it.Path {
+			n = x
+			break
+		}
+	}
+	newRel, updated, err := e.RenameNote(n, notes, dest)
+	if err != nil {
+		return fail(err)
+	}
+	fmt.Printf("renamed → %s (updated %d reference(s))\n", newRel, updated)
+	return 0
+}
+
 // cmdDoctor reconciles tasks.txt after a git merge or a hand-edit: it drops
 // duplicate-ULID lines (which a `merge=union` merge can leave) and assigns ids to
 // any task line missing one. --check reports without fixing (exit 1 if any).

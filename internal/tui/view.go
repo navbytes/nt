@@ -229,7 +229,7 @@ func (m *Model) keybarPairs() [][2]string {
 	hasTokens := len(m.collectTargets()) > 0
 	switch m.tab {
 	case tabNotes:
-		p := [][2]string{{"j/k", "move"}, {"enter", "detail"}, {"A", "add note"}, {"e", "edit"}}
+		p := [][2]string{{"j/k", "move"}, {"enter", "detail"}, {"A", "add note"}, {"r", "rename"}, {"e", "edit"}}
 		if hasTokens {
 			p = append(p, [2]string{"f", "follow"})
 		}
@@ -1079,6 +1079,8 @@ func promptLabel(ik inputKind) string {
 		return "untag:"
 	case inSetPri:
 		return "priority:"
+	case inRenameNote:
+		return "rename:"
 	case inLink:
 		return "link:"
 	}

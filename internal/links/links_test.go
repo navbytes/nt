@@ -67,6 +67,23 @@ func TestReferences(t *testing.T) {
 	}
 }
 
+func TestRewriteLine(t *testing.T) {
+	// All forms that resolve to work/old.md get their basename swapped, keeping
+	// the folder prefix, #fragment, and |alias.
+	in := "a [[old]] b [[work/old#sec|Plan]] c [[other/old]] d [[unrelated]]"
+	out, changed := RewriteLine(in, "work/old.md", "new")
+	if !changed {
+		t.Fatal("expected a rewrite")
+	}
+	want := "a [[new]] b [[work/new#sec|Plan]] c [[other/old]] d [[unrelated]]"
+	if out != want {
+		t.Fatalf("RewriteLine:\n got %q\nwant %q", out, want)
+	}
+	if _, ch := RewriteLine("no links here", "work/old.md", "new"); ch {
+		t.Error("should report no change when nothing matches")
+	}
+}
+
 func TestBacklinksIntegration(t *testing.T) {
 	t.Setenv("NT_DIR", t.TempDir())
 	s, err := store.Open()
