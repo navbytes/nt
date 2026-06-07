@@ -63,6 +63,9 @@ func Run(args []string) int {
 	case "hook":
 		return cmdHook(rest)
 	case "mcp":
+		if len(rest) > 0 && rest[0] == "install" {
+			return cmdMcpInstall(rest[1:])
+		}
 		if err := mcp.Serve(Version); err != nil {
 			return fail(err)
 		}
@@ -210,6 +213,7 @@ USAGE
   nt doctor [--check]         reconcile tasks.txt (dedup ids) after a git merge
   nt hook                     sync a Claude Code TodoWrite event (PostToolUse hook)
   nt mcp                      run the MCP server (stdio) — typed tools for agents
+  nt mcp install [--client]   register nt with an AI client (claude-code|claude-desktop)
 
 ADD/UPDATE FLAGS
   --pri high|med|low   --due today|tomorrow|fri|+3d|YYYY-MM-DD

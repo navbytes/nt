@@ -100,6 +100,8 @@ nt search "auth"               # ripgrep over notes + substring over tasks
 nt links <id|task:N>           # forward links + backlinks (both directions)
 nt recall --source claude --json   # read items back — the AI loop
 nt log [--since|--days N] [--json]  # completed tasks, newest first (the Logbook)
+nt mcp                              # stdio MCP server — typed tools for agents
+nt mcp install [--client claude-desktop]   # register nt with an AI client (absolute path, idempotent)
 nt edit <id|task:N>            # safe $EDITOR round-trip (never touches the shared file directly)
 nt mv <note> <new-name|folder/path>   # rename/move a note, rewriting all [[links]] to it
 nt archive                     # move done tasks to done.txt

@@ -86,7 +86,18 @@ For clients that speak the **Model Context Protocol** (Claude Code, Cursor, …)
 `nt mcp` runs a stdio MCP server so the agent calls **typed tools** instead of
 constructing CLI strings — more reliable, and discoverable via `tools/list`.
 
-Register it (Claude Code `~/.claude/settings.json` or a project `.mcp.json`):
+Register it in one command — it writes the entry below with the **absolute**
+binary path (GUI clients often launch without `~/.local/bin` on `PATH`, so a bare
+`nt` wouldn't resolve), and is idempotent:
+
+```bash
+nt mcp install                          # Claude Code (~/.claude/settings.json)
+nt mcp install --client claude-desktop  # Claude Desktop
+nt mcp install --print                  # print the snippet for any other client
+```
+
+Or register it by hand (Claude Code `~/.claude/settings.json`, Claude Desktop
+`claude_desktop_config.json`, or a project `.mcp.json`):
 
 ```json
 {
