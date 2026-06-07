@@ -116,11 +116,12 @@ nt mcp install --print                  # show what it would do, change nothing
 For any other client (Cursor, a project `.mcp.json`, …), `nt mcp install --print`
 emits the snippet to paste.
 
-Tools exposed: `nt_ready` (start here — open, unblocked work by urgency),
-`nt_add`, `nt_done`, `nt_update`, `nt_note`, `nt_recall` (incl. note bodies),
-`nt_log`. They go through the same locked, journaled engine as the CLI, default
-`source` to `claude`, and require **stable task ids** (positional `task:N` is
-refused — the index isn't safe for an agent).
+Tools exposed — **capture:** `nt_add`, `nt_note` (with `folder`), `nt_done`,
+`nt_update`, `nt_tag`, `nt_mv`; **retrieve:** `nt_ready` (start here),
+`nt_recall` (incl. note bodies), `nt_log`, `nt_search` (text and/or tag),
+`nt_links` (forward links + backlinks). They go through the same locked,
+journaled engine as the CLI, default `source` to `claude`, and require **stable
+task ids** (positional `task:N` is refused — the index isn't safe for an agent).
 
 Hook, skill, and MCP compose: the hook mirrors the todo list automatically, the
 skill/MCP capture notes and recall context. Use the MCP server if your client

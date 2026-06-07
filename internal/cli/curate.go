@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/navbytes/nt/internal/links"
 	"github.com/navbytes/nt/internal/mutate"
@@ -97,6 +98,7 @@ func cmdTag(args []string) int {
 			return fail(fmt.Errorf("tag: %q must start with + or -", op))
 		}
 	}
+	n.Updated = time.Now().Format(time.RFC3339)
 	if err := n.Save(); err != nil {
 		return fail(err)
 	}

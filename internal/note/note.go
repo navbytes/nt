@@ -26,6 +26,7 @@ type Note struct {
 	Aliases []string
 	Source  string
 	Created string
+	Updated string // stamped when nt rewrites the note (retag, --field)
 	Body    string
 	Extra   []string // raw frontmatter lines for keys nt doesn't model (preserved verbatim)
 }
@@ -137,6 +138,9 @@ func (n *Note) Save() error {
 	if n.Created != "" {
 		fmt.Fprintf(&b, "created: %s\n", n.Created)
 	}
+	if n.Updated != "" {
+		fmt.Fprintf(&b, "updated: %s\n", n.Updated)
+	}
 	for _, line := range n.Extra { // unknown keys (Obsidian properties), verbatim
 		b.WriteString(line)
 		b.WriteByte('\n')
@@ -210,6 +214,8 @@ func parseFrontmatter(fm string, n *Note) {
 			n.Source = unquote(val)
 		case "created":
 			n.Created = unquote(val)
+		case "updated":
+			n.Updated = unquote(val)
 		case "title":
 			if v := unquote(val); v != "" {
 				n.Title = v

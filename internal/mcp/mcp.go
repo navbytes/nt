@@ -530,6 +530,7 @@ func (s *server) tag(a map[string]any) (string, error) {
 	for _, tg := range remove {
 		n.Tags = removeTag(n.Tags, strings.TrimPrefix(tg, "@"))
 	}
+	n.Updated = time.Now().Format(time.RFC3339)
 	if err := n.Save(); err != nil {
 		return "", err
 	}

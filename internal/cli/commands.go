@@ -134,7 +134,9 @@ func cmdNote(args []string) int {
 	body := fs.String("body", "", "note body")
 	source := fs.String("source", "cli", "origin")
 	folder := fs.String("folder", "", "subfolder under notes/ (e.g. work or work/auth)")
+	var fields stringSlice
 	fs.Var(&tags, "tag", "tag (repeatable)")
+	fs.Var(&fields, "field", "extra frontmatter key=value (repeatable, e.g. status=stable)")
 
 	flags, positional := splitArgs(args, nil)
 	if err := fs.Parse(flags); err != nil {
@@ -160,6 +162,18 @@ func cmdNote(args []string) int {
 	n, err := note.Create(e.S, title, *body, tags, *source, fold)
 	if err != nil {
 		return fail(err)
+	}
+	if len(fields) > 0 { // --field key=value → extra frontmatter, preserved verbatim
+		for _, f := range fields {
+			k, v, found := strings.Cut(f, "=")
+			if !found || strings.TrimSpace(k) == "" {
+				return fail(fmt.Errorf("note: --field must be key=value, got %q", f))
+			}
+			n.Extra = append(n.Extra, strings.TrimSpace(k)+": "+strings.TrimSpace(v))
+		}
+		if err := n.Save(); err != nil {
+			return fail(err)
+		}
 	}
 	rel, _ := filepath.Rel(e.S.Dir, n.Path)
 	fmt.Printf("note %s  %s\n", shortID(n.ID), rel)
@@ -533,19 +547,38 @@ func cmdSearch(args []string) int {
 }
 
 func cmdLinks(args []string) int {
-	if len(args) == 0 {
-		return fail(fmt.Errorf("links: need an id (or note:slug)"))
+	fs := flag.NewFlagSet("links", flag.ContinueOnError)
+	orphans := fs.Bool("orphans", false, "list notes with no inbound links (no handle needed)")
+	flags, positional := splitArgs(args, nil)
+	if err := fs.Parse(flags); err != nil {
+		return 2
 	}
-	handle := args[0]
 	e, ok := engine()
 	if !ok {
 		return 1
 	}
+	notes, _ := note.List(e.S)
+	if *orphans {
+		found := 0
+		for _, n := range notes {
+			if len(links.Backlinks(e.S, n.ID, n.Rel)) == 0 {
+				fmt.Printf("orphan  %s  %s\n", n.Rel, n.Title)
+				found++
+			}
+		}
+		if found == 0 {
+			fmt.Println("no orphans")
+		}
+		return 0
+	}
+	if len(positional) == 0 {
+		return fail(fmt.Errorf("links: need an id (or note:slug), or --orphans"))
+	}
+	handle := positional[0]
 	d, err := e.Read()
 	if err != nil {
 		return fail(err)
 	}
-	notes, _ := note.List(e.S)
 
 	var id, title, noteRel string
 	var forward []string

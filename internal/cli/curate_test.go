@@ -67,3 +67,35 @@ func TestCmdRmNoteDangling(t *testing.T) {
 		t.Fatal("note should have been moved out of notes/")
 	}
 }
+
+func TestCmdNoteField(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("NT_DIR", dir)
+	captureRun(t, "note", "Spec", "--field", "status=stable")
+	b, _ := os.ReadFile(filepath.Join(dir, "notes", "spec.md"))
+	if !strings.Contains(string(b), "status: stable") {
+		t.Fatalf("--field not written:\n%s", b)
+	}
+}
+
+func TestCmdTagStampsUpdated(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("NT_DIR", dir)
+	captureRun(t, "note", "X", "--tag", "a")
+	captureRun(t, "tag", "x", "+b")
+	b, _ := os.ReadFile(filepath.Join(dir, "notes", "x.md"))
+	if !strings.Contains(string(b), "updated:") {
+		t.Fatalf("retag should stamp updated:\n%s", b)
+	}
+}
+
+func TestCmdLinksOrphans(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("NT_DIR", dir)
+	captureRun(t, "note", "Lonely")
+	captureRun(t, "note", "Hub", "--body", "see [[lonely]]")
+	out := captureRun(t, "links", "--orphans")
+	if !strings.Contains(out, "Hub") || strings.Contains(out, "Lonely") {
+		t.Fatalf("orphans wrong (Hub is the orphan, Lonely is linked):\n%s", out)
+	}
+}

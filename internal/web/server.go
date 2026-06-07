@@ -74,6 +74,7 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("/", s.handleIndex)
 	mux.HandleFunc("/n/", s.handleNote)
 	mux.HandleFunc("/search", s.handleSearch)
+	mux.HandleFunc("/orphans", s.handleOrphans)
 	mux.HandleFunc("/events", s.handleSSE)
 	mux.HandleFunc("/static/", s.handleStatic)
 	return mux
@@ -243,6 +244,18 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 		SearchQuery: q,
 		Results:     results,
 	})
+}
+
+// handleOrphans lists notes with no inbound links — navigation gaps to curate.
+func (s *Server) handleOrphans(w http.ResponseWriter, r *http.Request) {
+	_, notes := s.load()
+	var results []linkRow
+	for _, n := range notes {
+		if len(links.Backlinks(s.eng.S, n.ID, n.Rel)) == 0 {
+			results = append(results, linkRow{URL: "/n/" + url.PathEscape(noteHandle(n)), Title: n.Title, Path: n.Rel})
+		}
+	}
+	s.render(w, &pageData{Title: "Orphans", Tree: buildTree(notes, ""), ShowResults: true, Results: results})
 }
 
 func (s *Server) handleStatic(w http.ResponseWriter, r *http.Request) {

@@ -210,7 +210,7 @@ USAGE
   nt search "query" [--tag T]  full-text + tag search  (alias: q)
   nt tags                     list the tag vocabulary with counts
   nt tag <note> +x -y         retag a note (no $EDITOR; preserves frontmatter)
-  nt links <id|task:N>        forward links + backlinks
+  nt links <id|task:N>        forward links + backlinks  (--orphans: notes with none)
   nt edit <id|task:N>         edit a task/note in $EDITOR
   nt mv <note> <new|path>     rename/move a note, updating all [[links]] to it
   nt rm <id|note> [--force]   delete tasks (undoable) or notes (to .trash/)

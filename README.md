@@ -97,8 +97,10 @@ nt update <id|task:N> --status doing --due tomorrow --pri med
 nt add "weekly review" --due monday --recur weekly   # completing spawns the next
 nt add "write migration" --blocks task:5             # task:5 hides until this is done
 nt list --show-blocked                               # reveal dependency-blocked tasks
-nt search "auth"               # ripgrep over notes + substring over tasks
-nt links <id|task:N>           # forward links + backlinks (both directions)
+nt search "auth" [--tag T…]    # ripgrep + substring, optionally tag-filtered (AND); --tag alone lists
+nt tags                        # the tag vocabulary with counts
+nt tag <note> +ref -inbox      # retag a note (no $EDITOR; preserves Obsidian frontmatter)
+nt links <id|task:N>           # forward links + backlinks (--orphans: notes with none)
 nt recall --source claude --json   # read items back — the AI loop
 nt log [--since|--days N] [--json]  # completed tasks, newest first (the Logbook)
 nt mcp                              # stdio MCP server — typed tools for agents
@@ -106,6 +108,8 @@ nt mcp install [--client claude-desktop]   # register nt with an AI client (abso
 nt web [--port N]                   # browse & read notes in a browser (localhost, mermaid, live-reload)
 nt edit <id|task:N>            # safe $EDITOR round-trip (never touches the shared file directly)
 nt mv <note> <new-name|folder/path>   # rename/move a note, rewriting all [[links]] to it
+nt rm <note> [--force]         # delete a note → .trash/ (refuses if inbound [[links]] would dangle)
+nt note "x" --field status=stable     # set arbitrary frontmatter at capture
 nt archive                     # move done tasks to done.txt
 nt undo                        # revert the last change (and undo-again to redo)
 nt path                        # print $NT_DIR
