@@ -155,6 +155,8 @@ func (s *server) dispatch(name string, a map[string]any) (string, error) {
 		return s.links(a)
 	case "nt_mv":
 		return s.mv(a)
+	case "nt_tag":
+		return s.tag(a)
 	default:
 		return "", fmt.Errorf("unknown tool %q", name)
 	}
@@ -500,6 +502,48 @@ func (s *server) mv(a map[string]any) (string, error) {
 		return "", err
 	}
 	return jsonText(map[string]any{"moved_to": newRel, "updated_refs": updated}), nil
+}
+
+func (s *server) tag(a map[string]any) (string, error) {
+	handle := strings.TrimSpace(str(a, "handle"))
+	add, remove := strSlice(a, "add"), strSlice(a, "remove")
+	if handle == "" || (len(add) == 0 && len(remove) == 0) {
+		return "", fmt.Errorf("handle and at least one of add/remove are required")
+	}
+	notes, _ := note.List(s.eng.S)
+	it, ok := links.Resolve(handle, nil, notes)
+	if !ok || it.Kind != "note" {
+		return "", fmt.Errorf("no note %q", handle)
+	}
+	var n *note.Note
+	for _, x := range notes {
+		if x.Path == it.Path {
+			n = x
+			break
+		}
+	}
+	for _, tg := range add {
+		if tg = strings.TrimPrefix(tg, "@"); tg != "" && !contains(n.Tags, tg) {
+			n.Tags = append(n.Tags, tg)
+		}
+	}
+	for _, tg := range remove {
+		n.Tags = removeTag(n.Tags, strings.TrimPrefix(tg, "@"))
+	}
+	if err := n.Save(); err != nil {
+		return "", err
+	}
+	return jsonText(noteToOut(n)), nil
+}
+
+func removeTag(ss []string, want string) []string {
+	out := ss[:0]
+	for _, s := range ss {
+		if s != want {
+			out = append(out, s)
+		}
+	}
+	return out
 }
 
 // --- output shapes (id-first; no positional index — agents use ids) ------

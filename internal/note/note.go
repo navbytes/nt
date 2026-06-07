@@ -27,6 +27,7 @@ type Note struct {
 	Source  string
 	Created string
 	Body    string
+	Extra   []string // raw frontmatter lines for keys nt doesn't model (preserved verbatim)
 }
 
 // Slug derives a filesystem-safe slug from a title, falling back to a timestamp
@@ -127,11 +128,18 @@ func (n *Note) Save() error {
 	if len(n.Tags) > 0 {
 		fmt.Fprintf(&b, "tags: [%s]\n", strings.Join(n.Tags, ", "))
 	}
+	if len(n.Aliases) > 0 {
+		fmt.Fprintf(&b, "aliases: [%s]\n", strings.Join(n.Aliases, ", "))
+	}
 	if n.Source != "" {
 		fmt.Fprintf(&b, "source: %s\n", n.Source)
 	}
 	if n.Created != "" {
 		fmt.Fprintf(&b, "created: %s\n", n.Created)
+	}
+	for _, line := range n.Extra { // unknown keys (Obsidian properties), verbatim
+		b.WriteString(line)
+		b.WriteByte('\n')
 	}
 	b.WriteString("---\n\n")
 	body := n.Body
@@ -212,6 +220,17 @@ func parseFrontmatter(fm string, n *Note) {
 			n.Tags = append(n.Tags, parseList(val, lines, &i)...)
 		case "alias", "aliases":
 			n.Aliases = append(n.Aliases, parseList(val, lines, &i)...)
+		default:
+			// Unknown key (e.g. an Obsidian property): preserve it verbatim,
+			// including any block-list continuation lines, so a later rewrite
+			// (retag, --field, updated stamp) never clobbers it.
+			n.Extra = append(n.Extra, lines[i])
+			if val == "" {
+				for i+1 < len(lines) && strings.HasPrefix(strings.TrimSpace(lines[i+1]), "- ") {
+					n.Extra = append(n.Extra, lines[i+1])
+					i++
+				}
+			}
 		}
 	}
 }

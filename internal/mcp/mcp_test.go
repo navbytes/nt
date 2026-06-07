@@ -140,4 +140,9 @@ func TestMCPRetrievalTools(t *testing.T) {
 	if _, err := s.dispatch("nt_mv", map[string]any{"handle": "x"}); err == nil {
 		t.Error("nt_mv should require dest")
 	}
+
+	// nt_tag: add/remove on a note, preserving the rest.
+	if out := mustDispatch("nt_tag", map[string]any{"handle": "token-rotation", "add": []any{"ref"}, "remove": []any{"auth"}}); !strings.Contains(out, "ref") || strings.Contains(out, "auth") {
+		t.Fatalf("nt_tag result: %s", out)
+	}
 }

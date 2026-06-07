@@ -122,4 +122,13 @@ var toolDefs = []toolDef{
 			"dest":   sp("new name or folder/path under notes/, e.g. ref/auth"),
 		}, "handle", "dest"),
 	},
+	{
+		Name:        "nt_tag",
+		Description: "Add/remove tags on a note during curation (preserves other frontmatter).",
+		InputSchema: obj(map[string]any{
+			"handle": sp("the note (slug/title/id)"),
+			"add":    at(),
+			"remove": at(),
+		}, "handle"),
+	},
 }

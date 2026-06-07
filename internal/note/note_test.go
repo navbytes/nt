@@ -3,6 +3,7 @@ package note
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/navbytes/nt/internal/store"
@@ -164,5 +165,29 @@ func TestTitleFallback(t *testing.T) {
 	}
 	if got := load("my-plain-note.md").Title; got != "my plain note" {
 		t.Errorf("filename fallback: %q", got)
+	}
+}
+
+func TestSavePreservesUnknownFrontmatter(t *testing.T) {
+	s := testStore(t)
+	raw := "---\nid: 01ABC\ntags: [a, b]\naliases: [Alt Name]\nstatus: stable\ncssclass: wide\nkeywords:\n  - jwt\n  - auth\ncreated: 2026-01-01T00:00:00Z\n---\n\n# Body\n\ncontent\n"
+	p := filepath.Join(s.NotesDir(), "x.md")
+	if err := os.WriteFile(p, []byte(raw), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	n, err := Load(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	n.Tags = []string{"a", "c"} // simulate a retag, then Save
+	if err := n.Save(); err != nil {
+		t.Fatal(err)
+	}
+	out, _ := os.ReadFile(p)
+	got := string(out)
+	for _, want := range []string{"status: stable", "cssclass: wide", "keywords:", "- jwt", "- auth", "aliases: [Alt Name]", "tags: [a, c]"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("Save dropped %q from frontmatter:\n%s", want, got)
+		}
 	}
 }

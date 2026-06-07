@@ -451,25 +451,64 @@ func cmdUpdate(args []string) int {
 func cmdSearch(args []string) int {
 	fs := flag.NewFlagSet("search", flag.ContinueOnError)
 	typ := fs.String("type", "all", "note|task|all")
+	var tags stringSlice
+	fs.Var(&tags, "tag", "only items with this tag (repeatable, AND)")
 	flags, positional := splitArgs(args, nil)
 	if err := fs.Parse(flags); err != nil {
 		return 2
 	}
 	query := strings.Join(positional, " ")
-	if query == "" {
-		return fail(fmt.Errorf("search: need a query"))
+	if query == "" && len(tags) == 0 {
+		return fail(fmt.Errorf("search: need a query or --tag"))
 	}
 	e, ok := engine()
 	if !ok {
 		return 1
 	}
+	hasAll := func(have []string) bool {
+		for _, w := range tags {
+			if !contains(have, w) {
+				return false
+			}
+		}
+		return true
+	}
 	found := 0
 	if *typ != "task" {
-		hits, _ := search.Literal(query, e.S.NotesDir())
-		for _, h := range hits {
-			rel, _ := filepath.Rel(e.S.Dir, h.Path)
-			fmt.Printf("note  %s:%d  %s\n", rel, h.Line, strings.TrimSpace(h.Text))
-			found++
+		notes, _ := note.List(e.S)
+		if query != "" {
+			tagsByPath := make(map[string][]string, len(notes))
+			for _, n := range notes {
+				tagsByPath[n.Path] = n.Tags
+			}
+			emitted := map[string]bool{}
+			hits, _ := search.Literal(query, e.S.NotesDir())
+			for _, h := range hits {
+				if len(tags) > 0 && !hasAll(tagsByPath[h.Path]) {
+					continue
+				}
+				rel, _ := filepath.Rel(e.S.Dir, h.Path)
+				fmt.Printf("note  %s:%d  %s\n", rel, h.Line, strings.TrimSpace(h.Text))
+				emitted[h.Path] = true
+				found++
+			}
+			ql := strings.ToLower(query)
+			for _, n := range notes { // title matches not caught by body search
+				if emitted[n.Path] || (len(tags) > 0 && !hasAll(n.Tags)) {
+					continue
+				}
+				if strings.Contains(strings.ToLower(n.Title), ql) {
+					fmt.Printf("note  %s  %s\n", n.Rel, n.Title)
+					found++
+				}
+			}
+		} else { // tag-only listing
+			for _, n := range notes {
+				if hasAll(n.Tags) {
+					fmt.Printf("note  %s  %s\n", n.Rel, n.Title)
+					found++
+				}
+			}
 		}
 	}
 	if *typ != "note" {
@@ -478,7 +517,10 @@ func cmdSearch(args []string) int {
 		blocked := task.BlockedIDs(d.Tasks())
 		needle := strings.ToLower(query)
 		for _, t := range d.Tasks() {
-			if strings.Contains(strings.ToLower(t.Line()), needle) {
+			if len(tags) > 0 && !hasAll(t.Tags()) {
+				continue
+			}
+			if query == "" || strings.Contains(strings.ToLower(t.Line()), needle) {
 				fmt.Println(formatRow(t, idx[t], blocked[t.ID()]))
 				found++
 			}
@@ -663,16 +705,37 @@ func cmdLog(args []string) int {
 
 // cmdRm permanently removes tasks (journaled, so `nt undo` restores them).
 func cmdRm(args []string) int {
-	if len(args) == 0 {
-		return fail(fmt.Errorf("rm: need a task id"))
+	fs := flag.NewFlagSet("rm", flag.ContinueOnError)
+	force := fs.Bool("force", false, "delete a note even if other notes link to it")
+	flags, positional := splitArgs(args, nil)
+	if err := fs.Parse(flags); err != nil {
+		return 2
+	}
+	if len(positional) == 0 {
+		return fail(fmt.Errorf("rm: need a task id or note handle"))
 	}
 	e, ok := engine()
 	if !ok {
 		return 1
 	}
+	// Notes delete via the trash; the rest fall through to the task engine.
+	notes, _ := note.List(e.S)
+	var taskHandles []string
+	for _, h := range positional {
+		if n, err := resolveNote(notes, h); err == nil {
+			if code := rmNote(e, n, *force); code != 0 {
+				return code
+			}
+		} else {
+			taskHandles = append(taskHandles, h)
+		}
+	}
+	if len(taskHandles) == 0 {
+		return 0
+	}
 	count := 0
 	err := e.Apply("delete", func(d *task.Doc, rec *mutate.Recorder) error {
-		for _, h := range args {
+		for _, h := range taskHandles {
 			t, err := resolveHandle(d, h)
 			if err != nil {
 				return fmt.Errorf("rm: %w", err)

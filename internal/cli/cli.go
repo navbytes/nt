@@ -42,6 +42,10 @@ func Run(args []string) int {
 		return cmdUpdate(rest)
 	case "search", "q":
 		return cmdSearch(rest)
+	case "tags":
+		return cmdTags(rest)
+	case "tag":
+		return cmdTag(rest)
 	case "links":
 		return cmdLinks(rest)
 	case "mv", "rename":
@@ -203,11 +207,13 @@ USAGE
   nt log [--since|--days N]    completed tasks, newest first (the Logbook)
   nt done <id|task:N>         mark a task done       (alias: do)
   nt update <id|task:N> ...   change a task          (alias: up)
-  nt search "query" [flags]   full-text search       (alias: q)
+  nt search "query" [--tag T]  full-text + tag search  (alias: q)
+  nt tags                     list the tag vocabulary with counts
+  nt tag <note> +x -y         retag a note (no $EDITOR; preserves frontmatter)
   nt links <id|task:N>        forward links + backlinks
   nt edit <id|task:N>         edit a task/note in $EDITOR
   nt mv <note> <new|path>     rename/move a note, updating all [[links]] to it
-  nt rm <id…>                 delete tasks (undoable)
+  nt rm <id|note> [--force]   delete tasks (undoable) or notes (to .trash/)
   nt archive                  move done tasks to done.txt
   nt undo                     revert the last change
   nt path                     print the store directory
