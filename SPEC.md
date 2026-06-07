@@ -494,7 +494,7 @@ frontmatter-preserving write helper reserved for when writes land.
 
 ## 13. Tech stack
 
-- **Go 1.22+**, single static binary, no CGo.
+- **Go 1.24+**, single static binary, no CGo.
 - [Bubble Tea](https://github.com/charmbracelet/bubbletea) + [Lipgloss](https://github.com/charmbracelet/lipgloss) — TUI.
 - [Glamour](https://github.com/charmbracelet/glamour) — markdown rendering.
 - [fsnotify](https://github.com/fsnotify/fsnotify) — directory-watch refresh.

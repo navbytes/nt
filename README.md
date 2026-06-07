@@ -35,7 +35,7 @@ Pure Go, single static binary, no system dependencies. `nt --version` reports th
 ## Build (development)
 
 ```bash
-go build -o nt .       # Go 1.22+
+go build -o nt .       # Go 1.24+
 ./nt                   # launch the TUI
 ./nt help              # CLI reference
 make test              # run the test suite
