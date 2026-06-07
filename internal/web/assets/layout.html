@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{{.Title}} · nt</title>
   <link rel="stylesheet" href="/static/style.css">
-  <script>try{var t=localStorage.getItem("nt-theme");if(t)document.documentElement.setAttribute("data-theme",t);}catch(e){}</script>
+  <script>try{var d=document.documentElement;var t=localStorage.getItem("nt-theme");if(t)d.setAttribute("data-theme",t);var w=localStorage.getItem("nt-width");if(w&&w!=="cozy")d.setAttribute("data-width",w);}catch(e){}</script>
 </head>
 <body>
   <a class="skip-link" href="#main">Skip to note</a>
@@ -47,6 +47,7 @@
         </nav>
         {{else}}<a href="/" class="crumb-home">nt</a>{{end}}
         <div class="topbar__spacer"></div>
+        <button class="icon-btn" id="width-toggle" aria-label="Cycle reading width" title="Reading width (cozy / wide / full)">⇆</button>
         <button class="icon-btn" id="theme-toggle" aria-label="Toggle light/dark theme" title="Toggle theme">◐</button>
       </div>
 

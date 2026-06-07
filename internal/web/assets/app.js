@@ -34,6 +34,17 @@
     renderMermaid();
   });
 
+  // ---- Reading width (cozy → wide → full), persisted like the theme ----
+  var WIDTHS = ["cozy", "wide", "full"];
+  var wtoggle = document.getElementById("width-toggle");
+  if (wtoggle) wtoggle.addEventListener("click", function () {
+    var cur = root.getAttribute("data-width") || "cozy";
+    var next = WIDTHS[(WIDTHS.indexOf(cur) + 1) % WIDTHS.length];
+    if (next === "cozy") root.removeAttribute("data-width");
+    else root.setAttribute("data-width", next);
+    localStorage.setItem("nt-width", next);
+  });
+
   // ---- Sidebar collapse (mobile) ----
   var app = document.getElementById("app");
   document.querySelectorAll("[data-nav-toggle]").forEach(function (b) {
