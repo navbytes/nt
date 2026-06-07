@@ -87,6 +87,11 @@ func NormalizeTarget(raw string) (key, alias string) {
 	return strings.Trim(s, "/"), alias
 }
 
+// SuffixMatch reports whether targetKey matches noteRel by shortest path-suffix
+// — exported for adapters that list candidates for an ambiguous link (the web
+// viewer's "did you mean" page) without duplicating the resolution rule.
+func SuffixMatch(noteRel, targetKey string) bool { return suffixMatch(noteRel, targetKey) }
+
 // relOf is a note's path relative to notes/ (slash-separated); falls back to the
 // basename when Rel wasn't set (e.g. a note loaded outside List).
 func relOf(n *note.Note) string {

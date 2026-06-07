@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{.Title}} · nt</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <script>try{var t=localStorage.getItem("nt-theme");if(t)document.documentElement.setAttribute("data-theme",t);}catch(e){}</script>
+</head>
+<body>
+  <div class="app" id="app">
+    <div class="backdrop" data-nav-close></div>
+
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar__head">
+        <div class="brand">nt</div>
+        <form action="/search" method="get" role="search">
+          <input class="search" id="search" name="q" type="search"
+                 placeholder="Search notes…" autocomplete="off"
+                 aria-label="Search notes" value="{{.SearchQuery}}">
+        </form>
+      </div>
+      <nav class="sidebar__tree" aria-label="Notes">
+        {{if .ShowResults}}
+        <ul class="results">
+          {{range .Results}}
+          <li><a href="{{.URL}}">{{.Title}}<span class="results__path">{{.Path}}</span></a></li>
+          {{else}}
+          <li class="results__empty">No matches.</li>
+          {{end}}
+        </ul>
+        {{else}}
+        {{template "tree" .Tree}}
+        {{end}}
+      </nav>
+    </aside>
+
+    <main class="main">
+      <div class="topbar">
+        <button class="icon-btn menu-btn" data-nav-toggle aria-label="Toggle navigation" aria-controls="sidebar">☰</button>
+        <div class="topbar__spacer"></div>
+        <button class="icon-btn" id="theme-toggle" aria-label="Toggle light/dark theme" title="Toggle theme">◐</button>
+      </div>
+
+      {{if .IsState}}
+      <article class="note">
+        <div class="state">
+          <div class="state__icon">⌁</div>
+          <h1>{{.StateTitle}}</h1>
+          <p>No note matches <code>{{.Target}}</code>.</p>
+          {{if .Candidates}}
+          <p>Did you mean:</p>
+          <ul>{{range .Candidates}}<li><a href="{{.URL}}">{{.Title}} <code>{{.Path}}</code></a></li>{{end}}</ul>
+          {{end}}
+        </div>
+      </article>
+      {{else if .IsNote}}
+      <article class="note">
+        <header class="note__header">
+          <h1 class="note__title">{{.NoteTitle}}</h1>
+          <div class="note__path">{{if .FolderPath}}{{.FolderPath}}/{{end}}{{.FileName}}</div>
+          {{if .Tags}}
+          <div class="note__tags">
+            {{range .Tags}}<a class="tag" href="/search?q={{.}}">{{.}}</a>{{end}}
+          </div>
+          {{end}}
+        </header>
+        <div class="md">{{.BodyHTML}}</div>
+        <footer class="backlinks">
+          <h2 class="backlinks__title">Linked from</h2>
+          {{if .Backlinks}}
+          <ul>
+            {{range .Backlinks}}
+            {{if .IsNote}}<li><a href="{{.URL}}">{{.Title}}</a></li>
+            {{else}}<li><span class="backlinks__task">{{.Text}}</span></li>{{end}}
+            {{end}}
+          </ul>
+          {{else}}
+          <p class="backlinks__empty">Nothing links here yet.</p>
+          {{end}}
+        </footer>
+      </article>
+      {{else}}
+      <article class="note">
+        <div class="state">
+          <div class="state__icon">▌</div>
+          <h1>nt notes</h1>
+          <p>Pick a note from the sidebar, or press <code>/</code> to search.</p>
+        </div>
+      </article>
+      {{end}}
+    </main>
+  </div>
+
+  <script src="/static/mermaid.min.js"></script>
+  <script src="/static/app.js"></script>
+</body>
+</html>
+
+{{define "tree"}}
+<ul class="tree">
+  {{range .}}
+  {{if .IsNote}}
+  <li><a class="tree__link{{if .Current}} is-current{{end}}" href="{{.URL}}"{{if .Current}} aria-current="page"{{end}}>{{.Name}}</a></li>
+  {{else}}
+  <li><details class="folder" open><summary>{{.Name}}</summary>{{template "tree" .Children}}</details></li>
+  {{end}}
+  {{end}}
+</ul>
+{{end}}

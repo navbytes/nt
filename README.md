@@ -103,6 +103,7 @@ nt recall --source claude --json   # read items back — the AI loop
 nt log [--since|--days N] [--json]  # completed tasks, newest first (the Logbook)
 nt mcp                              # stdio MCP server — typed tools for agents
 nt mcp install [--client claude-desktop]   # register nt with an AI client (absolute path, idempotent)
+nt web [--port N]                   # browse & read notes in a browser (localhost, mermaid, live-reload)
 nt edit <id|task:N>            # safe $EDITOR round-trip (never touches the shared file directly)
 nt mv <note> <new-name|folder/path>   # rename/move a note, rewriting all [[links]] to it
 nt archive                     # move done tasks to done.txt
@@ -158,6 +159,25 @@ folders is flagged ambiguous rather than guessed. Rename/move is **nt-native**:
 `nt mv <note> <new>` (or `r` in the TUI notes tab) renames the file and rewrites
 every `[[link]]` to it across tasks and notes, so you don't depend on Obsidian to
 keep links intact. (Logseq's outliner model is not a target.)
+
+## Web viewer (`nt web`)
+
+`nt web` starts a **localhost** server to browse and read your notes in a
+browser — a folder tree, rendered Markdown with `[[wikilink]]` navigation and
+backlinks, full-text search, **Mermaid diagrams**, and light/dark themes that
+match the TUI. It reads the same `notes/` files everything else uses, so it
+shows exactly what you've captured.
+
+```bash
+nt web              # pick a free port, print the URL (127.0.0.1)
+nt web --port 8080  # fixed port
+```
+
+It's **read-only** and binds to `127.0.0.1` only — your notes are never exposed
+on the network. The page **live-reloads** when a file changes (via fsnotify +
+SSE), so editing in your editor, Obsidian, or Zettlr updates the view instantly.
+Mermaid is the only vendored asset (embedded gzipped); no external requests, no
+CDN — it works fully offline.
 
 ## Claude Code integration
 

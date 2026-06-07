@@ -70,6 +70,8 @@ func Run(args []string) int {
 			return fail(err)
 		}
 		return 0
+	case "web":
+		return cmdWeb(rest)
 	case "version", "--version", "-v":
 		fmt.Println("nt " + Version)
 		return 0
@@ -214,6 +216,7 @@ USAGE
   nt hook                     sync a Claude Code TodoWrite event (PostToolUse hook)
   nt mcp                      run the MCP server (stdio) — typed tools for agents
   nt mcp install [--client]   register nt with an AI client (claude-code|claude-desktop)
+  nt web [--port N]           browse & read notes in a browser (localhost, mermaid)
 
 ADD/UPDATE FLAGS
   --pri high|med|low   --due today|tomorrow|fri|+3d|YYYY-MM-DD

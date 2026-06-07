@@ -475,6 +475,21 @@ current tab and selection (e.g. no due/tag on notes, `x reopen` in the logbook,
 wheel scrolls, click selects a row, click a `[[link]]`/`@tag`/`+project` activates it,
 click a tab to switch, and drag the list/detail divider to resize it.
 
+### 12.1 Web viewer (`nt web`)
+
+A localhost HTTP adapter (`internal/web`) for browsing/reading notes in a
+browser — a read-only fourth adapter over the same `note`/`links` domain as the
+CLI/TUI/MCP. Binds `127.0.0.1` only (no network exposure, no auth). Serves a
+folder tree, Markdown rendered with **goldmark** (already in the module graph
+via Glamour — no new dependency), `[[wikilink]]` navigation (resolved → `/n/<id>`
+stable handles; unresolved/ambiguous → a "did you mean" page), backlinks,
+full-text search, and **Mermaid** diagrams (the only vendored asset, embedded
+gzipped; client-side render, fully offline). Light/dark themes reuse the TUI's
+Tokyo Night palette. The page **live-reloads** via fsnotify + SSE when the store
+changes. Structured to make editing a future additive change: state on a
+`Server` struct, id-addressed notes, one reusable render path, and the
+frontmatter-preserving write helper reserved for when writes land.
+
 ---
 
 ## 13. Tech stack

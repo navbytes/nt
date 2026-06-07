@@ -19,7 +19,23 @@ import (
 	"github.com/navbytes/nt/internal/search"
 	"github.com/navbytes/nt/internal/task"
 	"github.com/navbytes/nt/internal/tui"
+	"github.com/navbytes/nt/internal/web"
 )
+
+// cmdWeb starts the localhost notes viewer (SPEC §12.1). Read-only browse/render
+// with mermaid; binds 127.0.0.1 by default.
+func cmdWeb(args []string) int {
+	fs := flag.NewFlagSet("web", flag.ContinueOnError)
+	port := fs.Int("port", 0, "port to listen on (0 = pick a free one)")
+	host := fs.String("host", "127.0.0.1", "bind address (localhost only by default)")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if err := web.Serve(Version, fmt.Sprintf("%s:%d", *host, *port)); err != nil {
+		return fail(err)
+	}
+	return 0
+}
 
 // buildText assembles a task description from a title plus tags, project, and
 // an optional note link, as inline todo.txt tokens.
