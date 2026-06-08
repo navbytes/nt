@@ -167,3 +167,29 @@ export interface TagsResponse {
 export interface OrphansResponse {
   notes: NoteLink[];
 }
+/**
+ * GraphNode is one note in the knowledge graph (Deg = link degree, for sizing).
+ */
+export interface GraphNode {
+  id: string;
+  title: string;
+  url: string;
+  folder: string;
+  source: string;
+  tags: string[];
+  deg: number /* int */;
+}
+/**
+ * GraphLink is one wikilink edge as a pair of indices into GraphData.Nodes.
+ */
+export interface GraphLink {
+  s: number /* int */;
+  t: number /* int */;
+}
+/**
+ * GraphData is GET /api/graph — the note↔note wikilink graph.
+ */
+export interface GraphData {
+  nodes: GraphNode[];
+  links: GraphLink[];
+}

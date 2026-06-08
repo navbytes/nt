@@ -27,6 +27,7 @@
     "vitest": "^4.1.8"
   },
   "dependencies": {
-    "@tanstack/svelte-query": "^5.90.2"
+    "@tanstack/svelte-query": "^5.90.2",
+    "force-graph": "^1.51.4"
   }
 }

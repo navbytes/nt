@@ -477,6 +477,16 @@ code {
   border-top: 1px solid var(--border-soft);
 }
 
+/* ---- graph ---- */
+.graph {
+  height: calc(100vh - 150px);
+  min-height: 420px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius);
+  background: var(--bg-inset);
+  overflow: hidden;
+}
+
 /* ---- tags ---- */
 .tagcloud {
   display: flex;

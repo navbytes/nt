@@ -141,3 +141,26 @@ type TagsResponse struct {
 type OrphansResponse struct {
 	Notes []NoteLink `json:"notes"`
 }
+
+// GraphNode is one note in the knowledge graph (Deg = link degree, for sizing).
+type GraphNode struct {
+	ID     string   `json:"id"`
+	Title  string   `json:"title"`
+	URL    string   `json:"url"`
+	Folder string   `json:"folder"`
+	Source string   `json:"source"`
+	Tags   []string `json:"tags"`
+	Deg    int      `json:"deg"`
+}
+
+// GraphLink is one wikilink edge as a pair of indices into GraphData.Nodes.
+type GraphLink struct {
+	S int `json:"s"`
+	T int `json:"t"`
+}
+
+// GraphData is GET /api/graph — the note↔note wikilink graph.
+type GraphData struct {
+	Nodes []GraphNode `json:"nodes"`
+	Links []GraphLink `json:"links"`
+}

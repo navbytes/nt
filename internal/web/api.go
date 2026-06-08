@@ -242,7 +242,22 @@ func (s *Server) apiActivity(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) apiGraph(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, buildGraphData(s.current()))
+	writeJSON(w, toGraph(buildGraphData(s.current())))
+}
+
+func toGraph(g *graphData) apitypes.GraphData {
+	nodes := make([]apitypes.GraphNode, len(g.Nodes))
+	for i, n := range g.Nodes {
+		nodes[i] = apitypes.GraphNode{
+			ID: n.ID, Title: n.Title, URL: n.URL, Folder: n.Folder,
+			Source: n.Source, Tags: n.Tags, Deg: n.Deg,
+		}
+	}
+	links := make([]apitypes.GraphLink, len(g.Links))
+	for i, l := range g.Links {
+		links[i] = apitypes.GraphLink{S: l.S, T: l.T}
+	}
+	return apitypes.GraphData{Nodes: nodes, Links: links}
 }
 
 // apiTags lists the tag vocabulary (note + task tags) with counts, sorted by

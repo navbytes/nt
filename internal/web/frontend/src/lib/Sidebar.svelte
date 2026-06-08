@@ -11,6 +11,7 @@
     { href: "/", label: "Dashboard" },
     { href: "/tasks", label: "Tasks" },
     { href: "/activity", label: "Activity" },
+    { href: "/graph", label: "Graph" },
     { href: "/tags", label: "Tags" },
     { href: "/orphans", label: "Orphans" },
   ];

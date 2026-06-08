@@ -12,6 +12,7 @@
   import Search from "../routes/Search.svelte";
   import Tags from "../routes/Tags.svelte";
   import Orphans from "../routes/Orphans.svelte";
+  import Graph from "../routes/Graph.svelte";
   import NotFound from "../routes/NotFound.svelte";
 
   const stateQ = createQuery({ queryKey: ["state"], queryFn: api.state });
@@ -83,6 +84,8 @@
         <Tags />
       {:else if path === "/orphans"}
         <Orphans />
+      {:else if path === "/graph"}
+        <Graph />
       {:else}
         <NotFound {path} />
       {/if}
