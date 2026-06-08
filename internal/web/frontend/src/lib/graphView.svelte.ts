@@ -5,6 +5,7 @@
 // mirrored to localStorage so a user's tuned graph survives reloads.
 
 export type ColorBy = "folder" | "tag" | "source" | "none";
+export type ShapeBy = "source" | "folder" | "tag" | "none";
 export type Mode = "global" | "local";
 
 const KEY = "nt-graph-view";
@@ -13,6 +14,7 @@ const KEY = "nt-graph-view";
 // selection/filter state — those reset each visit so the graph opens clean).
 const PERSIST_KEYS = [
   "colorBy",
+  "shapeBy",
   "showLabels",
   "showArrows",
   "particles",
@@ -30,6 +32,7 @@ interface ViewState {
   selectedId: string | null;
   search: string;
   colorBy: ColorBy;
+  shapeBy: ShapeBy;
   filterFolders: string[];
   filterTags: string[];
   filterSources: string[];
@@ -51,6 +54,7 @@ const defaults: ViewState = {
   selectedId: null,
   search: "",
   colorBy: "folder",
+  shapeBy: "source",
   filterFolders: [],
   filterTags: [],
   filterSources: [],
