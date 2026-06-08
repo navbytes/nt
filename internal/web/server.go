@@ -54,6 +54,24 @@ type Server struct {
 	snap     *snapshot     // in-memory read-model (see readmodel.go)
 	watching bool          // true once the fsnotify watcher maintains snap
 	writes   *writeTracker // self-write suppression for the watcher
+
+	etags map[string]string // static asset name → content-hash ETag (for 304s)
+}
+
+// staticAsset describes one /static/ file.
+type staticAsset struct {
+	contentType string
+	path        string // path in assetsFS; "" for the generated highlight.css
+	gzip        bool
+}
+
+var staticAssets = map[string]staticAsset{
+	"style.css":      {"text/css; charset=utf-8", "assets/style.css", false},
+	"highlight.css":  {"text/css; charset=utf-8", "", false}, // generated (s.hlCSS)
+	"app.js":         {"text/javascript; charset=utf-8", "assets/app.js", false},
+	"htmx.min.js":    {"text/javascript; charset=utf-8", "assets/htmx.min.js", false},
+	"graph.js":       {"text/javascript; charset=utf-8", "assets/graph.js", false},
+	"mermaid.min.js": {"text/javascript; charset=utf-8", "assets/mermaid.min.js.gz", true},
 }
 
 // NewServer parses the embedded template and prepares the viewer.
@@ -83,6 +101,19 @@ func NewServer(eng *mutate.Engine, version string) (*Server, error) {
 	}
 	s := &Server{eng: eng, version: version, tmpl: tmpl, hub: newHub(), hlCSS: highlightCSS(), csrf: randToken(), writes: newWriteTracker()}
 	s.snap = buildSnapshot(eng) // warm the read-model so the first request is fast
+	// Precompute content-hash ETags for static assets so the browser revalidates
+	// with a cheap 304 instead of re-downloading them (incl. ~900 KB of mermaid)
+	// on every navigation.
+	s.etags = make(map[string]string, len(staticAssets))
+	for name, a := range staticAssets {
+		if a.path == "" {
+			s.etags[name] = etag([]byte(s.hlCSS))
+			continue
+		}
+		if b, err := assetsFS.ReadFile(a.path); err == nil {
+			s.etags[name] = etag(b)
+		}
+	}
 	return s, nil
 }
 
@@ -1012,38 +1043,36 @@ func contains(ss []string, want string) bool {
 }
 
 func (s *Server) handleStatic(w http.ResponseWriter, r *http.Request) {
-	switch strings.TrimPrefix(r.URL.Path, "/static/") {
-	case "style.css":
-		w.Header().Set("Content-Type", "text/css; charset=utf-8")
-		s.writeAsset(w, "assets/style.css")
-	case "highlight.css":
-		w.Header().Set("Content-Type", "text/css; charset=utf-8")
-		_, _ = io.WriteString(w, s.hlCSS)
-	case "app.js":
-		w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
-		s.writeAsset(w, "assets/app.js")
-	case "htmx.min.js":
-		w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
-		s.writeAsset(w, "assets/htmx.min.js")
-	case "graph.js":
-		w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
-		s.writeAsset(w, "assets/graph.js")
-	case "mermaid.min.js":
-		w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
-		w.Header().Set("Content-Encoding", "gzip") // embedded pre-gzipped (~900 KB vs 3.3 MB)
-		s.writeAsset(w, "assets/mermaid.min.js.gz")
-	default:
+	name := strings.TrimPrefix(r.URL.Path, "/static/")
+	a, ok := staticAssets[name]
+	if !ok {
 		http.NotFound(w, r)
+		return
 	}
-}
-
-func (s *Server) writeAsset(w http.ResponseWriter, path string) {
-	b, err := assetsFS.ReadFile(path)
+	// Revalidate cheaply: assets are fixed for the life of the binary, so a
+	// content-hash ETag lets the browser 304 instead of re-downloading them every
+	// navigation. no-cache keeps it correct across an upgrade (new bytes → new ETag).
+	w.Header().Set("Cache-Control", "no-cache")
+	if et := s.etags[name]; et != "" {
+		w.Header().Set("ETag", et)
+		if r.Header.Get("If-None-Match") == et {
+			w.WriteHeader(http.StatusNotModified)
+			return
+		}
+	}
+	w.Header().Set("Content-Type", a.contentType)
+	if a.path == "" { // generated highlight.css
+		_, _ = io.WriteString(w, s.hlCSS)
+		return
+	}
+	if a.gzip {
+		w.Header().Set("Content-Encoding", "gzip") // embedded pre-gzipped (~900 KB vs 3.3 MB)
+	}
+	b, err := assetsFS.ReadFile(a.path)
 	if err != nil {
 		http.Error(w, "asset missing", http.StatusInternalServerError)
 		return
 	}
-	w.Header().Set("Cache-Control", "no-cache")
 	_, _ = w.Write(b)
 }
 
@@ -1100,10 +1129,18 @@ func (s *Server) handleSSE(w http.ResponseWriter, r *http.Request) {
 	defer s.hub.remove(ch)
 	_, _ = fmt.Fprint(w, ": connected\n\n")
 	fl.Flush()
+	// Heartbeat: a periodic comment keeps the connection healthy and lets the
+	// server notice (and reap) a client that vanished without a clean close, so
+	// goroutines/sockets don't linger.
+	ping := time.NewTicker(25 * time.Second)
+	defer ping.Stop()
 	for {
 		select {
 		case <-r.Context().Done():
 			return
+		case <-ping.C:
+			_, _ = fmt.Fprint(w, ": ping\n\n")
+			fl.Flush()
 		case kind, ok := <-ch:
 			if !ok {
 				return
