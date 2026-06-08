@@ -220,6 +220,42 @@ func cmdNote(args []string) int {
 	return 0
 }
 
+// cmdJournal opens today's daily note (notes/journal/YYYY-MM-DD.md) in $EDITOR,
+// creating it if missing — the journal's CLI entry point, mirroring the web
+// /journal route so an agent or a person can keep a dated log from either surface.
+func cmdJournal(args []string) int {
+	fs := flag.NewFlagSet("journal", flag.ContinueOnError)
+	dateFlag := fs.String("date", "", "day to open (YYYY-MM-DD or today|fri|+1d; default today)")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	date := mutate.Today()
+	if *dateFlag != "" {
+		d, ok := parseDate(*dateFlag)
+		if !ok || d == "" {
+			return fail(fmt.Errorf("journal: invalid date %q", *dateFlag))
+		}
+		date = dateparse.DatePart(d) // ignore any time-of-day
+	}
+	e, ok := engine()
+	if !ok {
+		return 1
+	}
+	// Reuse an existing entry if present, else create journal/<date>.md.
+	want := "journal/" + date + ".md"
+	notes, _ := note.List(e.S)
+	for _, n := range notes {
+		if n.Rel == want {
+			return runEditor(n.Path)
+		}
+	}
+	n, err := note.Create(e.S, date, "", nil, "cli", "journal")
+	if err != nil {
+		return fail(err)
+	}
+	return runEditor(n.Path)
+}
+
 func cmdList(args []string) int {
 	fs := flag.NewFlagSet("list", flag.ContinueOnError)
 	status := fs.String("status", "", "open|doing|blocked|done")

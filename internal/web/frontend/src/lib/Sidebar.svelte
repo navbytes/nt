@@ -32,6 +32,7 @@
   const nav = [
     { href: "/", label: "Dashboard" },
     { href: "/tasks", label: "Tasks" },
+    { href: "/journal", label: "Journal" },
     { href: "/activity", label: "Activity" },
     { href: "/graph", label: "Graph" },
     { href: "/tags", label: "Tags" },

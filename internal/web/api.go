@@ -46,6 +46,7 @@ func (s *Server) apiRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/tags", s.apiTags)
 	mux.HandleFunc("GET /api/orphans", s.apiOrphans)
 	mux.HandleFunc("GET /api/graph", s.apiGraph)
+	mux.HandleFunc("GET /api/journal", s.apiJournal)
 }
 
 func writeJSON(w http.ResponseWriter, v any) {

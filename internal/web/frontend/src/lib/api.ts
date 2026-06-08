@@ -14,6 +14,7 @@ import type {
   OrphansResponse,
   GraphData,
   CreatedNote,
+  JournalResponse,
 } from "./api-types";
 
 export type * from "./api-types";
@@ -66,6 +67,7 @@ export const api = {
   tags: () => getJSON<TagsResponse>("/api/tags"),
   orphans: () => getJSON<OrphansResponse>("/api/orphans"),
   graph: () => getJSON<GraphData>("/api/graph"),
+  journal: () => getJSON<JournalResponse>("/api/journal"),
   taskNew: (text: string) => postForm<TasksResponse>("/api/tasks", { text }),
   taskDone: (id: string) => postForm<TasksResponse>(`/api/tasks/${id}/done`),
   taskReopen: (id: string) => postForm<TasksResponse>(`/api/tasks/${id}/reopen`),
