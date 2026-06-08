@@ -29,7 +29,7 @@ func TestSnapshotLinkGraph(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	snap := buildSnapshot(s.eng)
+	snap := buildSnapshot(s.eng, s.notes)
 	if got := snap.backlinks[b.Path]; len(got) != 1 || got[0].Title != "Source" {
 		t.Fatalf("backlinks[Target] = %+v, want one from Source", got)
 	}

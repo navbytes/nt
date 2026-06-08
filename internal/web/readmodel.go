@@ -66,9 +66,9 @@ func flatNotes(notes []*note.Note) []linkRow {
 // resolution it uses (links.Resolve over the in-memory notes/doc) is the exact
 // same resolution the CLI/TUI/MCP use, so the rendered pages are byte-identical
 // to the old per-request path — only faster.
-func buildSnapshot(eng *mutate.Engine) *snapshot {
+func buildSnapshot(eng *mutate.Engine, cache *note.Cache) *snapshot {
 	doc, docErr := eng.Read()
-	notes, notesErr := note.List(eng.S)
+	notes, notesErr := cache.List(eng.S)
 
 	// Surface read failures instead of silently rendering an empty store — a
 	// corrupt tasks.txt or unreadable notes/ otherwise looks like "no data".

@@ -43,6 +43,8 @@ type Server struct {
 	allowEdit bool   // writes enabled (nt web --edit); read-only by default
 	csrf      string // per-process token required on save (blocks cross-site POSTs)
 
+	notes *note.Cache // mtime-keyed parse cache: rebuilds re-read only changed notes
+
 	mu       sync.RWMutex  // guards snap + watching
 	snap     *snapshot     // in-memory read-model (see readmodel.go)
 	watching bool          // true once the fsnotify watcher maintains snap
@@ -56,8 +58,9 @@ func NewServer(eng *mutate.Engine, version string) (*Server, error) {
 		eng: eng, version: version, hub: newHub(),
 		hlCSS: css, hlETag: etag([]byte(css)),
 		csrf: randToken(), writes: newWriteTracker(),
+		notes: note.NewCache(),
 	}
-	s.snap = buildSnapshot(eng) // warm the read-model so the first request is fast
+	s.snap = buildSnapshot(eng, s.notes) // warm the read-model so the first request is fast
 	return s, nil
 }
 
@@ -74,13 +77,13 @@ func (s *Server) current() *snapshot {
 		return snap
 	}
 	s.mu.RUnlock()
-	return buildSnapshot(s.eng)
+	return buildSnapshot(s.eng, s.notes)
 }
 
 // rebuild recomputes the read-model and swaps it in. Called by the watcher and
 // synchronously by write handlers so the writer's next read is fresh.
 func (s *Server) rebuild() {
-	snap := buildSnapshot(s.eng)
+	snap := buildSnapshot(s.eng, s.notes)
 	s.mu.Lock()
 	s.snap = snap
 	s.mu.Unlock()
