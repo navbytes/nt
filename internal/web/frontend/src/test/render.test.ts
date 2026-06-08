@@ -1,0 +1,101 @@
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { render, screen, fireEvent } from "@testing-library/svelte";
+import Harness from "./Harness.svelte";
+
+// Mock the API client so components render against fixtures, no server needed.
+vi.mock("../lib/api", () => {
+  const groups = [
+    { status: "open", tasks: [{ id: "T1", text: "write tests", status: "open", source: "cli" }] },
+    { status: "done", tasks: [{ id: "T2", text: "old thing", status: "done" }] },
+  ];
+  return {
+    setCsrf: vi.fn(),
+    api: {
+      state: vi.fn().mockResolvedValue({
+        canEdit: true,
+        csrf: "x",
+        version: "v",
+        openCount: 1,
+        noteCount: 2,
+        sources: ["cli"],
+      }),
+      notes: vi.fn().mockResolvedValue({
+        tree: [
+          { name: "Welcome", path: "", url: "/n/abc", isNote: true },
+          {
+            name: "docs",
+            path: "docs",
+            url: "",
+            isNote: false,
+            children: [{ name: "Design", path: "", url: "/n/def", isNote: true }],
+          },
+        ],
+        index: [],
+      }),
+      note: vi.fn().mockResolvedValue({
+        id: "def",
+        title: "Design",
+        folder: "docs",
+        file: "design.md",
+        crumbs: ["docs"],
+        source: "cli",
+        created: "2026-06-08",
+        tags: ["spec"],
+        bodyHTML: "<p>the rendered body</p>",
+        backlinks: [{ title: "Welcome", url: "/n/abc", text: "", isNote: true }],
+        taskRefs: [{ text: "do the thing", status: "open", source: "cli" }],
+        etag: '"abc"',
+      }),
+      tasks: vi.fn().mockResolvedValue({ groups }),
+      activity: vi.fn().mockResolvedValue({ days: [], sources: ["cli"] }),
+      search: vi.fn().mockResolvedValue({ results: [] }),
+      taskDone: vi.fn().mockResolvedValue({ groups }),
+      taskReopen: vi.fn().mockResolvedValue({ groups }),
+      taskNew: vi.fn().mockResolvedValue({ groups }),
+    },
+  };
+});
+
+import { api } from "../lib/api";
+import TaskRows from "../lib/TaskRows.svelte";
+import Sidebar from "../lib/Sidebar.svelte";
+import NoteView from "../routes/NoteView.svelte";
+
+beforeEach(() => vi.clearAllMocks());
+
+describe("TaskRows", () => {
+  it("renders tasks from the query and completes one via the mutation", async () => {
+    render(Harness, { props: { comp: TaskRows, props: { canEdit: true } } });
+
+    expect(await screen.findByText("write tests")).toBeInTheDocument();
+    await fireEvent.click(screen.getByTitle("Mark done"));
+    // TanStack Query invokes mutationFn as (variables, context); only the id matters.
+    expect(api.taskDone).toHaveBeenCalledOnce();
+    expect(vi.mocked(api.taskDone).mock.calls[0]?.[0]).toBe("T1");
+  });
+
+  it("filters groups by status", async () => {
+    render(Harness, { props: { comp: TaskRows, props: { canEdit: false, statuses: ["open"] } } });
+    expect(await screen.findByText("write tests")).toBeInTheDocument();
+    expect(screen.queryByText("old thing")).not.toBeInTheDocument();
+  });
+});
+
+describe("Sidebar", () => {
+  it("renders the note tree (notes and nested folders)", async () => {
+    render(Harness, { props: { comp: Sidebar, props: { path: "/" } } });
+    expect(await screen.findByText("Welcome")).toBeInTheDocument();
+    expect(screen.getByText("docs")).toBeInTheDocument();
+    expect(screen.getByText("Design")).toBeInTheDocument();
+  });
+});
+
+describe("NoteView", () => {
+  it("renders title, server-rendered body, backlinks and task refs", async () => {
+    render(Harness, { props: { comp: NoteView, props: { handle: "def" } } });
+    expect(await screen.findByRole("heading", { name: "Design" })).toBeInTheDocument();
+    expect(screen.getByText("the rendered body")).toBeInTheDocument();
+    expect(screen.getByText("do the thing")).toBeInTheDocument();
+    expect(screen.getByText("Linked from")).toBeInTheDocument();
+  });
+});

@@ -9,16 +9,22 @@
     "build": "svelte-check --tsconfig ./tsconfig.json && vite build",
     "build:fast": "vite build",
     "preview": "vite preview",
-    "check": "svelte-check --tsconfig ./tsconfig.json"
+    "check": "svelte-check --tsconfig ./tsconfig.json",
+    "test": "vitest run"
   },
   "devDependencies": {
     "@sveltejs/vite-plugin-svelte": "^6.2.1",
+    "@testing-library/dom": "^10.4.1",
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/svelte": "^5.3.1",
     "@tsconfig/svelte": "^5.0.4",
     "@types/node": "^22.10.0",
+    "jsdom": "^29.1.1",
     "svelte": "^5.56.3",
     "svelte-check": "^4.3.3",
     "typescript": "^5.9.3",
-    "vite": "^7.1.12"
+    "vite": "^7.1.12",
+    "vitest": "^4.1.8"
   },
   "dependencies": {
     "@tanstack/svelte-query": "^5.90.2"
