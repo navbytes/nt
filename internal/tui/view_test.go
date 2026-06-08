@@ -6,6 +6,8 @@ import (
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+	"github.com/muesli/termenv"
 	"github.com/navbytes/nt/internal/mutate"
 	"github.com/navbytes/nt/internal/task"
 )
@@ -121,5 +123,20 @@ func TestAddViaInput(t *testing.T) {
 	mm := model.(*Model)
 	if len(mm.tasks) != before+1 {
 		t.Fatalf("want %d tasks after add, got %d", before+1, len(mm.tasks))
+	}
+}
+
+func TestAdaptivePaletteThemes(t *testing.T) {
+	old := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	defer lipgloss.SetColorProfile(old)
+	defer lipgloss.SetHasDarkBackground(true) // restore default for other tests
+
+	lipgloss.SetHasDarkBackground(true)
+	dark := lipgloss.NewStyle().Foreground(cFg).Render("x")
+	lipgloss.SetHasDarkBackground(false)
+	light := lipgloss.NewStyle().Foreground(cFg).Render("x")
+	if dark == light {
+		t.Fatal("adaptive palette should render differently on light vs dark backgrounds")
 	}
 }

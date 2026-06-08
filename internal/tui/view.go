@@ -200,7 +200,8 @@ func (m *Model) followBar() string {
 
 // chip renders a prominent badge (dark text on a bright background) for active
 // view state — so a filter/scope can't silently shrink the list unnoticed.
-func chip(label string, bg lipgloss.Color) string {
+func chip(label string, bg lipgloss.TerminalColor) string {
+	// Near-black on a bright badge reads on both light and dark terminals.
 	return lipgloss.NewStyle().Foreground(lipgloss.Color("#16161e")).Background(bg).Bold(true).Render(" " + label + " ")
 }
 
@@ -969,9 +970,12 @@ func priStr(p byte) string {
 }
 
 // dueLabel returns the short relative label and its color (no styling applied).
-func dueLabel(due string) (string, lipgloss.Color) {
+func dueLabel(due string) (string, lipgloss.TerminalColor) {
 	if due == "" {
 		return "", cDim
+	}
+	if len(due) > 10 { // tolerate a time-of-day suffix (due:…T17:00)
+		due = due[:10]
 	}
 	dt, err := time.Parse("2006-01-02", due)
 	if err != nil {

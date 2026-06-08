@@ -255,4 +255,5 @@ Recurring: add --recur weekly|3d|… ; completing spawns the next occurrence.
 Dependencies: add --blocks <id> ; blocked tasks hide unless --show-blocked.
 
 The store lives at $NT_DIR (default ~/.local/share/nt): tasks.txt + notes/*.md.
+The TUI follows your terminal's light/dark background; force it with NT_THEME=light|dark.
 `
