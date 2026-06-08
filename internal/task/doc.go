@@ -88,10 +88,10 @@ func (d *Doc) FindByID(id string) *Task {
 	return nil
 }
 
-// Resolve maps a user-supplied handle to a task. It accepts a full ULID, an
-// unambiguous short ULID prefix, or a 1-based positional "task:N" reference
-// (interactive-only, best-effort — SPEC §7.2). ambiguous is true when a short
-// prefix matches more than one task.
+// Resolve maps a user-supplied handle to a task. It accepts a full ULID, the
+// displayed trailing short code (id[len-6:]), or a 1-based positional "task:N"
+// reference (interactive-only, best-effort — SPEC §7.2). ambiguous is true when
+// a short code matches more than one task.
 func (d *Doc) Resolve(handle string) (t *Task, ambiguous bool) {
 	tasks := d.Tasks()
 	if n, ok := parsePositional(handle); ok {
@@ -107,9 +107,12 @@ func (d *Doc) Resolve(handle string) (t *Task, ambiguous bool) {
 		if id == h {
 			return t, false
 		}
-		// Accept a leading prefix (copied id) or the trailing short code
-		// (displayed handle), since ULID prefixes collide by timestamp.
-		if strings.HasPrefix(id, h) || strings.HasSuffix(id, h) {
+		// Match the trailing short code only — that's the handle nt displays
+		// (id[len-6:]); a copied full id matches exactly above. ULIDs share a long
+		// leading timestamp prefix, so prefix-matching is useless (never shown)
+		// and unsafe: a short handle could prefix-match a task the user never
+		// meant, or make their real (suffix) handle look ambiguous (F5/C5).
+		if strings.HasSuffix(id, h) {
 			matches = append(matches, t)
 		}
 	}
