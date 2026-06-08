@@ -3,6 +3,7 @@ package web
 import (
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -67,6 +68,114 @@ func TestSnapshotLinkGraph(t *testing.T) {
 	if snap.linked[a.Path] {
 		t.Error("Source has no inbound links — should be an orphan")
 	}
+}
+
+func postForm(s *Server, path, csrf string, form url.Values) (int, string) {
+	rec := httptest.NewRecorder()
+	var body *strings.Reader
+	r := httptest.NewRequest("POST", path, strings.NewReader(""))
+	if form != nil {
+		body = strings.NewReader(form.Encode())
+		r = httptest.NewRequest("POST", path, body)
+		r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	}
+	if csrf != "" {
+		r.Header.Set("X-CSRF", csrf)
+	}
+	s.routes().ServeHTTP(rec, r)
+	return rec.Code, rec.Body.String()
+}
+
+// addTask appends a task through the engine and returns its ULID.
+func addTask(t *testing.T, s *Server, text string) string {
+	t.Helper()
+	var id string
+	if err := s.eng.Apply("add", func(d *task.Doc, rec *mutate.Recorder) error {
+		tk := task.New(text)
+		d.Append(tk)
+		rec.Added(tk)
+		id = tk.ID()
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	return id
+}
+
+func TestTaskActionsGated(t *testing.T) {
+	s := newTestServer(t) // read-only
+	id := addTask(t, s, "guard me")
+	if code, _ := postForm(s, "/tasks/"+id+"/done", "", nil); code != 403 {
+		t.Errorf("done without --edit should 403, got %d", code)
+	}
+	s.allowEdit = true
+	if code, _ := postForm(s, "/tasks/"+id+"/done", "", nil); code != 403 {
+		t.Errorf("done without CSRF should 403, got %d", code)
+	}
+	if code, _ := postForm(s, "/tasks/"+id+"/done", "wrong", nil); code != 403 {
+		t.Errorf("done with bad CSRF should 403, got %d", code)
+	}
+}
+
+func TestTaskDoneReopenStatusDelete(t *testing.T) {
+	s := newTestServer(t)
+	s.allowEdit = true
+	id := addTask(t, s, "ship it")
+
+	code, body := postForm(s, "/tasks/"+id+"/done", s.csrf, nil)
+	if code != 200 || !strings.Contains(body, "s-done") {
+		t.Fatalf("done: code=%d body=%s", code, body)
+	}
+	if tk := mustDoc(t, s).FindByID(id); tk == nil || !tk.Done {
+		t.Fatal("task should be done")
+	}
+
+	code, _ = postForm(s, "/tasks/"+id+"/reopen", s.csrf, nil)
+	if code != 200 || mustDoc(t, s).FindByID(id).Done {
+		t.Fatalf("reopen failed: code=%d", code)
+	}
+
+	code, _ = postForm(s, "/tasks/"+id+"/status", s.csrf, url.Values{"status": {"doing"}})
+	if code != 200 || mustDoc(t, s).FindByID(id).State() != "doing" {
+		t.Fatalf("status doing failed: code=%d", code)
+	}
+
+	code, _ = postForm(s, "/tasks/"+id+"/delete", s.csrf, nil)
+	if code != 200 || mustDoc(t, s).FindByID(id) != nil {
+		t.Fatalf("delete failed: code=%d", code)
+	}
+}
+
+func TestTaskNew(t *testing.T) {
+	s := newTestServer(t)
+	s.allowEdit = true
+	code, body := postForm(s, "/tasks/new", s.csrf, url.Values{
+		"text": {"write the docs"}, "pri": {"high"}, "due": {"2026-07-01"}, "project": {"site"},
+	})
+	if code != 200 || !strings.Contains(body, "write the docs") {
+		t.Fatalf("new task: code=%d body=%s", code, body)
+	}
+	tasks := mustDoc(t, s).Tasks()
+	if len(tasks) != 1 {
+		t.Fatalf("want 1 task, got %d", len(tasks))
+	}
+	tk := tasks[0]
+	if tk.Source() != "web" || tk.Due() != "2026-07-01" || len(tk.Projects()) != 1 {
+		t.Fatalf("task fields wrong: src=%s due=%s proj=%v", tk.Source(), tk.Due(), tk.Projects())
+	}
+	// empty text is rejected
+	if code, _ := postForm(s, "/tasks/new", s.csrf, url.Values{"text": {"  "}}); code != 400 {
+		t.Errorf("empty task should 400, got %d", code)
+	}
+}
+
+func mustDoc(t *testing.T, s *Server) *task.Doc {
+	t.Helper()
+	d, err := s.eng.Read()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return d
 }
 
 func TestWriteTrackerSelfWrite(t *testing.T) {

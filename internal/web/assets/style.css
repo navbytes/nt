@@ -513,6 +513,30 @@ a:hover { text-decoration: underline; }
 .btn:disabled { opacity: .6; cursor: default; }
 .btn--ghost { background: transparent; color: var(--fg-soft); border-color: var(--border); }
 
+/* Interactive tasks (nt web --edit) */
+.taskadd { display: flex; gap: var(--s2); margin-bottom: var(--s5); flex-wrap: wrap; }
+.taskadd__text { flex: 1 1 240px; }
+.taskadd__due { flex: 0 0 96px; }
+.taskadd input, .taskadd select {
+  font: inherit; font-size: 14px; padding: var(--s2) var(--s3);
+  background: var(--bg-inset); border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--fg);
+}
+.taskadd input:focus, .taskadd select:focus { outline: none; border-color: var(--accent); }
+.taskrow.htmx-swapping, .tasklist.htmx-request { opacity: .5; transition: opacity .12s; }
+.taskrow__check {
+  flex: 0 0 auto; width: 20px; height: 20px; line-height: 1; padding: 0; cursor: pointer;
+  border: 1px solid var(--border); border-radius: 50%; background: transparent; color: var(--muted); font-size: 12px;
+}
+.taskrow__check:hover { border-color: var(--accent); color: var(--accent); }
+.taskrow__check.is-done { border-color: var(--accent-2); color: var(--accent-2); }
+.taskrow__actions { display: inline-flex; align-items: center; gap: var(--s2); margin-left: var(--s2); opacity: 0; transition: opacity .1s; }
+.taskrow:hover .taskrow__actions, .taskrow:focus-within .taskrow__actions { opacity: 1; }
+.taskrow__status { font: inherit; font-size: 12px; padding: 2px var(--s2); background: var(--bg-inset); border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--fg-soft); }
+.taskrow__del { cursor: pointer; border: 0; background: transparent; color: var(--muted); font-size: 13px; padding: 0 var(--s1); }
+.taskrow__del:hover { color: var(--broken); }
+.taskrow__due { margin-left: auto; }
+.taskrow .src-badge { flex: 0 0 auto; }
+
 /* Graph view (/graph) */
 .graphview { overflow: auto; border: 1px solid var(--border-soft); border-radius: var(--radius); padding: var(--s4); }
 .graphview .mermaid { background: transparent; border: 0; padding: 0; }

@@ -73,7 +73,7 @@
     es.onmessage = function (e) {
       var kind = (e.data || "reload").trim();
       if (kind === "reload") { window.onReload(); return; }
-      document.dispatchEvent(new CustomEvent("nt:" + kind));
+      (document.body || document).dispatchEvent(new CustomEvent("nt:" + kind, { bubbles: true }));
     };
   } catch (e) { /* SSE unavailable — static view still works */ }
 

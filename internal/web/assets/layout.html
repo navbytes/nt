@@ -76,22 +76,18 @@
       {{else if .IsTasks}}
       <article class="note">
         <header class="note__header"><h1 class="note__title">Tasks</h1></header>
-        {{range .TaskGroups}}
-        <section class="taskgroup">
-          <h2 class="taskgroup__title"><span class="taskref__status s-{{.Status}}">{{.Status}}</span> · {{len .Tasks}}</h2>
-          <ul>
-            {{range .Tasks}}
-            <li class="taskrow">
-              <span class="taskrow__text">{{.Text}}</span>
-              {{if .Due}}<span class="taskrow__due">{{.Due}}</span>{{end}}
-              {{if .Source}}<span class="taskref__src">{{.Source}}</span>{{end}}
-            </li>
-            {{end}}
-          </ul>
-        </section>
-        {{else}}
-        <p class="backlinks__empty">No tasks captured yet.</p>
+        {{if .CanEdit}}
+        <form class="taskadd" hx-post="/tasks/new" hx-target="#tasklist" hx-swap="outerHTML"
+              hx-headers='{"X-CSRF":"{{.CSRF}}"}' hx-on::after-request="if(event.detail.successful)this.reset()">
+          <input class="taskadd__text" name="text" placeholder="Add a task…  (+project supported)" autocomplete="off" required>
+          <input class="taskadd__due" name="due" placeholder="due" autocomplete="off">
+          <select class="taskadd__pri" name="pri" aria-label="Priority">
+            <option value="">pri</option><option value="high">high</option><option value="med">med</option><option value="low">low</option>
+          </select>
+          <button class="btn" type="submit">Add</button>
+        </form>
         {{end}}
+        {{template "tasklist" .}}
       </article>
 
       {{else if .IsTags}}
@@ -203,6 +199,44 @@
   <script src="/static/app.js"></script>
 </body>
 </html>
+
+{{define "tasklist"}}
+<div id="tasklist" class="tasklist" hx-get="/tasks?fragment=1" hx-trigger="nt:tasks from:body" hx-swap="outerHTML"{{if .CanEdit}} hx-headers='{"X-CSRF":"{{.CSRF}}"}'{{end}}>
+  {{range .TaskGroups}}
+  <section class="taskgroup">
+    <h2 class="taskgroup__title"><span class="taskref__status s-{{.Status}}">{{.Status}}</span> · {{len .Tasks}}</h2>
+    <ul>
+      {{range .Tasks}}
+      <li class="taskrow" data-id="{{.ID}}">
+        {{if $.CanEdit}}
+          {{if eq .Status "done"}}
+          <button class="taskrow__check is-done" title="Reopen" aria-label="Reopen task" hx-post="/tasks/{{.ID}}/reopen" hx-target="#tasklist" hx-swap="outerHTML">✓</button>
+          {{else}}
+          <button class="taskrow__check" title="Mark done" aria-label="Mark task done" hx-post="/tasks/{{.ID}}/done" hx-target="#tasklist" hx-swap="outerHTML">○</button>
+          {{end}}
+        {{end}}
+        <span class="taskrow__text">{{.Text}}</span>
+        {{if .Due}}<span class="taskrow__due">{{.Due}}</span>{{end}}
+        {{if .Project}}<span class="tag">{{.Project}}</span>{{end}}
+        {{if .Source}}<span class="src-badge{{if eq .Source "claude"}} src-badge--claude{{end}}">{{.Source}}</span>{{end}}
+        {{if $.CanEdit}}
+        <span class="taskrow__actions">
+          <select class="taskrow__status" name="status" aria-label="Set status" hx-post="/tasks/{{.ID}}/status" hx-target="#tasklist" hx-swap="outerHTML">
+            <option value="" disabled selected>…</option>
+            <option value="open">open</option><option value="doing">doing</option><option value="blocked">blocked</option><option value="done">done</option>
+          </select>
+          <button class="taskrow__del" title="Delete" aria-label="Delete task" hx-post="/tasks/{{.ID}}/delete" hx-target="#tasklist" hx-swap="outerHTML" hx-confirm="Delete this task?">✕</button>
+        </span>
+        {{end}}
+      </li>
+      {{end}}
+    </ul>
+  </section>
+  {{else}}
+  <p class="backlinks__empty">No tasks captured yet.</p>
+  {{end}}
+</div>
+{{end}}
 
 {{define "tree"}}
 <ul class="tree">

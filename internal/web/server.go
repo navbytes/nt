@@ -27,6 +27,7 @@ import (
 
 	"github.com/fsnotify/fsnotify"
 
+	"github.com/navbytes/nt/internal/dateparse"
 	"github.com/navbytes/nt/internal/links"
 	"github.com/navbytes/nt/internal/mutate"
 	"github.com/navbytes/nt/internal/note"
@@ -164,6 +165,14 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("/orphans", s.handleOrphans)
 	mux.HandleFunc("/tags", s.handleTags)
 	mux.HandleFunc("/tasks", s.handleTasks)
+	// Task write routes (nt web --edit). Each runs through mutate.Engine.Apply,
+	// so a browser action gets the same lock + re-read + undo-journal safety as
+	// a CLI/agent write — concurrent writers can't clobber one another.
+	mux.HandleFunc("POST /tasks/new", s.handleTaskNew)
+	mux.HandleFunc("POST /tasks/{id}/done", s.handleTaskDone)
+	mux.HandleFunc("POST /tasks/{id}/reopen", s.handleTaskReopen)
+	mux.HandleFunc("POST /tasks/{id}/status", s.handleTaskStatus)
+	mux.HandleFunc("POST /tasks/{id}/delete", s.handleTaskDelete)
 	mux.HandleFunc("/graph", s.handleGraph)
 	mux.HandleFunc("/events", s.handleSSE)
 	mux.HandleFunc("/static/", s.handleStatic)
@@ -229,6 +238,7 @@ type taskGroup struct {
 	Tasks  []taskRow
 }
 type taskRow struct {
+	ID                                 string
 	Text, Status, Due, Source, Project string
 	Tags                               []string
 }
@@ -531,28 +541,190 @@ func (s *Server) handleTags(w http.ResponseWriter, r *http.Request) {
 	s.render(w, notes, &pageData{Title: "Tags", Tree: buildTree(notes, ""), IsTags: true, TagRows: rows})
 }
 
-// handleTasks is the agent-memory dashboard: tasks grouped by status, urgency-sorted.
+// handleTasks is the agent-memory dashboard: tasks grouped by status,
+// urgency-sorted. With ?fragment=1 it returns just the task-list fragment (for
+// htmx swaps and SSE-driven refresh); otherwise the full page.
 func (s *Server) handleTasks(w http.ResponseWriter, r *http.Request) {
-	doc, notes := s.load()
-	var groups []taskGroup
-	if doc != nil {
-		tasks := doc.Tasks()
-		task.SortByUrgency(tasks)
-		byStatus := map[string][]taskRow{}
-		for _, t := range tasks {
-			row := taskRow{Text: cleanTaskText(t.Text), Status: t.Status(), Due: t.Due(), Source: t.Source(), Tags: t.Tags()}
-			if p := t.Projects(); len(p) > 0 {
-				row.Project = p[0]
-			}
-			byStatus[t.Status()] = append(byStatus[t.Status()], row)
+	snap := s.current()
+	if r.URL.Query().Get("fragment") == "1" {
+		s.renderTaskList(w, snap)
+		return
+	}
+	s.render(w, snap.notes, &pageData{
+		Title:      "Tasks",
+		Tree:       buildTree(snap.notes, ""),
+		IsTasks:    true,
+		TaskGroups: buildTaskGroups(snap.doc),
+		CanEdit:    s.allowEdit,
+		CSRF:       s.csrf,
+	})
+}
+
+// buildTaskGroups groups tasks by status (urgency-sorted within each), in the
+// display order doing → open → blocked → done.
+func buildTaskGroups(doc *task.Doc) []taskGroup {
+	if doc == nil {
+		return nil
+	}
+	tasks := doc.Tasks()
+	task.SortByUrgency(tasks)
+	byStatus := map[string][]taskRow{}
+	for _, t := range tasks {
+		row := taskRow{ID: t.ID(), Text: cleanTaskText(t.Text), Status: t.Status(), Due: t.Due(), Source: t.Source(), Tags: t.Tags()}
+		if p := t.Projects(); len(p) > 0 {
+			row.Project = p[0]
 		}
-		for _, st := range []string{"doing", "open", "blocked", "done"} {
-			if rows := byStatus[st]; len(rows) > 0 {
-				groups = append(groups, taskGroup{Status: st, Tasks: rows})
-			}
+		byStatus[t.Status()] = append(byStatus[t.Status()], row)
+	}
+	var groups []taskGroup
+	for _, st := range []string{"doing", "open", "blocked", "done"} {
+		if rows := byStatus[st]; len(rows) > 0 {
+			groups = append(groups, taskGroup{Status: st, Tasks: rows})
 		}
 	}
-	s.render(w, notes, &pageData{Title: "Tasks", Tree: buildTree(notes, ""), IsTasks: true, TaskGroups: groups})
+	return groups
+}
+
+// renderTaskList writes just the #tasklist fragment.
+func (s *Server) renderTaskList(w http.ResponseWriter, snap *snapshot) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	d := &pageData{TaskGroups: buildTaskGroups(snap.doc), CanEdit: s.allowEdit, CSRF: s.csrf}
+	if err := s.tmpl.ExecuteTemplate(w, "tasklist", d); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
+}
+
+// taskWrite is the shared write path for the task action endpoints: it enforces
+// the --edit + CSRF gate, marks tasks.txt as a self-write (so the watcher
+// doesn't also broadcast a full reload), runs fn through mutate.Engine.Apply
+// (lock + re-read + undo journal), then refreshes the read-model, nudges other
+// clients ("tasks"), and returns the updated fragment.
+func (s *Server) taskWrite(w http.ResponseWriter, r *http.Request, op string, fn func(d *task.Doc, rec *mutate.Recorder) error) {
+	if !s.allowEdit {
+		http.Error(w, "editing is disabled — start with `nt web --edit`", http.StatusForbidden)
+		return
+	}
+	if r.Header.Get("X-CSRF") != s.csrf {
+		http.Error(w, "bad or missing CSRF token", http.StatusForbidden)
+		return
+	}
+	s.writes.mark(s.eng.S.TasksFile())
+	if err := s.eng.Apply(op, fn); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	s.rebuild()
+	s.hub.broadcast("tasks")
+	s.renderTaskList(w, s.current())
+}
+
+// resolveTask looks up the task addressed by the {id} path segment.
+func resolveTask(d *task.Doc, r *http.Request) (*task.Task, error) {
+	id := r.PathValue("id")
+	if t, amb := d.Resolve(id); t != nil && !amb {
+		return t, nil
+	}
+	return nil, fmt.Errorf("no such task %q", id)
+}
+
+func (s *Server) handleTaskDone(w http.ResponseWriter, r *http.Request) {
+	s.taskWrite(w, r, "done", func(d *task.Doc, rec *mutate.Recorder) error {
+		t, err := resolveTask(d, r)
+		if err != nil {
+			return err
+		}
+		mutate.Complete(d, rec, t, mutate.Today()) // spawns the next if recurring
+		return nil
+	})
+}
+
+func (s *Server) handleTaskReopen(w http.ResponseWriter, r *http.Request) {
+	s.taskWrite(w, r, "reopen", func(d *task.Doc, rec *mutate.Recorder) error {
+		t, err := resolveTask(d, r)
+		if err != nil {
+			return err
+		}
+		rec.Before(t)
+		t.SetDone(false, "")
+		t.SetState("open")
+		return nil
+	})
+}
+
+func (s *Server) handleTaskStatus(w http.ResponseWriter, r *http.Request) {
+	status := r.FormValue("status")
+	s.taskWrite(w, r, "update", func(d *task.Doc, rec *mutate.Recorder) error {
+		t, err := resolveTask(d, r)
+		if err != nil {
+			return err
+		}
+		rec.Before(t)
+		switch status {
+		case "open":
+			t.SetDone(false, "")
+			t.SetState("open")
+		case "doing", "blocked":
+			t.SetState(status)
+		case "done":
+			mutate.Complete(d, rec, t, mutate.Today())
+		default:
+			return fmt.Errorf("invalid status %q", status)
+		}
+		return nil
+	})
+}
+
+func (s *Server) handleTaskDelete(w http.ResponseWriter, r *http.Request) {
+	s.taskWrite(w, r, "delete", func(d *task.Doc, rec *mutate.Recorder) error {
+		t, err := resolveTask(d, r)
+		if err != nil {
+			return err
+		}
+		before, ok := d.Remove(t.ID())
+		if !ok {
+			return fmt.Errorf("no such task")
+		}
+		rec.Removed(t.ID(), before)
+		return nil
+	})
+}
+
+func (s *Server) handleTaskNew(w http.ResponseWriter, r *http.Request) {
+	text := strings.TrimSpace(r.FormValue("text"))
+	if text == "" {
+		http.Error(w, "task text is required", http.StatusBadRequest)
+		return
+	}
+	pri, due, project := r.FormValue("pri"), r.FormValue("due"), strings.TrimSpace(r.FormValue("project"))
+	priByte, okP := byte(0), true
+	if pri != "" {
+		priByte, okP = dateparse.Priority(pri)
+	}
+	dueVal, okD := "", true
+	if due != "" {
+		dueVal, okD = dateparse.Date(due)
+	}
+	if !okP || !okD {
+		http.Error(w, "invalid priority or due date", http.StatusBadRequest)
+		return
+	}
+	s.taskWrite(w, r, "add", func(d *task.Doc, rec *mutate.Recorder) error {
+		txt := text
+		if project != "" {
+			txt += " +" + project
+		}
+		t := task.New(txt)
+		if priByte != 0 {
+			t.SetPriority(priByte)
+		}
+		if dueVal != "" {
+			t.SetKey("due", dueVal)
+		}
+		t.SetKey("src", "web") // provenance: created from the GUI
+		d.Append(t)
+		rec.Added(t)
+		return nil
+	})
 }
 
 // handleGraph renders the note link graph as a clickable Mermaid diagram (reuses
@@ -763,8 +935,8 @@ func (s *Server) watch() {
 				if !ok {
 					return
 				}
-				if strings.HasPrefix(filepath.Base(ev.Name), ".") {
-					continue // .nt-*.tmp staging files, .git, .obsidian, …
+				if isTransient(ev.Name) {
+					continue // .nt-*.tmp staging, lock/undo/log — not content the UI shows
 				}
 				if ev.Op&fsnotify.Create != 0 {
 					if fi, err := os.Stat(ev.Name); err == nil && fi.IsDir() {
@@ -788,6 +960,22 @@ func (s *Server) watch() {
 			}
 		}
 	}()
+}
+
+// isTransient reports whether a path is store bookkeeping the viewer never
+// renders — the atomic-write staging file, the lock, the undo journal, the log,
+// and dotfiles (.git/.obsidian). Changes to these must not trigger a rebuild or
+// a live-reload; only tasks.txt / done.txt / notes matter.
+func isTransient(path string) bool {
+	base := filepath.Base(path)
+	if strings.HasPrefix(base, ".") {
+		return true
+	}
+	switch base {
+	case "tasks.txt.lock", "undo.jsonl", "nt.log":
+		return true
+	}
+	return false
 }
 
 func addDirs(wt *fsnotify.Watcher, root string) {
