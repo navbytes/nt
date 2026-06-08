@@ -20,7 +20,7 @@ import (
 )
 
 // This file is the JSON API the Svelte/TypeScript SPA consumes — Phase 1 of the
-// web rebuild (see docs/web-redesign-proposal.md). It is additive: the existing
+// web rebuild. It is additive: the existing
 // server-rendered (htmx) UI is untouched and remains the default. Every read
 // projects from the in-memory snapshot (readmodel.go); every write still goes
 // through mutate.Engine.Apply, so the SPA gets the same lock + re-read + undo

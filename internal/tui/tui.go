@@ -377,7 +377,7 @@ func onOff(b bool) string {
 	return "off"
 }
 
-// --- palette / styles (mirrors docs/tui-mockup.html) ---------------------
+// --- palette / styles ------------------------------------------------------
 
 var (
 	// Palette is adaptive: lipgloss picks the Dark or Light value from the

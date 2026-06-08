@@ -18,8 +18,8 @@ import (
 // once, with the link graph (backlinks, task references, forward adjacency,
 // orphan set) precomputed. Every read handler serves from it instead of
 // re-walking notes/, re-parsing every .md, and shelling out to ripgrep per
-// request (the per-request cost that did not scale past a few thousand notes —
-// see docs/web-read-model-plan.md). It is treated immutable once built: a
+// request (the per-request cost that did not scale past a few thousand
+// notes). It is treated immutable once built: a
 // rebuild constructs a fresh value and swaps the pointer under the Server lock.
 type snapshot struct {
 	doc      *task.Doc
