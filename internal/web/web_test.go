@@ -216,6 +216,70 @@ func mustDoc(t *testing.T, s *Server) *task.Doc {
 	return d
 }
 
+func TestActivityFeed(t *testing.T) {
+	s := newTestServer(t)
+	note.Create(s.eng.S, "A Note", "body", nil, "claude", "")
+	id := addTask(t, s, "do a thing")
+	// complete it so a "completed" event is produced too
+	if _, err := s.eng.Read(); err != nil {
+		t.Fatal(err)
+	}
+	postFormSetup := func() { s.allowEdit = true }
+	postFormSetup()
+	postForm(s, "/tasks/"+id+"/done", s.csrf, nil)
+
+	snap := s.current()
+	if len(snap.activity) < 3 { // note added, task added, task completed
+		t.Fatalf("want ≥3 activity events, got %d: %+v", len(snap.activity), snap.activity)
+	}
+	// newest-first ordering
+	for i := 1; i < len(snap.activity); i++ {
+		if snap.activity[i-1].When.Before(snap.activity[i].When) {
+			t.Fatal("activity not sorted newest-first")
+		}
+	}
+	if !contains(snap.sources, "claude") {
+		t.Errorf("sources should include claude: %v", snap.sources)
+	}
+	// page renders + source filter
+	if _, body := get(t, s, "/activity"); !strings.Contains(body, "actlist") || !strings.Contains(body, "A Note") {
+		t.Fatalf("activity page missing entries:\n%s", body)
+	}
+	_, claudeOnly := get(t, s, "/activity?source=claude")
+	if !strings.Contains(claudeOnly, "A Note") {
+		t.Errorf("source filter dropped the claude note")
+	}
+}
+
+func TestHomeDashboard(t *testing.T) {
+	s := newTestServer(t)
+	// fresh store → onboarding
+	if _, body := get(t, s, "/"); !strings.Contains(body, "first task") {
+		t.Fatalf("empty store should onboard:\n%s", body)
+	}
+	ready := addTask(t, s, "ready task")
+	blocker := addTask(t, s, "blocker task")
+	if err := s.eng.Apply("block", func(d *task.Doc, rec *mutate.Recorder) error {
+		bt := d.FindByID(blocker)
+		rec.Before(bt)
+		bt.SetKey("blocks", ready)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	_, body := get(t, s, "/")
+	if !strings.Contains(body, "id=\"dashboard\"") || !strings.Contains(body, "Ready") || !strings.Contains(body, "Blocked") {
+		t.Fatalf("dashboard missing panels:\n%s", body)
+	}
+	if !strings.Contains(body, "blocker task") { // shown as the blocker reason
+		t.Errorf("blocked reason not shown")
+	}
+	// fragment endpoint
+	if _, frag := get(t, s, "/?fragment=dash"); !strings.Contains(frag, "dash__grid") {
+		t.Errorf("dashboard fragment missing")
+	}
+}
+
 func TestWriteTrackerSelfWrite(t *testing.T) {
 	wt := newWriteTracker()
 	if wt.isSelf("/x") {
@@ -472,7 +536,7 @@ func TestTasksDashboard(t *testing.T) {
 
 func TestPaletteIndexAndOnboarding(t *testing.T) {
 	s := newTestServer(t)
-	if _, body := get(t, s, "/"); !strings.Contains(body, "No notes yet") {
+	if _, body := get(t, s, "/"); !strings.Contains(body, "first task") {
 		t.Fatalf("empty onboarding missing:\n%s", body)
 	}
 	_, _ = note.Create(s.eng.S, "Findme", "", nil, "cli", "")

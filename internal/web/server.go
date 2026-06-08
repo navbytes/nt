@@ -65,6 +65,17 @@ func NewServer(eng *mutate.Engine, version string) (*Server, error) {
 			b, _ := json.Marshal(v)
 			return template.JS(b) //nolint:gosec // HTML-escaped JSON, data only
 		},
+		// dict builds a map from k,v pairs so a partial can receive both a row and
+		// the page context (e.g. CanEdit) — Go templates pass a single value.
+		"dict": func(kv ...any) map[string]any {
+			m := make(map[string]any, len(kv)/2)
+			for i := 0; i+1 < len(kv); i += 2 {
+				if k, ok := kv[i].(string); ok {
+					m[k] = kv[i+1]
+				}
+			}
+			return m
+		},
 	}
 	tmpl, err := template.New("nt").Funcs(funcs).ParseFS(assetsFS, "assets/*.html")
 	if err != nil {
@@ -164,6 +175,7 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("/search", s.handleSearch)
 	mux.HandleFunc("/orphans", s.handleOrphans)
 	mux.HandleFunc("/tags", s.handleTags)
+	mux.HandleFunc("/activity", s.handleActivity)
 	mux.HandleFunc("/tasks", s.handleTasks)
 	// Task write routes (nt web --edit). Each runs through mutate.Engine.Apply,
 	// so a browser action gets the same lock + re-read + undo-journal safety as
@@ -224,8 +236,33 @@ type pageData struct {
 	IsGraph    bool
 	GraphData  *graphData // JSON model for the force-directed link graph
 
+	IsHome bool
+	Dash   *dashboard
+
+	IsActivity     bool
+	ActivityDays   []activityDay
+	ActivitySource string
+	Sources        []string
+
 	CanEdit bool   // editing enabled (nt web --edit)
 	CSRF    string // token the editor sends back on save
+}
+
+// dashboard is the agent-memory home page: what's ready to start, in flight, and
+// blocked — plus the latest activity. It's the "live state of your memory" view.
+type dashboard struct {
+	Ready     []taskRow
+	Doing     []taskRow
+	Blocked   []taskRow // each carries its Blocker reason
+	Recent    []activityEvent
+	OpenCount int
+	NoteCount int
+}
+
+// activityDay groups timeline events under one calendar date.
+type activityDay struct {
+	Date   string
+	Events []activityEvent
 }
 
 type linkRow struct{ URL, Title, Path string }
@@ -242,6 +279,7 @@ type taskRow struct {
 	ID                                 string
 	Text, Status, Due, Source, Project string
 	Tags                               []string
+	Blocker                            string // on the dashboard: why this task is blocked
 }
 
 // flatNotes is the note index the ⌘K palette filters over.
@@ -263,13 +301,128 @@ func (s *Server) render(w http.ResponseWriter, notes []*note.Note, d *pageData) 
 
 // ---- handlers -------------------------------------------------------------
 
+// handleIndex serves the agent-memory dashboard (ready / doing / blocked +
+// recent activity) — the live state of the store. A fresh store still shows the
+// onboarding empty state. ?fragment=dash returns just the dashboard panel, so a
+// task action elsewhere can refresh it via the "tasks" SSE event.
 func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path != "/" {
 		http.NotFound(w, r)
 		return
 	}
-	_, notes := s.load()
-	s.render(w, notes, &pageData{Title: "nt notes", Tree: buildTree(notes, ""), Empty: len(notes) == 0})
+	snap := s.current()
+	empty := len(snap.notes) == 0 && (snap.doc == nil || len(snap.doc.Tasks()) == 0)
+	if r.URL.Query().Get("fragment") == "dash" {
+		s.renderDashboard(w, snap)
+		return
+	}
+	s.render(w, snap.notes, &pageData{
+		Title:   "nt",
+		Tree:    buildTree(snap.notes, ""),
+		Empty:   empty,
+		IsHome:  !empty,
+		Dash:    buildDashboard(snap),
+		CanEdit: s.allowEdit,
+		CSRF:    s.csrf,
+	})
+}
+
+func (s *Server) renderDashboard(w http.ResponseWriter, snap *snapshot) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	d := &pageData{Dash: buildDashboard(snap), CanEdit: s.allowEdit, CSRF: s.csrf}
+	if err := s.tmpl.ExecuteTemplate(w, "dashboard", d); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
+}
+
+// buildDashboard projects the task doc into ready / doing / blocked queues
+// (urgency-sorted, the same selection `nt ready` uses) plus the latest activity.
+func buildDashboard(snap *snapshot) *dashboard {
+	d := &dashboard{NoteCount: len(snap.notes)}
+	if snap.doc != nil {
+		tasks := snap.doc.Tasks()
+		task.SortByUrgency(tasks)
+		blocked := task.BlockedIDs(tasks)
+		for _, t := range tasks {
+			if t.Done {
+				continue
+			}
+			d.OpenCount++
+			row := taskRow{ID: t.ID(), Text: cleanTaskText(t.Text), Due: t.Due(), Source: t.Source(), Tags: t.Tags()}
+			if p := t.Projects(); len(p) > 0 {
+				row.Project = p[0]
+			}
+			switch task.EffectiveStatus(t, blocked[t.ID()]) {
+			case "doing":
+				row.Status = "doing"
+				d.Doing = append(d.Doing, row)
+			case "blocked":
+				row.Status = "blocked"
+				row.Blocker = blockerText(tasks, t.ID())
+				d.Blocked = append(d.Blocked, row)
+			default:
+				row.Status = "open"
+				d.Ready = append(d.Ready, row)
+			}
+		}
+	}
+	if len(snap.activity) > 8 {
+		d.Recent = snap.activity[:8]
+	} else {
+		d.Recent = snap.activity
+	}
+	return d
+}
+
+// blockerText returns the description of an open task blocking id (the "why").
+func blockerText(tasks []*task.Task, id string) string {
+	for _, b := range tasks {
+		if !b.Done && b.Blocks() == id {
+			return cleanTaskText(b.Text)
+		}
+	}
+	return ""
+}
+
+// handleActivity renders the provenance timeline (grouped by date), optionally
+// filtered to one source. ?fragment=1 returns just the list for live refresh.
+func (s *Server) handleActivity(w http.ResponseWriter, r *http.Request) {
+	snap := s.current()
+	src := r.URL.Query().Get("source")
+	days := groupActivity(snap.activity, src)
+	if r.URL.Query().Get("fragment") == "1" {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		if err := s.tmpl.ExecuteTemplate(w, "activitylist", &pageData{ActivityDays: days}); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+		}
+		return
+	}
+	s.render(w, snap.notes, &pageData{
+		Title:          "Activity",
+		Tree:           buildTree(snap.notes, ""),
+		IsActivity:     true,
+		ActivityDays:   days,
+		ActivitySource: src,
+		Sources:        snap.sources,
+	})
+}
+
+// groupActivity buckets events by calendar date (newest first), optionally
+// keeping only one source.
+func groupActivity(events []activityEvent, source string) []activityDay {
+	var days []activityDay
+	for _, e := range events {
+		if source != "" && e.Source != source {
+			continue
+		}
+		d := e.When.Format("Mon, Jan 2 2006")
+		if n := len(days); n > 0 && days[n-1].Date == d {
+			days[n-1].Events = append(days[n-1].Events, e)
+		} else {
+			days = append(days, activityDay{Date: d, Events: []activityEvent{e}})
+		}
+	}
+	return days
 }
 
 func (s *Server) handleNote(w http.ResponseWriter, r *http.Request) {

@@ -2,6 +2,7 @@ package web
 
 import (
 	"net/url"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -10,6 +11,7 @@ import (
 	"github.com/navbytes/nt/internal/mutate"
 	"github.com/navbytes/nt/internal/note"
 	"github.com/navbytes/nt/internal/task"
+	"github.com/navbytes/nt/internal/ulid"
 )
 
 // snapshot is the web adapter's in-memory read-model: the whole store parsed
@@ -31,7 +33,22 @@ type snapshot struct {
 	linked    map[string]bool       // note path → has any inbound link (note or task), for orphans
 	fwd       map[string][]string   // note path → resolved outbound note paths, for the graph
 
+	activity []activityEvent // every change, newest first (the provenance timeline)
+	sources  []string        // distinct sources seen, sorted (for the source filter)
+
 	builtAt time.Time
+}
+
+// activityEvent is one entry in the provenance timeline: who changed what, when.
+// It's the view nt can build but pure-PKM tools can't — because nt has agents
+// writing into the same store a human reads.
+type activityEvent struct {
+	When   time.Time
+	Action string // "added" | "updated" | "completed"
+	Kind   string // "note" | "task"
+	Source string // claude | cli | web | tui | …
+	Title  string
+	URL    string // /n/<id> for notes; "" for tasks (no task page yet)
 }
 
 // buildSnapshot reads the store once and precomputes the link graph. The
@@ -115,7 +132,52 @@ func buildSnapshot(eng *mutate.Engine) *snapshot {
 			}
 		}
 	}
+
+	s.buildActivity()
 	return s
+}
+
+// buildActivity derives the provenance timeline from data already in the store:
+// note Created/Updated timestamps, task creation times (decoded from the ULID),
+// and task completion dates — each tagged with its source.
+func (s *snapshot) buildActivity() {
+	srcSeen := map[string]bool{}
+	src := func(v string) string {
+		if v == "" {
+			v = "unknown"
+		}
+		srcSeen[v] = true
+		return v
+	}
+	for _, n := range s.notes {
+		url := "/n/" + url.PathEscape(noteHandle(n))
+		if ts, err := time.Parse(time.RFC3339, n.Created); err == nil {
+			s.activity = append(s.activity, activityEvent{When: ts, Action: "added", Kind: "note", Source: src(n.Source), Title: n.Title, URL: url})
+		}
+		if n.Updated != "" && n.Updated != n.Created {
+			if ts, err := time.Parse(time.RFC3339, n.Updated); err == nil {
+				s.activity = append(s.activity, activityEvent{When: ts, Action: "updated", Kind: "note", Source: src(n.Source), Title: n.Title, URL: url})
+			}
+		}
+	}
+	if s.doc != nil {
+		for _, t := range s.doc.Tasks() {
+			title := cleanTaskText(t.Text)
+			if ts, ok := ulid.Time(t.ID()); ok {
+				s.activity = append(s.activity, activityEvent{When: ts, Action: "added", Kind: "task", Source: src(t.Source()), Title: title})
+			}
+			if t.Done && t.Completed != "" {
+				if ts, err := time.Parse("2006-01-02", t.Completed); err == nil {
+					s.activity = append(s.activity, activityEvent{When: ts, Action: "completed", Kind: "task", Source: src(t.Source()), Title: title})
+				}
+			}
+		}
+	}
+	sort.Slice(s.activity, func(i, j int) bool { return s.activity[i].When.After(s.activity[j].When) })
+	for k := range srcSeen {
+		s.sources = append(s.sources, k)
+	}
+	sort.Strings(s.sources)
 }
 
 // findHandle resolves a note by id or rel from the prebuilt map.

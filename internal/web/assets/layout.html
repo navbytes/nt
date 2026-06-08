@@ -26,7 +26,7 @@
           <ul class="search-dropdown" id="search-dropdown" hidden></ul>
         </div>
         <nav class="sidenav" aria-label="Sections">
-          <a href="/tasks">Tasks</a><a href="/tags">Tags</a><a href="/graph">Graph</a><a href="/orphans">Orphans</a>
+          <a href="/tasks">Tasks</a><a href="/activity">Activity</a><a href="/tags">Tags</a><a href="/graph">Graph</a><a href="/orphans">Orphans</a>
         </nav>
       </div>
       <nav class="sidebar__tree" aria-label="Notes">
@@ -173,26 +173,38 @@
         {{end}}
       </article>
 
-      {{else}}
+      {{else if .IsHome}}
       <article class="note">
-        {{if .Empty}}
-        <div class="state">
-          <div class="state__icon">▌</div>
-          <h1>No notes yet</h1>
-          <p>Create one from the terminal:</p>
-          <p><code>nt note "My first note" --folder ref</code></p>
-        </div>
-        {{else}}
-        <div class="state">
-          <div class="state__icon">▌</div>
-          <h1>nt notes</h1>
-          <p>Pick a note from the sidebar, press <code>⌘K</code> to jump, or <code>/</code> to search.</p>
-        </div>
+        <header class="note__header"><h1 class="note__title">Memory</h1></header>
+        {{template "dashboard" .}}
         <div class="recent" id="recent" hidden>
           <h2 class="recent__title">Recently viewed</h2>
           <ul id="recent-list"></ul>
         </div>
-        {{end}}
+      </article>
+
+      {{else if .IsActivity}}
+      <article class="note">
+        <header class="note__header"><h1 class="note__title">Activity</h1></header>
+        <nav class="activity__filter" aria-label="Filter by source">
+          <a href="/activity"{{if not .ActivitySource}} class="is-active"{{end}}>all</a>
+          {{range .Sources}}<a href="/activity?source={{.}}"{{if eq . $.ActivitySource}} class="is-active"{{end}}>{{.}}</a>{{end}}
+        </nav>
+        {{template "activitylist" .}}
+      </article>
+
+      {{else}}
+      <article class="note">
+        <div class="state">
+          <div class="state__icon">▌</div>
+          <h1>nt</h1>
+          {{if .Empty}}
+          <p>No tasks or notes yet. Capture from the terminal:</p>
+          <p><code>nt add "first task"</code> · <code>nt note "First note"</code></p>
+          {{else}}
+          <p>Pick a note from the sidebar, press <code>⌘K</code> to jump, or <code>/</code> to search.</p>
+          {{end}}
+        </div>
       </article>
       {{end}}
     </main>
@@ -246,6 +258,79 @@
   </section>
   {{else}}
   <p class="backlinks__empty">No tasks captured yet.</p>
+  {{end}}
+</div>
+{{end}}
+
+{{define "dashboard"}}
+<div id="dashboard" class="dash" hx-get="/?fragment=dash" hx-trigger="nt:tasks from:body" hx-swap="outerHTML"{{if .CanEdit}} hx-headers='{"X-CSRF":"{{.CSRF}}"}'{{end}}>
+  <div class="dash__stats">
+    <span><strong>{{.Dash.OpenCount}}</strong> open</span>
+    <span><strong>{{len .Dash.Doing}}</strong> doing</span>
+    <span><strong>{{len .Dash.Blocked}}</strong> blocked</span>
+    <span><strong>{{.Dash.NoteCount}}</strong> notes</span>
+  </div>
+  <div class="dash__grid">
+    <section class="dash__panel">
+      {{if .Dash.Doing}}
+      <h2 class="dash__title">In flight</h2>
+      <ul class="dash__list">{{range .Dash.Doing}}{{template "dashrow" dict "Row" . "CanEdit" $.CanEdit}}{{end}}</ul>
+      {{end}}
+      <h2 class="dash__title">Ready <a class="dash__more" href="/tasks">manage →</a></h2>
+      {{if .Dash.Ready}}
+      <ul class="dash__list">{{range .Dash.Ready}}{{template "dashrow" dict "Row" . "CanEdit" $.CanEdit}}{{end}}</ul>
+      {{else}}
+      <p class="backlinks__empty">Nothing ready — you're clear.</p>
+      {{end}}
+      {{if .Dash.Blocked}}
+      <h2 class="dash__title">Blocked</h2>
+      <ul class="dash__list">{{range .Dash.Blocked}}{{template "dashrow" dict "Row" . "CanEdit" $.CanEdit}}{{end}}</ul>
+      {{end}}
+    </section>
+    <section class="dash__panel">
+      <h2 class="dash__title">Recent activity <a class="dash__more" href="/activity">all →</a></h2>
+      {{template "actrows" .Dash.Recent}}
+    </section>
+  </div>
+</div>
+{{end}}
+
+{{define "dashrow"}}
+<li class="taskrow" data-id="{{.Row.ID}}">
+  {{if .CanEdit}}<button class="taskrow__check" title="Mark done" aria-label="Mark done" hx-post="/tasks/{{.Row.ID}}/done" hx-swap="none">○</button>{{end}}
+  <span class="taskrow__text">{{.Row.Text}}</span>
+  {{if .Row.Blocker}}<span class="taskrow__blocker">⊘ {{.Row.Blocker}}</span>{{end}}
+  {{if .Row.Due}}<span class="taskrow__due">{{.Row.Due}}</span>{{end}}
+  {{if .Row.Project}}<span class="tag">{{.Row.Project}}</span>{{end}}
+  {{if .Row.Source}}<span class="src-badge{{if eq .Row.Source "claude"}} src-badge--claude{{end}}">{{.Row.Source}}</span>{{end}}
+</li>
+{{end}}
+
+{{define "actrows"}}
+<ul class="actlist">
+  {{range .}}
+  <li class="actrow">
+    <span class="actrow__time">{{.When.Format "15:04"}}</span>
+    <span class="actrow__act act--{{.Action}}">{{.Action}}</span>
+    <span class="actrow__kind">{{.Kind}}</span>
+    {{if .URL}}<a class="actrow__title" href="{{.URL}}">{{.Title}}</a>{{else}}<span class="actrow__title">{{.Title}}</span>{{end}}
+    {{if .Source}}<span class="src-badge{{if eq .Source "claude"}} src-badge--claude{{end}}">{{.Source}}</span>{{end}}
+  </li>
+  {{else}}
+  <li class="results__empty">No activity yet.</li>
+  {{end}}
+</ul>
+{{end}}
+
+{{define "activitylist"}}
+<div id="activitylist" hx-get="/activity?fragment=1" hx-trigger="nt:tasks from:body" hx-swap="outerHTML">
+  {{range .ActivityDays}}
+  <section class="actday">
+    <h2 class="actday__title">{{.Date}}</h2>
+    {{template "actrows" .Events}}
+  </section>
+  {{else}}
+  <p class="backlinks__empty">No activity yet.</p>
   {{end}}
 </div>
 {{end}}
