@@ -86,6 +86,7 @@
         {#each n.crumbs as c (c)}<span>{c}</span>{/each}
         <span class="crumbs__file">{n.file}</span>
         <span class="spacer"></span>
+        <a class="btn btn--ghost btn--sm" href={`/graph?focus=${encodeURIComponent(handle)}`}>Graph ⌖</a>
         {#if canEdit}<button class="btn btn--ghost btn--sm" onclick={() => (editing = true)}>Edit</button>{/if}
       </div>
       <h1>{n.title}</h1>

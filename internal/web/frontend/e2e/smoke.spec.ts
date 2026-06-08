@@ -38,7 +38,7 @@ test("command palette (⌘K) finds a note and navigates to it", async ({ page })
 test("graph view renders a canvas with a node/link summary", async ({ page }) => {
   await page.goto("/graph");
   await expect(page.getByText(/notes ·/)).toBeVisible();
-  await expect(page.locator(".graph canvas")).toBeVisible();
+  await expect(page.locator(".graph-canvas canvas")).toBeVisible();
 });
 
 test("completing a task moves it out of the open list", async ({ page }) => {
