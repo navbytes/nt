@@ -26,14 +26,13 @@ import (
 // with mermaid; binds 127.0.0.1 by default.
 func cmdWeb(args []string) int {
 	fs := flag.NewFlagSet("web", flag.ContinueOnError)
-	port := fs.Int("port", 0, "port to listen on (0 = pick a free one)")
+	port := fs.Int("port", web.DefaultPort, fmt.Sprintf("port to listen on (%d by default; falls back to a free one if taken; 0 = always pick a free one)", web.DefaultPort))
 	host := fs.String("host", "127.0.0.1", "bind address (localhost only by default)")
 	edit := fs.Bool("edit", false, "allow editing notes in the browser (default: read-only)")
-	spa := fs.Bool("spa", false, "serve the new Svelte SPA instead of the server-rendered UI (preview)")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
-	if err := web.Serve(Version, fmt.Sprintf("%s:%d", *host, *port), *edit, *spa); err != nil {
+	if err := web.Serve(Version, fmt.Sprintf("%s:%d", *host, *port), *edit); err != nil {
 		return fail(err)
 	}
 	return 0

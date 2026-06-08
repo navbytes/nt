@@ -54,6 +54,43 @@
     history.replaceState(null, "", "#" + id);
     activeId = id;
   }
+
+  // Run Mermaid on the rendered note body — after mount / on body change, and
+  // again on theme toggle so diagrams re-render in the matching light/dark theme.
+  $effect(() => {
+    const html = $noteQ.data?.bodyHTML;
+    if (!html) return;
+    let cancelled = false;
+
+    async function render() {
+      const el = document.querySelector(".prose");
+      if (!el) return;
+      const divs = Array.from(el.querySelectorAll<HTMLElement>(".mermaid"));
+      if (!divs.length) return;
+      const mermaid = (await import("mermaid")).default;
+      if (cancelled) return;
+      const dark = document.documentElement.getAttribute("data-theme") === "dark";
+      mermaid.initialize({ startOnLoad: false, theme: dark ? "dark" : "default" });
+      // Cache each diagram's source on first run (mermaid replaces the div's
+      // text with SVG), then restore it so a re-run picks up the new theme.
+      for (const d of divs) {
+        const src = d.getAttribute("data-src") ?? d.textContent ?? "";
+        d.setAttribute("data-src", src);
+        d.removeAttribute("data-processed");
+        d.innerHTML = src;
+      }
+      await mermaid.run({ nodes: divs });
+    }
+
+    const id = setTimeout(render, 0); // defer so the DOM is updated first
+    const obs = new MutationObserver(() => render());
+    obs.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme", "class"] });
+    return () => {
+      cancelled = true;
+      clearTimeout(id);
+      obs.disconnect();
+    };
+  });
 </script>
 
 {#if editing}
@@ -70,6 +107,7 @@
         {#each n.crumbs as c (c)}<span>{c}</span>{/each}
         <span class="crumbs__file">{n.file}</span>
         <span class="spacer"></span>
+        <a class="btn btn--ghost btn--sm" href={`/graph?focus=${encodeURIComponent(handle)}`}>Graph ⌖</a>
         {#if canEdit}<button class="btn btn--ghost btn--sm" onclick={() => (editing = true)}>Edit</button>{/if}
       </div>
       <h1>{n.title}</h1>

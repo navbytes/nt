@@ -85,7 +85,9 @@
       {:else if path === "/orphans"}
         <Orphans />
       {:else if path === "/graph"}
-        <Graph />
+        {#key loc.query.get("focus") ?? ""}
+          <Graph focus={loc.query.get("focus") ?? ""} />
+        {/key}
       {:else}
         <NotFound {path} />
       {/if}
