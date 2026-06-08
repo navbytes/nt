@@ -181,3 +181,16 @@ type CreatedNote struct {
 	Handle string `json:"handle"`
 	URL    string `json:"url"`
 }
+
+// JournalDay is one existing daily note (date + the note's stable handle).
+type JournalDay struct {
+	Date   string `json:"date"`   // YYYY-MM-DD
+	Handle string `json:"handle"` // note handle, for the note view
+}
+
+// JournalResponse is GET /api/journal — the daily-notes index for the journal UI.
+type JournalResponse struct {
+	Today  string       `json:"today"`  // today's date in the server's local time
+	Folder string       `json:"folder"` // subfolder daily notes live under (e.g. "journal")
+	Days   []JournalDay `json:"days"`   // existing daily notes, newest first
+}

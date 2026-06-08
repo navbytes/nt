@@ -28,6 +28,8 @@ func Run(args []string) int {
 		return cmdAdd(rest)
 	case "note":
 		return cmdNote(rest)
+	case "journal", "j":
+		return cmdJournal(rest)
 	case "list", "ls":
 		return cmdList(rest)
 	case "ready":
@@ -207,6 +209,7 @@ USAGE
   nt                          open the interactive TUI
   nt add "title" [flags]      add a task
   nt note "title" [flags]     capture a note (--folder work files it in notes/work/)
+  nt journal [--date D]       open today's daily note in $EDITOR  (alias: j)
   nt list [flags]             list tasks            (alias: ls)
   nt ready [flags]            open, unblocked tasks by urgency — start here
   nt today [flags]            overdue + due-today + just-started, grouped

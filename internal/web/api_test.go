@@ -272,3 +272,27 @@ func TestAPISearchRankingAndSnippets(t *testing.T) {
 		t.Fatalf("body match should carry a snippet with the match: %+v", bodyHit)
 	}
 }
+
+// TestAPIJournal: the journal index lists existing daily notes (journal/<date>)
+// newest-first with handles, plus today's date — and ignores non-date notes.
+func TestAPIJournal(t *testing.T) {
+	s := newTestServer(t)
+	note.Create(s.eng.S, "2026-06-06", "older", nil, "cli", "journal")
+	note.Create(s.eng.S, "2026-06-08", "newer", nil, "cli", "journal")
+	note.Create(s.eng.S, "Not A Date", "x", nil, "cli", "journal") // must be ignored
+
+	_, body := get(t, s, "/api/journal")
+	jr := decode[apitypes.JournalResponse](t, body)
+	if jr.Folder != "journal" || jr.Today == "" {
+		t.Fatalf("journal meta wrong: %+v", jr)
+	}
+	if len(jr.Days) != 2 {
+		t.Fatalf("expected 2 daily notes, got %d: %+v", len(jr.Days), jr.Days)
+	}
+	if jr.Days[0].Date != "2026-06-08" || jr.Days[1].Date != "2026-06-06" {
+		t.Errorf("days should be newest-first: %+v", jr.Days)
+	}
+	if jr.Days[0].Handle == "" {
+		t.Error("each day should carry a note handle")
+	}
+}

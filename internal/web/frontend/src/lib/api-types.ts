@@ -212,3 +212,18 @@ export interface CreatedNote {
   handle: string;
   url: string;
 }
+/**
+ * JournalDay is one existing daily note (date + the note's stable handle).
+ */
+export interface JournalDay {
+  date: string; // YYYY-MM-DD
+  handle: string; // note handle, for the note view
+}
+/**
+ * JournalResponse is GET /api/journal — the daily-notes index for the journal UI.
+ */
+export interface JournalResponse {
+  today: string; // today's date in the server's local time
+  folder: string; // subfolder daily notes live under (e.g. "journal")
+  days: JournalDay[]; // existing daily notes, newest first
+}
