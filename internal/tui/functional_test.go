@@ -49,7 +49,7 @@ func TestAddNoteFromTUI(t *testing.T) {
 	before := notesCount(t, m)
 
 	model := runInput(m, "A", "my brand new note")
-	mm := model.(*Model)
+	mm := press(model, "esc").(*Model) // exit the in-TUI body capture (title-only)
 
 	if got := notesCount(t, mm); got != before+1 {
 		t.Fatalf("add note: store has %d notes, want %d", got, before+1)
@@ -185,7 +185,7 @@ func TestFollowLink(t *testing.T) {
 	}
 	slug := strings.TrimSuffix(filepathBase(n.Path), ".md")
 	model := runInput(m, "A", "ignore") // unrelated, just to have activity
-	mm := model.(*Model)
+	mm := press(model, "esc").(*Model)  // exit the in-TUI body capture
 	mm.tab = tabTasks
 	mm.cursor = 0
 	// link the selected task to the note, then follow it.
@@ -1015,5 +1015,37 @@ func TestRenderAfterEachAction(t *testing.T) {
 		if strings.TrimSpace(model.(*Model).View()) == "" {
 			t.Fatalf("empty view after %q", k)
 		}
+	}
+}
+
+// TestNoteBodyCapture: A opens an in-TUI body editor; typing + Ctrl+S saves the
+// body to the new note (no $EDITOR bounce — U4).
+func TestNoteBodyCapture(t *testing.T) {
+	m := testModel(t)
+	m.width, m.height = 100, 30
+
+	model := runInput(m, "A", "Captured Note") // title → enter
+	mm := model.(*Model)
+	if !mm.bodyEdit {
+		t.Fatal("adding a note should open the in-TUI body capture")
+	}
+
+	mt, _ := mm.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("the captured body")})
+	mm = mt.(*Model)
+	ms, _ := mm.Update(tea.KeyMsg{Type: tea.KeyCtrlS}) // save
+	mm = ms.(*Model)
+	if mm.bodyEdit {
+		t.Fatal("Ctrl+S should exit body capture")
+	}
+
+	notes, _ := note.List(mm.eng.S)
+	var found *note.Note
+	for _, n := range notes {
+		if n.Title == "Captured Note" {
+			found = n
+		}
+	}
+	if found == nil || !strings.Contains(found.Body, "the captured body") {
+		t.Fatalf("captured body should be saved to the note, got %v", found)
 	}
 }

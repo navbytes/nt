@@ -20,6 +20,9 @@ func (m *Model) View() string {
 	if m.help {
 		return m.helpView()
 	}
+	if m.bodyEdit {
+		return m.bodyEditView()
+	}
 	header := m.headerView()
 	footer := m.footerView()
 	bodyH := m.height - lipgloss.Height(header) - lipgloss.Height(footer)

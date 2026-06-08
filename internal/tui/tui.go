@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -126,6 +127,10 @@ type Model struct {
 	ik     inputKind
 	pendD  bool   // first 'd' of a 'dd'
 	status string // transient status line
+
+	bodyEdit   bool           // in-TUI note-body capture is active (U4)
+	bodyArea   textarea.Model // multi-line body editor for fast capture
+	bodyNoteID string         // ULID of the note whose body is being captured
 
 	editTmp string // temp file for an in-progress external task edit
 	editID  string // ULID of the task being edited externally

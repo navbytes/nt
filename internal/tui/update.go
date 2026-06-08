@@ -41,6 +41,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if !m.ready {
 			return m, nil // drop startup terminal-query noise
 		}
+		if m.bodyEdit {
+			return m.updateBodyEdit(msg)
+		}
 		if m.ik != inNone {
 			return m.updateInput(msg)
 		}
@@ -428,7 +431,9 @@ func (m *Model) addNote(title string) {
 	m.cursor = 0
 	m.rebuild()
 	m.selectByID(n.ID)
-	m.setStatus("note added — press e to edit its body")
+	// Capture the body in-TUI right away (Ctrl+S to save, Esc for title-only)
+	// instead of bouncing through $EDITOR (U4).
+	m.openBodyCapture(n.ID, title)
 }
 
 func (m *Model) toggleDone() {
