@@ -10,6 +10,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -20,6 +21,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/fsnotify/fsnotify"
@@ -101,8 +103,15 @@ func randToken() string {
 	return hex.EncodeToString(b)
 }
 
-// Serve opens the store and serves the SPA on addr (e.g. "127.0.0.1:0").
-// allowEdit enables note editing in the browser (read-only when false).
+// DefaultPort is the stable port `nt web` binds by default, so the URL stays the
+// same across runs (bookmarkable). If it's already in use, Serve falls back to a
+// free port rather than failing — the address only changes on an actual conflict.
+const DefaultPort = 4321
+
+// Serve opens the store and serves the SPA on addr (e.g. "127.0.0.1:4321").
+// allowEdit enables note editing in the browser (read-only when false). If the
+// requested port is taken, it falls back to a free one (so the port is stable
+// run-to-run but a conflict doesn't crash the command).
 func Serve(version, addr string, allowEdit bool) error {
 	eng, err := mutate.Open()
 	if err != nil {
@@ -114,6 +123,12 @@ func Serve(version, addr string, allowEdit bool) error {
 	}
 	s.allowEdit = allowEdit
 	ln, err := net.Listen("tcp", addr)
+	if err != nil && errors.Is(err, syscall.EADDRINUSE) {
+		// Preferred port busy → pick a free one instead of failing.
+		host, _, _ := net.SplitHostPort(addr)
+		fmt.Printf("nt web — port in use, picking a free port instead\n")
+		ln, err = net.Listen("tcp", net.JoinHostPort(host, "0"))
+	}
 	if err != nil {
 		return err
 	}
