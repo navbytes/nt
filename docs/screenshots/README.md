@@ -22,3 +22,5 @@ Regenerate after a UI change:
 | **Logbook — standard** | ![logbook](09-logbook.png) |
 | **Locked (read-only)** | ![locked](10-locked.png) |
 | **Help overlay (scrollable)** | ![help](11-help.png) |
+| **Web — `/graph` view (light)** | ![graph light](web-graph-light.png) |
+| **Web — `/graph` view (dark)** | ![graph dark](web-graph-dark.png) |

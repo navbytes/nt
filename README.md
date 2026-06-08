@@ -14,7 +14,7 @@
 
 [Quickstart](#-quickstart) · [Why nt](#-why-youll-like-it) · [AI memory](#-durable-memory-for-your-ai-agents) · [The three faces](#-three-faces-one-store) · [vs. alternatives](#-how-it-compares) · [Docs](SPEC.md)
 
-![nt — terminal UI with a live detail pane](docs/screenshots/01-tasks-wide.png)
+<img src="docs/demo.gif" alt="nt in action — add a task, see what's ready, recall it back, and the TUI" width="900">
 
 </div>
 
@@ -96,6 +96,15 @@ It's built for moving fast: a **⌘K command palette** to jump anywhere, **ranke
   <source media="(prefers-color-scheme: light)" srcset="docs/screenshots/web-light.png">
   <img alt="nt web — note viewer with TOC, backlinks, and a Mermaid diagram" src="docs/screenshots/web-light.png" width="850">
 </picture>
+</div>
+
+<div align="center">
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/web-graph-dark.png">
+  <source media="(prefers-color-scheme: light)" srcset="docs/screenshots/web-graph-light.png">
+  <img alt="nt web — the /graph view: notes and wikilinks as an interactive constellation" src="docs/screenshots/web-graph-light.png" width="850">
+</picture>
+<br><em>The <code>/graph</code> view — your notes and links as a constellation.</em>
 </div>
 
 ### CLI — scriptable everything
