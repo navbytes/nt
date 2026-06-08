@@ -70,6 +70,11 @@ export const api = {
   taskReopen: (id: string) => postForm<TasksResponse>(`/api/tasks/${id}/reopen`),
   taskStatus: (id: string, status: string) =>
     postForm<TasksResponse>(`/api/tasks/${id}/status`, { status }),
+  taskDelete: async (id: string): Promise<TasksResponse> => {
+    const r = await fetch(`/api/tasks/${id}`, { method: "DELETE", headers: { "X-CSRF": csrf } });
+    if (!r.ok) throw new Error(`${(await r.text()) || r.status}`);
+    return (await r.json()) as TasksResponse;
+  },
 
   // ---- editor ----
   raw: (handle: string) => getJSON<RawNote>(`/api/notes/${encodeURIComponent(handle)}/raw`),
