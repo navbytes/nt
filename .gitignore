@@ -1,5 +1,6 @@
 # compiled binary
 /nt
+/nt-e2e
 
 # editor / OS cruft
 *.swp
