@@ -941,6 +941,36 @@ func TestEscCancelsInput(t *testing.T) {
 	}
 }
 
+// TestLiveFilterNarrowsAsYouType: the filter applies on every keystroke (not
+// only on Enter), and Esc cancels back to the pre-edit filter.
+func TestLiveFilterNarrowsAsYouType(t *testing.T) {
+	m := testModel(t) // seeds: "fix auth bug…", "write tests…", "deploy"
+	m.width, m.height = 100, 30
+	before := len(m.flat)
+	if before < 3 {
+		t.Fatalf("expected ≥3 seeded tasks, got %d", before)
+	}
+	var model tea.Model = m
+	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("/")}) // open filter
+	for _, r := range "auth" {
+		model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+	}
+	mm := model.(*Model)
+	// Live: list already narrowed before any Enter.
+	if len(mm.flat) != 1 || !strings.Contains(mm.flat[0].Text, "auth") {
+		t.Fatalf("live filter 'auth' should leave only the auth task, got %d", len(mm.flat))
+	}
+	// Esc cancels → full list + cleared filter.
+	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	mm = model.(*Model)
+	if len(mm.flat) != before {
+		t.Fatalf("Esc should restore the full list (%d), got %d", before, len(mm.flat))
+	}
+	if mm.filter != "" {
+		t.Fatalf("Esc should restore the empty pre-edit filter, got %q", mm.filter)
+	}
+}
+
 // TestRenderAfterEachAction makes sure View doesn't panic mid-flow.
 func TestRenderAfterEachAction(t *testing.T) {
 	m := testModel(t)
