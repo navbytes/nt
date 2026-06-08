@@ -14,8 +14,10 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/navbytes/nt/internal/config"
 	"github.com/navbytes/nt/internal/mutate"
 	"github.com/navbytes/nt/internal/note"
+	"github.com/navbytes/nt/internal/store"
 	"github.com/navbytes/nt/internal/task"
 )
 
@@ -143,9 +145,18 @@ type Model struct {
 
 // Run launches the TUI against the global store.
 func Run() error {
-	// NT_THEME forces the adaptive palette; unset = auto-detect from the terminal
-	// background. lipgloss reads this global when resolving AdaptiveColors.
-	switch os.Getenv("NT_THEME") {
+	// Theme precedence for the adaptive palette: NT_THEME → config [tui] theme →
+	// auto-detect from the terminal background. lipgloss reads this global when
+	// resolving AdaptiveColors.
+	theme := os.Getenv("NT_THEME")
+	if theme == "" {
+		if dir, derr := store.ResolveDir(); derr == nil {
+			if c, _ := config.Load(dir); c.TUITheme != "" {
+				theme = c.TUITheme
+			}
+		}
+	}
+	switch theme {
 	case "light":
 		lipgloss.SetHasDarkBackground(false)
 	case "dark":

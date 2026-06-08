@@ -20,23 +20,32 @@ type Store struct {
 //  2. $XDG_DATA_HOME/nt
 //  3. ~/.local/share/nt
 func Open() (*Store, error) {
-	dir := os.Getenv("NT_DIR")
-	if dir == "" {
-		if xdg := os.Getenv("XDG_DATA_HOME"); xdg != "" {
-			dir = filepath.Join(xdg, "nt")
-		} else {
-			home, err := os.UserHomeDir()
-			if err != nil {
-				return nil, err
-			}
-			dir = filepath.Join(home, ".local", "share", "nt")
-		}
+	dir, err := ResolveDir()
+	if err != nil {
+		return nil, err
 	}
 	s := &Store{Dir: dir}
 	if err := os.MkdirAll(s.NotesDir(), 0o755); err != nil {
 		return nil, err
 	}
 	return s, nil
+}
+
+// ResolveDir returns the store directory ($NT_DIR, else $XDG_DATA_HOME/nt, else
+// ~/.local/share/nt) WITHOUT creating it — for callers (config, web) that need
+// the path before, or without, opening the store.
+func ResolveDir() (string, error) {
+	if dir := os.Getenv("NT_DIR"); dir != "" {
+		return dir, nil
+	}
+	if xdg := os.Getenv("XDG_DATA_HOME"); xdg != "" {
+		return filepath.Join(xdg, "nt"), nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(home, ".local", "share", "nt"), nil
 }
 
 func (s *Store) TasksFile() string { return filepath.Join(s.Dir, "tasks.txt") }

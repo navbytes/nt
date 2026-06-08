@@ -8,9 +8,11 @@ import (
 	"os"
 	"strings"
 
+	"github.com/navbytes/nt/internal/config"
 	"github.com/navbytes/nt/internal/dateparse"
 	"github.com/navbytes/nt/internal/mcp"
 	"github.com/navbytes/nt/internal/mutate"
+	"github.com/navbytes/nt/internal/store"
 	"github.com/navbytes/nt/internal/task"
 )
 
@@ -199,6 +201,17 @@ func shortID(id string) string {
 func parseDate(s string) (string, bool)   { return dateparse.Date(s) }
 func parsePriority(s string) (byte, bool) { return dateparse.Priority(s) }
 
+// loadConfig reads $NT_DIR/config.toml (resolving the dir without opening the
+// store). A missing/broken config yields an empty Config, never an error.
+func loadConfig() *config.Config {
+	dir, err := store.ResolveDir()
+	if err != nil {
+		return &config.Config{}
+	}
+	c, _ := config.Load(dir)
+	return c
+}
+
 func printHelp() {
 	fmt.Print(helpText)
 }
@@ -259,4 +272,6 @@ Dependencies: add --blocks <id> ; blocked tasks hide unless --show-blocked.
 
 The store lives at $NT_DIR (default ~/.local/share/nt): tasks.txt + notes/*.md.
 The TUI follows your terminal's light/dark background; force it with NT_THEME=light|dark.
+Optional config: $NT_DIR/config.toml — [defaults] priority/source/agenda_days/editor,
+[web] port/host, [tui] theme. Flags and env vars override it.
 `
