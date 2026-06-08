@@ -20,6 +20,11 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: internal/web/frontend/package-lock.json
       - uses: goreleaser/goreleaser-action@v7
         with:
           version: "~> v2"

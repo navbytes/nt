@@ -50,10 +50,30 @@ type Server struct {
 	allowEdit bool   // writes enabled (nt web --edit); read-only by default
 	csrf      string // per-process token required on save (blocks cross-site POSTs)
 
+	spa bool // serve the embedded Svelte SPA instead of the server-rendered UI
+
 	mu       sync.RWMutex  // guards snap + watching
 	snap     *snapshot     // in-memory read-model (see readmodel.go)
 	watching bool          // true once the fsnotify watcher maintains snap
 	writes   *writeTracker // self-write suppression for the watcher
+
+	etags map[string]string // static asset name → content-hash ETag (for 304s)
+}
+
+// staticAsset describes one /static/ file.
+type staticAsset struct {
+	contentType string
+	path        string // path in assetsFS; "" for the generated highlight.css
+	gzip        bool
+}
+
+var staticAssets = map[string]staticAsset{
+	"style.css":      {"text/css; charset=utf-8", "assets/style.css", false},
+	"highlight.css":  {"text/css; charset=utf-8", "", false}, // generated (s.hlCSS)
+	"app.js":         {"text/javascript; charset=utf-8", "assets/app.js", false},
+	"htmx.min.js":    {"text/javascript; charset=utf-8", "assets/htmx.min.js", false},
+	"graph.js":       {"text/javascript; charset=utf-8", "assets/graph.js", false},
+	"mermaid.min.js": {"text/javascript; charset=utf-8", "assets/mermaid.min.js.gz", true},
 }
 
 // NewServer parses the embedded template and prepares the viewer.
@@ -83,6 +103,19 @@ func NewServer(eng *mutate.Engine, version string) (*Server, error) {
 	}
 	s := &Server{eng: eng, version: version, tmpl: tmpl, hub: newHub(), hlCSS: highlightCSS(), csrf: randToken(), writes: newWriteTracker()}
 	s.snap = buildSnapshot(eng) // warm the read-model so the first request is fast
+	// Precompute content-hash ETags for static assets so the browser revalidates
+	// with a cheap 304 instead of re-downloading them (incl. ~900 KB of mermaid)
+	// on every navigation.
+	s.etags = make(map[string]string, len(staticAssets))
+	for name, a := range staticAssets {
+		if a.path == "" {
+			s.etags[name] = etag([]byte(s.hlCSS))
+			continue
+		}
+		if b, err := assetsFS.ReadFile(a.path); err == nil {
+			s.etags[name] = etag(b)
+		}
+	}
 	return s, nil
 }
 
@@ -129,8 +162,9 @@ func randToken() string {
 }
 
 // Serve opens the store and serves the viewer on addr (e.g. "127.0.0.1:0").
-// allowEdit enables note editing in the browser (read-only when false).
-func Serve(version, addr string, allowEdit bool) error {
+// allowEdit enables note editing in the browser (read-only when false). spa
+// serves the embedded Svelte SPA instead of the server-rendered UI (preview).
+func Serve(version, addr string, allowEdit, spa bool) error {
 	eng, err := mutate.Open()
 	if err != nil {
 		return err
@@ -140,17 +174,22 @@ func Serve(version, addr string, allowEdit bool) error {
 		return err
 	}
 	s.allowEdit = allowEdit
+	s.spa = spa
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
 		return err
 	}
 	s.watch()
+	ui := "server-rendered"
+	if spa {
+		ui = "Svelte SPA (--spa)"
+	}
 	fmt.Printf("nt web — serving notes at http://%s\n", ln.Addr().String())
 	mode := "read-only"
 	if allowEdit {
 		mode = "editing enabled (--edit)"
 	}
-	fmt.Printf("(localhost only · %s · live-reloads on change · Ctrl+C to stop)\n", mode)
+	fmt.Printf("(localhost only · %s · %s · live-reloads on change · Ctrl+C to stop)\n", ui, mode)
 	return http.Serve(ln, s.routes()) //nolint:gosec // localhost dev server, no timeouts needed
 }
 
@@ -164,12 +203,27 @@ func (s *Server) Handler() http.Handler { return s.routes() }
 // SetEdit toggles in-app editing (CSRF-guarded). Read-only by default.
 func (s *Server) SetEdit(v bool) { s.allowEdit = v }
 
+// SetSPA serves the embedded Svelte SPA instead of the server-rendered UI.
+func (s *Server) SetSPA(v bool) { s.spa = v }
+
 // StartWatch begins watching the store and pushing SSE live-reload events.
 // Serve calls this itself; embedders call it when they want live-reload.
 func (s *Server) StartWatch() { s.watch() }
 
 func (s *Server) routes() http.Handler {
 	mux := http.NewServeMux()
+	s.apiRoutes(mux) // JSON API — available in both UIs
+	mux.HandleFunc("/events", s.handleSSE)
+	if s.spa {
+		// New Svelte SPA: API + SSE + embedded bundle. None of the v1
+		// server-rendered page handlers are registered.
+		if err := s.spaRoutes(mux); err != nil {
+			// dist not built — fall back to v1 so the server still works.
+			s.spa = false
+		} else {
+			return mux
+		}
+	}
 	mux.HandleFunc("/", s.handleIndex)
 	mux.HandleFunc("/n/", s.handleNote)
 	mux.HandleFunc("/search", s.handleSearch)
@@ -187,7 +241,6 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("POST /tasks/{id}/delete", s.handleTaskDelete)
 	mux.HandleFunc("/graph", s.handleGraph)
 	mux.HandleFunc("POST /preview", s.handlePreview)
-	mux.HandleFunc("/events", s.handleSSE)
 	mux.HandleFunc("/static/", s.handleStatic)
 	return mux
 }
@@ -261,25 +314,33 @@ type dashboard struct {
 
 // activityDay groups timeline events under one calendar date.
 type activityDay struct {
-	Date   string
-	Events []activityEvent
+	Date   string          `json:"date"`
+	Events []activityEvent `json:"events"`
 }
 
-type linkRow struct{ URL, Title, Path string }
+type linkRow struct {
+	URL   string `json:"url"`
+	Title string `json:"title"`
+	Path  string `json:"path"`
+}
 type tagRow struct {
 	Name  string
 	Count int
 	URL   string
 }
 type taskGroup struct {
-	Status string
-	Tasks  []taskRow
+	Status string    `json:"status"`
+	Tasks  []taskRow `json:"tasks"`
 }
 type taskRow struct {
-	ID                                 string
-	Text, Status, Due, Source, Project string
-	Tags                               []string
-	Blocker                            string // on the dashboard: why this task is blocked
+	ID      string   `json:"id"`
+	Text    string   `json:"text"`
+	Status  string   `json:"status"`
+	Due     string   `json:"due,omitempty"`
+	Source  string   `json:"source,omitempty"`
+	Project string   `json:"project,omitempty"`
+	Tags    []string `json:"tags,omitempty"`
+	Blocker string   `json:"blocker,omitempty"` // on the dashboard: why this task is blocked
 }
 
 // flatNotes is the note index the ⌘K palette filters over.
@@ -800,22 +861,33 @@ func (s *Server) renderTaskList(w http.ResponseWriter, snap *snapshot) {
 // (lock + re-read + undo journal), then refreshes the read-model, nudges other
 // clients ("tasks"), and returns the updated fragment.
 func (s *Server) taskWrite(w http.ResponseWriter, r *http.Request, op string, fn func(d *task.Doc, rec *mutate.Recorder) error) {
+	if s.doTaskWrite(w, r, op, fn) {
+		s.renderTaskList(w, s.current())
+	}
+}
+
+// doTaskWrite enforces the --edit + CSRF gate, marks tasks.txt as a self-write
+// (so the watcher doesn't also broadcast a full reload), runs fn through
+// mutate.Engine.Apply (lock + re-read + undo journal), refreshes the read-model,
+// and nudges other clients ("tasks"). Returns true on success; on failure it has
+// already written the error response. Shared by the htmx and JSON task handlers.
+func (s *Server) doTaskWrite(w http.ResponseWriter, r *http.Request, op string, fn func(d *task.Doc, rec *mutate.Recorder) error) bool {
 	if !s.allowEdit {
 		http.Error(w, "editing is disabled — start with `nt web --edit`", http.StatusForbidden)
-		return
+		return false
 	}
 	if r.Header.Get("X-CSRF") != s.csrf {
 		http.Error(w, "bad or missing CSRF token", http.StatusForbidden)
-		return
+		return false
 	}
 	s.writes.mark(s.eng.S.TasksFile())
 	if err := s.eng.Apply(op, fn); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
+		return false
 	}
 	s.rebuild()
 	s.hub.broadcast("tasks")
-	s.renderTaskList(w, s.current())
+	return true
 }
 
 // resolveTask looks up the task addressed by the {id} path segment.
@@ -1012,38 +1084,36 @@ func contains(ss []string, want string) bool {
 }
 
 func (s *Server) handleStatic(w http.ResponseWriter, r *http.Request) {
-	switch strings.TrimPrefix(r.URL.Path, "/static/") {
-	case "style.css":
-		w.Header().Set("Content-Type", "text/css; charset=utf-8")
-		s.writeAsset(w, "assets/style.css")
-	case "highlight.css":
-		w.Header().Set("Content-Type", "text/css; charset=utf-8")
-		_, _ = io.WriteString(w, s.hlCSS)
-	case "app.js":
-		w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
-		s.writeAsset(w, "assets/app.js")
-	case "htmx.min.js":
-		w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
-		s.writeAsset(w, "assets/htmx.min.js")
-	case "graph.js":
-		w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
-		s.writeAsset(w, "assets/graph.js")
-	case "mermaid.min.js":
-		w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
-		w.Header().Set("Content-Encoding", "gzip") // embedded pre-gzipped (~900 KB vs 3.3 MB)
-		s.writeAsset(w, "assets/mermaid.min.js.gz")
-	default:
+	name := strings.TrimPrefix(r.URL.Path, "/static/")
+	a, ok := staticAssets[name]
+	if !ok {
 		http.NotFound(w, r)
+		return
 	}
-}
-
-func (s *Server) writeAsset(w http.ResponseWriter, path string) {
-	b, err := assetsFS.ReadFile(path)
+	// Revalidate cheaply: assets are fixed for the life of the binary, so a
+	// content-hash ETag lets the browser 304 instead of re-downloading them every
+	// navigation. no-cache keeps it correct across an upgrade (new bytes → new ETag).
+	w.Header().Set("Cache-Control", "no-cache")
+	if et := s.etags[name]; et != "" {
+		w.Header().Set("ETag", et)
+		if r.Header.Get("If-None-Match") == et {
+			w.WriteHeader(http.StatusNotModified)
+			return
+		}
+	}
+	w.Header().Set("Content-Type", a.contentType)
+	if a.path == "" { // generated highlight.css
+		_, _ = io.WriteString(w, s.hlCSS)
+		return
+	}
+	if a.gzip {
+		w.Header().Set("Content-Encoding", "gzip") // embedded pre-gzipped (~900 KB vs 3.3 MB)
+	}
+	b, err := assetsFS.ReadFile(a.path)
 	if err != nil {
 		http.Error(w, "asset missing", http.StatusInternalServerError)
 		return
 	}
-	w.Header().Set("Cache-Control", "no-cache")
 	_, _ = w.Write(b)
 }
 
@@ -1100,10 +1170,18 @@ func (s *Server) handleSSE(w http.ResponseWriter, r *http.Request) {
 	defer s.hub.remove(ch)
 	_, _ = fmt.Fprint(w, ": connected\n\n")
 	fl.Flush()
+	// Heartbeat: a periodic comment keeps the connection healthy and lets the
+	// server notice (and reap) a client that vanished without a clean close, so
+	// goroutines/sockets don't linger.
+	ping := time.NewTicker(25 * time.Second)
+	defer ping.Stop()
 	for {
 		select {
 		case <-r.Context().Done():
 			return
+		case <-ping.C:
+			_, _ = fmt.Fprint(w, ": ping\n\n")
+			fl.Flush()
 		case kind, ok := <-ch:
 			if !ok {
 				return
@@ -1221,12 +1299,12 @@ func addDirs(wt *fsnotify.Watcher, root string) {
 // ---- tree + helpers -------------------------------------------------------
 
 type treeNode struct {
-	Name     string
-	Path     string // folder path (persistence key for collapse state); "" for notes
-	URL      string
-	IsNote   bool
-	Current  bool
-	Children []*treeNode
+	Name     string      `json:"name"`
+	Path     string      `json:"path"` // folder path (persistence key for collapse state); "" for notes
+	URL      string      `json:"url"`
+	IsNote   bool        `json:"isNote"`
+	Current  bool        `json:"-"`
+	Children []*treeNode `json:"children,omitempty"`
 }
 
 // buildTree groups notes into a nested folder tree from their Rel paths.

@@ -491,6 +491,31 @@ func TestStaticAssets(t *testing.T) {
 	}
 }
 
+// TestStaticAssetCaching: assets carry an ETag and revalidate to 304 — so a
+// browser doesn't re-download ~900 KB of JS on every navigation (the per-page
+// weight behind slow page loads).
+func TestStaticAssetCaching(t *testing.T) {
+	s := newTestServer(t)
+	for _, name := range []string{"app.js", "mermaid.min.js", "highlight.css"} {
+		resp, _ := get(t, s, "/static/"+name)
+		et := resp.Header.Get("ETag")
+		if et == "" {
+			t.Fatalf("%s missing ETag", name)
+		}
+		// A conditional request with the matching ETag must 304 (no body).
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest("GET", "/static/"+name, nil)
+		req.Header.Set("If-None-Match", et)
+		s.routes().ServeHTTP(rec, req)
+		if rec.Code != http.StatusNotModified {
+			t.Errorf("%s: want 304 on matching If-None-Match, got %d", name, rec.Code)
+		}
+		if rec.Body.Len() != 0 {
+			t.Errorf("%s: 304 should have empty body, got %d bytes", name, rec.Body.Len())
+		}
+	}
+}
+
 func TestTagsPage(t *testing.T) {
 	s := newTestServer(t)
 	_, _ = note.Create(s.eng.S, "A", "", []string{"auth", "ref"}, "cli", "")

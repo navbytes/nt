@@ -4,10 +4,35 @@ NT_INSTALL_DIR ?= $(HOME)/.local/bin
 INSTALL_DIR    := $(NT_INSTALL_DIR)
 LDFLAGS        := -s -w -X main.version=$(VERSION)
 
-.PHONY: build install uninstall test vet fmt render clean release snapshot desktop desktop-build
+.PHONY: build install uninstall test vet fmt render clean release snapshot desktop desktop-build web-build web-dev web-check web-types
+
+TYGO := github.com/gzuidhof/tygo@v0.2.21
 
 build:
 	go build -ldflags "$(LDFLAGS)" -o $(BINARY) .
+
+# --- Svelte SPA (internal/web/frontend) --------------------------------------
+# The built bundle is committed (internal/web/frontend/dist) so `go build` /
+# `go install` — which never run npm — still embed a current UI. Run web-build
+# after changing the frontend, then commit the regenerated dist/. CI verifies
+# the committed dist matches a fresh build.
+WEB_DIR := internal/web/frontend
+
+web-build:
+	cd $(WEB_DIR) && npm ci && npm run build
+
+# Dev: vite (HMR) on :5173 proxying the API to a running `nt web`. In another
+# terminal: `nt web --edit --port 8765` (or set NT_API).
+web-dev:
+	cd $(WEB_DIR) && npm install && npm run dev
+
+web-check:
+	cd $(WEB_DIR) && npm run check
+
+# Regenerate the SPA's TypeScript types from the Go wire contract (apitypes),
+# then commit the result. CI fails if this output is stale.
+web-types:
+	go run $(TYGO) generate
 
 install: build
 	@mkdir -p $(INSTALL_DIR)

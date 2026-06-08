@@ -172,10 +172,10 @@ func mdEscapeLabel(s string) string { return mdLabelEscaper.Replace(s) }
 
 // Backlink is one "Linked from" entry for the note page.
 type Backlink struct {
-	Title  string // note title, or "" for a task source
-	URL    string // /n/<id> for a note source; "" for a task
-	Text   string // the matching line (shown for task sources)
-	IsNote bool
+	Title  string `json:"title"` // note title, or "" for a task source
+	URL    string `json:"url"`   // /n/<id> for a note source; "" for a task
+	Text   string `json:"text"`  // the matching line (shown for task sources)
+	IsNote bool   `json:"isNote"`
 }
 
 // Note → note backlinks (the "Linked from" panel) and task → note references
@@ -195,9 +195,9 @@ func snippet(s string) string {
 
 // TaskRef is one task that links to the note (the task↔note moat).
 type TaskRef struct {
-	Text   string
-	Status string
-	Source string
+	Text   string `json:"text"`
+	Status string `json:"status"`
+	Source string `json:"source"`
 }
 
 var taskTokenRe = regexp.MustCompile(`\s+(id|src|due|s|pri|parent|blocks|rec|discovered|completed):[^\s]+`)

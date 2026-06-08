@@ -69,15 +69,27 @@
   // Typed payloads: "reload" = page is stale (external change), reload it; a
   // finer kind (e.g. "tasks") is dispatched as a "nt:<kind>" DOM event so a
   // listener can refresh just one fragment instead of the whole page.
+  //
+  // The connection MUST be closed on navigate-away: SSE holds an HTTP/1.1
+  // socket, the browser allows only ~6 per origin, and a page frozen into the
+  // back/forward cache keeps its EventSource open — so without this, a few
+  // navigations exhaust the pool and every later page load stalls waiting for a
+  // free socket. We close on pagehide and reopen on bfcache restore.
   window.onReload = function () { location.reload(); };
-  try {
-    var es = new EventSource("/events");
-    es.onmessage = function (e) {
-      var kind = (e.data || "reload").trim();
-      if (kind === "reload") { window.onReload(); return; }
-      (document.body || document).dispatchEvent(new CustomEvent("nt:" + kind, { bubbles: true }));
-    };
-  } catch (e) { /* SSE unavailable — static view still works */ }
+  var es = null;
+  function connectSSE() {
+    try {
+      es = new EventSource("/events");
+      es.onmessage = function (e) {
+        var kind = (e.data || "reload").trim();
+        if (kind === "reload") { window.onReload(); return; }
+        (document.body || document).dispatchEvent(new CustomEvent("nt:" + kind, { bubbles: true }));
+      };
+    } catch (e) { es = null; /* SSE unavailable — static view still works */ }
+  }
+  connectSSE();
+  window.addEventListener("pagehide", function () { if (es) { es.close(); es = null; } });
+  window.addEventListener("pageshow", function (e) { if (e.persisted && !es) connectSSE(); });
 
   // ---- Reading enhancements: heading anchors, TOC, copy buttons ----
   function enhanceReading() {

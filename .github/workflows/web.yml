@@ -1,0 +1,67 @@
+name: Web
+
+# Builds and tests the Svelte SPA (internal/web/frontend) and verifies the
+# committed dist/ — which is embedded into the Go binary so `go build`/`go install`
+# work without Node — is up to date with the source.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  web:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: internal/web/frontend
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: internal/web/frontend/package-lock.json
+      - run: npm ci
+      - name: Type-check (svelte-check)
+        run: npm run check
+      - name: Component tests (vitest)
+        run: npm test
+      - name: Build
+        run: npm run build
+      - name: Verify committed dist/ is up to date
+        run: |
+          if ! git diff --quiet -- dist; then
+            echo "::error::internal/web/frontend/dist is stale — run 'make web-build' and commit the result."
+            git diff --stat -- dist
+            exit 1
+          fi
+
+  e2e:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: internal/web/frontend
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: internal/web/frontend/package-lock.json
+      - run: npm ci
+      - name: Build SPA (embedded by the e2e server)
+        run: npm run build
+      - name: Install Playwright browser
+        run: npx playwright install --with-deps chromium
+      - name: Run e2e (real nt web --spa, seeded store)
+        run: npm run e2e
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() }}
+        with:
+          name: playwright-report
+          path: internal/web/frontend/playwright-report/
+          retention-days: 7
