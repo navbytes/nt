@@ -23,6 +23,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/fsnotify/fsnotify"
 
@@ -47,6 +48,11 @@ type Server struct {
 	hlCSS     string // generated Chroma syntax-highlight stylesheet (theme-scoped)
 	allowEdit bool   // writes enabled (nt web --edit); read-only by default
 	csrf      string // per-process token required on save (blocks cross-site POSTs)
+
+	mu       sync.RWMutex  // guards snap + watching
+	snap     *snapshot     // in-memory read-model (see readmodel.go)
+	watching bool          // true once the fsnotify watcher maintains snap
+	writes   *writeTracker // self-write suppression for the watcher
 }
 
 // NewServer parses the embedded template and prepares the viewer.
@@ -63,7 +69,34 @@ func NewServer(eng *mutate.Engine, version string) (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Server{eng: eng, version: version, tmpl: tmpl, hub: newHub(), hlCSS: highlightCSS(), csrf: randToken()}, nil
+	s := &Server{eng: eng, version: version, tmpl: tmpl, hub: newHub(), hlCSS: highlightCSS(), csrf: randToken(), writes: newWriteTracker()}
+	s.snap = buildSnapshot(eng) // warm the read-model so the first request is fast
+	return s, nil
+}
+
+// current returns the read-model. While the fsnotify watcher is running it
+// serves the maintained snapshot (the fast path). When it is NOT — tests and
+// embedders that never call StartWatch — it builds fresh per call, preserving
+// the old read-through semantics so a write made directly to the store is seen
+// immediately without a watcher.
+func (s *Server) current() *snapshot {
+	s.mu.RLock()
+	if s.watching {
+		snap := s.snap
+		s.mu.RUnlock()
+		return snap
+	}
+	s.mu.RUnlock()
+	return buildSnapshot(s.eng)
+}
+
+// rebuild recomputes the read-model and swaps it in. Called by the watcher and
+// synchronously by write handlers so the writer's next read is fresh.
+func (s *Server) rebuild() {
+	snap := buildSnapshot(s.eng)
+	s.mu.Lock()
+	s.snap = snap
+	s.mu.Unlock()
 }
 
 // etag is a content validator for a note file's current bytes. The editor
@@ -137,10 +170,10 @@ func (s *Server) routes() http.Handler {
 	return mux
 }
 
+// load returns the current document and notes from the read-model.
 func (s *Server) load() (*task.Doc, []*note.Note) {
-	doc, _ := s.eng.Read()
-	notes, _ := note.List(s.eng.S)
-	return doc, notes
+	snap := s.current()
+	return snap.doc, snap.notes
 }
 
 // ---- page model -----------------------------------------------------------
@@ -238,9 +271,10 @@ func (s *Server) handleNote(w http.ResponseWriter, r *http.Request) {
 		s.handleSave(w, r, handle)
 		return
 	}
-	doc, notes := s.load()
+	snap := s.current()
+	notes := snap.notes
 	if r.URL.Query().Get("missing") != "1" {
-		if n := findByHandle(notes, handle); n != nil {
+		if n := snap.findHandle(handle); n != nil {
 			if r.URL.Query().Get("preview") == "1" { // hover preview
 				w.Header().Set("Content-Type", "application/json")
 				_ = json.NewEncoder(w).Encode(map[string]string{"title": n.Title, "snippet": previewSnippet(n.Body)})
@@ -258,11 +292,11 @@ func (s *Server) handleNote(w http.ResponseWriter, r *http.Request) {
 				}
 				return
 			}
-			s.renderNote(w, n, doc, notes)
+			s.renderNote(w, n, snap)
 			return
 		}
-		if it, ok := links.Resolve(handle, doc, notes); ok && it.Kind == "note" {
-			if n := findByPath(notes, it.Path); n != nil {
+		if it, ok := links.Resolve(handle, snap.doc, notes); ok && it.Kind == "note" {
+			if n := snap.byPath[it.Path]; n != nil {
 				http.Redirect(w, r, "/n/"+url.PathEscape(noteHandle(n)), http.StatusFound)
 				return
 			}
@@ -271,8 +305,9 @@ func (s *Server) handleNote(w http.ResponseWriter, r *http.Request) {
 	s.renderMissing(w, handle, notes)
 }
 
-func (s *Server) renderNote(w http.ResponseWriter, n *note.Note, doc *task.Doc, notes []*note.Note) {
-	body, err := renderBody(n.Body, doc, notes)
+func (s *Server) renderNote(w http.ResponseWriter, n *note.Note, snap *snapshot) {
+	notes := snap.notes
+	body, err := renderBody(n.Body, snap.doc, notes)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -295,8 +330,8 @@ func (s *Server) renderNote(w http.ResponseWriter, n *note.Note, doc *task.Doc, 
 		NoteCreated: dateOnly(n.Created),
 		Tags:        n.Tags,
 		BodyHTML:    body,
-		Backlinks:   backlinksFor(s.eng.S, n, notes),
-		TaskRefs:    tasksReferencing(doc, n, notes),
+		Backlinks:   snap.backlinks[n.Path],
+		TaskRefs:    snap.taskRefs[n.Path],
 		Prev:        prev,
 		Next:        next,
 		CanEdit:     s.allowEdit,
@@ -316,8 +351,7 @@ func (s *Server) handleSave(w http.ResponseWriter, r *http.Request, handle strin
 		http.Error(w, "bad or missing CSRF token", http.StatusForbidden)
 		return
 	}
-	_, notes := s.load()
-	n := findByHandle(notes, handle)
+	n := s.current().findHandle(handle)
 	if n == nil {
 		http.NotFound(w, r)
 		return
@@ -342,10 +376,12 @@ func (s *Server) handleSave(w http.ResponseWriter, r *http.Request, handle strin
 	if len(body) > 0 && body[len(body)-1] != '\n' {
 		body = append(body, '\n')
 	}
+	s.writes.mark(n.Path) // suppress our own fsnotify event (no self-reload)
 	if err := store.WriteAtomic(n.Path, body, 0o644); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	s.rebuild() // refresh the read-model so the editor's reload sees the save
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -456,10 +492,11 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 
 // handleOrphans lists notes with no inbound links — navigation gaps to curate.
 func (s *Server) handleOrphans(w http.ResponseWriter, r *http.Request) {
-	_, notes := s.load()
+	snap := s.current()
+	notes := snap.notes
 	var results []linkRow
 	for _, n := range notes {
-		if len(links.Backlinks(s.eng.S, n.ID, n.Rel)) == 0 {
+		if !snap.linked[n.Path] {
 			results = append(results, linkRow{URL: "/n/" + url.PathEscape(noteHandle(n)), Title: n.Title, Path: n.Rel})
 		}
 	}
@@ -665,28 +702,76 @@ func (s *Server) handleSSE(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// watch broadcasts a reload on any change under notes/ or the store dir.
+// watchDebounce coalesces a burst of fsnotify events (an atomic rename fires
+// several) into one rebuild (SPEC §6.5).
+const watchDebounce = 80 * time.Millisecond
+
+// watch maintains the read-model from disk and broadcasts live-reload. It is
+// debounced and self-write-aware: events for files the adapter just wrote (and
+// for hidden/temp files like the .nt-*.tmp atomic-write staging file) don't
+// bounce clients, and a burst collapses into a single rebuild. Idempotent —
+// safe to call more than once (Serve and embedders both may).
 func (s *Server) watch() {
+	s.mu.Lock()
+	if s.watching {
+		s.mu.Unlock()
+		return
+	}
+	s.watching = true
+	s.mu.Unlock()
+
 	wt, err := fsnotify.NewWatcher()
 	if err != nil {
+		s.mu.Lock()
+		s.watching = false
+		s.mu.Unlock()
 		return
 	}
 	addDirs(wt, s.eng.S.NotesDir())
 	_ = wt.Add(s.eng.S.Dir)
+	s.rebuild() // ensure the maintained snapshot is current before serving from it
+
 	go func() {
 		defer func() { _ = wt.Close() }()
+		var (
+			bmu      sync.Mutex
+			timer    *time.Timer
+			external bool // batch contains a change we didn't make ourselves
+		)
+		flush := func() {
+			bmu.Lock()
+			ext := external
+			external = false
+			bmu.Unlock()
+			s.rebuild()
+			if ext {
+				s.hub.broadcast() // only nudge clients for changes they didn't trigger
+			}
+		}
 		for {
 			select {
 			case ev, ok := <-wt.Events:
 				if !ok {
 					return
 				}
+				if strings.HasPrefix(filepath.Base(ev.Name), ".") {
+					continue // .nt-*.tmp staging files, .git, .obsidian, …
+				}
 				if ev.Op&fsnotify.Create != 0 {
 					if fi, err := os.Stat(ev.Name); err == nil && fi.IsDir() {
 						_ = wt.Add(ev.Name) // watch newly-created subfolders
 					}
 				}
-				s.hub.broadcast()
+				bmu.Lock()
+				if !s.writes.isSelf(ev.Name) {
+					external = true
+				}
+				if timer == nil {
+					timer = time.AfterFunc(watchDebounce, flush)
+				} else {
+					timer.Reset(watchDebounce)
+				}
+				bmu.Unlock()
 			case _, ok := <-wt.Errors:
 				if !ok {
 					return
@@ -809,23 +894,4 @@ func noteHandle(n *note.Note) string {
 		return n.ID
 	}
 	return n.Rel
-}
-
-// findByHandle matches a note by its id or its relative path.
-func findByHandle(notes []*note.Note, h string) *note.Note {
-	for _, n := range notes {
-		if (n.ID != "" && n.ID == h) || n.Rel == h {
-			return n
-		}
-	}
-	return nil
-}
-
-func findByPath(notes []*note.Note, path string) *note.Note {
-	for _, n := range notes {
-		if n.Path == path {
-			return n
-		}
-	}
-	return nil
 }

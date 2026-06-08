@@ -35,6 +35,54 @@ func TestIdlessNoteRoutesByPath(t *testing.T) {
 	}
 }
 
+// TestSnapshotLinkGraph: the read-model precomputes note→note backlinks, the
+// task→note reference panel, forward adjacency, and the orphan ("linked") set —
+// the maps the per-request ripgrep used to recompute.
+func TestSnapshotLinkGraph(t *testing.T) {
+	s := newTestServer(t)
+	b, _ := note.Create(s.eng.S, "Target", "the target note", nil, "cli", "")
+	a, _ := note.Create(s.eng.S, "Source", "see [[Target]] for context", nil, "cli", "")
+	if err := s.eng.Apply("add", func(d *task.Doc, rec *mutate.Recorder) error {
+		tk := task.New("wire up [[Target]]")
+		d.Append(tk)
+		rec.Added(tk)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	snap := buildSnapshot(s.eng)
+	if got := snap.backlinks[b.Path]; len(got) != 1 || got[0].Title != "Source" {
+		t.Fatalf("backlinks[Target] = %+v, want one from Source", got)
+	}
+	if got := snap.taskRefs[b.Path]; len(got) != 1 || !strings.Contains(got[0].Text, "wire up") {
+		t.Fatalf("taskRefs[Target] = %+v, want the linking task", got)
+	}
+	if !contains(snap.fwd[a.Path], b.Path) {
+		t.Fatalf("fwd[Source] = %v, want it to include Target", snap.fwd[a.Path])
+	}
+	if !snap.linked[b.Path] {
+		t.Error("Target should be linked (not an orphan)")
+	}
+	if snap.linked[a.Path] {
+		t.Error("Source has no inbound links — should be an orphan")
+	}
+}
+
+func TestWriteTrackerSelfWrite(t *testing.T) {
+	wt := newWriteTracker()
+	if wt.isSelf("/x") {
+		t.Error("unmarked path should not be a self-write")
+	}
+	wt.mark("/x")
+	if !wt.isSelf("/x") {
+		t.Error("freshly-marked path should be a self-write")
+	}
+	if wt.isSelf("/y") {
+		t.Error("a different path should not be a self-write")
+	}
+}
+
 func newTestServer(t *testing.T) *Server {
 	t.Helper()
 	t.Setenv("NT_DIR", t.TempDir())
