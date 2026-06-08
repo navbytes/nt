@@ -209,14 +209,27 @@ and glossed over the note lost-update gap and the debounce requirement.
 
 ---
 
-## Addendum — fixes already landed from this review
+## Addendum — work landed from this review
 
-- **Note-save lost-update guard (decision B.1, sequencing step 1) — DONE.**
-  `?raw=1` now returns a content-hash `ETag` (`server.go` `etag`); `handleSave`
-  refuses a stale write with **409** when the client's `If-Match` no longer
-  matches the bytes on disk; `app.js` captures the ETag and sends it back, with a
-  "Changed on disk — reload to merge" message on 409. Covered by
-  `TestEditingLostUpdateGuard`.
-- **Read-model + debounced watcher (decision A/E, step 2)** — designed in
-  [web-read-model-plan.md](web-read-model-plan.md); not yet implemented.
+The full recommended sequence (§5) has been implemented, all additive at the
+`internal/web` seam — no domain changes, no re-architecture:
+
+1. **Note-save lost-update guard (B.1) — DONE.** `?raw=1` returns a content-hash
+   `ETag`; `handleSave` 409s a stale `If-Match` instead of clobbering; the editor
+   surfaces "Changed on disk — reload to merge". (`TestEditingLostUpdateGuard`)
+2. **In-memory read-model + debounced, self-write-aware watcher (A/E) — DONE.**
+   `readmodel.go` parses the store once and precomputes backlinks / task-refs /
+   adjacency / orphan set; the watcher debounces (80 ms), ignores transient files,
+   and suppresses self-writes. (`web-read-model-plan.md`, `TestSnapshotLinkGraph`)
+3. **htmx + typed SSE (C) — DONE.** htmx 2.0.4 vendored; SSE carries typed kinds.
+4. **Interactive tasks via `mutate.Apply` (F / sequencing 4) — DONE.** complete /
+   reopen / status / delete / add, CSRF-gated, `src:web`. (`TestTask*`)
+5. **Split live-preview editor (B.2) — DONE.** `POST /preview` reuses `renderBody`.
+   (`TestPreviewEndpoint`)
+6. **Force-directed graph (C-rendering) — DONE.** `graph.js` canvas, JSON from the
+   snapshot; replaces Mermaid `graph LR`. (`TestGraphView`)
+
+Still open (lower-tier, see the roadmap): note saves are not yet journaled/
+undoable (decision B.3), note/folder creation from the web, ranked search +
+snippets + task search, and the activity-timeline / agent-memory home-page wedge.
 </content>

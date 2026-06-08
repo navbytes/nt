@@ -26,6 +26,15 @@ also a perfectly good notes app on its own.
 This document inventories what's there today, benchmarks it against the field,
 and proposes a tiered roadmap that stays inside nt's product values.
 
+> **Implementation status (2026-06-08).** Tier 0 (htmx, typed SSE, in-memory
+> read-model + debounced watcher) and the headline Tier 1–2 items are **shipped**:
+> interactive tasks routed through `mutate.Apply`, the note lost-update guard, a
+> split live-preview editor, and an interactive force-directed graph. Remaining:
+> note/folder creation from the web, ranked search with highlighted snippets +
+> task search, the activity/provenance timeline, the agent-memory home page, the
+> web Logbook, properties editing, split panes, and all of Tier 3. See the
+> per-item ✅ markers below and [web-architecture-review.md](web-architecture-review.md).
+
 ---
 
 ## 1. What `nt web` is today (honest inventory)
