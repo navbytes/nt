@@ -115,9 +115,9 @@
           <li class="row" class:row--doing={t.status === "doing"}>
             {#if canEdit}
               {#if t.status === "done"}
-                <button class="check check--done" title="Reopen" onclick={() => $reopenMut.mutate(t.id)}>●</button>
+                <button class="check check--done" title="Reopen" aria-label="Reopen task" onclick={() => $reopenMut.mutate(t.id)}>●</button>
               {:else}
-                <button class="check" title="Mark done" onclick={() => $doneMut.mutate(t.id)}>○</button>
+                <button class="check" title="Mark done" aria-label="Mark task done" onclick={() => $doneMut.mutate(t.id)}>○</button>
               {/if}
             {/if}
             <span class="row__text" class:done={t.status === "done"}>{t.text}</span>

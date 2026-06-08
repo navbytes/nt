@@ -52,6 +52,7 @@
   }
 </script>
 
+<a href="#main-content" class="skip-link">Skip to content</a>
 <div class="layout">
   <Sidebar {path} canEdit={$stateQ.data?.canEdit ?? false} open={drawerOpen} />
   {#if drawerOpen}
@@ -69,7 +70,7 @@
       <form class="topbar__search" onsubmit={onSearch}>
         <input name="q" placeholder="Search notes…" autocomplete="off" />
       </form>
-      <button class="palette-btn" onclick={openPalette} title="Command palette (⌘K)">
+      <button class="palette-btn" onclick={openPalette} title="Command palette (⌘K)" aria-label="Open command palette">
         <span class="kbd">⌘K</span>
       </button>
       <span class="spacer"></span>
@@ -78,10 +79,10 @@
         <span class="stat"><strong>{$stateQ.data.noteCount}</strong> notes</span>
         {#if $stateQ.data.canEdit}<span class="badge">edit</span>{/if}
       {/if}
-      <button class="icon-btn" onclick={toggleTheme} title="Toggle theme">◐</button>
+      <button class="icon-btn" onclick={toggleTheme} title="Toggle theme" aria-label="Toggle light/dark theme">◐</button>
     </header>
 
-    <main class="main">
+    <main class="main" id="main-content" tabindex="-1">
       {#if path === "/"}
         <Home canEdit={$stateQ.data?.canEdit ?? false} />
       {:else if noteHandle}
