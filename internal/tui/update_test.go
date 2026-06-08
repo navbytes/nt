@@ -199,7 +199,7 @@ func TestAddLinkToNoteFromNotesTab(t *testing.T) {
 
 	m = press(m, "l").(*Model)     // open the link prompt
 	m = press(m, "Other").(*Model) // type the target (one multi-rune msg)
-	m = press(m, "enter").(*Model) // commit
+	press(m, "enter")              // commit (note is written to disk; m unused after)
 
 	got, _ := note.Load(n.Path)
 	if !strings.Contains(got.Body, "[[Other]]") {
