@@ -44,6 +44,10 @@
     d.setDate(d.getDate() + n);
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
   }
+  // A due value may carry a time-of-day ("2026-06-08T17:00"). dateOf gives the
+  // date part for bucketing; fmtDue renders it readably for display.
+  const dateOf = (due?: string) => (due ? due.slice(0, 10) : "");
+  const fmtDue = (due: string) => (due.includes("T") ? due.replace("T", " ") : due);
 
   // Agenda view: re-bucket every task by its due date (the planner layout).
   const agendaGroups = $derived.by((): TaskGroup[] => {
@@ -59,11 +63,12 @@
     };
     for (const g of allGroups) {
       for (const t of g.tasks) {
+        const due = dateOf(t.due); // YYYY-MM-DD, ignoring any time-of-day suffix
         if (t.status === "done") buckets.Done.push(t);
-        else if (!t.due) buckets["No date"].push(t);
-        else if (t.due < today) buckets.Overdue.push(t);
-        else if (t.due === today) buckets.Today.push(t);
-        else if (t.due <= weekEnd) buckets["This week"].push(t);
+        else if (!due) buckets["No date"].push(t);
+        else if (due < today) buckets.Overdue.push(t);
+        else if (due === today) buckets.Today.push(t);
+        else if (due <= weekEnd) buckets["This week"].push(t);
         else buckets.Later.push(t);
       }
     }
@@ -125,7 +130,7 @@
             {#if t.status === "blocked"}<span class="status-pill status-pill--blocked" title={t.blocker ? `blocked by: ${t.blocker}` : "blocked"}>⊘ blocked</span>{/if}
             {#if t.project}<a class="chip" href={`/search?tag=${encodeURIComponent(t.project)}`}>+{t.project}</a>{/if}
             {#each t.tags ?? [] as tag (tag)}<a class="chip chip--tag" href={`/search?tag=${encodeURIComponent(tag)}`}>@{tag}</a>{/each}
-            {#if t.due}<span class="row__due" class:row__due--over={t.due < todayISO() && t.status !== "done"}>{t.due}</span>{/if}
+            {#if t.due}<span class="row__due" class:row__due--over={dateOf(t.due) < todayISO() && t.status !== "done"}>{fmtDue(t.due)}</span>{/if}
             {#if t.source}<span class="src">{t.source}</span>{/if}
             {#if canEdit && t.status !== "done"}
               <span class="row__actions">

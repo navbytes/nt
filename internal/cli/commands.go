@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/navbytes/nt/internal/aisync"
+	"github.com/navbytes/nt/internal/dateparse"
 	"github.com/navbytes/nt/internal/links"
 	"github.com/navbytes/nt/internal/mutate"
 	"github.com/navbytes/nt/internal/note"
@@ -421,9 +422,9 @@ func runAgenda(args []string, defDays int) int {
 		if *source != "" && t.Source() != *source {
 			continue
 		}
-		due := t.Due()
+		due := dateparse.DatePart(t.Due())      // ignore any time-of-day for windowing
 		inWindow := due != "" && due <= horizon // overdue (< today) or within horizon
-		startsToday := t.Start() == today
+		startsToday := dateparse.DatePart(t.Start()) == today
 		if inWindow || startsToday {
 			rows = append(rows, t)
 		}
@@ -442,11 +443,12 @@ func runAgenda(args []string, defDays int) int {
 		label string
 		keep  func(*task.Task) bool
 	}{
-		{"Overdue", func(t *task.Task) bool { return t.Due() != "" && t.Due() < today }},
+		{"Overdue", func(t *task.Task) bool { d := dateparse.DatePart(t.Due()); return d != "" && d < today }},
 		{"Today", func(t *task.Task) bool {
-			return t.Due() == today || (t.Start() == today && (t.Due() == "" || t.Due() >= today))
+			d, st := dateparse.DatePart(t.Due()), dateparse.DatePart(t.Start())
+			return d == today || (st == today && (d == "" || d >= today))
 		}},
-		{"Upcoming", func(t *task.Task) bool { return t.Due() > today }},
+		{"Upcoming", func(t *task.Task) bool { return dateparse.DatePart(t.Due()) > today }},
 	}
 	for _, b := range buckets {
 		var group []*task.Task
@@ -469,7 +471,7 @@ func runAgenda(args []string, defDays int) int {
 // isFutureStart reports whether a task is deferred — it has a start (t:) date
 // that is still in the future, so it isn't actionable yet.
 func isFutureStart(t *task.Task, today string) bool {
-	s := t.Start()
+	s := dateparse.DatePart(t.Start())
 	return s != "" && s > today
 }
 

@@ -19,6 +19,9 @@ func Urgency(t *Task) float64 {
 		s += 2
 	}
 	if due := t.Due(); due != "" {
+		if len(due) > 10 { // tolerate a time-of-day suffix; urgency is day-granular
+			due = due[:10]
+		}
 		if dt, err := time.Parse("2006-01-02", due); err == nil {
 			days := time.Until(dt).Hours() / 24
 			switch {
