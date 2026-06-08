@@ -32,7 +32,18 @@ func WriteAtomic(path string, data []byte, perm os.FileMode) error {
 	if err := os.Chmod(tmpName, perm); err != nil {
 		return err
 	}
-	return os.Rename(tmpName, path)
+	if err := os.Rename(tmpName, path); err != nil {
+		return err
+	}
+	// fsync the parent directory so the rename itself is durable: POSIX does not
+	// guarantee a rename survives a crash until the directory entry is flushed,
+	// which would otherwise defeat the journal-before-mutation ordering (SPEC
+	// §6.1/§6.3). Best-effort — directory fsync isn't supported on every platform.
+	if d, derr := os.Open(dir); derr == nil {
+		_ = d.Sync()
+		_ = d.Close()
+	}
+	return nil
 }
 
 // ReadFile reads a file, returning empty bytes (not an error) when it does not

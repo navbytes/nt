@@ -48,10 +48,13 @@ func Append(s *store.Store, t Txn) error {
 	return f.Sync()
 }
 
-// Pop removes and returns the most recent transaction, or ok=false if the
-// journal is empty. Caller holds the lock. It rewrites the journal without the
-// popped line (atomic write).
-func Pop(s *store.Store) (Txn, bool, error) {
+// Peek returns the most recent transaction without modifying the journal, or
+// ok=false if the journal is empty. Caller holds the lock. It is non-destructive
+// by design: undo must apply (and durably write) the reverted tasks file BEFORE
+// the journal entry is removed, so a write failure can't lose the inverse
+// (SPEC §6.3 — "a crash can't leave a mutation without its inverse"). Pair it
+// with ReplaceLast once the tasks write has succeeded.
+func Peek(s *store.Store) (Txn, bool, error) {
 	data, err := store.ReadFile(s.UndoFile())
 	if err != nil {
 		return Txn{}, false, err
@@ -60,19 +63,33 @@ func Pop(s *store.Store) (Txn, bool, error) {
 	if len(lines) == 0 {
 		return Txn{}, false, nil
 	}
-	last := lines[len(lines)-1]
 	var t Txn
-	if err := json.Unmarshal([]byte(last), &t); err != nil {
-		return Txn{}, false, err
-	}
-	remaining := strings.Join(lines[:len(lines)-1], "\n")
-	if remaining != "" {
-		remaining += "\n"
-	}
-	if err := store.WriteAtomic(s.UndoFile(), []byte(remaining), 0o644); err != nil {
+	if err := json.Unmarshal([]byte(lines[len(lines)-1]), &t); err != nil {
 		return Txn{}, false, err
 	}
 	return t, true, nil
+}
+
+// ReplaceLast atomically removes the most recent transaction and appends next
+// (the redo entry) in a single atomic write. Caller holds the lock. Called by
+// undo AFTER the reverted tasks file is durably written, so the journal only
+// drops the entry once the revert is committed.
+func ReplaceLast(s *store.Store, next Txn) error {
+	data, err := store.ReadFile(s.UndoFile())
+	if err != nil {
+		return err
+	}
+	lines := nonEmptyLines(string(data))
+	if len(lines) > 0 {
+		lines = lines[:len(lines)-1] // drop the popped transaction
+	}
+	enc, err := json.Marshal(next)
+	if err != nil {
+		return err
+	}
+	lines = append(lines, string(enc))
+	out := strings.Join(lines, "\n") + "\n"
+	return store.WriteAtomic(s.UndoFile(), []byte(out), 0o644)
 }
 
 func nonEmptyLines(s string) []string {

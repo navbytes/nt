@@ -1,8 +1,10 @@
 package mutate
 
 import (
+	"strings"
 	"testing"
 
+	"github.com/navbytes/nt/internal/store"
 	"github.com/navbytes/nt/internal/task"
 )
 
@@ -125,6 +127,78 @@ func TestCompleteRecurrenceUndo(t *testing.T) {
 	}
 	if got[0].Done {
 		t.Fatal("undo should reopen the original")
+	}
+}
+
+// addAndComplete adds a task and completes it, leaving a "done" transaction on
+// top of the undo journal whose post-image is the completed line. Returns the id.
+func addAndComplete(t *testing.T, e *Engine) string {
+	t.Helper()
+	var id string
+	if err := e.Apply("add", func(d *task.Doc, rec *Recorder) error {
+		nt := task.New("fragile task")
+		d.Append(nt)
+		rec.Added(nt)
+		id = nt.ID()
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.Apply("done", func(d *task.Doc, rec *Recorder) error {
+		tk := d.FindByID(id)
+		rec.Before(tk)
+		tk.SetDone(true, "2026-06-06")
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	return id
+}
+
+// TestUndoRefusesAndDoesNotResurrect: if a touched task is removed underneath us
+// (an unjournaled archive/sync, here simulated by an external write) before we
+// undo, undo must refuse rather than re-append (resurrect) the task — SPEC §6.1
+// "never resurrects a removed task", §6.3 "if the world moved underneath, it
+// refuses". This is the regression guard for the resurrection bug.
+func TestUndoRefusesAndDoesNotResurrect(t *testing.T) {
+	e := newEngine(t)
+	_ = addAndComplete(t, e)
+
+	// Another writer removes the task entirely, without a journal entry.
+	if err := store.WriteAtomic(e.S.TasksFile(), []byte(""), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	op, did, err := e.Undo()
+	if err == nil || did {
+		t.Fatalf("undo should refuse when the task was removed underneath (op=%q did=%v err=%v)", op, did, err)
+	}
+	if got := tasks(t, e); len(got) != 0 {
+		t.Fatalf("undo resurrected a removed task: got %d tasks, want 0", len(got))
+	}
+}
+
+// TestUndoRefusesWhenChangedUnderneath: if a touched task was modified by another
+// writer after the recorded transaction, undo refuses and the other writer's
+// change survives intact (not clobbered by the stale before-image).
+func TestUndoRefusesWhenChangedUnderneath(t *testing.T) {
+	e := newEngine(t)
+	id := addAndComplete(t, e)
+
+	// Another writer edits the same task (adds a token), bypassing the journal.
+	data, _ := store.ReadFile(e.S.TasksFile())
+	d := task.Parse(data)
+	d.FindByID(id).SetKey("note", "edited")
+	if err := store.WriteAtomic(e.S.TasksFile(), d.Render(), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if op, did, err := e.Undo(); err == nil || did {
+		t.Fatalf("undo should refuse when the task changed underneath (op=%q did=%v err=%v)", op, did, err)
+	}
+	out, _ := store.ReadFile(e.S.TasksFile())
+	if !strings.Contains(string(out), "note:edited") {
+		t.Fatalf("refused undo clobbered the concurrent edit:\n%s", out)
 	}
 }
 
