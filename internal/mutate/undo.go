@@ -2,6 +2,7 @@ package mutate
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/navbytes/nt/internal/lock"
@@ -67,6 +68,24 @@ func (e *Engine) Undo() (op string, did bool, err error) {
 		return "", false, err
 	}
 	return txn.Op, true, nil
+}
+
+// PeekUndo reports what the next reversal targets, without changing anything: the
+// human label (with the internal "redo:" prefixes stripped) and whether the
+// pending journal entry is a redo (an odd number of "redo:" prefixes) rather than
+// a fresh forward op. ok is false when the journal is empty. It is a display-only
+// read of the atomically-written journal, so it runs lock-free.
+func (e *Engine) PeekUndo() (label string, isRedo bool, ok bool) {
+	txn, found, err := undo.Peek(e.S)
+	if err != nil || !found {
+		return "", false, false
+	}
+	op, n := txn.Op, 0
+	for strings.HasPrefix(op, "redo:") {
+		op = op[len("redo:"):]
+		n++
+	}
+	return op, n%2 == 1, true
 }
 
 // validatePostImage checks that the live document still matches what the

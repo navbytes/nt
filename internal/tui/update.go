@@ -207,6 +207,8 @@ func (m *Model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	case "u":
 		m.undo()
+	case "U":
+		m.redo()
 	case "p":
 		if len(m.marked) > 0 {
 			return m, m.startInput(inSetPri, "", "priority for marked: high/med/low/none")
@@ -539,6 +541,7 @@ var writeKeys = map[string]bool{
 	"p": true, "D": true, "t": true, "T": true, "l": true, // priority / due / tag / link
 	"s": true, // toggle "doing" status
 	"u": true, // undo (reverses a write)
+	"U": true, // redo (re-applies an undone write)
 }
 
 func isWriteKey(key string) bool { return writeKeys[key] }
@@ -610,11 +613,38 @@ func (m *Model) addLinkTarget(target string) {
 	m.mutate("link", t.ID(), func(tk *task.Task) { tk.AddLink(target) })
 }
 
+// undo reverses the last forward write. The journal is a single-entry toggle
+// (an undo leaves a redo behind), so undo and redo are split by direction: undo
+// only fires on a fresh forward op, redo only on a pending redo (see redo).
 func (m *Model) undo() {
-	if op, did, err := m.eng.Undo(); err == nil && did {
-		m.setStatus("undid: " + op)
-	} else {
+	label, isRedo, ok := m.eng.PeekUndo()
+	if !ok {
 		m.setStatus("nothing to undo")
+		return
+	}
+	if isRedo {
+		m.setStatus("nothing to undo — press U to redo " + label)
+		return
+	}
+	if _, did, err := m.eng.Undo(); err != nil {
+		m.setStatus("undo failed: " + err.Error())
+	} else if did {
+		m.setStatus("undid: " + label + " — U to redo")
+	}
+	m.reload()
+}
+
+// redo re-applies the most recently undone write (the pending redo entry).
+func (m *Model) redo() {
+	label, isRedo, ok := m.eng.PeekUndo()
+	if !ok || !isRedo {
+		m.setStatus("nothing to redo")
+		return
+	}
+	if _, did, err := m.eng.Undo(); err != nil { // Undo() toggles: applying a redo entry redoes it
+		m.setStatus("redo failed: " + err.Error())
+	} else if did {
+		m.setStatus("redid: " + label + " — u to undo")
 	}
 	m.reload()
 }
