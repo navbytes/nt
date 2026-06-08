@@ -16,6 +16,7 @@ import (
 	"github.com/navbytes/nt/internal/links"
 	"github.com/navbytes/nt/internal/mutate"
 	"github.com/navbytes/nt/internal/note"
+	"github.com/navbytes/nt/internal/quickadd"
 	"github.com/navbytes/nt/internal/search"
 	"github.com/navbytes/nt/internal/task"
 	"github.com/navbytes/nt/internal/tui"
@@ -91,7 +92,7 @@ func cmdAdd(args []string) int {
 	}
 	var created *task.Task
 	err := e.Apply("add", func(d *task.Doc, rec *mutate.Recorder) error {
-		t := task.New(buildText(title, tags, *project, *noteSlug))
+		t := quickadd.New(buildText(title, tags, *project, *noteSlug))
 		if p != 0 {
 			t.SetPriority(p)
 		}
@@ -256,6 +257,7 @@ func cmdReady(args []string) int {
 	idx := indexMap(all)
 	blocked := task.BlockedIDs(all)
 
+	today := mutate.Today()
 	var rows []*task.Task
 	for _, t := range all {
 		// keep with all=false, showBlocked=false drops done + dependency-blocked.
@@ -264,6 +266,9 @@ func cmdReady(args []string) int {
 		}
 		if *source != "" && t.Source() != *source {
 			continue
+		}
+		if isFutureStart(t, today) {
+			continue // deferred: not actionable until its start (t:) date
 		}
 		rows = append(rows, t)
 	}
@@ -280,6 +285,118 @@ func cmdReady(args []string) int {
 		fmt.Println(formatRow(t, idx[t], false)) // ready ⇒ not blocked
 	}
 	return 0
+}
+
+// cmdToday is the day's actionable plan: overdue + due-today + just-became-
+// actionable (start today). Shorthand for `agenda --days 0`.
+func cmdToday(args []string) int { return runAgenda(args, 0) }
+
+// cmdAgenda shows the date-windowed plan — overdue, today, and the next N days —
+// grouped by bucket and urgency-sorted, so nt is a planner, not just a list. It
+// excludes done, dependency-blocked, and not-yet-started (future t:) tasks.
+func cmdAgenda(args []string) int { return runAgenda(args, 7) }
+
+func runAgenda(args []string, defDays int) int {
+	fs := flag.NewFlagSet("agenda", flag.ContinueOnError)
+	days := fs.Int("days", defDays, "horizon: include tasks due within N days")
+	tag := fs.String("tag", "", "filter by tag")
+	project := fs.String("project", "", "filter by project")
+	source := fs.String("source", "", "filter by source")
+	asJSON := fs.Bool("json", false, "machine-readable output")
+
+	flags, _ := splitArgs(args, map[string]bool{"json": true})
+	if err := fs.Parse(flags); err != nil {
+		return 2
+	}
+	e, ok := engine()
+	if !ok {
+		return 1
+	}
+	d, err := e.Read()
+	if err != nil {
+		return fail(err)
+	}
+	all := d.Tasks()
+	idx := indexMap(all)
+	blocked := task.BlockedIDs(all)
+	today := mutate.Today()
+	horizon := addDays(today, *days)
+
+	// Select actionable tasks that land in the window: overdue, due within the
+	// horizon, or newly actionable today (start == today).
+	var rows []*task.Task
+	for _, t := range all {
+		if t.Done || (blocked[t.ID()] && !t.Done) || isFutureStart(t, today) {
+			continue
+		}
+		if *tag != "" && !contains(t.Tags(), *tag) {
+			continue
+		}
+		if *project != "" && !contains(t.Projects(), *project) {
+			continue
+		}
+		if *source != "" && t.Source() != *source {
+			continue
+		}
+		due := t.Due()
+		inWindow := due != "" && due <= horizon // overdue (< today) or within horizon
+		startsToday := t.Start() == today
+		if inWindow || startsToday {
+			rows = append(rows, t)
+		}
+	}
+	sortTasks(rows, "urgency")
+
+	if *asJSON {
+		return printJSON(tasksToJSON(rows, idx))
+	}
+	if len(rows) == 0 {
+		fmt.Println("nothing on the agenda — all clear within the horizon")
+		return 0
+	}
+	// Group into Overdue / Today / Upcoming, preserving urgency order within each.
+	buckets := []struct {
+		label string
+		keep  func(*task.Task) bool
+	}{
+		{"Overdue", func(t *task.Task) bool { return t.Due() != "" && t.Due() < today }},
+		{"Today", func(t *task.Task) bool {
+			return t.Due() == today || (t.Start() == today && (t.Due() == "" || t.Due() >= today))
+		}},
+		{"Upcoming", func(t *task.Task) bool { return t.Due() > today }},
+	}
+	for _, b := range buckets {
+		var group []*task.Task
+		for _, t := range rows {
+			if b.keep(t) {
+				group = append(group, t)
+			}
+		}
+		if len(group) == 0 {
+			continue
+		}
+		fmt.Printf("\n%s\n", b.label)
+		for _, t := range group {
+			fmt.Println("  " + formatRow(t, idx[t], false))
+		}
+	}
+	return 0
+}
+
+// isFutureStart reports whether a task is deferred — it has a start (t:) date
+// that is still in the future, so it isn't actionable yet.
+func isFutureStart(t *task.Task, today string) bool {
+	s := t.Start()
+	return s != "" && s > today
+}
+
+// addDays returns the ISO date n days after the given ISO date (n may be 0).
+func addDays(date string, n int) string {
+	tm, err := time.Parse("2006-01-02", date)
+	if err != nil {
+		return date
+	}
+	return tm.AddDate(0, 0, n).Format("2006-01-02")
 }
 
 func cmdRecall(args []string) int {

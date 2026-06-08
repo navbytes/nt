@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/navbytes/nt/internal/note"
 	"github.com/navbytes/nt/internal/store"
@@ -87,6 +88,35 @@ func TestAPITasksReadAndWrite(t *testing.T) {
 		t.Fatalf("new task not in response: %s", body)
 	}
 }
+
+// TestAPIQuickAddNormalizesInlineTokens: the web quick-add box sends raw text;
+// inline natural-language tokens ("due:fri", "!high") must be normalized into a
+// real due date + priority rather than stored as the literal string (the bug the
+// quickadd package fixes). Regression guard for the cross-surface add path.
+func TestAPIQuickAddNormalizesInlineTokens(t *testing.T) {
+	s := newTestServer(t)
+	s.allowEdit = true
+
+	code, _ := postForm(s, "/api/tasks", s.csrf, mustValues("text", "pay rent due:fri !high @home"))
+	if code != 200 {
+		t.Fatalf("quick-add: %d", code)
+	}
+	tk := mustDoc(t, s).Tasks()[0]
+	if tk.Due() == "" || tk.Due() == "fri" {
+		t.Fatalf("inline due:fri should normalize to a date, got %q", tk.Due())
+	}
+	if _, err := timeParseISO(tk.Due()); err != nil {
+		t.Fatalf("due should be an ISO date, got %q", tk.Due())
+	}
+	if tk.Priority != 'A' {
+		t.Errorf("inline !high should lift to priority A, got %q", tk.Priority)
+	}
+	if tags := tk.Tags(); len(tags) != 1 || tags[0] != "home" {
+		t.Errorf("@home context should survive: %v", tags)
+	}
+}
+
+func timeParseISO(s string) (any, error) { return time.Parse("2006-01-02", s) }
 
 func TestAPINoteRawSaveGuard(t *testing.T) {
 	s := newTestServer(t)

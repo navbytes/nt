@@ -184,6 +184,14 @@ func (t *Task) Parent() string { v, _ := t.get("parent"); return v }
 func (t *Task) Recur() string  { v, _ := t.get("rec"); return v }
 func (t *Task) Blocks() string { v, _ := t.get("blocks"); return v }
 
+// Start is the threshold/defer date (todo.txt "t:" key): the task is not
+// actionable until this date. Agenda/ready views hide future-start tasks.
+func (t *Task) Start() string { v, _ := t.get("t"); return v }
+
+// Key returns the value of an arbitrary key:value token (empty if absent), so
+// callers outside the package can read/normalize tokens nt doesn't model.
+func (t *Task) Key(name string) string { v, _ := t.get(name); return v }
+
 // Discovered is the ULID of the task this one was discovered while working on —
 // provenance for work an agent surfaced mid-task (key: discovered:<ULID>).
 func (t *Task) Discovered() string { v, _ := t.get("discovered"); return v }

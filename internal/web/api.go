@@ -11,6 +11,7 @@ import (
 	"github.com/navbytes/nt/internal/dateparse"
 	"github.com/navbytes/nt/internal/mutate"
 	"github.com/navbytes/nt/internal/note"
+	"github.com/navbytes/nt/internal/quickadd"
 	"github.com/navbytes/nt/internal/search"
 	"github.com/navbytes/nt/internal/store"
 	"github.com/navbytes/nt/internal/task"
@@ -444,7 +445,7 @@ func (s *Server) apiTaskNew(w http.ResponseWriter, r *http.Request) {
 		if project != "" {
 			txt += " +" + project
 		}
-		t := task.New(txt)
+		t := quickadd.New(txt) // normalize inline due:/t:/!pri the user typed
 		if priByte != 0 {
 			t.SetPriority(priByte)
 		}
