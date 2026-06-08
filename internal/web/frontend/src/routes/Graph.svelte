@@ -75,6 +75,7 @@
   function buildGraph(el: HTMLDivElement) {
     let destroyed = false;
     let ro: ResizeObserver | undefined;
+    let zoomedOnce = false;
 
     void (async () => {
       const { default: ForceGraph } = await import("force-graph");
@@ -143,7 +144,7 @@
           if (n.url) navigate(n.url);
         })
         .onEngineStop(() => {
-          graph?.zoomToFit(400, 40);
+          if (!zoomedOnce) { zoomedOnce = true; graph?.zoomToFit(400, 40); }
         });
 
       size();
@@ -172,13 +173,6 @@
   $effect(() => {
     const data = $graphQ.data;
     if (graph && data) graph.graphData(toForceGraph(data));
-  });
-
-  // Re-render on filter/search changes.
-  $effect(() => {
-    if (!graph) return;
-    void searchText; void filterFolder; void hoveredId;
-    graph?.refresh();
   });
 
   function zoomToNode(title: string) {
