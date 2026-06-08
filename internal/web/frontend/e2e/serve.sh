@@ -17,4 +17,4 @@ export NT_DIR
 "$BIN" note "Welcome" --body $'# Welcome\n\nSee [[Design]] for details.' >/dev/null
 "$BIN" note "Design" --body $'# Design\n\n## Goals\n\nRefs [[Welcome]].\n\n## Non-goals\n\nlater.' >/dev/null
 
-exec "$BIN" web --spa --edit --host 127.0.0.1 --port 4173
+exec "$BIN" web --edit --host 127.0.0.1 --port 4173

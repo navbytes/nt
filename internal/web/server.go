@@ -9,11 +9,8 @@ package web
 import (
 	"crypto/rand"
 	"crypto/sha256"
-	"embed"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
-	"html/template"
 	"io"
 	"net"
 	"net/http"
@@ -27,95 +24,38 @@ import (
 
 	"github.com/fsnotify/fsnotify"
 
-	"github.com/navbytes/nt/internal/dateparse"
-	"github.com/navbytes/nt/internal/links"
 	"github.com/navbytes/nt/internal/mutate"
 	"github.com/navbytes/nt/internal/note"
-	"github.com/navbytes/nt/internal/search"
 	"github.com/navbytes/nt/internal/store"
 	"github.com/navbytes/nt/internal/task"
 )
-
-//go:embed assets
-var assetsFS embed.FS
 
 // Server holds the shared state for the viewer. (Editing, when added, hangs
 // write routes and a CSRF token here — seam #1.)
 type Server struct {
 	eng       *mutate.Engine
 	version   string
-	tmpl      *template.Template
 	hub       *hub
 	hlCSS     string // generated Chroma syntax-highlight stylesheet (theme-scoped)
+	hlETag    string // content-hash ETag for highlight.css (for 304s)
 	allowEdit bool   // writes enabled (nt web --edit); read-only by default
 	csrf      string // per-process token required on save (blocks cross-site POSTs)
-
-	spa bool // serve the embedded Svelte SPA instead of the server-rendered UI
 
 	mu       sync.RWMutex  // guards snap + watching
 	snap     *snapshot     // in-memory read-model (see readmodel.go)
 	watching bool          // true once the fsnotify watcher maintains snap
 	writes   *writeTracker // self-write suppression for the watcher
-
-	etags map[string]string // static asset name → content-hash ETag (for 304s)
 }
 
-// staticAsset describes one /static/ file.
-type staticAsset struct {
-	contentType string
-	path        string // path in assetsFS; "" for the generated highlight.css
-	gzip        bool
-}
-
-var staticAssets = map[string]staticAsset{
-	"style.css":      {"text/css; charset=utf-8", "assets/style.css", false},
-	"highlight.css":  {"text/css; charset=utf-8", "", false}, // generated (s.hlCSS)
-	"app.js":         {"text/javascript; charset=utf-8", "assets/app.js", false},
-	"htmx.min.js":    {"text/javascript; charset=utf-8", "assets/htmx.min.js", false},
-	"graph.js":       {"text/javascript; charset=utf-8", "assets/graph.js", false},
-	"mermaid.min.js": {"text/javascript; charset=utf-8", "assets/mermaid.min.js.gz", true},
-}
-
-// NewServer parses the embedded template and prepares the viewer.
+// NewServer initialises the server and warms the read-model.
 func NewServer(eng *mutate.Engine, version string) (*Server, error) {
-	funcs := template.FuncMap{
-		// json marshals a value for safe embedding in a <script> tag (Go's
-		// encoder escapes <, >, & so a note title can't break out).
-		"json": func(v any) template.JS {
-			b, _ := json.Marshal(v)
-			return template.JS(b) //nolint:gosec // HTML-escaped JSON, data only
-		},
-		// dict builds a map from k,v pairs so a partial can receive both a row and
-		// the page context (e.g. CanEdit) — Go templates pass a single value.
-		"dict": func(kv ...any) map[string]any {
-			m := make(map[string]any, len(kv)/2)
-			for i := 0; i+1 < len(kv); i += 2 {
-				if k, ok := kv[i].(string); ok {
-					m[k] = kv[i+1]
-				}
-			}
-			return m
-		},
+	css := highlightCSS()
+	s := &Server{
+		eng: eng, version: version, hub: newHub(),
+		hlCSS: css, hlETag: etag([]byte(css)),
+		csrf: randToken(), writes: newWriteTracker(),
 	}
-	tmpl, err := template.New("nt").Funcs(funcs).ParseFS(assetsFS, "assets/*.html")
-	if err != nil {
-		return nil, err
-	}
-	s := &Server{eng: eng, version: version, tmpl: tmpl, hub: newHub(), hlCSS: highlightCSS(), csrf: randToken(), writes: newWriteTracker()}
 	s.snap = buildSnapshot(eng) // warm the read-model so the first request is fast
-	// Precompute content-hash ETags for static assets so the browser revalidates
-	// with a cheap 304 instead of re-downloading them (incl. ~900 KB of mermaid)
-	// on every navigation.
-	s.etags = make(map[string]string, len(staticAssets))
-	for name, a := range staticAssets {
-		if a.path == "" {
-			s.etags[name] = etag([]byte(s.hlCSS))
-			continue
-		}
-		if b, err := assetsFS.ReadFile(a.path); err == nil {
-			s.etags[name] = etag(b)
-		}
-	}
 	return s, nil
 }
 
@@ -161,10 +101,9 @@ func randToken() string {
 	return hex.EncodeToString(b)
 }
 
-// Serve opens the store and serves the viewer on addr (e.g. "127.0.0.1:0").
-// allowEdit enables note editing in the browser (read-only when false). spa
-// serves the embedded Svelte SPA instead of the server-rendered UI (preview).
-func Serve(version, addr string, allowEdit, spa bool) error {
+// Serve opens the store and serves the SPA on addr (e.g. "127.0.0.1:0").
+// allowEdit enables note editing in the browser (read-only when false).
+func Serve(version, addr string, allowEdit bool) error {
 	eng, err := mutate.Open()
 	if err != nil {
 		return err
@@ -174,22 +113,17 @@ func Serve(version, addr string, allowEdit, spa bool) error {
 		return err
 	}
 	s.allowEdit = allowEdit
-	s.spa = spa
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
 		return err
 	}
 	s.watch()
-	ui := "server-rendered"
-	if spa {
-		ui = "Svelte SPA (--spa)"
-	}
 	fmt.Printf("nt web — serving notes at http://%s\n", ln.Addr().String())
 	mode := "read-only"
 	if allowEdit {
 		mode = "editing enabled (--edit)"
 	}
-	fmt.Printf("(localhost only · %s · %s · live-reloads on change · Ctrl+C to stop)\n", ui, mode)
+	fmt.Printf("(localhost only · Svelte SPA · %s · live-reloads on change · Ctrl+C to stop)\n", mode)
 	return http.Serve(ln, s.routes()) //nolint:gosec // localhost dev server, no timeouts needed
 }
 
@@ -203,8 +137,8 @@ func (s *Server) Handler() http.Handler { return s.routes() }
 // SetEdit toggles in-app editing (CSRF-guarded). Read-only by default.
 func (s *Server) SetEdit(v bool) { s.allowEdit = v }
 
-// SetSPA serves the embedded Svelte SPA instead of the server-rendered UI.
-func (s *Server) SetSPA(v bool) { s.spa = v }
+// SetSPA is a no-op retained for embedder compatibility; the SPA is always served.
+func (s *Server) SetSPA(_ bool) {}
 
 // StartWatch begins watching the store and pushing SSE live-reload events.
 // Serve calls this itself; embedders call it when they want live-reload.
@@ -212,36 +146,10 @@ func (s *Server) StartWatch() { s.watch() }
 
 func (s *Server) routes() http.Handler {
 	mux := http.NewServeMux()
-	s.apiRoutes(mux) // JSON API — available in both UIs
+	s.apiRoutes(mux)
 	mux.HandleFunc("/events", s.handleSSE)
-	if s.spa {
-		// New Svelte SPA: API + SSE + embedded bundle. None of the v1
-		// server-rendered page handlers are registered.
-		if err := s.spaRoutes(mux); err != nil {
-			// dist not built — fall back to v1 so the server still works.
-			s.spa = false
-		} else {
-			return mux
-		}
-	}
-	mux.HandleFunc("/", s.handleIndex)
-	mux.HandleFunc("/n/", s.handleNote)
-	mux.HandleFunc("/search", s.handleSearch)
-	mux.HandleFunc("/orphans", s.handleOrphans)
-	mux.HandleFunc("/tags", s.handleTags)
-	mux.HandleFunc("/activity", s.handleActivity)
-	mux.HandleFunc("/tasks", s.handleTasks)
-	// Task write routes (nt web --edit). Each runs through mutate.Engine.Apply,
-	// so a browser action gets the same lock + re-read + undo-journal safety as
-	// a CLI/agent write — concurrent writers can't clobber one another.
-	mux.HandleFunc("POST /tasks/new", s.handleTaskNew)
-	mux.HandleFunc("POST /tasks/{id}/done", s.handleTaskDone)
-	mux.HandleFunc("POST /tasks/{id}/reopen", s.handleTaskReopen)
-	mux.HandleFunc("POST /tasks/{id}/status", s.handleTaskStatus)
-	mux.HandleFunc("POST /tasks/{id}/delete", s.handleTaskDelete)
-	mux.HandleFunc("/graph", s.handleGraph)
-	mux.HandleFunc("POST /preview", s.handlePreview)
-	mux.HandleFunc("/static/", s.handleStatic)
+	mux.HandleFunc("GET /static/highlight.css", s.handleHighlightCSS)
+	_ = s.spaRoutes(mux) // embedded SPA bundle; always present in a built binary
 	return mux
 }
 
@@ -251,66 +159,7 @@ func (s *Server) load() (*task.Doc, []*note.Note) {
 	return snap.doc, snap.notes
 }
 
-// ---- page model -----------------------------------------------------------
-
-type pageData struct {
-	Title       string
-	Tree        []*treeNode
-	NoteIndex   []linkRow // flat list of every note, for the ⌘K palette
-	ShowResults bool
-	SearchQuery string
-	SearchTag   string
-	Results     []linkRow
-
-	IsNote      bool
-	NoteTitle   string
-	FolderPath  string
-	FileName    string
-	Crumbs      []string
-	NoteSource  string
-	NoteCreated string
-	Tags        []string
-	BodyHTML    template.HTML
-	Backlinks   []Backlink
-	TaskRefs    []TaskRef
-	Prev        *linkRow
-	Next        *linkRow
-
-	IsState    bool
-	StateTitle string
-	Target     string
-	Candidates []linkRow
-
-	Empty      bool // store has no notes (onboarding state)
-	IsTags     bool
-	TagRows    []tagRow
-	IsTasks    bool
-	TaskGroups []taskGroup
-	IsGraph    bool
-	GraphData  *graphData // JSON model for the force-directed link graph
-
-	IsHome bool
-	Dash   *dashboard
-
-	IsActivity     bool
-	ActivityDays   []activityDay
-	ActivitySource string
-	Sources        []string
-
-	CanEdit bool   // editing enabled (nt web --edit)
-	CSRF    string // token the editor sends back on save
-}
-
-// dashboard is the agent-memory home page: what's ready to start, in flight, and
-// blocked — plus the latest activity. It's the "live state of your memory" view.
-type dashboard struct {
-	Ready     []taskRow
-	Doing     []taskRow
-	Blocked   []taskRow // each carries its Blocker reason
-	Recent    []activityEvent
-	OpenCount int
-	NoteCount int
-}
+// ---- shared data types (used by both server.go helpers and api.go) --------
 
 // activityDay groups timeline events under one calendar date.
 type activityDay struct {
@@ -322,11 +171,6 @@ type linkRow struct {
 	URL   string `json:"url"`
 	Title string `json:"title"`
 	Path  string `json:"path"`
-}
-type tagRow struct {
-	Name  string
-	Count int
-	URL   string
 }
 type taskGroup struct {
 	Status string    `json:"status"`
@@ -340,132 +184,23 @@ type taskRow struct {
 	Source  string   `json:"source,omitempty"`
 	Project string   `json:"project,omitempty"`
 	Tags    []string `json:"tags,omitempty"`
-	Blocker string   `json:"blocker,omitempty"` // on the dashboard: why this task is blocked
-}
-
-// flatNotes is the note index the ⌘K palette filters over.
-func flatNotes(notes []*note.Note) []linkRow {
-	out := make([]linkRow, 0, len(notes))
-	for _, n := range notes {
-		out = append(out, linkRow{URL: "/n/" + url.PathEscape(noteHandle(n)), Title: n.Title, Path: n.Rel})
-	}
-	return out
-}
-
-func (s *Server) render(w http.ResponseWriter, notes []*note.Note, d *pageData) {
-	d.NoteIndex = flatNotes(notes)
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := s.tmpl.ExecuteTemplate(w, "layout.html", d); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-	}
+	Blocker string   `json:"blocker,omitempty"`
 }
 
 // ---- handlers -------------------------------------------------------------
 
-// handleIndex serves the agent-memory dashboard (ready / doing / blocked +
-// recent activity) — the live state of the store. A fresh store still shows the
-// onboarding empty state. ?fragment=dash returns just the dashboard panel, so a
-// task action elsewhere can refresh it via the "tasks" SSE event.
-func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
-	if r.URL.Path != "/" {
-		http.NotFound(w, r)
+// handleHighlightCSS serves the Chroma syntax-highlight stylesheet with ETag
+// caching. The SPA links to it from index.html so note bodies get correct
+// syntax colours without embedding the CSS in every API response.
+func (s *Server) handleHighlightCSS(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("ETag", s.hlETag)
+	if r.Header.Get("If-None-Match") == s.hlETag {
+		w.WriteHeader(http.StatusNotModified)
 		return
 	}
-	snap := s.current()
-	empty := len(snap.notes) == 0 && (snap.doc == nil || len(snap.doc.Tasks()) == 0)
-	if r.URL.Query().Get("fragment") == "dash" {
-		s.renderDashboard(w, snap)
-		return
-	}
-	s.render(w, snap.notes, &pageData{
-		Title:   "nt",
-		Tree:    buildTree(snap.notes, ""),
-		Empty:   empty,
-		IsHome:  !empty,
-		Dash:    buildDashboard(snap),
-		CanEdit: s.allowEdit,
-		CSRF:    s.csrf,
-	})
-}
-
-func (s *Server) renderDashboard(w http.ResponseWriter, snap *snapshot) {
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	d := &pageData{Dash: buildDashboard(snap), CanEdit: s.allowEdit, CSRF: s.csrf}
-	if err := s.tmpl.ExecuteTemplate(w, "dashboard", d); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-	}
-}
-
-// buildDashboard projects the task doc into ready / doing / blocked queues
-// (urgency-sorted, the same selection `nt ready` uses) plus the latest activity.
-func buildDashboard(snap *snapshot) *dashboard {
-	d := &dashboard{NoteCount: len(snap.notes)}
-	if snap.doc != nil {
-		tasks := snap.doc.Tasks()
-		task.SortByUrgency(tasks)
-		blocked := task.BlockedIDs(tasks)
-		for _, t := range tasks {
-			if t.Done {
-				continue
-			}
-			d.OpenCount++
-			row := taskRow{ID: t.ID(), Text: cleanTaskText(t.Text), Due: t.Due(), Source: t.Source(), Tags: t.Tags()}
-			if p := t.Projects(); len(p) > 0 {
-				row.Project = p[0]
-			}
-			switch task.EffectiveStatus(t, blocked[t.ID()]) {
-			case "doing":
-				row.Status = "doing"
-				d.Doing = append(d.Doing, row)
-			case "blocked":
-				row.Status = "blocked"
-				row.Blocker = blockerText(tasks, t.ID())
-				d.Blocked = append(d.Blocked, row)
-			default:
-				row.Status = "open"
-				d.Ready = append(d.Ready, row)
-			}
-		}
-	}
-	if len(snap.activity) > 8 {
-		d.Recent = snap.activity[:8]
-	} else {
-		d.Recent = snap.activity
-	}
-	return d
-}
-
-// blockerText returns the description of an open task blocking id (the "why").
-func blockerText(tasks []*task.Task, id string) string {
-	for _, b := range tasks {
-		if !b.Done && b.Blocks() == id {
-			return cleanTaskText(b.Text)
-		}
-	}
-	return ""
-}
-
-// handleActivity renders the provenance timeline (grouped by date), optionally
-// filtered to one source. ?fragment=1 returns just the list for live refresh.
-func (s *Server) handleActivity(w http.ResponseWriter, r *http.Request) {
-	snap := s.current()
-	src := r.URL.Query().Get("source")
-	days := groupActivity(snap.activity, src)
-	if r.URL.Query().Get("fragment") == "1" {
-		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		if err := s.tmpl.ExecuteTemplate(w, "activitylist", &pageData{ActivityDays: days}); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-		}
-		return
-	}
-	s.render(w, snap.notes, &pageData{
-		Title:          "Activity",
-		Tree:           buildTree(snap.notes, ""),
-		IsActivity:     true,
-		ActivityDays:   days,
-		ActivitySource: src,
-		Sources:        snap.sources,
-	})
+	w.Header().Set("Content-Type", "text/css; charset=utf-8")
+	_, _ = io.WriteString(w, s.hlCSS)
 }
 
 // groupActivity buckets events by calendar date (newest first), optionally
@@ -484,84 +219,6 @@ func groupActivity(events []activityEvent, source string) []activityDay {
 		}
 	}
 	return days
-}
-
-func (s *Server) handleNote(w http.ResponseWriter, r *http.Request) {
-	handle, _ := url.PathUnescape(strings.TrimPrefix(r.URL.Path, "/n/"))
-	if handle == "" {
-		http.Redirect(w, r, "/", http.StatusFound)
-		return
-	}
-	if r.Method == http.MethodPost { // save (editing)
-		s.handleSave(w, r, handle)
-		return
-	}
-	snap := s.current()
-	notes := snap.notes
-	if r.URL.Query().Get("missing") != "1" {
-		if n := snap.findHandle(handle); n != nil {
-			if r.URL.Query().Get("preview") == "1" { // hover preview
-				w.Header().Set("Content-Type", "application/json")
-				_ = json.NewEncoder(w).Encode(map[string]string{"title": n.Title, "snippet": previewSnippet(n.Body)})
-				return
-			}
-			if r.URL.Query().Get("raw") == "1" { // raw source for the editor
-				if !s.allowEdit {
-					http.NotFound(w, r)
-					return
-				}
-				if data, err := store.ReadFile(n.Path); err == nil {
-					w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-					w.Header().Set("ETag", etag(data)) // editor sends this back as If-Match on save
-					_, _ = w.Write(data)
-				}
-				return
-			}
-			s.renderNote(w, n, snap)
-			return
-		}
-		if it, ok := links.Resolve(handle, snap.doc, notes); ok && it.Kind == "note" {
-			if n := snap.byPath[it.Path]; n != nil {
-				http.Redirect(w, r, "/n/"+url.PathEscape(noteHandle(n)), http.StatusFound)
-				return
-			}
-		}
-	}
-	s.renderMissing(w, handle, notes)
-}
-
-func (s *Server) renderNote(w http.ResponseWriter, n *note.Note, snap *snapshot) {
-	notes := snap.notes
-	body, err := renderBody(n.Body, snap.doc, notes)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	folder, file := splitRel(n.Rel)
-	var crumbs []string
-	if folder != "" {
-		crumbs = strings.Split(folder, "/")
-	}
-	prev, next := siblings(notes, n, folder)
-	s.render(w, notes, &pageData{
-		Title:       n.Title,
-		Tree:        buildTree(notes, noteHandle(n)),
-		IsNote:      true,
-		NoteTitle:   n.Title,
-		FolderPath:  folder,
-		FileName:    file,
-		Crumbs:      crumbs,
-		NoteSource:  n.Source,
-		NoteCreated: dateOnly(n.Created),
-		Tags:        n.Tags,
-		BodyHTML:    body,
-		Backlinks:   snap.backlinks[n.Path],
-		TaskRefs:    snap.taskRefs[n.Path],
-		Prev:        prev,
-		Next:        next,
-		CanEdit:     s.allowEdit,
-		CSRF:        s.csrf,
-	})
 }
 
 // handleSave writes an edited note back to disk (nt web --edit). It is guarded by
@@ -682,144 +339,6 @@ func siblings(notes []*note.Note, n *note.Note, folder string) (prev, next *link
 	return prev, next
 }
 
-func (s *Server) renderMissing(w http.ResponseWriter, handle string, notes []*note.Note) {
-	key, _ := links.NormalizeTarget(handle)
-	var cands []linkRow
-	for _, n := range notes {
-		if links.SuffixMatch(n.Rel, key) {
-			cands = append(cands, linkRow{URL: "/n/" + url.PathEscape(noteHandle(n)), Title: n.Title, Path: n.Rel})
-		}
-	}
-	title := "Note not found"
-	if len(cands) > 1 {
-		title = "Ambiguous link"
-	}
-	s.render(w, notes, &pageData{
-		Title:      title,
-		Tree:       buildTree(notes, ""),
-		IsState:    true,
-		StateTitle: title,
-		Target:     key,
-		Candidates: cands,
-	})
-}
-
-func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
-	q := strings.TrimSpace(r.URL.Query().Get("q"))
-	tag := strings.TrimSpace(r.URL.Query().Get("tag"))
-	_, notes := s.load()
-	if q == "" && tag == "" {
-		http.Redirect(w, r, "/", http.StatusFound)
-		return
-	}
-	byPath := make(map[string]*note.Note, len(notes))
-	for _, n := range notes {
-		byPath[n.Path] = n
-	}
-	seen := map[string]bool{}
-	var results []linkRow
-	add := func(n *note.Note) {
-		if n == nil || seen[noteHandle(n)] || (tag != "" && !contains(n.Tags, tag)) {
-			return
-		}
-		seen[noteHandle(n)] = true
-		results = append(results, linkRow{URL: "/n/" + url.PathEscape(noteHandle(n)), Title: n.Title, Path: n.Rel})
-	}
-	if q == "" { // tag-only: list every note carrying the tag
-		for _, n := range notes {
-			add(n)
-		}
-	} else {
-		ql := strings.ToLower(q)
-		for _, n := range notes { // title matches first (most relevant)
-			if strings.Contains(strings.ToLower(n.Title), ql) {
-				add(n)
-			}
-		}
-		if hits, err := search.Literal(q, s.eng.S.NotesDir()); err == nil {
-			for _, h := range hits {
-				add(byPath[h.Path])
-			}
-		}
-	}
-	if r.URL.Query().Get("json") == "1" { // search-as-you-type
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(results)
-		return
-	}
-	label := "Search: " + q
-	if q == "" {
-		label = "Tag: " + tag
-	}
-	s.render(w, notes, &pageData{
-		Title:       label,
-		Tree:        buildTree(notes, ""),
-		ShowResults: true,
-		SearchQuery: q,
-		SearchTag:   tag,
-		Results:     results,
-	})
-}
-
-// handleOrphans lists notes with no inbound links — navigation gaps to curate.
-func (s *Server) handleOrphans(w http.ResponseWriter, r *http.Request) {
-	snap := s.current()
-	notes := snap.notes
-	var results []linkRow
-	for _, n := range notes {
-		if !snap.linked[n.Path] {
-			results = append(results, linkRow{URL: "/n/" + url.PathEscape(noteHandle(n)), Title: n.Title, Path: n.Rel})
-		}
-	}
-	s.render(w, notes, &pageData{Title: "Orphans", Tree: buildTree(notes, ""), ShowResults: true, Results: results})
-}
-
-// handleTags lists the tag vocabulary with counts; each links to its filtered set.
-func (s *Server) handleTags(w http.ResponseWriter, r *http.Request) {
-	doc, notes := s.load()
-	counts := map[string]int{}
-	for _, n := range notes {
-		for _, t := range n.Tags {
-			counts[t]++
-		}
-	}
-	if doc != nil {
-		for _, tk := range doc.Tasks() {
-			for _, t := range tk.Tags() {
-				counts[t]++
-			}
-		}
-	}
-	names := make([]string, 0, len(counts))
-	for k := range counts {
-		names = append(names, k)
-	}
-	sort.Strings(names)
-	rows := make([]tagRow, 0, len(names))
-	for _, k := range names {
-		rows = append(rows, tagRow{Name: k, Count: counts[k], URL: "/search?tag=" + url.QueryEscape(k)})
-	}
-	s.render(w, notes, &pageData{Title: "Tags", Tree: buildTree(notes, ""), IsTags: true, TagRows: rows})
-}
-
-// handleTasks is the agent-memory dashboard: tasks grouped by status,
-// urgency-sorted. With ?fragment=1 it returns just the task-list fragment (for
-// htmx swaps and SSE-driven refresh); otherwise the full page.
-func (s *Server) handleTasks(w http.ResponseWriter, r *http.Request) {
-	snap := s.current()
-	if r.URL.Query().Get("fragment") == "1" {
-		s.renderTaskList(w, snap)
-		return
-	}
-	s.render(w, snap.notes, &pageData{
-		Title:      "Tasks",
-		Tree:       buildTree(snap.notes, ""),
-		IsTasks:    true,
-		TaskGroups: buildTaskGroups(snap.doc),
-		CanEdit:    s.allowEdit,
-		CSRF:       s.csrf,
-	})
-}
 
 // buildTaskGroups groups tasks by status (urgency-sorted within each), in the
 // display order doing → open → blocked → done.
@@ -846,25 +365,6 @@ func buildTaskGroups(doc *task.Doc) []taskGroup {
 	return groups
 }
 
-// renderTaskList writes just the #tasklist fragment.
-func (s *Server) renderTaskList(w http.ResponseWriter, snap *snapshot) {
-	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	d := &pageData{TaskGroups: buildTaskGroups(snap.doc), CanEdit: s.allowEdit, CSRF: s.csrf}
-	if err := s.tmpl.ExecuteTemplate(w, "tasklist", d); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-	}
-}
-
-// taskWrite is the shared write path for the task action endpoints: it enforces
-// the --edit + CSRF gate, marks tasks.txt as a self-write (so the watcher
-// doesn't also broadcast a full reload), runs fn through mutate.Engine.Apply
-// (lock + re-read + undo journal), then refreshes the read-model, nudges other
-// clients ("tasks"), and returns the updated fragment.
-func (s *Server) taskWrite(w http.ResponseWriter, r *http.Request, op string, fn func(d *task.Doc, rec *mutate.Recorder) error) {
-	if s.doTaskWrite(w, r, op, fn) {
-		s.renderTaskList(w, s.current())
-	}
-}
 
 // doTaskWrite enforces the --edit + CSRF gate, marks tasks.txt as a self-write
 // (so the watcher doesn't also broadcast a full reload), runs fn through
@@ -899,105 +399,6 @@ func resolveTask(d *task.Doc, r *http.Request) (*task.Task, error) {
 	return nil, fmt.Errorf("no such task %q", id)
 }
 
-func (s *Server) handleTaskDone(w http.ResponseWriter, r *http.Request) {
-	s.taskWrite(w, r, "done", func(d *task.Doc, rec *mutate.Recorder) error {
-		t, err := resolveTask(d, r)
-		if err != nil {
-			return err
-		}
-		mutate.Complete(d, rec, t, mutate.Today()) // spawns the next if recurring
-		return nil
-	})
-}
-
-func (s *Server) handleTaskReopen(w http.ResponseWriter, r *http.Request) {
-	s.taskWrite(w, r, "reopen", func(d *task.Doc, rec *mutate.Recorder) error {
-		t, err := resolveTask(d, r)
-		if err != nil {
-			return err
-		}
-		rec.Before(t)
-		t.SetDone(false, "")
-		t.SetState("open")
-		return nil
-	})
-}
-
-func (s *Server) handleTaskStatus(w http.ResponseWriter, r *http.Request) {
-	status := r.FormValue("status")
-	s.taskWrite(w, r, "update", func(d *task.Doc, rec *mutate.Recorder) error {
-		t, err := resolveTask(d, r)
-		if err != nil {
-			return err
-		}
-		rec.Before(t)
-		switch status {
-		case "open":
-			t.SetDone(false, "")
-			t.SetState("open")
-		case "doing", "blocked":
-			t.SetState(status)
-		case "done":
-			mutate.Complete(d, rec, t, mutate.Today())
-		default:
-			return fmt.Errorf("invalid status %q", status)
-		}
-		return nil
-	})
-}
-
-func (s *Server) handleTaskDelete(w http.ResponseWriter, r *http.Request) {
-	s.taskWrite(w, r, "delete", func(d *task.Doc, rec *mutate.Recorder) error {
-		t, err := resolveTask(d, r)
-		if err != nil {
-			return err
-		}
-		before, ok := d.Remove(t.ID())
-		if !ok {
-			return fmt.Errorf("no such task")
-		}
-		rec.Removed(t.ID(), before)
-		return nil
-	})
-}
-
-func (s *Server) handleTaskNew(w http.ResponseWriter, r *http.Request) {
-	text := strings.TrimSpace(r.FormValue("text"))
-	if text == "" {
-		http.Error(w, "task text is required", http.StatusBadRequest)
-		return
-	}
-	pri, due, project := r.FormValue("pri"), r.FormValue("due"), strings.TrimSpace(r.FormValue("project"))
-	priByte, okP := byte(0), true
-	if pri != "" {
-		priByte, okP = dateparse.Priority(pri)
-	}
-	dueVal, okD := "", true
-	if due != "" {
-		dueVal, okD = dateparse.Date(due)
-	}
-	if !okP || !okD {
-		http.Error(w, "invalid priority or due date", http.StatusBadRequest)
-		return
-	}
-	s.taskWrite(w, r, "add", func(d *task.Doc, rec *mutate.Recorder) error {
-		txt := text
-		if project != "" {
-			txt += " +" + project
-		}
-		t := task.New(txt)
-		if priByte != 0 {
-			t.SetPriority(priByte)
-		}
-		if dueVal != "" {
-			t.SetKey("due", dueVal)
-		}
-		t.SetKey("src", "web") // provenance: created from the GUI
-		d.Append(t)
-		rec.Added(t)
-		return nil
-	})
-}
 
 // graphNode/graphLink/graphData are the JSON model the client force-directed
 // canvas renders. Nodes carry folder/source/tags so the view can color and
@@ -1018,15 +419,6 @@ type graphLink struct {
 type graphData struct {
 	Nodes []graphNode `json:"nodes"`
 	Links []graphLink `json:"links"`
-}
-
-// handleGraph renders the note link graph as an interactive force-directed
-// canvas. The adjacency is the snapshot's precomputed forward map; the client
-// (graph.js) runs the layout. Replaces the old Mermaid graph, which didn't pan/
-// zoom and visually collapsed past a few dozen nodes.
-func (s *Server) handleGraph(w http.ResponseWriter, r *http.Request) {
-	snap := s.current()
-	s.render(w, snap.notes, &pageData{Title: "Graph", Tree: buildTree(snap.notes, ""), IsGraph: true, GraphData: buildGraphData(snap)})
 }
 
 func buildGraphData(snap *snapshot) *graphData {
@@ -1083,39 +475,6 @@ func contains(ss []string, want string) bool {
 	return false
 }
 
-func (s *Server) handleStatic(w http.ResponseWriter, r *http.Request) {
-	name := strings.TrimPrefix(r.URL.Path, "/static/")
-	a, ok := staticAssets[name]
-	if !ok {
-		http.NotFound(w, r)
-		return
-	}
-	// Revalidate cheaply: assets are fixed for the life of the binary, so a
-	// content-hash ETag lets the browser 304 instead of re-downloading them every
-	// navigation. no-cache keeps it correct across an upgrade (new bytes → new ETag).
-	w.Header().Set("Cache-Control", "no-cache")
-	if et := s.etags[name]; et != "" {
-		w.Header().Set("ETag", et)
-		if r.Header.Get("If-None-Match") == et {
-			w.WriteHeader(http.StatusNotModified)
-			return
-		}
-	}
-	w.Header().Set("Content-Type", a.contentType)
-	if a.path == "" { // generated highlight.css
-		_, _ = io.WriteString(w, s.hlCSS)
-		return
-	}
-	if a.gzip {
-		w.Header().Set("Content-Encoding", "gzip") // embedded pre-gzipped (~900 KB vs 3.3 MB)
-	}
-	b, err := assetsFS.ReadFile(a.path)
-	if err != nil {
-		http.Error(w, "asset missing", http.StatusInternalServerError)
-		return
-	}
-	_, _ = w.Write(b)
-}
 
 // ---- live reload (SSE + fsnotify) -----------------------------------------
 
@@ -1355,24 +714,6 @@ func sortTree(n *treeNode) {
 			sortTree(c)
 		}
 	}
-}
-
-var mdNoise = strings.NewReplacer("[[", "", "]]", "", "#", "", "*", "", "`", "", ">", "")
-
-// previewSnippet builds a short plain-text excerpt of a note body for the hover
-// popover: drops a leading H1, strips light Markdown noise, collapses whitespace.
-func previewSnippet(body string) string {
-	s := strings.TrimSpace(body)
-	if strings.HasPrefix(s, "# ") {
-		if i := strings.IndexByte(s, '\n'); i >= 0 {
-			s = s[i+1:]
-		}
-	}
-	s = strings.Join(strings.Fields(mdNoise.Replace(s)), " ")
-	if len(s) > 220 {
-		s = s[:220] + "…"
-	}
-	return s
 }
 
 // dateOnly trims an RFC3339 timestamp to its YYYY-MM-DD date for display.

@@ -29,11 +29,10 @@ func cmdWeb(args []string) int {
 	port := fs.Int("port", 0, "port to listen on (0 = pick a free one)")
 	host := fs.String("host", "127.0.0.1", "bind address (localhost only by default)")
 	edit := fs.Bool("edit", false, "allow editing notes in the browser (default: read-only)")
-	spa := fs.Bool("spa", false, "serve the new Svelte SPA instead of the server-rendered UI (preview)")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
-	if err := web.Serve(Version, fmt.Sprintf("%s:%d", *host, *port), *edit, *spa); err != nil {
+	if err := web.Serve(Version, fmt.Sprintf("%s:%d", *host, *port), *edit); err != nil {
 		return fail(err)
 	}
 	return 0

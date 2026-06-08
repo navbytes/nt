@@ -30,6 +30,7 @@
   },
   "dependencies": {
     "@tanstack/svelte-query": "^5.90.2",
-    "force-graph": "^1.51.4"
+    "force-graph": "^1.51.4",
+    "mermaid": "^11.15.0"
   }
 }

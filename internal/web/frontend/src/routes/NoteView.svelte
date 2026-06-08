@@ -54,6 +54,22 @@
     history.replaceState(null, "", "#" + id);
     activeId = id;
   }
+
+  // Run Mermaid on the rendered note body after mount / on body change.
+  $effect(() => {
+    const html = $noteQ.data?.bodyHTML;
+    if (!html) return;
+    // Deferred so the DOM has been updated before we query it.
+    const id = setTimeout(async () => {
+      const el = document.querySelector(".prose");
+      if (!el || !el.querySelector(".mermaid")) return;
+      const mermaid = (await import("mermaid")).default;
+      const dark = document.documentElement.getAttribute("data-theme") === "dark";
+      mermaid.initialize({ startOnLoad: false, theme: dark ? "dark" : "default" });
+      await mermaid.run({ nodes: Array.from(el.querySelectorAll(".mermaid")) as HTMLElement[] });
+    }, 0);
+    return () => clearTimeout(id);
+  });
 </script>
 
 {#if editing}

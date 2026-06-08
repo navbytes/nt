@@ -51,6 +51,15 @@ type activityEvent struct {
 	URL    string    `json:"url,omitempty"` // /n/<id> for notes; "" for tasks (no task page yet)
 }
 
+// flatNotes returns the flat ⌘K palette index for the snapshot.
+func flatNotes(notes []*note.Note) []linkRow {
+	out := make([]linkRow, 0, len(notes))
+	for _, n := range notes {
+		out = append(out, linkRow{URL: "/n/" + url.PathEscape(noteHandle(n)), Title: n.Title, Path: n.Rel})
+	}
+	return out
+}
+
 // buildSnapshot reads the store once and precomputes the link graph. The
 // resolution it uses (links.Resolve over the in-memory notes/doc) is the exact
 // same resolution the CLI/TUI/MCP use, so the rendered pages are byte-identical
