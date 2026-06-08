@@ -81,15 +81,19 @@
   function scopedData(): { nodes: FGNode[]; links: FGLink[] } {
     const data = $graphQ.data;
     if (!data) return { nodes: [], links: [] };
-    const fg = toForceGraph(data);
-    if (view.mode === "local" && view.rootId) {
-      const keep = nodesWithinDepth(view.rootId, adjacency, view.depth);
-      return {
-        nodes: fg.nodes.filter((n) => keep.has(n.id)),
-        links: fg.links.filter((l) => keep.has(linkEndId(l.source)) && keep.has(linkEndId(l.target))),
-      };
+    let { nodes, links } = toForceGraph(data);
+    // "Show tasks" off → drop task nodes (and any edge touching one) entirely.
+    if (!view.showTasks) {
+      nodes = nodes.filter((n) => n.kind !== "task");
+      const keep = new Set(nodes.map((n) => n.id));
+      links = links.filter((l) => keep.has(linkEndId(l.source)) && keep.has(linkEndId(l.target)));
     }
-    return fg;
+    if (view.mode === "local" && view.rootId) {
+      const within = nodesWithinDepth(view.rootId, adjacency, view.depth);
+      nodes = nodes.filter((n) => within.has(n.id));
+      links = links.filter((l) => within.has(linkEndId(l.source)) && within.has(linkEndId(l.target)));
+    }
+    return { nodes, links };
   }
 
   // recompute rebuilds the color + bright sets once per relevant change.
@@ -425,7 +429,7 @@
   $effect(() => {
     const data = $graphQ.data;
     // establish dependencies
-    void [view.mode, view.depth, view.rootId, data];
+    void [view.mode, view.depth, view.rootId, view.showTasks, data];
     if (!graph || !data) return;
     feedHook?.();
     graph.graphData(scopedData());

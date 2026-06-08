@@ -301,7 +301,7 @@ func toGraph(g *graphData) apitypes.GraphData {
 	nodes := make([]apitypes.GraphNode, len(g.Nodes))
 	for i, n := range g.Nodes {
 		nodes[i] = apitypes.GraphNode{
-			ID: n.ID, Title: n.Title, URL: n.URL, Folder: n.Folder,
+			ID: n.ID, Kind: n.Kind, Title: n.Title, URL: n.URL, Folder: n.Folder,
 			Source: n.Source, Tags: n.Tags, Deg: n.Deg,
 		}
 	}

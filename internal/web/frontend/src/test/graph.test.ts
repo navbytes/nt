@@ -3,7 +3,7 @@ import { toForceGraph, buildAdjacency, nodesWithinDepth, linkEndId } from "../li
 import type { GraphData } from "../lib/api-types";
 
 function node(id: string, folder = "", deg = 0, tags: string[] = [], source = "cli") {
-  return { id, title: id.toUpperCase(), url: `/n/${id}`, folder, source, tags, deg };
+  return { id, kind: "note", title: id.toUpperCase(), url: `/n/${id}`, folder, source, tags, deg };
 }
 
 describe("toForceGraph", () => {

@@ -36,6 +36,7 @@
   ];
 
   const shapeOptions: { v: ShapeBy; label: string }[] = [
+    { v: "kind", label: "Kind (note/task)" },
     { v: "source", label: "Source" },
     { v: "folder", label: "Folder" },
     { v: "tag", label: "Tag" },
@@ -162,6 +163,7 @@
       {/if}
 
       <div class="gctl__row gctl__inline">
+        <label><input type="checkbox" bind:checked={view.showTasks} /> Show tasks</label>
         <label><input type="checkbox" bind:checked={view.hideOrphans} /> Hide orphans</label>
         {#if hasFilters}<button class="linklike" onclick={resetFilters}>Clear filters</button>{/if}
       </div>

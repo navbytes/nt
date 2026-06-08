@@ -26,6 +26,7 @@ import (
 
 	"github.com/fsnotify/fsnotify"
 
+	"github.com/navbytes/nt/internal/links"
 	"github.com/navbytes/nt/internal/mutate"
 	"github.com/navbytes/nt/internal/note"
 	"github.com/navbytes/nt/internal/store"
@@ -419,9 +420,10 @@ func resolveTask(d *task.Doc, r *http.Request) (*task.Task, error) {
 // canvas renders. Nodes carry folder/source/tags so the view can color and
 // filter; links index into Nodes.
 type graphNode struct {
-	ID     string   `json:"id"`     // note handle (for /n/<id>)
+	ID     string   `json:"id"`     // note handle (/n/<id>) or task ULID
+	Kind   string   `json:"kind"`   // "note" | "task"
 	Title  string   `json:"title"`  //
-	URL    string   `json:"url"`    //
+	URL    string   `json:"url"`    // /n/<id> for notes; /tasks for tasks
 	Folder string   `json:"folder"` // top-level folder (color/filter grouping)
 	Source string   `json:"source"` // provenance (claude/cli/web/…)
 	Tags   []string `json:"tags"`   //
@@ -437,16 +439,46 @@ type graphData struct {
 }
 
 func buildGraphData(snap *snapshot) *graphData {
-	idx := make(map[string]int, len(snap.notes))
-	g := &graphData{Nodes: make([]graphNode, 0, len(snap.notes))}
-	for i, n := range snap.notes {
-		idx[n.Path] = i
+	g := &graphData{}
+	idx := make(map[string]int) // node key ("note:"+path / "task:"+id) → index
+
+	addNode := func(key string, n graphNode) int {
+		if i, ok := idx[key]; ok {
+			return i
+		}
+		i := len(g.Nodes)
+		idx[key] = i
+		g.Nodes = append(g.Nodes, n)
+		return i
+	}
+
+	seen := map[[2]int]bool{} // undirected edge dedup
+	link := func(a, b int) {
+		if a == b {
+			return
+		}
+		key := [2]int{a, b}
+		if a > b {
+			key = [2]int{b, a}
+		}
+		if seen[key] {
+			return
+		}
+		seen[key] = true
+		g.Links = append(g.Links, graphLink{S: a, T: b})
+		g.Nodes[a].Deg++
+		g.Nodes[b].Deg++
+	}
+
+	// Note nodes (keyed by path so the index can't collide with task ids).
+	for _, n := range snap.notes {
 		folder, _ := splitRel(n.Rel)
 		if j := strings.IndexByte(folder, '/'); j >= 0 {
 			folder = folder[:j] // top-level folder only
 		}
-		g.Nodes = append(g.Nodes, graphNode{
+		addNode("note:"+n.Path, graphNode{
 			ID:     noteHandle(n),
+			Kind:   "note",
 			Title:  n.Title,
 			URL:    "/n/" + url.PathEscape(noteHandle(n)),
 			Folder: folder,
@@ -454,28 +486,52 @@ func buildGraphData(snap *snapshot) *graphData {
 			Tags:   n.Tags,
 		})
 	}
-	seen := map[[2]int]bool{} // undirected dedup
+
+	// Note ↔ note edges (resolved wikilinks, precomputed in snap.fwd).
 	for path, outs := range snap.fwd {
-		from, ok := idx[path]
+		from, ok := idx["note:"+path]
 		if !ok {
 			continue
 		}
 		for _, tgt := range outs {
-			to, ok := idx[tgt]
-			if !ok || to == from {
+			if to, ok := idx["note:"+tgt]; ok {
+				link(from, to)
+			}
+		}
+	}
+
+	// Task → note edges: a task that references ≥1 note joins the graph (tasks
+	// with no note links are omitted, so the graph stays about connected memory).
+	if snap.doc != nil {
+		for _, t := range snap.doc.Tasks() {
+			var targets []int
+			tseen := map[int]bool{}
+			for _, raw := range t.Links() {
+				it, ok := links.Resolve(raw, snap.doc, snap.notes)
+				if !ok || it.Kind != "note" {
+					continue
+				}
+				to, ok := idx["note:"+it.Path]
+				if !ok || tseen[to] {
+					continue
+				}
+				tseen[to] = true
+				targets = append(targets, to)
+			}
+			if len(targets) == 0 {
 				continue
 			}
-			key := [2]int{from, to}
-			if from > to {
-				key = [2]int{to, from}
+			ti := addNode("task:"+t.ID(), graphNode{
+				ID:     t.ID(),
+				Kind:   "task",
+				Title:  cleanTaskText(t.Text),
+				URL:    "/tasks",
+				Source: t.Source(),
+				Tags:   t.Tags(),
+			})
+			for _, to := range targets {
+				link(ti, to)
 			}
-			if seen[key] {
-				continue
-			}
-			seen[key] = true
-			g.Links = append(g.Links, graphLink{S: from, T: to})
-			g.Nodes[from].Deg++
-			g.Nodes[to].Deg++
 		}
 	}
 	return g

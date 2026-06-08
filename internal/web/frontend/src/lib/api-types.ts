@@ -179,10 +179,11 @@ export interface OrphansResponse {
   notes: NoteLink[];
 }
 /**
- * GraphNode is one note in the knowledge graph (Deg = link degree, for sizing).
+ * GraphNode is one entity in the knowledge graph (Deg = link degree, for sizing).
  */
 export interface GraphNode {
   id: string;
+  kind: string; // "note" | "task"
   title: string;
   url: string;
   folder: string;

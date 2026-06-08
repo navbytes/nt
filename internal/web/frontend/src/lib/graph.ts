@@ -7,6 +7,7 @@ import type { GraphData } from "./api-types";
 
 export interface FGNode {
   id: string;
+  kind: string; // "note" | "task"
   title: string;
   url: string;
   folder: string;
@@ -28,6 +29,7 @@ export interface FGLink {
 export function toForceGraph(data: GraphData): { nodes: FGNode[]; links: FGLink[] } {
   const nodes: FGNode[] = data.nodes.map((n) => ({
     id: n.id,
+    kind: n.kind || "note",
     title: n.title,
     url: n.url,
     folder: n.folder,

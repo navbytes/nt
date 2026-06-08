@@ -9,6 +9,15 @@ export type ShapeKind = "circle" | "diamond" | "square" | "triangle" | "hexagon"
 
 const SHAPES: ShapeKind[] = ["circle", "diamond", "square", "triangle", "hexagon", "star"];
 
+// Node-kind gets a FIXED, meaningful mapping (not the rotating assignment) so a
+// task is always a diamond, a note always a circle, etc.
+const KIND_SHAPE: Record<string, ShapeKind> = {
+  note: "circle",
+  task: "diamond",
+  tag: "triangle",
+  project: "square",
+};
+
 const assigned = new Map<string, ShapeKind>();
 
 function shapeForKey(key: string): ShapeKind {
@@ -24,6 +33,8 @@ function shapeForKey(key: string): ShapeKind {
 // (first tag when shaping by tag; a note can carry many).
 export function shapeValue(n: FGNode, shapeBy: ShapeBy): string {
   switch (shapeBy) {
+    case "kind":
+      return n.kind;
     case "tag":
       return n.tags[0] ?? "";
     case "folder":
@@ -35,11 +46,17 @@ export function shapeValue(n: FGNode, shapeBy: ShapeBy): string {
   }
 }
 
+// shapeFor maps a dimension value to a shape: fixed for kind, stable-rotating
+// for every other dimension.
+function shapeFor(shapeBy: ShapeBy, value: string): ShapeKind {
+  if (!value) return "circle";
+  if (shapeBy === "kind") return KIND_SHAPE[value] ?? "circle";
+  return shapeForKey(shapeBy + ":" + value);
+}
+
 export function nodeShape(n: FGNode, shapeBy: ShapeBy): ShapeKind {
   if (shapeBy === "none") return "circle";
-  const v = shapeValue(n, shapeBy);
-  if (!v) return "circle"; // uncategorised → the neutral shape
-  return shapeForKey(shapeBy + ":" + v);
+  return shapeFor(shapeBy, shapeValue(n, shapeBy));
 }
 
 export function shapeLegendEntries(
@@ -54,7 +71,7 @@ export function shapeLegendEntries(
     .map((value) => ({
       value,
       label: value || "(none)",
-      shape: value ? shapeForKey(shapeBy + ":" + value) : "circle",
+      shape: shapeFor(shapeBy, value),
     }));
 }
 
