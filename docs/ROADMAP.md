@@ -2,93 +2,80 @@
 
 North star: **make nt the best note-taking and task-manager app for both web and TUI** — without breaking the locked design (plain-text files, todo.txt, ULID-keyed undoable writes, AI-memory thesis; see [SPEC.md](../SPEC.md)).
 
-This roadmap synthesizes four expert audits (web UX, TUI, task-management product, and Go core/architecture). Items are tagged by surface and effort (S < ½ day · M ≈ 1–2 days · L > 2 days). Most additions are **losslessly representable** in the existing todo.txt model as `key:value` conventions.
+This roadmap synthesizes four expert audits (web UX, TUI, task-management product, and Go core/architecture). Items are tagged by surface and effort (S < ½ day · M ≈ 1–2 days · L > 2 days) and keep their original F#/T#/W#/U#/E# ids for continuity.
 
-## Strategic read
+## Strategic read (updated)
 
-nt's foundation is genuinely strong: clean ULID-keyed mutation engine, undo journal, provenance/source field, MCP + AI-sync, a just-shipped Obsidian-class graph view. The gap to "best app" is concentrated in **table-stakes task + editing flows**, and several capabilities are **already built in the backend but unused by the surfaces** (`dateparse`, `apiTaskStatus`/`apiTaskDelete`, `Task.Blocker`, `parent:`). The single biggest theme across three of four audits: **nt is a task *list*, not a task *manager*** — no start/defer date, no Today/Agenda view, and quick-add throws away structure.
+The original gap — "nt is a task *list*, not a task *manager*" — is **closed**: start/defer dates, Today/Agenda, recurrence, sub-tasks, dependency hardening, and structured quick-add all shipped across CLI/TUI/web/MCP. The **web is now essentially feature-complete** (real CodeMirror editor, ranked search, daily-notes journal, mobile shell, command palette, a11y, PWA) and the read-model is **incremental** (scales past the snapshot-rebuild cliff). The remaining work has shifted to three pockets: **(1) the TUI**, now the thinnest surface; **(2) a correctness/quality tail** (a `Resolve` ambiguity bug, lock/undo tests); and **(3) architecture** (shared query layer, config file, god-file splits) that pays down drift risk rather than adding features.
 
-## ✅ Shipped (as of this push — 16 merged PRs)
+## ✅ Shipped
 
-- **Foundation:** F1 undo correctness (post-image validation, no-resurrect, durable ordering) + store dir-fsync + first `store` tests; F7 recursive note watch; T3 dependency cycle detection + dangling-edge `doctor` checks (no more invisible deadlock); CI/security (fixed broken vuln-scan, patched stdlib CVEs via Go 1.25.11, path-injection hardening).
-- **Tasks:** P1 natural-language quick-add across CLI/TUI/web/MCP; P2 start/defer `t:` + `nt today`/`nt agenda` + hide-future-start; T2 recurrence correctness (strict vs floating, roll-forward, month clamp) + `nt skip`; T5 bulk `update`; T1 `nt list --tree` sub-tasks; T9 full A–Z priority; dateparse tests.
-- **Web:** P3 create-notes-from-web; P4 interactive task rows + agenda (date-grouped) view; W2 ranked search + highlighted snippets; W5 command palette (all routes + actions + listbox a11y); PWA + app icon; stable default port.
-- **TUI:** U1 live filter; U5 set-doing key; add-from-notes-tab fix.
+**Foundation / correctness**
+- **F1** undo correctness — post-image validation, no-resurrect, durable ordering + store dir-fsync + first `store` tests
+- **F3** archive atomicity — `doctor` reconciles cross-file (crash-leftover) duplicates ([#25](https://github.com/navbytes/nt/pull/25))
+- **F6** surface store read errors (red banner) instead of rendering an empty store ([#28](https://github.com/navbytes/nt/pull/28))
+- **F7** recursive note-folder watch
+- **T3** dependency hardening — cycle detection (no invisible deadlock) + dangling-edge `doctor` checks ([#19](https://github.com/navbytes/nt/pull/19))
+- CI/security — fixed the broken vuln-scan action, patched reachable stdlib CVEs (Go 1.25.11), path-injection hardening on note create
 
-## Next up
+**Tasks → a real planner**
+- **P1** natural-language quick-add across CLI/TUI/web/MCP
+- **P2** start/defer `t:` + `nt today` / `nt agenda` + hide-future-start
+- **T1** sub-tasks: `parent:` read, `nt list --tree`, progress rollup
+- **T2** recurrence correctness (strict vs floating, roll-forward, month-end clamp) + `nt skip`
+- **T5** bulk `nt update`
+- **T8** time-of-day on due dates (`--due "fri 5pm"`, ISO) ([#26](https://github.com/navbytes/nt/pull/26))
+- **T9** full A–Z priority model
 
-| # | Item | Surface | Effort |
-|---|------|---------|--------|
-| W1 | **CodeMirror 6 editor** — highlighted source + `[[` autocomplete (keep server goldmark render) | web | L |
-| W3 | **Daily notes / journal** — makes the AI-memory positioning a visible product | web | L |
-| W4 | **Mobile shell** — collapsible drawer (no mobile nav today) | web | M |
-| W7 | **a11y pass (beyond the palette)** — focus trap, skip-link, reduced-motion, aria-labels | web | M |
-| U2/U3 | **TUI command palette + fuzzy jumper** (fix `L` multi-link picker) | tui | M |
-| U8 | **TUI light theme** | tui | M |
-| T8 | **Time-of-day on dates + reminder hooks** | core | M |
-| F3/F4/F6 | Archive atomicity; TUI self-write suppression; surface read errors | core/tui | M |
-| E1/E2 | **Incremental read-model + persisted search index** — the scale work (>10k notes) | infra | L |
-| E3/E5 | Shared Query DSL across surfaces; `$NT_DIR/config.toml` | infra | M |
+**Web** (SPA is the default; old htmx UI removed)
+- Obsidian-class force-graph; **P3** create-notes-from-web; **P4** interactive task rows + agenda view
+- **W1** CodeMirror 6 editor — markdown highlighting + `[[` wikilink autocomplete ([#33](https://github.com/navbytes/nt/pull/33))
+- **W2** ranked search + highlighted snippets ([#21](https://github.com/navbytes/nt/pull/21))
+- **W3** daily notes / journal — web route + `nt journal` ([#30](https://github.com/navbytes/nt/pull/30))
+- **W4** mobile shell — hamburger + off-canvas drawer ([#23](https://github.com/navbytes/nt/pull/23))
+- **W5** command palette — all routes + actions + listbox a11y ([#20](https://github.com/navbytes/nt/pull/20))
+- **W7** a11y pass — skip-link, palette focus-trap, reduced-motion, aria-labels ([#24](https://github.com/navbytes/nt/pull/24))
+- PWA + app icon; stable default port
 
-## Foundation / correctness (core audit)
+**TUI**
+- **U1** live filter (search-as-you-type); **U5** set-doing from the keyboard; **U8** light theme via adaptive palette ([#29](https://github.com/navbytes/nt/pull/29)); add-from-notes-tab bug fix
 
-- **F2 — Test the safety-critical core**: `lock`, `store`, `undo` had ~zero tests. (store tests landed with F1; lock + concurrent add/done/archive/undo next.) — M
-- **F3 — Archive atomicity** (C4): crash between done.txt and tasks.txt renames duplicates tasks; make atomic or reconcile cross-file in `doctor`. — M
-- **F4 — TUI self-write suppression** (C6, SPEC §6.5): TUI watcher reloads its own writes (flicker); add mtime/ignore-next. — M
-- **F5 — `Resolve` prefix-only** (C5): currently matches prefix *and* suffix → ambiguous handles can hit the wrong task. — S
-- **F6 — Stop swallowing read errors** (`notes, _ :=`, `doc, _ :=`): a corrupt store renders as "empty". — S
-- **F7 — Recursive note-folder watch**: `watch.go` is non-recursive; foldered notes don't live-refresh. — S
+**Infrastructure**
+- **E1** incremental read-model — mtime parse cache; a 2000-note rebuild dropped 37.9ms → 6.7ms ([#34](https://github.com/navbytes/nt/pull/34))
+- **E2** in-memory search — title-ranked + snippets with no per-query ripgrep ([#34](https://github.com/navbytes/nt/pull/34))
 
-## Task management (product audit)
+## ⬜ Remaining
 
-- **T1 — Sub-tasks**: `parent:` is stored but never read. Indented display, `--tree`, progress rollup, carry through recurrence. — M
-- **T2 — Recurrence correctness**: fixed-vs-floating (`rec:+3d`), roll-forward past today (no overdue spawn), month-end clamp, `nt skip`. — S/M
-- **T3 — Dependency hardening**: `dep:`/blockedBy from the dependent side, cycle detection, `doctor` dangling-edge check, show-blocked-greyed. — M
-- **T4 — Saved smart views**: `nt view save/recall`; presets (today, overdue, stuck). Config file, not tasks.txt. — S/M
-- **T5 — Bulk ops on all mutating verbs** (update/rm/reschedule/retag accept many ids). — S
-- **T6 — Time estimates + tracking** (`est:`, `nt start/stop` → `spent:`). — M
-- **T7 — Weekly-review workflow** (`nt review`: stuck projects, stale, undated). — M
-- **T8 — Time-of-day on dates + reminder hooks** (`due:…T17:00`, `nt agenda --json` for cron/launchd). — M
-- **T9 — Multiple projects + full priority model** (JSON drops `Projects()[0]` only; A–Z collapsed to A/B/C). — S
+| # | Item | Surface | Effort | Status |
+|---|------|---------|--------|--------|
+| **F5** | `Resolve` matches prefix **and** suffix → an ambiguous handle can hit the wrong task | core | S | ⚠️ correctness bug, untouched |
+| F2 | finish safety-critical tests: `lock` + concurrent add/done/archive/undo (store done) | core | M | partial |
+| F4 | TUI self-write suppression (watcher reloads its own writes → flicker) | tui | M | not started |
+| T4 | saved smart views (`nt view save/recall`; presets) | core/cli | S/M | not started |
+| T5 | bulk ops on the remaining verbs (`rm`/`retag`/`reschedule`; `update` done) | cli | S | partial |
+| T6 | time estimates + tracking (`est:`, `nt start/stop` → `spent:`) | core | M | not started |
+| T7 | weekly review (`nt review`: stuck / stale / undated) | cli | M | not started |
+| W2 | add **tasks** to search results (notes are ranked already) | web | S | partial |
+| W6 | slash commands in the editor (now unblocked by W1) | web | M | not started |
+| W8 | frontmatter/properties editing + backlinks-while-editing | web | M | not started |
+| U2 | TUI command palette (`:` ex-line, fuzzy action list) | tui | M | not started |
+| U3 | fuzzy "go to anything" jumper + fix `L` multi-link picker | tui | M | not started |
+| U4 | fast note capture + in-TUI body textarea (today: two-step `$EDITOR`) | tui | M | not started |
+| U6 | vim counts + `n`/`N` (needs a keymap decision — `1`/`2`/`3` are tab keys) | tui | M | not started |
+| U7 | add `[[wikilink]]` / create-note-from-link in the TUI | tui | M | not started |
+| U9 | explicit redo key + undo affordance | tui | S | not started |
+| U1 | rank the live filter fuzzily, not by substring (filter itself shipped) | tui | S | partial |
+| E2 | **persisted** on-disk index (cold start still re-reads all; in-memory shipped) | infra | L | partial |
+| E3 | shared Query/DTO layer across cli/tui/web/mcp (each re-derives grouping today) | infra | M | not started |
+| E4 | pagination/limits on graph + ⌘K + search payloads | infra | M | not started |
+| E5 | config file (`$NT_DIR/config.toml`: themes, keybindings, saved views) | infra | M | not started |
+| E6 | split god-files (`cli/commands.go`, `web/server.go`) | infra | M | not started |
 
-## Web (web UX audit)
+## Suggested sequencing for what's left
 
-- **W1 — CodeMirror 6 editor** (highlighted source + `[[` autocomplete; keep server goldmark render). CM6 edits the buffer directly → no markdown-fidelity risk (rules out TipTap/Milkdown). — L
-- **W2 — Ranked search + highlighted snippets + task search** (current search is an unranked title list). — M
-- **W3 — Daily notes / journal** — makes the AI-memory positioning a visible product. — L
-- **W4 — Mobile shell** (collapsible drawer; there is no mobile nav today). — M
-- **W5 — Command palette: full nav + actions** (only knows 3 of 6 routes; no New note/New task/Today). — S
-- **W6 — Slash commands in the editor** (depends on W1). — M
-- **W7 — a11y pass** (palette as listbox + focus trap; aria-labels on icon buttons; skip-link; reduced-motion). — M
-- **W8 — Properties/frontmatter editing + backlinks-while-editing.** — M
+1. **Correctness quick wins** — F5 (real bug), U9 (redo), T5-rest (bulk `rm`/`retag`). Small, high-confidence.
+2. **TUI parity batch** — U2/U3/U4/U7 bring the TUI up to the web's polish (the biggest remaining surface gap).
+3. **Product depth** — T6/T7 (estimates + weekly review), W6/W8 (editor slash-commands + frontmatter).
+4. **Architecture** — E3 (shared query layer) then E5/E6, to pay down drift before the surface count grows further. E2-persisted and E4 only matter at real scale (>10k notes).
 
-## TUI (TUI audit)
-
-- **U1 — Live, fuzzy filter** (search-as-you-type; rank fuzzy not substring). Highest-ROI TUI item. — S
-- **U2 — Command palette (`:` ex-line)** with fuzzy action list. — M
-- **U3 — Fuzzy "go to anything" jumper + fix `L` to open the multi-link picker SPEC promises.** — M
-- **U4 — Fast note capture + in-TUI body textarea** (capture is a two-step `$EDITOR` dance today). — M
-- **U5 — Set "doing" status from the keyboard** (model supports it; unreachable today). — S
-- **U6 — Vim counts + group jumps + `n`/`N`.** — M
-- **U7 — Add `[[wikilink]]` to notes + create-note-from-unresolved-link** (`l` is tasks-only today). — M
-- **U8 — Light theme + theming** (web has it; TUI is hardcoded Tokyo Night). — M
-- **U9 — Explicit redo key + undo affordance.** — S
-- **Bugs:** add-task-from-notes-tab is invisible (`selectTaskByID` searches only `m.flat`); non-recursive note watch (= F7).
-
-## Enabling infrastructure (cross-cutting)
-
-- **E1 — Incremental read-model**: web rebuilds the entire snapshot (reparse every note) on every change — O(N²)-ish; the scale cliff past ~10k notes. — L
-- **E2 — Persisted note/link index** (inverted index): powers ranked search/snippets (W2), backlinks, and fixes E1. — L
-- **E3 — Shared `Query` DSL + DTO layer** across cli/tui/web/mcp (today each re-derives grouping/status → drift). — M
-- **E4 — Pagination/limits** on graph + ⌘K + search payloads. — M
-- **E5 — Config file** (`$NT_DIR/config.toml`): themes, keybindings, saved views, defaults. — M
-- **E6 — Split god-files** (`cli/commands.go` ~32KB, `web/server.go` ~23KB). — M
-
-## Sequencing rationale
-
-1. **Foundation first** (F1 done): never build product features on a broken write/undo contract.
-2. **"Make tasks real"** (P1–P2 + T1–T2): the highest-consensus product gap; mostly lossless todo.txt additions; lands across CLI/TUI/web/MCP together so the surfaces stay consistent.
-3. **Close web dead-ends** (P3–P4, W2, W5): cheap wins that wire up existing backend.
-4. **Editor + scale** (W1, E1/E2): the larger investments, once the daily-driver flows are solid.
-
-Each surface change must be mirrored across CLI, TUI, web, and MCP (or explicitly deferred) to avoid the drift the core audit flagged — ideally via the shared Query/DTO layer (E3).
+Each surface change should be mirrored across CLI, TUI, web, and MCP (or explicitly deferred) — ideally via the shared Query/DTO layer (E3) — to avoid the drift the core audit flagged.
