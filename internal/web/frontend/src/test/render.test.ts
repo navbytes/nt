@@ -1,6 +1,13 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/svelte";
 import Harness from "./Harness.svelte";
+
+// The command palette navigates via the router; mock it so we can assert.
+vi.mock("../lib/router.svelte", () => ({
+  navigate: vi.fn(),
+  loc: { path: "/", query: new URLSearchParams() },
+  initRouter: () => () => {},
+}));
 
 // Mock the API client so components render against fixtures, no server needed.
 vi.mock("../lib/api", () => {
@@ -34,7 +41,10 @@ vi.mock("../lib/api", () => {
             children: [{ name: "Design", path: "", url: "/n/def", isNote: true }],
           },
         ],
-        index: [],
+        index: [
+          { url: "/n/abc", title: "Welcome", path: "welcome.md" },
+          { url: "/n/def", title: "Design", path: "docs/design.md" },
+        ],
       }),
       note: vi.fn().mockResolvedValue({
         id: "def",
@@ -65,6 +75,9 @@ import TaskRows from "../lib/TaskRows.svelte";
 import Sidebar from "../lib/Sidebar.svelte";
 import NoteView from "../routes/NoteView.svelte";
 import Editor from "../lib/Editor.svelte";
+import CommandPalette from "../lib/CommandPalette.svelte";
+import { navigate } from "../lib/router.svelte";
+import { openPalette, closePalette } from "../lib/palette.svelte";
 
 beforeEach(() => vi.clearAllMocks());
 
@@ -119,5 +132,25 @@ describe("Editor", () => {
     expect(call?.[0]).toBe("def");
     expect(call?.[2]).toBe('"e1"');
     await vi.waitFor(() => expect(onClose).toHaveBeenCalled());
+  });
+});
+
+describe("CommandPalette", () => {
+  afterEach(closePalette);
+
+  it("opens, filters notes by query, and navigates on Enter", async () => {
+    openPalette();
+    render(Harness, { props: { comp: CommandPalette } });
+
+    const input = (await screen.findByPlaceholderText(/Search notes/i)) as HTMLInputElement;
+    await fireEvent.input(input, { target: { value: "Design" } });
+
+    const hit = await screen.findByText("Design");
+    expect(hit).toBeInTheDocument();
+    // Nav items not matching the query are filtered out.
+    expect(screen.queryByText("Dashboard")).not.toBeInTheDocument();
+
+    await fireEvent.keyDown(input, { key: "Enter" });
+    expect(navigate).toHaveBeenCalledWith("/n/def");
   });
 });

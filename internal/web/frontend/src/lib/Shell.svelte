@@ -3,6 +3,8 @@
   import { api, setCsrf } from "./api";
   import { loc, navigate } from "./router.svelte";
   import Sidebar from "./Sidebar.svelte";
+  import CommandPalette from "./CommandPalette.svelte";
+  import { openPalette } from "./palette.svelte";
   import Home from "../routes/Home.svelte";
   import NoteView from "../routes/NoteView.svelte";
   import Tasks from "../routes/Tasks.svelte";
@@ -48,6 +50,9 @@
       <form class="topbar__search" onsubmit={onSearch}>
         <input name="q" placeholder="Search notes…" autocomplete="off" />
       </form>
+      <button class="palette-btn" onclick={openPalette} title="Command palette (⌘K)">
+        <span class="kbd">⌘K</span>
+      </button>
       <span class="spacer"></span>
       {#if $stateQ.data}
         <a class="stat" href="/tasks"><strong>{$stateQ.data.openCount}</strong> open</a>
@@ -77,4 +82,6 @@
       {/if}
     </main>
   </div>
+
+  <CommandPalette />
 </div>
