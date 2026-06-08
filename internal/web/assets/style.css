@@ -506,6 +506,13 @@ a:hover { text-decoration: underline; }
   padding: var(--s4); resize: vertical;
 }
 .editor:focus { outline: none; border-color: var(--accent); }
+.editsplit { display: grid; grid-template-columns: 1fr 1fr; gap: var(--s4); align-items: stretch; }
+.editsplit .editor { min-height: 60vh; height: 100%; }
+.editpreview {
+  min-height: 60vh; overflow: auto; padding: var(--s4);
+  background: var(--bg-elev); border: 1px solid var(--border-soft); border-radius: var(--radius);
+}
+@media (max-width: 820px) { .editsplit { grid-template-columns: 1fr; } .editpreview { min-height: 30vh; } }
 .editbar { display: flex; align-items: center; justify-content: flex-end; gap: var(--s3); margin-top: var(--s3); }
 .editbar__status { margin-right: auto; font-size: 12px; color: var(--muted); }
 .btn { font: inherit; font-size: 13px; padding: var(--s2) var(--s4); border-radius: var(--radius-sm); cursor: pointer;

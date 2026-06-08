@@ -169,6 +169,44 @@ func TestTaskNew(t *testing.T) {
 	}
 }
 
+func TestPreviewEndpoint(t *testing.T) {
+	s := newTestServer(t)
+	note.Create(s.eng.S, "Target", "x", nil, "cli", "")
+
+	// gated off when read-only
+	if code, _ := postBody(s, "/preview", "", "# hi"); code != 404 {
+		t.Errorf("preview should 404 when read-only, got %d", code)
+	}
+	s.allowEdit = true
+	if code, _ := postBody(s, "/preview", "", "# hi"); code != 403 {
+		t.Errorf("preview without CSRF should 403, got %d", code)
+	}
+	// renders markdown + resolves wikilinks the same way the note page does,
+	// and ignores leading frontmatter.
+	code, body := postBody(s, "/preview", s.csrf, "---\nid: x\n---\n\n## Heading\n\nsee [[Target]]")
+	if code != 200 {
+		t.Fatalf("preview code=%d", code)
+	}
+	if !strings.Contains(body, "<h2") || !strings.Contains(body, `class="wikilink"`) {
+		t.Fatalf("preview did not render markdown/wikilink:\n%s", body)
+	}
+	if strings.Contains(body, "id: x") {
+		t.Errorf("preview should strip frontmatter:\n%s", body)
+	}
+}
+
+// postBody POSTs a text/plain body with optional CSRF.
+func postBody(s *Server, path, csrf, body string) (int, string) {
+	rec := httptest.NewRecorder()
+	r := httptest.NewRequest("POST", path, strings.NewReader(body))
+	r.Header.Set("Content-Type", "text/plain")
+	if csrf != "" {
+		r.Header.Set("X-CSRF", csrf)
+	}
+	s.routes().ServeHTTP(rec, r)
+	return rec.Code, rec.Body.String()
+}
+
 func mustDoc(t *testing.T, s *Server) *task.Doc {
 	t.Helper()
 	d, err := s.eng.Read()

@@ -11,13 +11,14 @@
         window.matchMedia("(prefers-color-scheme: dark)").matches);
   }
 
-  function renderMermaid() {
+  function renderMermaid(root) {
     if (!window.mermaid) return;
+    root = root || document;
     // The /graph page needs "loose" so its server-generated click links work;
     // note-embedded diagrams stay "strict" (untrusted-ish note content).
     var graph = !!document.querySelector(".graphview");
     mermaid.initialize({ startOnLoad: false, securityLevel: graph ? "loose" : "strict", theme: isDark() ? "dark" : "neutral" });
-    var nodes = document.querySelectorAll(".mermaid");
+    var nodes = root.querySelectorAll(".mermaid");
     nodes.forEach(function (n) {
       if (!n.dataset.src) n.dataset.src = n.textContent;   // stash source once
       n.removeAttribute("data-processed");
@@ -25,6 +26,7 @@
     });
     try { mermaid.run({ nodes: nodes }); } catch (e) { console.warn(e); }
   }
+  window.ntRenderMermaid = renderMermaid; // reused by the editor's live preview
 
   var saved = localStorage.getItem("nt-theme");
   if (saved) root.setAttribute("data-theme", saved);
@@ -305,6 +307,12 @@
         ta.className = "editor";
         ta.value = text;
         ta.spellcheck = false;
+        var pane = document.createElement("div");
+        pane.className = "editsplit";
+        var preview = document.createElement("div");
+        preview.className = "md editpreview";
+        pane.appendChild(ta);
+        pane.appendChild(preview);
         var bar = document.createElement("div");
         bar.className = "editbar";
         var status = document.createElement("span");
@@ -318,12 +326,28 @@
         bar.appendChild(status);
         bar.appendChild(cancel);
         bar.appendChild(save);
-        wrap.appendChild(ta);
+        wrap.appendChild(pane);
         wrap.appendChild(bar);
         md.style.display = "none";
         md.parentNode.insertBefore(wrap, md.nextSibling);
         ta.focus();
-        function close() { wrap.remove(); md.style.display = ""; }
+
+        // Live split preview: re-render the buffer through the server's own
+        // markdown path (debounced) so it matches exactly what a save produces.
+        var ptimer;
+        function renderPreview() {
+          fetch("/preview", { method: "POST", headers: { "X-CSRF": csrf, "Content-Type": "text/plain" }, body: ta.value })
+            .then(function (r) { return r.ok ? r.text() : ""; })
+            .then(function (html) {
+              if (!html) return;
+              preview.innerHTML = html;
+              if (window.ntRenderMermaid) window.ntRenderMermaid(preview);
+            }).catch(function () { /* keep last preview */ });
+        }
+        ta.addEventListener("input", function () { clearTimeout(ptimer); ptimer = setTimeout(renderPreview, 200); });
+        renderPreview();
+
+        function close() { clearTimeout(ptimer); wrap.remove(); md.style.display = ""; }
         function commit() {
           save.disabled = true;
           status.textContent = "Saving…";

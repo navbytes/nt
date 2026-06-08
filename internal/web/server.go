@@ -174,6 +174,7 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("POST /tasks/{id}/status", s.handleTaskStatus)
 	mux.HandleFunc("POST /tasks/{id}/delete", s.handleTaskDelete)
 	mux.HandleFunc("/graph", s.handleGraph)
+	mux.HandleFunc("POST /preview", s.handlePreview)
 	mux.HandleFunc("/events", s.handleSSE)
 	mux.HandleFunc("/static/", s.handleStatic)
 	return mux
@@ -393,6 +394,52 @@ func (s *Server) handleSave(w http.ResponseWriter, r *http.Request, handle strin
 	}
 	s.rebuild() // refresh the read-model so the editor's reload sees the save
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// handlePreview renders an editor buffer to HTML for the live split-preview,
+// reusing the exact renderBody path the note page uses (so wikilinks, mermaid,
+// and syntax highlighting match what a save will produce). Edit-mode + CSRF
+// gated; it reads but never writes.
+func (s *Server) handlePreview(w http.ResponseWriter, r *http.Request) {
+	if !s.allowEdit {
+		http.NotFound(w, r)
+		return
+	}
+	if r.Header.Get("X-CSRF") != s.csrf {
+		http.Error(w, "bad or missing CSRF token", http.StatusForbidden)
+		return
+	}
+	body, err := io.ReadAll(io.LimitReader(r.Body, 4<<20))
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	snap := s.current()
+	html, err := renderBody(stripFrontmatter(string(body)), snap.doc, snap.notes)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	_, _ = io.WriteString(w, string(html))
+}
+
+// stripFrontmatter drops a leading YAML frontmatter block so the preview renders
+// the body the way the note page does (note.List parses frontmatter out). The
+// raw editor buffer still includes it; only the preview ignores it.
+func stripFrontmatter(s string) string {
+	if !strings.HasPrefix(s, "---\n") && !strings.HasPrefix(s, "---\r\n") {
+		return s
+	}
+	rest := s[3:]
+	if i := strings.Index(rest, "\n---"); i >= 0 {
+		after := rest[i+4:]
+		if j := strings.IndexByte(after, '\n'); j >= 0 {
+			return after[j+1:]
+		}
+		return ""
+	}
+	return s
 }
 
 // siblings returns the previous/next notes in the same folder (Rel order).
