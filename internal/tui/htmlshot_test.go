@@ -132,7 +132,7 @@ h1{color:#fff}h2{color:#7aa2f7;font-size:13px;text-transform:uppercase;letter-sp
 .dot{display:inline-block;width:11px;height:11px;border-radius:50%;margin-right:6px}
 pre{margin:0;padding:0;background:#1a1b26;line-height:1.32;font-size:13px}</style>
 <h1>nt — live TUI render</h1>
-<p style="color:#787c99">Actual View() output (truecolor → HTML). Compare with tui-mockup.html.</p>`)
+<p style="color:#787c99">Actual View() output (truecolor → HTML).</p>`)
 	for _, f := range frames {
 		b.WriteString("<h2>" + f.title + "</h2>\n")
 		b.WriteString(`<div class="term"><div class="chrome"><span class="dot" style="background:#ff5f57"></span><span class="dot" style="background:#febc2e"></span><span class="dot" style="background:#28c840"></span></div>`)
