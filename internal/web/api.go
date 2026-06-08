@@ -363,35 +363,72 @@ func (s *Server) apiSearch(w http.ResponseWriter, r *http.Request) {
 		byPath[n.Path] = n
 	}
 	seen := map[string]bool{}
-	results := make([]apitypes.NoteLink, 0)
-	add := func(n *note.Note) {
+	results := make([]apitypes.SearchResult, 0)
+	add := func(n *note.Note, snippet string) {
 		if n == nil || seen[noteHandle(n)] || (tag != "" && !contains(n.Tags, tag)) {
 			return
 		}
 		seen[noteHandle(n)] = true
-		results = append(results, apitypes.NoteLink{URL: "/n/" + url.PathEscape(noteHandle(n)), Title: n.Title, Path: n.Rel})
+		results = append(results, apitypes.SearchResult{
+			URL: "/n/" + url.PathEscape(noteHandle(n)), Title: n.Title, Path: n.Rel, Snippet: snippet,
+		})
 	}
 	switch {
 	case q == "" && tag == "":
 		// nothing
 	case q == "":
 		for _, n := range snap.notes {
-			add(n)
+			add(n, "")
 		}
 	default:
+		// Rank title matches first (most relevant), then body matches — each
+		// carrying the matching line as a snippet for context.
 		ql := strings.ToLower(q)
 		for _, n := range snap.notes {
 			if strings.Contains(strings.ToLower(n.Title), ql) {
-				add(n)
+				add(n, "")
 			}
 		}
 		if hits, err := search.Literal(q, s.eng.S.NotesDir()); err == nil {
 			for _, h := range hits {
-				add(byPath[h.Path])
+				add(byPath[h.Path], snippetAround(h.Text, q))
 			}
 		}
 	}
 	writeJSON(w, apitypes.SearchResponse{Results: results})
+}
+
+// snippetAround trims a matching line to a short window centered on the query,
+// for display under a search result. The highlight is applied client-side.
+func snippetAround(line, q string) string {
+	line = strings.TrimSpace(line)
+	const window = 160
+	if len(line) <= window {
+		return line
+	}
+	idx := strings.Index(strings.ToLower(line), strings.ToLower(q))
+	if idx < 0 {
+		return line[:window] + "…"
+	}
+	start := idx - window/3
+	if start < 0 {
+		start = 0
+	}
+	end := start + window
+	if end > len(line) {
+		end = len(line)
+		if start = end - window; start < 0 {
+			start = 0
+		}
+	}
+	out := line[start:end]
+	if start > 0 {
+		out = "…" + out
+	}
+	if end < len(line) {
+		out += "…"
+	}
+	return out
 }
 
 // ---- task write handlers (JSON) --------------------------------------------

@@ -246,3 +246,29 @@ func TestAPIActivityGraphSearch(t *testing.T) {
 		t.Fatalf("search returned nothing: %s", body)
 	}
 }
+
+// TestAPISearchRankingAndSnippets: title matches rank before body matches, and a
+// body match carries the matching line as a snippet.
+func TestAPISearchRankingAndSnippets(t *testing.T) {
+	s := newTestServer(t)
+	note.Create(s.eng.S, "Mutex Guide", "how to use locks", nil, "cli", "")
+	note.Create(s.eng.S, "Race Conditions", "always guard shared state with a mutex lock", nil, "cli", "")
+
+	_, body := get(t, s, "/api/search?q=mutex")
+	res := decode[apitypes.SearchResponse](t, body).Results
+	if len(res) < 2 {
+		t.Fatalf("expected ≥2 results, got %d: %s", len(res), body)
+	}
+	if res[0].Title != "Mutex Guide" {
+		t.Errorf("title match should rank first, got %q", res[0].Title)
+	}
+	var bodyHit *apitypes.SearchResult
+	for i := range res {
+		if res[i].Title == "Race Conditions" {
+			bodyHit = &res[i]
+		}
+	}
+	if bodyHit == nil || bodyHit.Snippet == "" || !strings.Contains(bodyHit.Snippet, "mutex") {
+		t.Fatalf("body match should carry a snippet with the match: %+v", bodyHit)
+	}
+}

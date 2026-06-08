@@ -121,9 +121,18 @@ type ActivityResponse struct {
 	Sources []string      `json:"sources"`
 }
 
+// SearchResult is one ranked search hit: title matches rank first (no snippet),
+// body matches carry the matching line as a snippet for context.
+type SearchResult struct {
+	URL     string `json:"url"`
+	Title   string `json:"title"`
+	Path    string `json:"path"`
+	Snippet string `json:"snippet,omitempty"` // matching line (body hits only)
+}
+
 // SearchResponse is GET /api/search.
 type SearchResponse struct {
-	Results []NoteLink `json:"results"`
+	Results []SearchResult `json:"results"`
 }
 
 // Tag is one entry in the tag vocabulary with its usage count.
