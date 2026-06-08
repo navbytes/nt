@@ -1,11 +1,14 @@
 <script lang="ts">
   import { createQuery, useQueryClient } from "@tanstack/svelte-query";
   import { api, SaveConflict } from "./api";
+  import CodeMirror from "./CodeMirror.svelte";
 
   let { handle, onClose }: { handle: string; onClose: () => void } = $props();
 
   const qc = useQueryClient();
   const rawQ = createQuery({ queryKey: ["raw", handle], queryFn: () => api.raw(handle) });
+  // Cached note index powers [[ wikilink autocomplete in the editor.
+  const notesQ = createQuery({ queryKey: ["notes"], queryFn: api.notes });
 
   let buffer = $state("");
   let etag = $state("");
@@ -56,13 +59,6 @@
     }
   }
 
-  function onKey(e: KeyboardEvent) {
-    if ((e.metaKey || e.ctrlKey) && e.key === "s") {
-      e.preventDefault();
-      save();
-    }
-    if (e.key === "Escape") onClose();
-  }
 </script>
 
 <div class="editor">
@@ -81,14 +77,17 @@
     <p class="error">Couldn't open this note for editing.</p>
   {:else}
     <div class="editor__panes">
-      <!-- svelte-ignore a11y_autofocus -->
-      <textarea
-        class="editor__src"
-        bind:value={buffer}
-        onkeydown={onKey}
-        spellcheck="false"
-        autofocus
-      ></textarea>
+      {#if loaded}
+        <div class="editor__src">
+          <CodeMirror
+            value={buffer}
+            onChange={(v) => (buffer = v)}
+            onSave={save}
+            onEscape={onClose}
+            getNotes={() => $notesQ.data?.index ?? []}
+          />
+        </div>
+      {/if}
       <div class="editor__preview prose">{@html previewHTML}</div>
     </div>
   {/if}

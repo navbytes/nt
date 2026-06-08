@@ -723,16 +723,12 @@ code {
   min-height: 0;
 }
 .editor__src {
-  font-family: var(--font-mono);
-  font-size: 13px;
-  line-height: 1.6;
-  resize: none;
-  padding: 14px 16px;
   background: var(--bg-inset);
-  color: var(--fg);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  tab-size: 2;
+  overflow: hidden;
+  min-height: 0;
+  padding: 4px 10px;
 }
 .editor__preview {
   overflow-y: auto;

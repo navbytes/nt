@@ -137,13 +137,15 @@ describe("Editor", () => {
     const onClose = vi.fn();
     render(Harness, { props: { comp: Editor, props: { handle: "def", onClose } } });
 
-    const ta = (await screen.findByRole("textbox")) as HTMLTextAreaElement;
-    expect(ta.value).toContain("the body");
+    // The CodeMirror editor is ready once the raw note loads (Save enabled).
+    const saveBtn = (await screen.findByText("Save")) as HTMLButtonElement;
+    await vi.waitFor(() => expect(saveBtn.disabled).toBe(false));
 
-    await fireEvent.click(screen.getByText("Save"));
+    await fireEvent.click(saveBtn);
     expect(api.save).toHaveBeenCalledOnce();
     const call = vi.mocked(api.save).mock.calls[0];
     expect(call?.[0]).toBe("def");
+    expect(call?.[1]).toContain("the body"); // the loaded buffer was saved back
     expect(call?.[2]).toBe('"e1"');
     await vi.waitFor(() => expect(onClose).toHaveBeenCalled());
   });
