@@ -73,36 +73,52 @@ func cmdTags(args []string) int {
 // cmdTag retags a note without a $EDITOR round-trip: nt tag <note> +add -remove …
 // Frontmatter the agent didn't author (Obsidian properties) is preserved.
 func cmdTag(args []string) int {
-	if len(args) < 2 {
-		return fail(fmt.Errorf("tag: usage: nt tag <note> +add -remove …"))
+	// Split into note handles and +add/-remove ops, so one retag can apply to
+	// many notes: `nt tag work/auth design/spec +reviewed -draft`.
+	var handles, ops []string
+	for _, a := range args {
+		if strings.HasPrefix(a, "+") || strings.HasPrefix(a, "-") {
+			ops = append(ops, a)
+		} else {
+			handles = append(handles, a)
+		}
+	}
+	if len(handles) == 0 || len(ops) == 0 {
+		return fail(fmt.Errorf("tag: usage: nt tag <note…> +add -remove …"))
 	}
 	e, ok := engine()
 	if !ok {
 		return 1
 	}
 	notes, _ := note.List(e.S)
-	n, err := resolveNote(notes, args[0])
-	if err != nil {
-		return fail(fmt.Errorf("tag: %w", err))
-	}
-	for _, op := range args[1:] {
-		tg := strings.TrimPrefix(strings.TrimPrefix(op[1:], "@"), "@")
-		switch {
-		case strings.HasPrefix(op, "+"):
-			if tg != "" && !contains(n.Tags, tg) {
-				n.Tags = append(n.Tags, tg)
-			}
-		case strings.HasPrefix(op, "-"):
-			n.Tags = removeStr(n.Tags, tg)
-		default:
-			return fail(fmt.Errorf("tag: %q must start with + or -", op))
+	var last *note.Note
+	count := 0
+	for _, h := range handles {
+		n, err := resolveNote(notes, h)
+		if err != nil {
+			return fail(fmt.Errorf("tag: %w", err))
 		}
+		for _, op := range ops {
+			tg := strings.TrimPrefix(op[1:], "@")
+			if strings.HasPrefix(op, "+") {
+				if tg != "" && !contains(n.Tags, tg) {
+					n.Tags = append(n.Tags, tg)
+				}
+			} else {
+				n.Tags = removeStr(n.Tags, tg)
+			}
+		}
+		n.Updated = time.Now().Format(time.RFC3339)
+		if err := n.Save(); err != nil {
+			return fail(err)
+		}
+		last, count = n, count+1
 	}
-	n.Updated = time.Now().Format(time.RFC3339)
-	if err := n.Save(); err != nil {
-		return fail(err)
+	if count == 1 {
+		fmt.Printf("tagged %s  @%s\n", shortID(last.ID), strings.Join(last.Tags, " @"))
+	} else {
+		fmt.Printf("tagged %d notes  (%s)\n", count, strings.Join(ops, " "))
 	}
-	fmt.Printf("tagged %s  @%s\n", shortID(n.ID), strings.Join(n.Tags, " @"))
 	return 0
 }
 

@@ -222,7 +222,7 @@ USAGE
   nt list --tree              show sub-tasks indented under their parent
   nt search "query" [--tag T]  full-text + tag search  (alias: q)
   nt tags                     list the tag vocabulary with counts
-  nt tag <note> +x -y         retag a note (no $EDITOR; preserves frontmatter)
+  nt tag <note…> +x -y        retag one or more notes (no $EDITOR; preserves frontmatter)
   nt links <id|task:N>        forward links + backlinks  (--orphans: notes with none)
   nt edit <id|task:N>         edit a task/note in $EDITOR
   nt mv <note> <new|path>     rename/move a note, updating all [[links]] to it
