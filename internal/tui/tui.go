@@ -138,6 +138,14 @@ type Model struct {
 
 // Run launches the TUI against the global store.
 func Run() error {
+	// NT_THEME forces the adaptive palette; unset = auto-detect from the terminal
+	// background. lipgloss reads this global when resolving AdaptiveColors.
+	switch os.Getenv("NT_THEME") {
+	case "light":
+		lipgloss.SetHasDarkBackground(false)
+	case "dark":
+		lipgloss.SetHasDarkBackground(true)
+	}
 	eng, err := mutate.Open()
 	if err != nil {
 		return err
@@ -372,19 +380,23 @@ func onOff(b bool) string {
 // --- palette / styles (mirrors docs/tui-mockup.html) ---------------------
 
 var (
-	cFg      = lipgloss.Color("#c0caf5")
-	cDim     = lipgloss.Color("#565f89")
-	cMuted   = lipgloss.Color("#787c99")
-	cRed     = lipgloss.Color("#f7768e")
-	cOrange  = lipgloss.Color("#ff9e64")
-	cYellow  = lipgloss.Color("#e0af68")
-	cGreen   = lipgloss.Color("#9ece6a")
-	cCyan    = lipgloss.Color("#7dcfff")
-	cBlue    = lipgloss.Color("#7aa2f7")
-	cMagenta = lipgloss.Color("#bb9af7")
-	cBorder  = lipgloss.Color("#3b4261")
-	cSelBg   = lipgloss.Color("#283457")
-	cBarBg   = lipgloss.Color("#1f2335")
+	// Palette is adaptive: lipgloss picks the Dark or Light value from the
+	// terminal background (Tokyo Night Storm / Tokyo Night Day). `NT_THEME=
+	// light|dark` forces it (see Run). All styles below reference these vars, so
+	// both themes flow through without per-style changes.
+	cFg      = lipgloss.AdaptiveColor{Dark: "#c0caf5", Light: "#3760bf"}
+	cDim     = lipgloss.AdaptiveColor{Dark: "#565f89", Light: "#848cb5"}
+	cMuted   = lipgloss.AdaptiveColor{Dark: "#787c99", Light: "#9aa0c2"}
+	cRed     = lipgloss.AdaptiveColor{Dark: "#f7768e", Light: "#f52a65"}
+	cOrange  = lipgloss.AdaptiveColor{Dark: "#ff9e64", Light: "#b15c00"}
+	cYellow  = lipgloss.AdaptiveColor{Dark: "#e0af68", Light: "#8c6c3e"}
+	cGreen   = lipgloss.AdaptiveColor{Dark: "#9ece6a", Light: "#587539"}
+	cCyan    = lipgloss.AdaptiveColor{Dark: "#7dcfff", Light: "#007197"}
+	cBlue    = lipgloss.AdaptiveColor{Dark: "#7aa2f7", Light: "#2e7de9"}
+	cMagenta = lipgloss.AdaptiveColor{Dark: "#bb9af7", Light: "#9854f1"}
+	cBorder  = lipgloss.AdaptiveColor{Dark: "#3b4261", Light: "#a8aecb"}
+	cSelBg   = lipgloss.AdaptiveColor{Dark: "#283457", Light: "#b7c1e3"}
+	cBarBg   = lipgloss.AdaptiveColor{Dark: "#1f2335", Light: "#d0d5e3"}
 
 	stBrand      = lipgloss.NewStyle().Foreground(cMagenta).Bold(true).Background(cBarBg)
 	stTabOn      = lipgloss.NewStyle().Foreground(cFg).Bold(true).Background(cBarBg)
