@@ -42,6 +42,8 @@ func Run(args []string) int {
 		return cmdLog(rest)
 	case "done", "do":
 		return cmdDone(rest)
+	case "skip":
+		return cmdSkip(rest)
 	case "update", "up":
 		return cmdUpdate(rest)
 	case "search", "q":
@@ -212,6 +214,7 @@ USAGE
   nt recall [flags]           read back prior items (for AI sessions)
   nt log [--since|--days N]    completed tasks, newest first (the Logbook)
   nt done <id|task:N>         mark a task done       (alias: do)
+  nt skip <id|task:N>         move a recurring task to its next occurrence
   nt update <id|task:N> ...   change a task          (alias: up)
   nt search "query" [--tag T]  full-text + tag search  (alias: q)
   nt tags                     list the tag vocabulary with counts
