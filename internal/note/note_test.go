@@ -191,3 +191,16 @@ func TestSavePreservesUnknownFrontmatter(t *testing.T) {
 		}
 	}
 }
+
+func TestWithinDir(t *testing.T) {
+	base := "/store/notes"
+	if !withinDir(base, "/store/notes/work/x.md") {
+		t.Error("a path inside notes/ should be allowed")
+	}
+	if withinDir(base, "/store/secrets.txt") {
+		t.Error("a sibling path must be rejected")
+	}
+	if withinDir(base, "/store/notes/../../etc/passwd") {
+		t.Error("a traversal path must be rejected")
+	}
+}
