@@ -193,3 +193,11 @@ export interface GraphData {
   nodes: GraphNode[];
   links: GraphLink[];
 }
+/**
+ * CreatedNote is the result of POST /api/notes — the new note's stable handle
+ * and its URL, so the client can navigate straight to it.
+ */
+export interface CreatedNote {
+  handle: string;
+  url: string;
+}

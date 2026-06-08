@@ -164,3 +164,10 @@ type GraphData struct {
 	Nodes []GraphNode `json:"nodes"`
 	Links []GraphLink `json:"links"`
 }
+
+// CreatedNote is the result of POST /api/notes — the new note's stable handle
+// and its URL, so the client can navigate straight to it.
+type CreatedNote struct {
+	Handle string `json:"handle"`
+	URL    string `json:"url"`
+}

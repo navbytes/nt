@@ -71,7 +71,8 @@ func Create(s *store.Store, title, body string, tags []string, source, folder st
 		Created: time.Now().Format(time.RFC3339),
 		Body:    body,
 	}
-	dir := s.NotesDir()
+	notesDir := s.NotesDir()
+	dir := notesDir
 	if clean, err := cleanFolder(folder); err != nil {
 		return nil, err
 	} else if clean != "" {
@@ -81,10 +82,26 @@ func Create(s *store.Store, title, body string, tags []string, source, folder st
 		}
 	}
 	n.Path = uniquePath(dir, Slug(title))
+	// Defense in depth against path traversal: cleanFolder rejects ".."/absolute
+	// folders and Slug strips the title to [a-z0-9-], so the path can't escape
+	// notes/ — but with a web endpoint feeding untrusted input we assert it
+	// explicitly rather than trust those barriers transitively.
+	if !withinDir(notesDir, n.Path) {
+		return nil, fmt.Errorf("refusing to write note outside notes/: %q", n.Path)
+	}
 	if err := n.Save(); err != nil {
 		return nil, err
 	}
 	return n, nil
+}
+
+// withinDir reports whether target resolves inside base (no "../" escape).
+func withinDir(base, target string) bool {
+	rel, err := filepath.Rel(base, target)
+	if err != nil {
+		return false
+	}
+	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
 // cleanFolder normalizes a slash-separated subfolder and refuses paths that

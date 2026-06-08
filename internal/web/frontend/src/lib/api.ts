@@ -13,6 +13,7 @@ import type {
   TagsResponse,
   OrphansResponse,
   GraphData,
+  CreatedNote,
 } from "./api-types";
 
 export type * from "./api-types";
@@ -75,6 +76,9 @@ export const api = {
     if (!r.ok) throw new Error(`${(await r.text()) || r.status}`);
     return (await r.json()) as TasksResponse;
   },
+
+  noteCreate: (title: string, folder = "") =>
+    postForm<CreatedNote>("/api/notes", folder ? { title, folder } : { title }),
 
   // ---- editor ----
   raw: (handle: string) => getJSON<RawNote>(`/api/notes/${encodeURIComponent(handle)}/raw`),
