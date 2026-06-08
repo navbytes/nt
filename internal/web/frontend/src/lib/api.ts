@@ -1,99 +1,18 @@
-// Typed client for the Go JSON API (internal/web/api.go). These types mirror the
-// Go DTOs; a later phase generates them from Go via tygo so the contract can't
-// drift. For now they are hand-written to match api.go exactly.
+// Typed client for the Go JSON API (internal/web/api.go). The wire types are
+// generated from the Go apitypes package by tygo (api-types.ts) and re-exported
+// here, so a contract change in Go surfaces as a TS error. This file adds only
+// the runtime concerns: CSRF, fetch helpers, and the typed endpoint map.
+import type {
+  State,
+  NotesIndex,
+  NoteView,
+  RawNote,
+  TasksResponse,
+  ActivityResponse,
+  SearchResponse,
+} from "./api-types";
 
-export interface State {
-  canEdit: boolean;
-  csrf: string;
-  version: string;
-  openCount: number;
-  noteCount: number;
-  sources: string[];
-}
-
-export interface Task {
-  id: string;
-  text: string;
-  status: string;
-  due?: string;
-  source?: string;
-  project?: string;
-  tags?: string[];
-  blocker?: string;
-}
-
-export interface TaskGroup {
-  status: string;
-  tasks: Task[];
-}
-
-export interface TreeNode {
-  name: string;
-  path: string;
-  url: string;
-  isNote: boolean;
-  children?: TreeNode[];
-}
-
-export interface NoteLink {
-  url: string;
-  title: string;
-  path: string;
-}
-
-export interface NotesIndex {
-  tree: TreeNode[];
-  index: NoteLink[];
-}
-
-export interface Backlink {
-  title: string;
-  url: string;
-  text: string;
-  isNote: boolean;
-}
-
-export interface TaskRef {
-  text: string;
-  status: string;
-  source: string;
-}
-
-export interface NoteView {
-  id: string;
-  title: string;
-  folder: string;
-  file: string;
-  crumbs: string[];
-  source: string;
-  created: string;
-  tags: string[];
-  bodyHTML: string;
-  backlinks: Backlink[];
-  taskRefs: TaskRef[];
-  prev?: NoteLink;
-  next?: NoteLink;
-  etag: string;
-}
-
-export interface ActivityEvent {
-  when: string;
-  action: string;
-  kind: string;
-  source: string;
-  title: string;
-  url?: string;
-}
-
-export interface ActivityDay {
-  date: string;
-  events: ActivityEvent[];
-}
-
-export interface RawNote {
-  text: string;
-  etag: string;
-}
+export type * from "./api-types";
 
 /** Thrown by api.save when the note changed on disk since it was opened (HTTP 409). */
 export class SaveConflict extends Error {
@@ -131,20 +50,20 @@ export const api = {
   state: () => getJSON<State>("/api/state"),
   notes: () => getJSON<NotesIndex>("/api/notes"),
   note: (handle: string) => getJSON<NoteView>(`/api/notes/${encodeURIComponent(handle)}`),
-  tasks: () => getJSON<{ groups: TaskGroup[] }>("/api/tasks"),
+  tasks: () => getJSON<TasksResponse>("/api/tasks"),
   activity: (source = "") =>
-    getJSON<{ days: ActivityDay[]; sources: string[] }>(
+    getJSON<ActivityResponse>(
       "/api/activity" + (source ? `?source=${encodeURIComponent(source)}` : ""),
     ),
   search: (q: string, tag = "") =>
-    getJSON<{ results: NoteLink[] }>(
+    getJSON<SearchResponse>(
       `/api/search?q=${encodeURIComponent(q)}` + (tag ? `&tag=${encodeURIComponent(tag)}` : ""),
     ),
-  taskNew: (text: string) => postForm<{ groups: TaskGroup[] }>("/api/tasks", { text }),
-  taskDone: (id: string) => postForm<{ groups: TaskGroup[] }>(`/api/tasks/${id}/done`),
-  taskReopen: (id: string) => postForm<{ groups: TaskGroup[] }>(`/api/tasks/${id}/reopen`),
+  taskNew: (text: string) => postForm<TasksResponse>("/api/tasks", { text }),
+  taskDone: (id: string) => postForm<TasksResponse>(`/api/tasks/${id}/done`),
+  taskReopen: (id: string) => postForm<TasksResponse>(`/api/tasks/${id}/reopen`),
   taskStatus: (id: string, status: string) =>
-    postForm<{ groups: TaskGroup[] }>(`/api/tasks/${id}/status`, { status }),
+    postForm<TasksResponse>(`/api/tasks/${id}/status`, { status }),
 
   // ---- editor ----
   raw: (handle: string) => getJSON<RawNote>(`/api/notes/${encodeURIComponent(handle)}/raw`),

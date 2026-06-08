@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/navbytes/nt/internal/dateparse"
 	"github.com/navbytes/nt/internal/mutate"
@@ -12,6 +13,7 @@ import (
 	"github.com/navbytes/nt/internal/search"
 	"github.com/navbytes/nt/internal/store"
 	"github.com/navbytes/nt/internal/task"
+	"github.com/navbytes/nt/internal/web/apitypes"
 )
 
 // This file is the JSON API the Svelte/TypeScript SPA consumes — Phase 1 of the
@@ -45,55 +47,90 @@ func writeJSON(w http.ResponseWriter, v any) {
 	_ = json.NewEncoder(w).Encode(v)
 }
 
-// ---- DTOs (the wire contract; tygo generates TS types from these) ----------
+// ---- projections to the wire contract (apitypes) ---------------------------
+// The wire structs live in the apitypes package (the single source tygo turns
+// into TS); these converters project the web package's internal read-model
+// structs onto them, so v1's server-rendered types stay independent.
 
-type apiStateDTO struct {
-	CanEdit   bool     `json:"canEdit"`
-	CSRF      string   `json:"csrf"` // token to echo as X-CSRF on writes; "" when read-only
-	Version   string   `json:"version"`
-	OpenCount int      `json:"openCount"`
-	NoteCount int      `json:"noteCount"`
-	Sources   []string `json:"sources"`
+func toTask(t taskRow) apitypes.Task {
+	return apitypes.Task{
+		ID: t.ID, Text: t.Text, Status: t.Status, Due: t.Due,
+		Source: t.Source, Project: t.Project, Tags: t.Tags, Blocker: t.Blocker,
+	}
 }
 
-type apiNotesDTO struct {
-	Tree  []*treeNode `json:"tree"`
-	Index []linkRow   `json:"index"`
+func toGroups(gs []taskGroup) []apitypes.TaskGroup {
+	out := make([]apitypes.TaskGroup, len(gs))
+	for i, g := range gs {
+		tasks := make([]apitypes.Task, len(g.Tasks))
+		for j, t := range g.Tasks {
+			tasks[j] = toTask(t)
+		}
+		out[i] = apitypes.TaskGroup{Status: g.Status, Tasks: tasks}
+	}
+	return out
 }
 
-type apiNoteDTO struct {
-	ID        string     `json:"id"`
-	Title     string     `json:"title"`
-	Folder    string     `json:"folder"`
-	File      string     `json:"file"`
-	Crumbs    []string   `json:"crumbs"`
-	Source    string     `json:"source"`
-	Created   string     `json:"created"`
-	Tags      []string   `json:"tags"`
-	BodyHTML  string     `json:"bodyHTML"`
-	Backlinks []Backlink `json:"backlinks"`
-	TaskRefs  []TaskRef  `json:"taskRefs"`
-	Prev      *linkRow   `json:"prev,omitempty"`
-	Next      *linkRow   `json:"next,omitempty"`
-	ETag      string     `json:"etag"`
+func toTree(ns []*treeNode) []apitypes.TreeNode {
+	out := make([]apitypes.TreeNode, len(ns))
+	for i, n := range ns {
+		out[i] = apitypes.TreeNode{
+			Name: n.Name, Path: n.Path, URL: n.URL, IsNote: n.IsNote,
+			Children: toTree(n.Children),
+		}
+	}
+	return out
 }
 
-type apiRawDTO struct {
-	Text string `json:"text"`
-	ETag string `json:"etag"`
+func toLink(l linkRow) apitypes.NoteLink {
+	return apitypes.NoteLink{URL: l.URL, Title: l.Title, Path: l.Path}
 }
 
-type apiTasksDTO struct {
-	Groups []taskGroup `json:"groups"`
+func toLinks(ls []linkRow) []apitypes.NoteLink {
+	out := make([]apitypes.NoteLink, len(ls))
+	for i, l := range ls {
+		out[i] = toLink(l)
+	}
+	return out
 }
 
-type apiActivityDTO struct {
-	Days    []activityDay `json:"days"`
-	Sources []string      `json:"sources"`
+func toLinkPtr(l *linkRow) *apitypes.NoteLink {
+	if l == nil {
+		return nil
+	}
+	v := toLink(*l)
+	return &v
 }
 
-type apiSearchDTO struct {
-	Results []linkRow `json:"results"`
+func toBacklinks(bs []Backlink) []apitypes.Backlink {
+	out := make([]apitypes.Backlink, len(bs))
+	for i, b := range bs {
+		out[i] = apitypes.Backlink{Title: b.Title, URL: b.URL, Text: b.Text, IsNote: b.IsNote}
+	}
+	return out
+}
+
+func toTaskRefs(rs []TaskRef) []apitypes.TaskRef {
+	out := make([]apitypes.TaskRef, len(rs))
+	for i, r := range rs {
+		out[i] = apitypes.TaskRef{Text: r.Text, Status: r.Status, Source: r.Source}
+	}
+	return out
+}
+
+func toActivity(days []activityDay) []apitypes.ActivityDay {
+	out := make([]apitypes.ActivityDay, len(days))
+	for i, d := range days {
+		evs := make([]apitypes.ActivityEvent, len(d.Events))
+		for j, e := range d.Events {
+			evs[j] = apitypes.ActivityEvent{
+				When: e.When.Format(time.RFC3339), Action: e.Action, Kind: e.Kind,
+				Source: e.Source, Title: e.Title, URL: e.URL,
+			}
+		}
+		out[i] = apitypes.ActivityDay{Date: d.Date, Events: evs}
+	}
+	return out
 }
 
 // ---- read handlers ---------------------------------------------------------
@@ -112,7 +149,7 @@ func (s *Server) apiState(w http.ResponseWriter, r *http.Request) {
 	if s.allowEdit {
 		csrf = s.csrf
 	}
-	writeJSON(w, apiStateDTO{
+	writeJSON(w, apitypes.State{
 		CanEdit:   s.allowEdit,
 		CSRF:      csrf,
 		Version:   s.version,
@@ -124,7 +161,7 @@ func (s *Server) apiState(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) apiNotes(w http.ResponseWriter, r *http.Request) {
 	snap := s.current()
-	writeJSON(w, apiNotesDTO{Tree: buildTree(snap.notes, ""), Index: snap.index})
+	writeJSON(w, apitypes.NotesIndex{Tree: toTree(buildTree(snap.notes, "")), Index: toLinks(snap.index)})
 }
 
 func (s *Server) apiNote(w http.ResponseWriter, r *http.Request) {
@@ -147,7 +184,7 @@ func (s *Server) apiNote(w http.ResponseWriter, r *http.Request) {
 	}
 	prev, next := siblings(snap.notes, n, folder)
 	raw, _ := store.ReadFile(n.Path)
-	writeJSON(w, apiNoteDTO{
+	writeJSON(w, apitypes.NoteView{
 		ID:        noteHandle(n),
 		Title:     n.Title,
 		Folder:    folder,
@@ -157,10 +194,10 @@ func (s *Server) apiNote(w http.ResponseWriter, r *http.Request) {
 		Created:   dateOnly(n.Created),
 		Tags:      n.Tags,
 		BodyHTML:  string(html),
-		Backlinks: snap.backlinks[n.Path],
-		TaskRefs:  snap.taskRefs[n.Path],
-		Prev:      prev,
-		Next:      next,
+		Backlinks: toBacklinks(snap.backlinks[n.Path]),
+		TaskRefs:  toTaskRefs(snap.taskRefs[n.Path]),
+		Prev:      toLinkPtr(prev),
+		Next:      toLinkPtr(next),
 		ETag:      etag(raw),
 	})
 }
@@ -180,7 +217,7 @@ func (s *Server) apiNoteRaw(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	writeJSON(w, apiRawDTO{Text: string(data), ETag: etag(data)})
+	writeJSON(w, apitypes.RawNote{Text: string(data), ETag: etag(data)})
 }
 
 // apiNoteSave reuses the existing save path (--edit + CSRF + If-Match → 409 +
@@ -190,13 +227,13 @@ func (s *Server) apiNoteSave(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) apiTasks(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, apiTasksDTO{Groups: buildTaskGroups(s.current().doc)})
+	writeJSON(w, apitypes.TasksResponse{Groups: toGroups(buildTaskGroups(s.current().doc))})
 }
 
 func (s *Server) apiActivity(w http.ResponseWriter, r *http.Request) {
 	snap := s.current()
-	writeJSON(w, apiActivityDTO{
-		Days:    groupActivity(snap.activity, r.URL.Query().Get("source")),
+	writeJSON(w, apitypes.ActivityResponse{
+		Days:    toActivity(groupActivity(snap.activity, r.URL.Query().Get("source"))),
 		Sources: snap.sources,
 	})
 }
@@ -216,13 +253,13 @@ func (s *Server) apiSearch(w http.ResponseWriter, r *http.Request) {
 		byPath[n.Path] = n
 	}
 	seen := map[string]bool{}
-	var results []linkRow
+	results := make([]apitypes.NoteLink, 0)
 	add := func(n *note.Note) {
 		if n == nil || seen[noteHandle(n)] || (tag != "" && !contains(n.Tags, tag)) {
 			return
 		}
 		seen[noteHandle(n)] = true
-		results = append(results, linkRow{URL: "/n/" + url.PathEscape(noteHandle(n)), Title: n.Title, Path: n.Rel})
+		results = append(results, apitypes.NoteLink{URL: "/n/" + url.PathEscape(noteHandle(n)), Title: n.Title, Path: n.Rel})
 	}
 	switch {
 	case q == "" && tag == "":
@@ -244,14 +281,14 @@ func (s *Server) apiSearch(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	writeJSON(w, apiSearchDTO{Results: results})
+	writeJSON(w, apitypes.SearchResponse{Results: results})
 }
 
 // ---- task write handlers (JSON) --------------------------------------------
 
 // respondTasks returns the refreshed task groups after a successful write.
 func (s *Server) respondTasks(w http.ResponseWriter) {
-	writeJSON(w, apiTasksDTO{Groups: buildTaskGroups(s.current().doc)})
+	writeJSON(w, apitypes.TasksResponse{Groups: toGroups(buildTaskGroups(s.current().doc))})
 }
 
 func (s *Server) apiTaskDone(w http.ResponseWriter, r *http.Request) {

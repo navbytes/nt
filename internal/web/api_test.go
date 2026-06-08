@@ -9,6 +9,7 @@ import (
 
 	"github.com/navbytes/nt/internal/note"
 	"github.com/navbytes/nt/internal/store"
+	"github.com/navbytes/nt/internal/web/apitypes"
 )
 
 func mustValues(kv ...string) url.Values {
@@ -35,19 +36,19 @@ func TestAPIStateAndNotes(t *testing.T) {
 	addTask(t, s, "open one")
 
 	_, body := get(t, s, "/api/state")
-	st := decode[apiStateDTO](t, body)
+	st := decode[apitypes.State](t, body)
 	if st.NoteCount != 2 || st.OpenCount != 1 || st.CanEdit {
 		t.Fatalf("state wrong: %+v", st)
 	}
 
 	_, body = get(t, s, "/api/notes")
-	idx := decode[apiNotesDTO](t, body)
+	idx := decode[apitypes.NotesIndex](t, body)
 	if len(idx.Index) != 2 || len(idx.Tree) == 0 {
 		t.Fatalf("notes index wrong: %+v", idx)
 	}
 
 	_, body = get(t, s, "/api/notes/"+n.ID)
-	nv := decode[apiNoteDTO](t, body)
+	nv := decode[apitypes.NoteView](t, body)
 	if nv.Title != "Alpha" || !strings.Contains(nv.BodyHTML, "wikilink") || nv.ETag == "" {
 		t.Fatalf("note view wrong: %+v", nv)
 	}
@@ -59,7 +60,7 @@ func TestAPITasksReadAndWrite(t *testing.T) {
 	id := addTask(t, s, "ship it")
 
 	_, body := get(t, s, "/api/tasks")
-	if g := decode[apiTasksDTO](t, body).Groups; len(g) == 0 {
+	if g := decode[apitypes.TasksResponse](t, body).Groups; len(g) == 0 {
 		t.Fatal("expected task groups")
 	}
 
@@ -74,7 +75,7 @@ func TestAPITasksReadAndWrite(t *testing.T) {
 	if !mustDoc(t, s).FindByID(id).Done {
 		t.Fatal("task should be done")
 	}
-	if g := decode[apiTasksDTO](t, body).Groups; len(g) == 0 || g[0].Status == "" {
+	if g := decode[apitypes.TasksResponse](t, body).Groups; len(g) == 0 || g[0].Status == "" {
 		t.Fatalf("done response should return groups: %s", body)
 	}
 
@@ -97,7 +98,7 @@ func TestAPINoteRawSaveGuard(t *testing.T) {
 	}
 	s.allowEdit = true
 	_, body := get(t, s, "/api/notes/"+n.ID+"/raw")
-	raw := decode[apiRawDTO](t, body)
+	raw := decode[apitypes.RawNote](t, body)
 	if !strings.Contains(raw.Text, "v1") || raw.ETag == "" {
 		t.Fatalf("raw wrong: %+v", raw)
 	}
@@ -122,7 +123,7 @@ func TestAPIActivityGraphSearch(t *testing.T) {
 	note.Create(s.eng.S, "Spoke", "x", nil, "cli", "")
 
 	_, body := get(t, s, "/api/activity")
-	if act := decode[apiActivityDTO](t, body); len(act.Days) == 0 || !contains(act.Sources, "claude") {
+	if act := decode[apitypes.ActivityResponse](t, body); len(act.Days) == 0 || !contains(act.Sources, "claude") {
 		t.Fatalf("activity wrong: %+v", act)
 	}
 	_, body = get(t, s, "/api/graph")
@@ -131,7 +132,7 @@ func TestAPIActivityGraphSearch(t *testing.T) {
 		t.Fatalf("graph wrong: %d nodes %d links", len(g.Nodes), len(g.Links))
 	}
 	_, body = get(t, s, "/api/search?q=Spoke")
-	if r := decode[apiSearchDTO](t, body); len(r.Results) == 0 {
+	if r := decode[apitypes.SearchResponse](t, body); len(r.Results) == 0 {
 		t.Fatalf("search returned nothing: %s", body)
 	}
 }
