@@ -118,6 +118,51 @@ func TestAPIQuickAddNormalizesInlineTokens(t *testing.T) {
 
 func timeParseISO(s string) (any, error) { return time.Parse("2006-01-02", s) }
 
+// TestAPINoteCreate: POST /api/notes is edit+CSRF gated, creates the note, splits
+// a "folder/Title" handle into a subfolder, and returns a usable handle/url.
+func TestAPINoteCreate(t *testing.T) {
+	s := newTestServer(t)
+
+	// gated off when read-only
+	if code, _ := postForm(s, "/api/notes", "", mustValues("title", "Nope")); code != 403 {
+		t.Errorf("create should 403 when read-only, got %d", code)
+	}
+	s.allowEdit = true
+	if code, _ := postForm(s, "/api/notes", "", mustValues("title", "Nope")); code != 403 {
+		t.Errorf("create without CSRF should 403, got %d", code)
+	}
+	// empty title rejected
+	if code, _ := postForm(s, "/api/notes", s.csrf, mustValues("title", "  ")); code != 400 {
+		t.Errorf("empty title should 400, got %d", code)
+	}
+
+	code, body := postForm(s, "/api/notes", s.csrf, mustValues("title", "work/Auth Design"))
+	if code != 200 {
+		t.Fatalf("create: %d %s", code, body)
+	}
+	res := decode[apitypes.CreatedNote](t, body)
+	if res.Handle == "" || res.URL == "" {
+		t.Fatalf("create response missing handle/url: %+v", res)
+	}
+	// The note exists, filed under work/, titled without the folder prefix.
+	notes, _ := note.List(s.eng.S)
+	var found *note.Note
+	for _, n := range notes {
+		if n.Title == "Auth Design" {
+			found = n
+		}
+	}
+	if found == nil {
+		t.Fatalf("created note not found among %d notes", len(notes))
+	}
+	if !strings.HasPrefix(found.Rel, "work/") {
+		t.Errorf("note should be filed under work/, got rel %q", found.Rel)
+	}
+	if found.Source != "web" {
+		t.Errorf("note source should be web, got %q", found.Source)
+	}
+}
+
 func TestAPINoteRawSaveGuard(t *testing.T) {
 	s := newTestServer(t)
 	n, _ := note.Create(s.eng.S, "Edit Me", "v1", nil, "cli", "")

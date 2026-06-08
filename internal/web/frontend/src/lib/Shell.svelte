@@ -46,7 +46,7 @@
 </script>
 
 <div class="layout">
-  <Sidebar {path} />
+  <Sidebar {path} canEdit={$stateQ.data?.canEdit ?? false} />
 
   <div class="content">
     <header class="topbar">

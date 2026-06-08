@@ -29,6 +29,7 @@ import (
 func (s *Server) apiRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/state", s.apiState)
 	mux.HandleFunc("GET /api/notes", s.apiNotes)
+	mux.HandleFunc("POST /api/notes", s.apiNoteCreate)
 	mux.HandleFunc("GET /api/notes/{handle}", s.apiNote)
 	mux.HandleFunc("GET /api/notes/{handle}/raw", s.apiNoteRaw)
 	mux.HandleFunc("POST /api/notes/{handle}", s.apiNoteSave)
@@ -228,6 +229,41 @@ func (s *Server) apiNoteRaw(w http.ResponseWriter, r *http.Request) {
 // atomic write + rebuild) — the lost-update guard is preserved verbatim.
 func (s *Server) apiNoteSave(w http.ResponseWriter, r *http.Request) {
 	s.handleSave(w, r, r.PathValue("handle"))
+}
+
+// apiNoteCreate creates a new note (--edit + CSRF gated) and returns its handle
+// + URL. A "folder/Title" value in the title is split into a subfolder, mirroring
+// the `nt note` CLI shorthand.
+func (s *Server) apiNoteCreate(w http.ResponseWriter, r *http.Request) {
+	if !s.allowEdit {
+		http.Error(w, "editing is disabled — start with `nt web --edit`", http.StatusForbidden)
+		return
+	}
+	if r.Header.Get("X-CSRF") != s.csrf {
+		http.Error(w, "bad or missing CSRF token", http.StatusForbidden)
+		return
+	}
+	title := strings.TrimSpace(r.FormValue("title"))
+	folder := strings.TrimSpace(r.FormValue("folder"))
+	if folder == "" { // "work/Auth design" → folder "work", title "Auth design"
+		if i := strings.LastIndex(title, "/"); i >= 0 {
+			folder = strings.TrimSpace(title[:i])
+			title = strings.TrimSpace(title[i+1:])
+		}
+	}
+	if title == "" {
+		http.Error(w, "a note title is required", http.StatusBadRequest)
+		return
+	}
+	n, err := note.Create(s.eng.S, title, "", nil, "web", folder)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	s.writes.mark(n.Path) // suppress our own fsnotify event
+	s.rebuild()
+	s.hub.broadcast("reload") // other tabs pick up the new note
+	writeJSON(w, apitypes.CreatedNote{Handle: noteHandle(n), URL: "/n/" + url.PathEscape(noteHandle(n))})
 }
 
 func (s *Server) apiTasks(w http.ResponseWriter, r *http.Request) {
