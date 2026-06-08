@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { createQuery } from "@tanstack/svelte-query";
+  import { createQuery, useQueryClient } from "@tanstack/svelte-query";
   import { api, type NoteLink } from "./api";
   import { navigate } from "./router.svelte";
   import { palette, openPalette, closePalette } from "./palette.svelte";
@@ -8,38 +8,86 @@
   let active = $state(0);
   let inputEl: HTMLInputElement | undefined = $state();
 
-  // Reuses the cached note index, so filtering is instant and offline.
+  const qc = useQueryClient();
   const notesQ = createQuery({ queryKey: ["notes"], queryFn: api.notes });
+  const stateQ = createQuery({ queryKey: ["state"], queryFn: api.state });
+  const canEdit = $derived($stateQ.data?.canEdit ?? false);
 
-  type Item = { label: string; sub?: string; url: string; kind: string };
+  type Item = { label: string; sub?: string; kind: string; url?: string; run?: () => void };
 
   const navItems: Item[] = [
     { label: "Dashboard", url: "/", kind: "go" },
     { label: "Tasks", url: "/tasks", kind: "go" },
     { label: "Activity", url: "/activity", kind: "go" },
+    { label: "Graph", url: "/graph", kind: "go" },
+    { label: "Tags", url: "/tags", kind: "go" },
+    { label: "Orphans", url: "/orphans", kind: "go" },
   ];
 
-  const items = $derived(build(q, $notesQ.data?.index ?? []));
+  function toggleTheme() {
+    const root = document.documentElement;
+    const dark =
+      root.getAttribute("data-theme") === "dark" ||
+      (!root.hasAttribute("data-theme") && window.matchMedia("(prefers-color-scheme: dark)").matches);
+    const next = dark ? "light" : "dark";
+    root.setAttribute("data-theme", next);
+    try {
+      localStorage.setItem("nt-theme", next);
+    } catch {
+      /* private mode */
+    }
+  }
 
-  function build(query: string, index: NoteLink[]): Item[] {
+  async function newNote() {
+    const title = prompt("New note title (use folder/Title for a subfolder):");
+    if (!title?.trim()) return;
+    const res = await api.noteCreate(title.trim());
+    await qc.invalidateQueries({ queryKey: ["notes"] });
+    navigate(res.url);
+  }
+
+  async function newTask() {
+    const text = prompt("New task (try: pay rent due:fri !high @home):");
+    if (!text?.trim()) return;
+    qc.setQueryData(["tasks"], await api.taskNew(text.trim()));
+    navigate("/tasks");
+  }
+
+  const actionItems = $derived<Item[]>([
+    ...(canEdit
+      ? [
+          { label: "New note", kind: "action", run: newNote },
+          { label: "New task", kind: "action", run: newTask },
+        ]
+      : []),
+    { label: "Toggle theme", kind: "action", run: toggleTheme },
+  ]);
+
+  const items = $derived(build(q, $notesQ.data?.index ?? [], actionItems));
+
+  function build(query: string, index: NoteLink[], actions: Item[]): Item[] {
     const ql = query.trim().toLowerCase();
     const match = (s: string) => s.toLowerCase().includes(ql);
     const nav = navItems.filter((n) => !ql || match(n.label));
+    const acts = actions.filter((a) => !ql || match(a.label));
     const notes: Item[] = index
       .filter((n) => !ql || match(n.title) || match(n.path))
       .slice(0, 8)
       .map((n) => ({ label: n.title, sub: n.path, url: n.url, kind: "note" }));
-    const out = [...nav, ...notes];
-    if (ql) out.push({ label: `Search notes for “${query}”`, url: `/search?q=${encodeURIComponent(query)}`, kind: "search" });
+    const out = [...nav, ...acts, ...notes];
+    if (ql)
+      out.push({
+        label: `Search notes for “${query}”`,
+        url: `/search?q=${encodeURIComponent(query)}`,
+        kind: "search",
+      });
     return out;
   }
 
-  // Keep the highlighted row in range as the result set shrinks/grows.
   $effect(() => {
     if (active > items.length - 1) active = Math.max(0, items.length - 1);
   });
 
-  // Reset + focus whenever the palette opens.
   $effect(() => {
     if (palette.open) {
       q = "";
@@ -51,7 +99,8 @@
   function choose(it: Item | undefined) {
     if (!it) return;
     closePalette();
-    navigate(it.url);
+    if (it.run) it.run();
+    else if (it.url) navigate(it.url);
   }
 
   function onGlobalKey(e: KeyboardEvent) {
@@ -86,20 +135,33 @@
 {#if palette.open}
   <div class="palette__backdrop" onclick={closePalette} role="presentation">
     <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
-    <div class="palette" role="dialog" aria-modal="true" onclick={(e) => e.stopPropagation()}>
+    <div
+      class="palette"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Command palette"
+      onclick={(e) => e.stopPropagation()}
+    >
       <input
         bind:this={inputEl}
         bind:value={q}
         onkeydown={onInputKey}
         class="palette__input"
-        placeholder="Search notes, jump to…"
+        placeholder="Search notes, run a command, jump to…"
         autocomplete="off"
         spellcheck="false"
+        role="combobox"
+        aria-expanded="true"
+        aria-controls="palette-listbox"
+        aria-activedescendant={items.length ? `palette-opt-${active}` : undefined}
       />
-      <ul class="palette__list">
-        {#each items as it, i (it.kind + it.url)}
-          <li>
+      <ul class="palette__list" id="palette-listbox" role="listbox">
+        {#each items as it, i (it.kind + (it.url ?? it.label))}
+          <li role="presentation">
             <button
+              id={`palette-opt-${i}`}
+              role="option"
+              aria-selected={i === active}
               class="palette__item"
               class:active={i === active}
               onmouseenter={() => (active = i)}
@@ -111,10 +173,10 @@
             </button>
           </li>
         {:else}
-          <li class="palette__empty muted">No matches</li>
+          <li class="palette__empty muted" role="presentation">No matches</li>
         {/each}
       </ul>
-      <div class="palette__hint muted">↑↓ navigate · ↵ open · esc close</div>
+      <div class="palette__hint muted">↑↓ navigate · ↵ run · esc close</div>
     </div>
   </div>
 {/if}
