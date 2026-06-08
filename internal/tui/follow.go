@@ -56,6 +56,28 @@ func (m *Model) collectTargets() []followTarget {
 	return raw
 }
 
+// linkTargets gathers just the [[link]] tokens of the selected item, each
+// labeled a, b, c… — the set `L` offers as a picker when an item has more than
+// one link (SPEC §11.2).
+func (m *Model) linkTargets() []followTarget {
+	var raw []string
+	if m.tab != tabNotes {
+		if t := m.selectedTask(); t != nil {
+			raw = t.Links()
+		}
+	} else if n := m.selectedNote(); n != nil {
+		raw = extractLinks(n.Body)
+	}
+	var out []followTarget
+	for i, l := range raw {
+		if i >= 26 {
+			break
+		}
+		out = append(out, followTarget{label: rune('a' + i), kind: "link", value: l})
+	}
+	return out
+}
+
 // extractLinks pulls [[target]] references out of a note body.
 func extractLinks(body string) []string {
 	var out []string

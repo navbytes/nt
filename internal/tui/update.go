@@ -9,7 +9,6 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/navbytes/nt/internal/dateparse"
-	"github.com/navbytes/nt/internal/links"
 	"github.com/navbytes/nt/internal/mutate"
 	"github.com/navbytes/nt/internal/note"
 	"github.com/navbytes/nt/internal/quickadd"
@@ -664,34 +663,21 @@ func (m *Model) mutate(op, id string, fn func(*task.Task)) {
 	m.selectTaskByID(id)
 }
 
+// followLink (L) jumps to a [[link]] on the selected item. With one link it
+// follows it directly; with several it opens the follow-mode picker scoped to
+// just the links, so you choose which to follow (SPEC §11.2) instead of silently
+// taking the first.
 func (m *Model) followLink() {
-	t := m.selectedTask()
-	if t == nil {
-		return
-	}
-	ls := t.Links()
-	if len(ls) == 0 {
+	targets := m.linkTargets()
+	switch len(targets) {
+	case 0:
 		m.setStatus("no links")
-		return
+	case 1:
+		m.gotoLink(targets[0].value)
+	default:
+		m.followTargets = targets
+		m.followMode = true
 	}
-	d, err := m.eng.Read()
-	if err != nil {
-		return
-	}
-	it, ok := links.Resolve(ls[0], d, m.notes)
-	if !ok {
-		m.setStatus("unresolved link")
-		return
-	}
-	if it.Kind == "note" {
-		m.tab = tabNotes
-	} else {
-		m.tab = tabTasks
-	}
-	m.filter = "" // clear filter so the target is visible
-	m.rebuild()
-	m.selectByID(it.ID)
-	m.setStatus("→ " + it.Title)
 }
 
 func (m *Model) selectTaskByID(id string) {
