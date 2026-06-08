@@ -20,6 +20,46 @@ func TestBlockedIDs(t *testing.T) {
 	}
 }
 
+func TestDepCycleNotHidden(t *testing.T) {
+	// A blocks B and B blocks A → a 2-cycle. Neither can ever unblock, so neither
+	// should be hidden (that would be an invisible deadlock).
+	doc := Parse([]byte("task a blocks:01B id:01A\ntask b blocks:01A id:01B\n"))
+	tasks := doc.Tasks()
+
+	cycles := DepCycles(tasks)
+	if len(cycles) != 1 || len(cycles[0]) != 2 {
+		t.Fatalf("expected one 2-cycle, got %v", cycles)
+	}
+	blocked := BlockedIDs(tasks)
+	if blocked["01A"] || blocked["01B"] {
+		t.Errorf("cycle members must stay visible (not blocked): %v", blocked)
+	}
+}
+
+func TestDepCycleThreeNode(t *testing.T) {
+	doc := Parse([]byte("a blocks:01B id:01A\nb blocks:01C id:01B\nc blocks:01A id:01C\n"))
+	cycles := DepCycles(doc.Tasks())
+	if len(cycles) != 1 || len(cycles[0]) != 3 {
+		t.Fatalf("expected one 3-cycle, got %v", cycles)
+	}
+}
+
+func TestNoCycleForChain(t *testing.T) {
+	// A → B → C is a valid chain, not a cycle.
+	doc := Parse([]byte("a blocks:01B id:01A\nb blocks:01C id:01B\nc id:01C\n"))
+	if cycles := DepCycles(doc.Tasks()); len(cycles) != 0 {
+		t.Errorf("a chain is not a cycle, got %v", cycles)
+	}
+}
+
+func TestDanglingBlocks(t *testing.T) {
+	doc := Parse([]byte("orphan blocks:01GONE id:01A\nfine task id:01B\n"))
+	d := DanglingBlocks(doc.Tasks())
+	if len(d) != 1 || d[0] != "01A" {
+		t.Errorf("expected task 01A flagged for a dangling blocks:, got %v", d)
+	}
+}
+
 func TestEffectiveStatus(t *testing.T) {
 	open := Parse([]byte("plain task id:01A\n")).Tasks()[0]
 	if got := EffectiveStatus(open, false); got != "open" {
