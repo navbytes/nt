@@ -3,9 +3,18 @@ package web
 import (
 	"embed"
 	"io/fs"
+	"mime"
 	"net/http"
 	"strings"
 )
+
+func init() {
+	// The Go file server serves the embedded SPA via mime.TypeByExtension; the
+	// PWA manifest extension isn't registered by default, so register it (and pin
+	// the SW + favicon types) so browsers accept them.
+	_ = mime.AddExtensionType(".webmanifest", "application/manifest+json")
+	_ = mime.AddExtensionType(".svg", "image/svg+xml")
+}
 
 // distFS holds the built Svelte SPA (internal/web/frontend/dist), embedded into
 // the binary so `nt web --spa` is still a single static binary with no runtime

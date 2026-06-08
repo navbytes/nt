@@ -11,7 +11,8 @@
     "preview": "vite preview",
     "check": "svelte-check --tsconfig ./tsconfig.json",
     "test": "vitest run",
-    "e2e": "playwright test"
+    "e2e": "playwright test",
+    "icons": "node icons/generate.mjs"
   },
   "devDependencies": {
     "@playwright/test": "^1.60.0",
@@ -22,10 +23,12 @@
     "@tsconfig/svelte": "^5.0.4",
     "@types/node": "^22.10.0",
     "jsdom": "^29.1.1",
+    "sharp": "^0.34.5",
     "svelte": "^5.56.3",
     "svelte-check": "^4.3.3",
     "typescript": "^5.9.3",
     "vite": "^7.1.12",
+    "vite-plugin-pwa": "^1.3.0",
     "vitest": "^4.1.8"
   },
   "dependencies": {
