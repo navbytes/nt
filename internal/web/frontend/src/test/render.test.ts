@@ -10,7 +10,11 @@ vi.mock("../lib/api", () => {
   ];
   return {
     setCsrf: vi.fn(),
+    SaveConflict: class SaveConflict extends Error {},
     api: {
+      raw: vi.fn().mockResolvedValue({ text: "# Hello\n\nthe body", etag: '"e1"' }),
+      preview: vi.fn().mockResolvedValue("<p>preview</p>"),
+      save: vi.fn().mockResolvedValue(undefined),
       state: vi.fn().mockResolvedValue({
         canEdit: true,
         csrf: "x",
@@ -60,6 +64,7 @@ import { api } from "../lib/api";
 import TaskRows from "../lib/TaskRows.svelte";
 import Sidebar from "../lib/Sidebar.svelte";
 import NoteView from "../routes/NoteView.svelte";
+import Editor from "../lib/Editor.svelte";
 
 beforeEach(() => vi.clearAllMocks());
 
@@ -97,5 +102,22 @@ describe("NoteView", () => {
     expect(screen.getByText("the rendered body")).toBeInTheDocument();
     expect(screen.getByText("do the thing")).toBeInTheDocument();
     expect(screen.getByText("Linked from")).toBeInTheDocument();
+  });
+});
+
+describe("Editor", () => {
+  it("loads raw text and saves with the captured etag, then closes", async () => {
+    const onClose = vi.fn();
+    render(Harness, { props: { comp: Editor, props: { handle: "def", onClose } } });
+
+    const ta = (await screen.findByRole("textbox")) as HTMLTextAreaElement;
+    expect(ta.value).toContain("the body");
+
+    await fireEvent.click(screen.getByText("Save"));
+    expect(api.save).toHaveBeenCalledOnce();
+    const call = vi.mocked(api.save).mock.calls[0];
+    expect(call?.[0]).toBe("def");
+    expect(call?.[2]).toBe('"e1"');
+    await vi.waitFor(() => expect(onClose).toHaveBeenCalled());
   });
 });

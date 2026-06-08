@@ -90,6 +90,19 @@ export interface ActivityDay {
   events: ActivityEvent[];
 }
 
+export interface RawNote {
+  text: string;
+  etag: string;
+}
+
+/** Thrown by api.save when the note changed on disk since it was opened (HTTP 409). */
+export class SaveConflict extends Error {
+  constructor() {
+    super("note changed on disk since you opened it");
+    this.name = "SaveConflict";
+  }
+}
+
 let csrf = "";
 export function setCsrf(token: string): void {
   csrf = token;
@@ -132,4 +145,23 @@ export const api = {
   taskReopen: (id: string) => postForm<{ groups: TaskGroup[] }>(`/api/tasks/${id}/reopen`),
   taskStatus: (id: string, status: string) =>
     postForm<{ groups: TaskGroup[] }>(`/api/tasks/${id}/status`, { status }),
+
+  // ---- editor ----
+  raw: (handle: string) => getJSON<RawNote>(`/api/notes/${encodeURIComponent(handle)}/raw`),
+
+  preview: async (text: string): Promise<string> => {
+    const r = await fetch("/api/preview", { method: "POST", headers: { "X-CSRF": csrf }, body: text });
+    if (!r.ok) throw new Error(`preview → ${r.status}`);
+    return r.text();
+  },
+
+  save: async (handle: string, text: string, etag: string): Promise<void> => {
+    const r = await fetch(`/api/notes/${encodeURIComponent(handle)}`, {
+      method: "POST",
+      headers: { "X-CSRF": csrf, "If-Match": etag },
+      body: text,
+    });
+    if (r.status === 409) throw new SaveConflict();
+    if (!r.ok) throw new Error(`${(await r.text()) || r.status}`);
+  },
 };

@@ -62,7 +62,7 @@
         <Home canEdit={$stateQ.data?.canEdit ?? false} />
       {:else if noteHandle}
         {#key noteHandle}
-          <NoteView handle={noteHandle} />
+          <NoteView handle={noteHandle} canEdit={$stateQ.data?.canEdit ?? false} />
         {/key}
       {:else if path === "/tasks"}
         <Tasks canEdit={$stateQ.data?.canEdit ?? false} />

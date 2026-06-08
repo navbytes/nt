@@ -1,13 +1,18 @@
 <script lang="ts">
   import { createQuery } from "@tanstack/svelte-query";
   import { api } from "../lib/api";
+  import Editor from "../lib/Editor.svelte";
 
-  let { handle }: { handle: string } = $props();
+  let { handle, canEdit = false }: { handle: string; canEdit?: boolean } = $props();
 
   const noteQ = createQuery({ queryKey: ["note", handle], queryFn: () => api.note(handle) });
+
+  let editing = $state(false);
 </script>
 
-{#if $noteQ.isPending}
+{#if editing}
+  <Editor {handle} onClose={() => (editing = false)} />
+{:else if $noteQ.isPending}
   <p class="muted">Loading…</p>
 {:else if $noteQ.error}
   <p class="error">Note not found.</p>
@@ -17,6 +22,8 @@
     <div class="crumbs">
       {#each n.crumbs as c (c)}<span>{c}</span>{/each}
       <span class="crumbs__file">{n.file}</span>
+      <span class="spacer"></span>
+      {#if canEdit}<button class="btn btn--ghost btn--sm" onclick={() => (editing = true)}>Edit</button>{/if}
     </div>
     <h1>{n.title}</h1>
     <div class="note__meta">
