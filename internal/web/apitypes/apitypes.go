@@ -152,9 +152,10 @@ type OrphansResponse struct {
 	Notes []NoteLink `json:"notes"`
 }
 
-// GraphNode is one note in the knowledge graph (Deg = link degree, for sizing).
+// GraphNode is one entity in the knowledge graph (Deg = link degree, for sizing).
 type GraphNode struct {
 	ID     string   `json:"id"`
+	Kind   string   `json:"kind"` // "note" | "task"
 	Title  string   `json:"title"`
 	URL    string   `json:"url"`
 	Folder string   `json:"folder"`

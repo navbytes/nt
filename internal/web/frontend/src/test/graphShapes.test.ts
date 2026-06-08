@@ -2,8 +2,8 @@ import { describe, it, expect } from "vitest";
 import { nodeShape, shapeValue, shapeLegendEntries, glyphPoints } from "../lib/graphShapes";
 import type { FGNode } from "../lib/graph";
 
-function node(id: string, source = "cli", folder = "", tags: string[] = []): FGNode {
-  return { id, title: id.toUpperCase(), url: `/n/${id}`, folder, source, tags, deg: 0 };
+function node(id: string, source = "cli", folder = "", tags: string[] = [], kind = "note"): FGNode {
+  return { id, kind, title: id.toUpperCase(), url: `/n/${id}`, folder, source, tags, deg: 0 };
 }
 
 describe("nodeShape", () => {
@@ -21,6 +21,11 @@ describe("nodeShape", () => {
     const c = nodeShape(node("c", "claude"), "source");
     expect(a1).toBe(a2); // same source → same shape
     expect(a1).not.toBe(c); // different source → different shape
+  });
+
+  it("maps kind to fixed shapes (note=circle, task=diamond)", () => {
+    expect(nodeShape(node("a", "cli", "", [], "note"), "kind")).toBe("circle");
+    expect(nodeShape(node("b", "cli", "", [], "task"), "kind")).toBe("diamond");
   });
 });
 

@@ -227,6 +227,38 @@ func TestAPITagsAndOrphans(t *testing.T) {
 	}
 }
 
+// TestAPIGraphTaskNodes: a task that wikilinks a note joins the graph as a
+// "task" node with an edge to that note; tasks with no note links are omitted.
+func TestAPIGraphTaskNodes(t *testing.T) {
+	s := newTestServer(t)
+	s.allowEdit = true
+	note.Create(s.eng.S, "Hub", "hub note", nil, "cli", "")
+	addTask(t, s, "wire [[Hub]] up")
+	addTask(t, s, "unconnected chore") // no note link → should NOT appear
+
+	_, body := get(t, s, "/api/graph")
+	g := decode[apitypes.GraphData](t, body)
+
+	var notes, tasks int
+	for _, n := range g.Nodes {
+		switch n.Kind {
+		case "note":
+			notes++
+		case "task":
+			tasks++
+			if n.URL != "/tasks" {
+				t.Errorf("task node URL should be /tasks, got %q", n.URL)
+			}
+		}
+	}
+	if notes != 1 || tasks != 1 {
+		t.Fatalf("want 1 note + 1 connected task node, got %d notes / %d tasks: %+v", notes, tasks, g.Nodes)
+	}
+	if len(g.Links) != 1 {
+		t.Fatalf("want one task→note edge, got %d", len(g.Links))
+	}
+}
+
 func TestAPIActivityGraphSearch(t *testing.T) {
 	s := newTestServer(t)
 	note.Create(s.eng.S, "Hub", "see [[Spoke]]", nil, "claude", "")
