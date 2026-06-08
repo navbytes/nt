@@ -2,6 +2,7 @@ package mutate
 
 import (
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/navbytes/nt/internal/store"
@@ -86,5 +87,29 @@ func TestDoctorWarnsCycleAndDangling(t *testing.T) {
 	}
 	if rep.Issues() != 0 {
 		t.Errorf("warnings are not fixable issues: Issues()=%d", rep.Issues())
+	}
+}
+
+func TestDoctorReconcilesCrossFileDup(t *testing.T) {
+	e := newEngine(t)
+	// Simulate a crash mid-archive: the same completed task is in BOTH files.
+	const id = "id:01ZZZZZZZZZZZZZZZZZZZZZZZZ"
+	if err := store.WriteAtomic(e.S.TasksFile(), []byte("x 2026-06-07 ship it "+id+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.WriteAtomic(e.S.DoneFile(), []byte("x 2026-06-07 ship it "+id+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rep, err := e.Doctor(true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.CrossFileDups != 1 {
+		t.Fatalf("expected 1 cross-file dup reconciled, got %d", rep.CrossFileDups)
+	}
+	// tasks.txt no longer holds the archived task.
+	got, _ := os.ReadFile(e.S.TasksFile())
+	if strings.Contains(string(got), "ship it") {
+		t.Fatalf("archived task should be removed from tasks.txt:\n%s", got)
 	}
 }

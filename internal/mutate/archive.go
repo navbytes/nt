@@ -53,6 +53,9 @@ func (e *Engine) Archive() (int, error) {
 		b.WriteString(l)
 		b.WriteByte('\n')
 	}
+	// Write done.txt FIRST, then tasks.txt. A crash between the two leaves the
+	// moved tasks in both files (never neither) — `nt doctor` reconciles that by
+	// dropping the tasks.txt copies that already exist in done.txt (SPEC §15).
 	if err := store.WriteAtomic(e.S.DoneFile(), []byte(b.String()), 0o644); err != nil {
 		return 0, err
 	}
