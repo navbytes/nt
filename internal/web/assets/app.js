@@ -288,9 +288,10 @@
     var md = document.querySelector(".md");
     if (!btn || !md) return;
     var csrf = (document.querySelector('meta[name="csrf"]') || {}).content || "";
+    var etag = "";
     function openEditor() {
       if (document.querySelector(".editor")) return;
-      fetch(location.pathname + "?raw=1").then(function (r) { return r.text(); }).then(function (text) {
+      fetch(location.pathname + "?raw=1").then(function (r) { etag = r.headers.get("ETag") || ""; return r.text(); }).then(function (text) {
         var wrap = document.createElement("div");
         wrap.className = "editwrap";
         var ta = document.createElement("textarea");
@@ -319,9 +320,12 @@
         function commit() {
           save.disabled = true;
           status.textContent = "Saving…";
-          fetch(location.pathname, { method: "POST", headers: { "X-CSRF": csrf, "Content-Type": "text/plain" }, body: ta.value })
+          var headers = { "X-CSRF": csrf, "Content-Type": "text/plain" };
+          if (etag) headers["If-Match"] = etag; // lost-update guard (409 if changed underneath)
+          fetch(location.pathname, { method: "POST", headers: headers, body: ta.value })
             .then(function (r) {
               if (r.ok) { location.reload(); }
+              else if (r.status === 409) { save.disabled = false; status.textContent = "Changed on disk — reload to merge"; }
               else { save.disabled = false; status.textContent = "Save failed (" + r.status + ")"; }
             }).catch(function () { save.disabled = false; status.textContent = "Save failed"; });
         }

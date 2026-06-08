@@ -8,6 +8,7 @@ package web
 
 import (
 	"crypto/rand"
+	"crypto/sha256"
 	"embed"
 	"encoding/hex"
 	"encoding/json"
@@ -63,6 +64,15 @@ func NewServer(eng *mutate.Engine, version string) (*Server, error) {
 		return nil, err
 	}
 	return &Server{eng: eng, version: version, tmpl: tmpl, hub: newHub(), hlCSS: highlightCSS(), csrf: randToken()}, nil
+}
+
+// etag is a content validator for a note file's current bytes. The editor
+// captures it on ?raw=1 load and returns it as If-Match on save so a concurrent
+// write (agent, CLI, another tab) is detected rather than overwritten. Content-
+// hashed (not mtime) so it's immune to filesystem timestamp granularity.
+func etag(data []byte) string {
+	sum := sha256.Sum256(data)
+	return `"` + hex.EncodeToString(sum[:8]) + `"`
 }
 
 func randToken() string {
@@ -243,6 +253,7 @@ func (s *Server) handleNote(w http.ResponseWriter, r *http.Request) {
 				}
 				if data, err := store.ReadFile(n.Path); err == nil {
 					w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+					w.Header().Set("ETag", etag(data)) // editor sends this back as If-Match on save
 					_, _ = w.Write(data)
 				}
 				return
@@ -310,6 +321,18 @@ func (s *Server) handleSave(w http.ResponseWriter, r *http.Request, handle strin
 	if n == nil {
 		http.NotFound(w, r)
 		return
+	}
+	// Lost-update guard: the editor captures the file's ETag on ?raw=1 and sends
+	// it back as If-Match. If the bytes on disk no longer match (an agent, the
+	// CLI, or another tab wrote this note since it was opened), refuse with 409
+	// instead of silently clobbering that write. Absent If-Match (e.g. a non-JS
+	// client) skips the check — the save is then plain last-writer-wins.
+	if ifMatch := r.Header.Get("If-Match"); ifMatch != "" {
+		cur, _ := store.ReadFile(n.Path)
+		if etag(cur) != ifMatch {
+			http.Error(w, "note changed on disk since you opened it — reload to merge", http.StatusConflict)
+			return
+		}
 	}
 	body, err := io.ReadAll(io.LimitReader(r.Body, 4<<20)) // 4 MiB cap
 	if err != nil {

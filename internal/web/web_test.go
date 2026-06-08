@@ -10,6 +10,7 @@ import (
 
 	"github.com/navbytes/nt/internal/mutate"
 	"github.com/navbytes/nt/internal/note"
+	"github.com/navbytes/nt/internal/store"
 	"github.com/navbytes/nt/internal/task"
 )
 
@@ -348,6 +349,15 @@ func postNote(s *Server, id, csrf, body string) int {
 	return rec.Code
 }
 
+func postNoteIfMatch(s *Server, id, csrf, ifMatch, body string) int {
+	rec := httptest.NewRecorder()
+	r := httptest.NewRequest("POST", "/n/"+id, strings.NewReader(body))
+	r.Header.Set("X-CSRF", csrf)
+	r.Header.Set("If-Match", ifMatch)
+	s.routes().ServeHTTP(rec, r)
+	return rec.Code
+}
+
 func TestEditingDisabledByDefault(t *testing.T) {
 	s := newTestServer(t) // allowEdit defaults false
 	n, _ := note.Create(s.eng.S, "X", "body", nil, "cli", "")
@@ -382,5 +392,41 @@ func TestEditingSave(t *testing.T) {
 	b, _ := os.ReadFile(n.Path)
 	if !strings.Contains(string(b), "brand new body") || !strings.Contains(string(b), "id: keep") {
 		t.Fatalf("file not updated as written:\n%s", b)
+	}
+}
+
+// TestEditingLostUpdateGuard: when a note changes on disk after the editor
+// opened it (a concurrent agent/CLI write), a save carrying the stale ETag as
+// If-Match is refused with 409 instead of clobbering the other write. A save
+// with the current ETag goes through.
+func TestEditingLostUpdateGuard(t *testing.T) {
+	s := newTestServer(t)
+	s.allowEdit = true
+	n, _ := note.Create(s.eng.S, "X", "v1 body", nil, "cli", "")
+
+	resp, _ := get(t, s, "/n/"+n.ID+"?raw=1")
+	stale := resp.Header.Get("ETag")
+	if stale == "" {
+		t.Fatal("raw response missing ETag")
+	}
+
+	// Another writer (agent/CLI) rewrites the same note underneath the editor.
+	fresh := "---\nid: " + n.ID + "\n---\n\nagent wrote this\n"
+	if err := store.WriteAtomic(n.Path, []byte(fresh), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// The stale save is refused and the agent's write survives intact.
+	if code := postNoteIfMatch(s, n.ID, s.csrf, stale, "clobbered\n"); code != 409 {
+		t.Fatalf("stale save should 409, got %d", code)
+	}
+	if b, _ := os.ReadFile(n.Path); !strings.Contains(string(b), "agent wrote this") {
+		t.Fatalf("agent write was clobbered:\n%s", b)
+	}
+
+	// Re-opening yields the current ETag, which lets the save through.
+	resp2, _ := get(t, s, "/n/"+n.ID+"?raw=1")
+	if code := postNoteIfMatch(s, n.ID, s.csrf, resp2.Header.Get("ETag"), "---\nid: "+n.ID+"\n---\n\nmerged\n"); code != 204 {
+		t.Fatalf("fresh save should 204, got %d", code)
 	}
 }
