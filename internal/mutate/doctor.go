@@ -13,10 +13,16 @@ type DoctorReport struct {
 	DupIDsRemoved int      // duplicate-ULID lines dropped
 	IDsAssigned   int      // task lines that lacked an id and got one
 	Actions       []string // human-readable, one per fix
+	Warnings      []string // structural problems doctor reports but can't auto-fix
 }
 
-// Issues is the total number of problems found.
+// Issues is the count of auto-fixable problems (used to decide whether to write).
 func (r DoctorReport) Issues() int { return r.DupIDsRemoved + r.IDsAssigned }
+
+// HasProblems reports whether anything is wrong — fixable issues OR warnings —
+// so `nt doctor --check` exits non-zero on a dependency cycle / dangling edge
+// even when there's nothing to rewrite.
+func (r DoctorReport) HasProblems() bool { return r.Issues() > 0 || len(r.Warnings) > 0 }
 
 // Doctor reconciles tasks.txt after a git merge (or hand-editing): it drops
 // duplicate-ULID lines that a `merge=union` merge can leave behind, and assigns
@@ -77,11 +83,50 @@ func (e *Engine) Doctor(apply bool) (DoctorReport, error) {
 		kept = append(kept, n)
 	}
 
+	// 4. Dependency-integrity warnings (not auto-fixable — breaking a cycle or a
+	// stale edge is a user decision). Computed on the post-dedup task set.
+	checkNodes := kept
+	if !apply {
+		checkNodes = d.Nodes // dry-run hasn't pruned dups; check the keepers only
+	}
+	var checkTasks []*task.Task
+	seen := map[string]bool{}
+	for _, n := range checkNodes {
+		if n.Task != nil && n.Task.ID() != "" && !seen[n.Task.ID()] {
+			seen[n.Task.ID()] = true
+			checkTasks = append(checkTasks, n.Task)
+		}
+	}
+	for _, cyc := range task.DepCycles(checkTasks) {
+		shorts := make([]string, len(cyc))
+		for i, id := range cyc {
+			shorts[i] = short(id)
+		}
+		rep.Warnings = append(rep.Warnings, "dependency cycle: "+joinArrow(shorts))
+	}
+	for _, id := range task.DanglingBlocks(checkTasks) {
+		rep.Warnings = append(rep.Warnings, "dangling blocks: target on task "+short(id)+" no longer exists")
+	}
+
 	if rep.Issues() == 0 || !apply {
 		return rep, nil
 	}
 	d.Nodes = kept
 	return rep, store.WriteAtomic(e.S.TasksFile(), d.Render(), 0o644)
+}
+
+func joinArrow(ids []string) string {
+	out := ""
+	for i, id := range ids {
+		if i > 0 {
+			out += " → "
+		}
+		out += id
+	}
+	if len(ids) > 0 {
+		out += " → " + ids[0] // close the loop visually
+	}
+	return out
 }
 
 func short(id string) string {

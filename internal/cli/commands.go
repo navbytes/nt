@@ -1169,17 +1169,28 @@ func cmdDoctor(args []string) int {
 	for _, a := range rep.Actions {
 		fmt.Println("  " + a)
 	}
-	if rep.Issues() == 0 {
+	for _, w := range rep.Warnings {
+		fmt.Println("  ⚠ " + w)
+	}
+	if !rep.HasProblems() {
 		fmt.Println("store is healthy — no issues found")
 		return 0
 	}
+	if rep.Issues() > 0 {
+		if *check {
+			fmt.Printf("found %d fixable issue(s): %d duplicate id(s), %d missing id(s) — run `nt doctor` to fix\n",
+				rep.Issues(), rep.DupIDsRemoved, rep.IDsAssigned)
+		} else {
+			fmt.Printf("fixed %d issue(s): %d duplicate id(s) removed, %d id(s) assigned\n",
+				rep.Issues(), rep.DupIDsRemoved, rep.IDsAssigned)
+		}
+	}
+	if len(rep.Warnings) > 0 {
+		fmt.Printf("%d dependency warning(s) need a manual fix (see ⚠ above)\n", len(rep.Warnings))
+	}
 	if *check {
-		fmt.Printf("found %d issue(s): %d duplicate id(s), %d missing id(s) — run `nt doctor` to fix\n",
-			rep.Issues(), rep.DupIDsRemoved, rep.IDsAssigned)
 		return 1
 	}
-	fmt.Printf("fixed %d issue(s): %d duplicate id(s) removed, %d id(s) assigned\n",
-		rep.Issues(), rep.DupIDsRemoved, rep.IDsAssigned)
 	return 0
 }
 

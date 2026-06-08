@@ -64,3 +64,27 @@ func TestDoctorDedupAndAssign(t *testing.T) {
 		t.Errorf("doctor should be idempotent, second run found %d issues", rep2.Issues())
 	}
 }
+
+func TestDoctorWarnsCycleAndDangling(t *testing.T) {
+	e := newEngine(t)
+	// A 2-cycle (a↔b) plus a task pointing at a deleted target.
+	const raw = "task a blocks:01BBBBBBBBBBBBBBBBBBBBBBBB id:01AAAAAAAAAAAAAAAAAAAAAAAA\n" +
+		"task b blocks:01AAAAAAAAAAAAAAAAAAAAAAAA id:01BBBBBBBBBBBBBBBBBBBBBBBB\n" +
+		"orphan blocks:01GONEGONEGONEGONEGONEGONE id:01CCCCCCCCCCCCCCCCCCCCCCCC\n"
+	if err := store.WriteAtomic(e.S.TasksFile(), []byte(raw), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	rep, err := e.Doctor(false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rep.Warnings) != 2 {
+		t.Fatalf("expected 2 warnings (1 cycle + 1 dangling), got %d: %v", len(rep.Warnings), rep.Warnings)
+	}
+	if !rep.HasProblems() {
+		t.Error("HasProblems should be true when there are warnings")
+	}
+	if rep.Issues() != 0 {
+		t.Errorf("warnings are not fixable issues: Issues()=%d", rep.Issues())
+	}
+}
