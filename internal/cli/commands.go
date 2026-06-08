@@ -65,7 +65,7 @@ func cmdAdd(args []string) int {
 	parent := fs.String("parent", "", "parent task id")
 	blocks := fs.String("blocks", "", "blocks task id")
 	discovered := fs.String("discovered-from", "", "task this was discovered while working on")
-	recur := fs.String("recur", "", "recurrence: weekly|3d|…")
+	recur := fs.String("recur", "", "recurrence: weekly|3d|… (prefix + for strict, e.g. +monthly)")
 	noteSlug := fs.String("note", "", "link to a note slug")
 	fs.Var(&tags, "tag", "tag (repeatable)")
 
@@ -127,6 +127,43 @@ func cmdAdd(args []string) int {
 		return fail(err)
 	}
 	fmt.Printf("added %s  %s\n", shortID(created.ID()), title)
+	return 0
+}
+
+// cmdSkip advances one or more recurring tasks to their next occurrence without
+// completing them — "not this time, but keep the cadence."
+func cmdSkip(args []string) int {
+	if len(args) == 0 {
+		return fail(fmt.Errorf("skip: need a task id"))
+	}
+	e, ok := engine()
+	if !ok {
+		return 1
+	}
+	moved := 0
+	err := e.Apply("skip", func(d *task.Doc, rec *mutate.Recorder) error {
+		for _, h := range args {
+			t, err := resolveHandle(d, h)
+			if err != nil {
+				return fmt.Errorf("skip: %w", err)
+			}
+			if t.Recur() == "" {
+				return fmt.Errorf("skip: %s is not a recurring task", shortID(t.ID()))
+			}
+			next := task.AdvanceDue(t, mutate.Today())
+			if next == "" {
+				return fmt.Errorf("skip: %s has an unparseable recurrence %q", shortID(t.ID()), t.Recur())
+			}
+			rec.Before(t)
+			t.SetKey("due", next)
+			moved++
+		}
+		return nil
+	})
+	if err != nil {
+		return fail(err)
+	}
+	fmt.Printf("skipped to next occurrence (%d)\n", moved)
 	return 0
 }
 
