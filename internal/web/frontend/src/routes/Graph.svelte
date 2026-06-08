@@ -12,6 +12,7 @@
     type FGLink,
   } from "../lib/graph";
   import { nodeColor as colorOfNode, legendEntries } from "../lib/graphColors";
+  import { nodeShape, tracePath, shapeLegendEntries, type ShapeKind } from "../lib/graphShapes";
   import { view, savePersisted, enterLocal, exitLocal } from "../lib/graphView.svelte";
   import GraphControls from "../lib/GraphControls.svelte";
   import GraphDetails from "../lib/GraphDetails.svelte";
@@ -36,9 +37,10 @@
   const adjacency = $derived(
     $graphQ.data ? buildAdjacency($graphQ.data) : new Map<string, Set<string>>(),
   );
-  let R: { color: Map<string, string>; bright: Set<string> } = {
+  let R: { color: Map<string, string>; bright: Set<string>; shape: Map<string, ShapeKind> } = {
     color: new Map(),
     bright: new Set(),
+    shape: new Map(),
   };
 
   // Cached theme colors (refreshed on theme change) so the draw loop doesn't hit
@@ -59,6 +61,7 @@
   const tags = $derived([...new Set(allNodes.flatMap((n) => n.tags))].sort());
   const sources = $derived([...new Set(allNodes.map((n) => n.source).filter(Boolean))].sort());
   const legend = $derived(legendEntries(allNodes, view.colorBy));
+  const shapeLegend = $derived(shapeLegendEntries(allNodes, view.shapeBy));
   const selectedNode = $derived(allNodes.find((n) => n.id === view.selectedId) ?? null);
   // R is a plain (non-reactive) object read O(1) by the hot draw loop; the panel
   // reads this mirrored count instead so it stays reactive.
@@ -95,7 +98,11 @@
     if (!data) return;
     const nodes = toForceGraph(data).nodes;
     const color = new Map<string, string>();
-    for (const n of nodes) color.set(n.id, colorOfNode(n, view.colorBy));
+    const shape = new Map<string, ShapeKind>();
+    for (const n of nodes) {
+      color.set(n.id, colorOfNode(n, view.colorBy));
+      shape.set(n.id, nodeShape(n, view.shapeBy));
+    }
 
     const hoverSet =
       hoveredId && adjacency.has(hoveredId)
@@ -106,7 +113,7 @@
     for (const n of nodes) {
       if (passes(n) && (!hoverSet || hoverSet.has(n.id))) bright.add(n.id);
     }
-    R = { color, bright };
+    R = { color, bright, shape };
     visibleCount = bright.size;
     graph?.refresh?.();
   }
@@ -137,11 +144,16 @@
       ctx.lineWidth = 1.5 / scale;
       ctx.stroke();
     }
-    // node
-    ctx.beginPath();
-    ctx.arc(x, y, r, 0, 2 * Math.PI);
+    // node — shape encodes view.shapeBy (source/folder/tag); circle by default
+    tracePath(ctx, R.shape.get(n.id) ?? "circle", x, y, r);
     ctx.fillStyle = dim ? base + "26" : base;
     ctx.fill();
+    // orphans (no links) read as a hollow outline so they stand out
+    if (n.deg === 0) {
+      ctx.lineWidth = 1 / scale;
+      ctx.strokeStyle = dim ? base + "55" : base;
+      ctx.stroke();
+    }
     // pinned indicator
     if (pinned.has(n.id)) {
       ctx.beginPath();
@@ -426,6 +438,7 @@
     void [
       $graphQ.data,
       view.colorBy,
+      view.shapeBy,
       view.search,
       view.filterFolders,
       view.filterTags,
@@ -486,6 +499,7 @@
   $effect(() => {
     void [
       view.colorBy,
+      view.shapeBy,
       view.showLabels,
       view.showArrows,
       view.particles,
@@ -541,6 +555,7 @@
       {tags}
       {sources}
       {legend}
+      {shapeLegend}
       nodeCount={allNodes.length}
       linkCount={$graphQ.data?.links.length ?? 0}
       {visibleCount}

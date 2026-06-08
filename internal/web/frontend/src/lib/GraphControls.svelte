@@ -1,11 +1,14 @@
 <script lang="ts">
-  import { view, toggleIn, resetFilters, exitLocal, type ColorBy } from "./graphView.svelte";
+  import { view, toggleIn, resetFilters, exitLocal, type ColorBy, type ShapeBy } from "./graphView.svelte";
+  import ShapeGlyph from "./ShapeGlyph.svelte";
+  import type { ShapeKind } from "./graphShapes";
 
   let {
     folders,
     tags,
     sources,
     legend,
+    shapeLegend,
     nodeCount,
     linkCount,
     visibleCount,
@@ -15,6 +18,7 @@
     tags: string[];
     sources: string[];
     legend: { value: string; label: string; color: string }[];
+    shapeLegend: { value: string; label: string; shape: ShapeKind }[];
     nodeCount: number;
     linkCount: number;
     visibleCount: number;
@@ -28,6 +32,13 @@
     { v: "folder", label: "Folder" },
     { v: "tag", label: "Tag" },
     { v: "source", label: "Source" },
+    { v: "none", label: "None" },
+  ];
+
+  const shapeOptions: { v: ShapeBy; label: string }[] = [
+    { v: "source", label: "Source" },
+    { v: "folder", label: "Folder" },
+    { v: "tag", label: "Tag" },
     { v: "none", label: "None" },
   ];
 
@@ -95,6 +106,14 @@
         <label for="g-colorby">Color by</label>
         <select id="g-colorby" bind:value={view.colorBy}>
           {#each colorOptions as o (o.v)}<option value={o.v}>{o.label}</option>{/each}
+        </select>
+      </div>
+
+      <!-- Shape by -->
+      <div class="gctl__row gctl__field">
+        <label for="g-shapeby">Shape by</label>
+        <select id="g-shapeby" bind:value={view.shapeBy}>
+          {#each shapeOptions as o (o.v)}<option value={o.v}>{o.label}</option>{/each}
         </select>
       </div>
 
@@ -180,12 +199,21 @@
 
       <!-- Legend -->
       {#if legend.length > 1}
-        <div class="gctl__legend" aria-label="Legend (click to filter)">
+        <div class="gctl__legend" aria-label="Color legend (click to filter)">
           {#each legend as e (e.value)}
             <button class="legend-item" class:on={legendActive(e.value)}
               disabled={view.colorBy === "none"} onclick={() => legendClick(e.value)}>
               <span class="legend-dot" style="background:{e.color}"></span>{e.label}
             </button>
+          {/each}
+        </div>
+      {/if}
+
+      <!-- Shape legend (what the node shapes mean) -->
+      {#if shapeLegend.length > 1}
+        <div class="gctl__legend gctl__shapelegend" aria-label="Shape legend">
+          {#each shapeLegend as e (e.value)}
+            <span class="shape-legend-item"><ShapeGlyph kind={e.shape} /> {e.label}</span>
           {/each}
         </div>
       {/if}
@@ -383,6 +411,14 @@
     border-radius: 50%;
     display: inline-block;
     flex: none;
+  }
+  .shape-legend-item {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    color: var(--fg-soft);
+    font-size: 0.75rem;
+    padding: 1px 3px;
   }
   .gctl__stats {
     color: var(--muted);
