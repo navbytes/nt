@@ -205,6 +205,7 @@ go build -o nt .       # Go 1.25+
 ./nt                   # launch the TUI
 make test              # run the Go test suite
 make web-build         # rebuild the embedded web app (needs Node 22+)
+vhs docs/demo.tape     # (optional) render an animated demo → docs/demo.gif
 ```
 The web app's built bundle is committed and embedded with `//go:embed`, so `go build` / `go install` need no Node toolchain. See **[SPEC.md](SPEC.md)** for the full design.
 </details>
