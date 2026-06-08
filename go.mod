@@ -1,6 +1,6 @@
 module github.com/navbytes/nt
 
-go 1.24.2
+go 1.25.11
 
 require (
 	github.com/alecthomas/chroma/v2 v2.20.0
