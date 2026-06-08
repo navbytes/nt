@@ -475,27 +475,53 @@ current tab and selection (e.g. no due/tag on notes, `x reopen` in the logbook,
 wheel scrolls, click selects a row, click a `[[link]]`/`@tag`/`+project` activates it,
 click a tab to switch, and drag the list/detail divider to resize it.
 
-### 12.1 Web viewer (`nt web`)
+### 12.1 Web GUI (`nt web`)
 
-Read-only by default; `nt web --edit` enables in-browser note editing (raw-file
-textarea → atomic write, frontmatter preserved verbatim), guarded by a
-per-process CSRF token sent as a custom header (cross-site POSTs fail the CORS
-preflight). The seams designed for this: a `Server` struct holding the token,
-id-addressed notes, one reusable render path, and the frontmatter-safe write.
+A localhost HTTP adapter (`internal/web`) — the browser GUI over the same
+`task`/`note`/`links` domain as the CLI/TUI/MCP. Binds `127.0.0.1` only (no
+network exposure, no auth). Read-only by default; `nt web --edit` enables writes
+(notes **and** tasks), each guarded by a per-process CSRF token sent as a custom
+header (cross-site POSTs fail the CORS preflight).
 
+**Read model.** Every request serves from an in-memory snapshot (`readmodel.go`)
+that parses the store once and precomputes the link graph — note→note backlinks,
+the task→note reference panel, forward adjacency, and the orphan set, keyed by
+note path. A note page is a map lookup, not a per-request walk + ripgrep. The
+snapshot is rebuilt from a **debounced, self-write-aware** fsnotify watcher (SPEC
+§6.5): an atomic-rename event burst collapses into one rebuild, transient files
+(`.nt-*.tmp`, lock, undo, log) are ignored, and the adapter's own writes don't
+bounce the editing client. With no watcher (tests/embedders) reads build fresh.
 
-A localhost HTTP adapter (`internal/web`) for browsing/reading notes in a
-browser — a read-only fourth adapter over the same `note`/`links` domain as the
-CLI/TUI/MCP. Binds `127.0.0.1` only (no network exposure, no auth). Serves a
-folder tree, Markdown rendered with **goldmark** (already in the module graph
-via Glamour — no new dependency), `[[wikilink]]` navigation (resolved → `/n/<id>`
-stable handles; unresolved/ambiguous → a "did you mean" page), backlinks,
-full-text search, and **Mermaid** diagrams (the only vendored asset, embedded
-gzipped; client-side render, fully offline). Light/dark themes reuse the TUI's
-Tokyo Night palette. The page **live-reloads** via fsnotify + SSE when the store
-changes. Structured to make editing a future additive change: state on a
-`Server` struct, id-addressed notes, one reusable render path, and the
-frontmatter-preserving write helper reserved for when writes land.
+**Browse + read.** Folder tree, Markdown via **goldmark** (in the module graph
+via Glamour), `[[wikilink]]` navigation (resolved → `/n/<id>` stable handles;
+unresolved/ambiguous → a "did you mean" page), backlinks, full-text search,
+command palette (⌘K), hover previews, **Mermaid** diagrams (vendored gzipped,
+client-side, offline). Light/dark Tokyo Night themes.
+
+**Interactive tasks** (`--edit`). The `/tasks` dashboard can complete / reopen /
+set-status / delete / add — every action routed through `mutate.Engine.Apply`
+(lock + re-read + undo journal), so a browser write gets the same safety as a
+CLI/agent write and concurrent human+agent edits can't clobber each other. New
+tasks are stamped `src:web`. UI is **htmx** fragment swaps (vendored, no build);
+a write broadcasts a typed `tasks` SSE event so other open clients refresh just
+the list.
+
+**Editing notes** (`--edit`). A split live-preview editor: raw buffer on the
+left, a preview on the right that re-renders through the server's own
+`renderBody` (`POST /preview`) so it matches what a save produces. Saves are
+atomic, frontmatter preserved verbatim, and guarded against lost updates — the
+editor sends the file's `ETag` as `If-Match`; a concurrent write yields **409**
+(reload to merge) instead of a silent clobber.
+
+**Graph.** `/graph` is an interactive force-directed canvas (`graph.js`, no new
+vendored lib): pan/zoom/drag, hover-highlights a node's neighborhood,
+click-to-open, live filter, and color by folder/source. The server emits the
+graph as JSON from the snapshot adjacency; the client runs the layout.
+
+**Live updates** via fsnotify + SSE, now typed (`reload` = full reload for
+external changes; finer kinds drive surgical fragment refresh). The whole
+adapter is embeddable — `Server.Handler()` lets the Wails desktop shell render
+the identical UI in a native window (see `desktop/`, ADR 0001).
 
 ---
 

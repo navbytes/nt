@@ -11,13 +11,14 @@
         window.matchMedia("(prefers-color-scheme: dark)").matches);
   }
 
-  function renderMermaid() {
+  function renderMermaid(root) {
     if (!window.mermaid) return;
+    root = root || document;
     // The /graph page needs "loose" so its server-generated click links work;
     // note-embedded diagrams stay "strict" (untrusted-ish note content).
     var graph = !!document.querySelector(".graphview");
     mermaid.initialize({ startOnLoad: false, securityLevel: graph ? "loose" : "strict", theme: isDark() ? "dark" : "neutral" });
-    var nodes = document.querySelectorAll(".mermaid");
+    var nodes = root.querySelectorAll(".mermaid");
     nodes.forEach(function (n) {
       if (!n.dataset.src) n.dataset.src = n.textContent;   // stash source once
       n.removeAttribute("data-processed");
@@ -25,6 +26,7 @@
     });
     try { mermaid.run({ nodes: nodes }); } catch (e) { console.warn(e); }
   }
+  window.ntRenderMermaid = renderMermaid; // reused by the editor's live preview
 
   var saved = localStorage.getItem("nt-theme");
   if (saved) root.setAttribute("data-theme", saved);
@@ -63,11 +65,18 @@
     }
   });
 
-  // ---- Live reload via server-sent events (/events) ----
+  // ---- Live updates via server-sent events (/events) ----
+  // Typed payloads: "reload" = page is stale (external change), reload it; a
+  // finer kind (e.g. "tasks") is dispatched as a "nt:<kind>" DOM event so a
+  // listener can refresh just one fragment instead of the whole page.
   window.onReload = function () { location.reload(); };
   try {
     var es = new EventSource("/events");
-    es.onmessage = function () { window.onReload(); };
+    es.onmessage = function (e) {
+      var kind = (e.data || "reload").trim();
+      if (kind === "reload") { window.onReload(); return; }
+      (document.body || document).dispatchEvent(new CustomEvent("nt:" + kind, { bubbles: true }));
+    };
   } catch (e) { /* SSE unavailable — static view still works */ }
 
   // ---- Reading enhancements: heading anchors, TOC, copy buttons ----
@@ -288,15 +297,22 @@
     var md = document.querySelector(".md");
     if (!btn || !md) return;
     var csrf = (document.querySelector('meta[name="csrf"]') || {}).content || "";
+    var etag = "";
     function openEditor() {
       if (document.querySelector(".editor")) return;
-      fetch(location.pathname + "?raw=1").then(function (r) { return r.text(); }).then(function (text) {
+      fetch(location.pathname + "?raw=1").then(function (r) { etag = r.headers.get("ETag") || ""; return r.text(); }).then(function (text) {
         var wrap = document.createElement("div");
         wrap.className = "editwrap";
         var ta = document.createElement("textarea");
         ta.className = "editor";
         ta.value = text;
         ta.spellcheck = false;
+        var pane = document.createElement("div");
+        pane.className = "editsplit";
+        var preview = document.createElement("div");
+        preview.className = "md editpreview";
+        pane.appendChild(ta);
+        pane.appendChild(preview);
         var bar = document.createElement("div");
         bar.className = "editbar";
         var status = document.createElement("span");
@@ -310,18 +326,37 @@
         bar.appendChild(status);
         bar.appendChild(cancel);
         bar.appendChild(save);
-        wrap.appendChild(ta);
+        wrap.appendChild(pane);
         wrap.appendChild(bar);
         md.style.display = "none";
         md.parentNode.insertBefore(wrap, md.nextSibling);
         ta.focus();
-        function close() { wrap.remove(); md.style.display = ""; }
+
+        // Live split preview: re-render the buffer through the server's own
+        // markdown path (debounced) so it matches exactly what a save produces.
+        var ptimer;
+        function renderPreview() {
+          fetch("/preview", { method: "POST", headers: { "X-CSRF": csrf, "Content-Type": "text/plain" }, body: ta.value })
+            .then(function (r) { return r.ok ? r.text() : ""; })
+            .then(function (html) {
+              if (!html) return;
+              preview.innerHTML = html;
+              if (window.ntRenderMermaid) window.ntRenderMermaid(preview);
+            }).catch(function () { /* keep last preview */ });
+        }
+        ta.addEventListener("input", function () { clearTimeout(ptimer); ptimer = setTimeout(renderPreview, 200); });
+        renderPreview();
+
+        function close() { clearTimeout(ptimer); wrap.remove(); md.style.display = ""; }
         function commit() {
           save.disabled = true;
           status.textContent = "Saving…";
-          fetch(location.pathname, { method: "POST", headers: { "X-CSRF": csrf, "Content-Type": "text/plain" }, body: ta.value })
+          var headers = { "X-CSRF": csrf, "Content-Type": "text/plain" };
+          if (etag) headers["If-Match"] = etag; // lost-update guard (409 if changed underneath)
+          fetch(location.pathname, { method: "POST", headers: headers, body: ta.value })
             .then(function (r) {
               if (r.ok) { location.reload(); }
+              else if (r.status === 409) { save.disabled = false; status.textContent = "Changed on disk — reload to merge"; }
               else { save.disabled = false; status.textContent = "Save failed (" + r.status + ")"; }
             }).catch(function () { save.disabled = false; status.textContent = "Save failed"; });
         }

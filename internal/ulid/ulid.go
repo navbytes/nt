@@ -60,6 +60,42 @@ func incr(e *[10]byte) {
 	}
 }
 
+// decodeTbl maps a Crockford base32 byte to its 5-bit value (-1 if invalid).
+var decodeTbl = func() [256]int8 {
+	var t [256]int8
+	for i := range t {
+		t[i] = -1
+	}
+	for i := 0; i < len(encoding); i++ {
+		t[encoding[i]] = int8(i)
+	}
+	return t
+}()
+
+// Time extracts the creation time from a ULID's 48-bit millisecond timestamp
+// prefix (the first 10 characters). ok is false if id is too short or holds an
+// invalid character. This is the inverse of the time bits New encodes, letting
+// callers recover "when was this created" without storing a separate field.
+func Time(id string) (t time.Time, ok bool) {
+	if len(id) < 10 {
+		return time.Time{}, false
+	}
+	var b [10]uint64
+	for i := 0; i < 10; i++ {
+		v := decodeTbl[id[i]]
+		if v < 0 {
+			return time.Time{}, false
+		}
+		b[i] = uint64(v)
+	}
+	// The first 10 chars hold the 48-bit ms timestamp, left-padded with two zero
+	// bits (the first char spans only 3 bits), so the 50-bit concatenation is the
+	// timestamp directly.
+	ms := b[0]<<45 | b[1]<<40 | b[2]<<35 | b[3]<<30 | b[4]<<25 |
+		b[5]<<20 | b[6]<<15 | b[7]<<10 | b[8]<<5 | b[9]
+	return time.UnixMilli(int64(ms)), true
+}
+
 // encode renders the 16-byte id as 26 Crockford base32 characters.
 func encode(id [16]byte) string {
 	dst := make([]byte, 26)

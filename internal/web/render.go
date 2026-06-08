@@ -17,7 +17,6 @@ import (
 
 	"github.com/navbytes/nt/internal/links"
 	"github.com/navbytes/nt/internal/note"
-	"github.com/navbytes/nt/internal/store"
 	"github.com/navbytes/nt/internal/task"
 )
 
@@ -179,34 +178,10 @@ type Backlink struct {
 	IsNote bool
 }
 
-// backlinksFor collects de-duplicated backlinks to a note, mapping each source
-// file to a note (linkable) or leaving it as a task line.
-func backlinksFor(s *store.Store, n *note.Note, notes []*note.Note) []Backlink {
-	byPath := make(map[string]*note.Note, len(notes))
-	for _, x := range notes {
-		byPath[x.Path] = x
-	}
-	seen := map[string]bool{}
-	var out []Backlink
-	for _, h := range links.Backlinks(s, n.ID, n.Rel) {
-		// Note → note only; task references get their own "Referenced by tasks"
-		// panel (tasksReferencing), so they're excluded here to avoid showing
-		// the same task in two places.
-		src, isNote := byPath[h.Path]
-		if !isNote || src.Path == n.Path || seen[noteHandle(src)] {
-			continue
-		}
-		seen[noteHandle(src)] = true
-		// Keep the matching line as a snippet (Notion-style context).
-		out = append(out, Backlink{
-			Title:  src.Title,
-			URL:    "/n/" + url.PathEscape(noteHandle(src)),
-			Text:   snippet(h.Text),
-			IsNote: true,
-		})
-	}
-	return out
-}
+// Note → note backlinks (the "Linked from" panel) and task → note references
+// (the "Referenced by tasks" panel) are precomputed once per store change in
+// buildSnapshot (readmodel.go), keyed by note path — so a note page is a map
+// lookup, not a per-request full-store ripgrep.
 
 // snippet trims a matched line to a compact one-liner for context display.
 func snippet(s string) string {
@@ -223,25 +198,6 @@ type TaskRef struct {
 	Text   string
 	Status string
 	Source string
-}
-
-// tasksReferencing returns tasks whose [[links]] resolve to this note — the
-// "Referenced by tasks" panel. Reuses links.Resolve, the same resolution the
-// CLI/TUI use, over the task Doc already loaded for the request.
-func tasksReferencing(doc *task.Doc, n *note.Note, notes []*note.Note) []TaskRef {
-	if doc == nil {
-		return nil
-	}
-	var out []TaskRef
-	for _, t := range doc.Tasks() {
-		for _, raw := range t.Links() {
-			if it, ok := links.Resolve(raw, doc, notes); ok && it.Kind == "note" && it.Path == n.Path {
-				out = append(out, TaskRef{Text: cleanTaskText(t.Text), Status: t.Status(), Source: t.Source()})
-				break
-			}
-		}
-	}
-	return out
 }
 
 var taskTokenRe = regexp.MustCompile(`\s+(id|src|due|s|pri|parent|blocks|rec|discovered|completed):[^\s]+`)

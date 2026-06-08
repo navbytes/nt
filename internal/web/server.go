@@ -8,6 +8,7 @@ package web
 
 import (
 	"crypto/rand"
+	"crypto/sha256"
 	"embed"
 	"encoding/hex"
 	"encoding/json"
@@ -22,9 +23,11 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/fsnotify/fsnotify"
 
+	"github.com/navbytes/nt/internal/dateparse"
 	"github.com/navbytes/nt/internal/links"
 	"github.com/navbytes/nt/internal/mutate"
 	"github.com/navbytes/nt/internal/note"
@@ -46,6 +49,11 @@ type Server struct {
 	hlCSS     string // generated Chroma syntax-highlight stylesheet (theme-scoped)
 	allowEdit bool   // writes enabled (nt web --edit); read-only by default
 	csrf      string // per-process token required on save (blocks cross-site POSTs)
+
+	mu       sync.RWMutex  // guards snap + watching
+	snap     *snapshot     // in-memory read-model (see readmodel.go)
+	watching bool          // true once the fsnotify watcher maintains snap
+	writes   *writeTracker // self-write suppression for the watcher
 }
 
 // NewServer parses the embedded template and prepares the viewer.
@@ -57,12 +65,59 @@ func NewServer(eng *mutate.Engine, version string) (*Server, error) {
 			b, _ := json.Marshal(v)
 			return template.JS(b) //nolint:gosec // HTML-escaped JSON, data only
 		},
+		// dict builds a map from k,v pairs so a partial can receive both a row and
+		// the page context (e.g. CanEdit) — Go templates pass a single value.
+		"dict": func(kv ...any) map[string]any {
+			m := make(map[string]any, len(kv)/2)
+			for i := 0; i+1 < len(kv); i += 2 {
+				if k, ok := kv[i].(string); ok {
+					m[k] = kv[i+1]
+				}
+			}
+			return m
+		},
 	}
 	tmpl, err := template.New("nt").Funcs(funcs).ParseFS(assetsFS, "assets/*.html")
 	if err != nil {
 		return nil, err
 	}
-	return &Server{eng: eng, version: version, tmpl: tmpl, hub: newHub(), hlCSS: highlightCSS(), csrf: randToken()}, nil
+	s := &Server{eng: eng, version: version, tmpl: tmpl, hub: newHub(), hlCSS: highlightCSS(), csrf: randToken(), writes: newWriteTracker()}
+	s.snap = buildSnapshot(eng) // warm the read-model so the first request is fast
+	return s, nil
+}
+
+// current returns the read-model. While the fsnotify watcher is running it
+// serves the maintained snapshot (the fast path). When it is NOT — tests and
+// embedders that never call StartWatch — it builds fresh per call, preserving
+// the old read-through semantics so a write made directly to the store is seen
+// immediately without a watcher.
+func (s *Server) current() *snapshot {
+	s.mu.RLock()
+	if s.watching {
+		snap := s.snap
+		s.mu.RUnlock()
+		return snap
+	}
+	s.mu.RUnlock()
+	return buildSnapshot(s.eng)
+}
+
+// rebuild recomputes the read-model and swaps it in. Called by the watcher and
+// synchronously by write handlers so the writer's next read is fresh.
+func (s *Server) rebuild() {
+	snap := buildSnapshot(s.eng)
+	s.mu.Lock()
+	s.snap = snap
+	s.mu.Unlock()
+}
+
+// etag is a content validator for a note file's current bytes. The editor
+// captures it on ?raw=1 load and returns it as If-Match on save so a concurrent
+// write (agent, CLI, another tab) is detected rather than overwritten. Content-
+// hashed (not mtime) so it's immune to filesystem timestamp granularity.
+func etag(data []byte) string {
+	sum := sha256.Sum256(data)
+	return `"` + hex.EncodeToString(sum[:8]) + `"`
 }
 
 func randToken() string {
@@ -120,17 +175,27 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("/search", s.handleSearch)
 	mux.HandleFunc("/orphans", s.handleOrphans)
 	mux.HandleFunc("/tags", s.handleTags)
+	mux.HandleFunc("/activity", s.handleActivity)
 	mux.HandleFunc("/tasks", s.handleTasks)
+	// Task write routes (nt web --edit). Each runs through mutate.Engine.Apply,
+	// so a browser action gets the same lock + re-read + undo-journal safety as
+	// a CLI/agent write — concurrent writers can't clobber one another.
+	mux.HandleFunc("POST /tasks/new", s.handleTaskNew)
+	mux.HandleFunc("POST /tasks/{id}/done", s.handleTaskDone)
+	mux.HandleFunc("POST /tasks/{id}/reopen", s.handleTaskReopen)
+	mux.HandleFunc("POST /tasks/{id}/status", s.handleTaskStatus)
+	mux.HandleFunc("POST /tasks/{id}/delete", s.handleTaskDelete)
 	mux.HandleFunc("/graph", s.handleGraph)
+	mux.HandleFunc("POST /preview", s.handlePreview)
 	mux.HandleFunc("/events", s.handleSSE)
 	mux.HandleFunc("/static/", s.handleStatic)
 	return mux
 }
 
+// load returns the current document and notes from the read-model.
 func (s *Server) load() (*task.Doc, []*note.Note) {
-	doc, _ := s.eng.Read()
-	notes, _ := note.List(s.eng.S)
-	return doc, notes
+	snap := s.current()
+	return snap.doc, snap.notes
 }
 
 // ---- page model -----------------------------------------------------------
@@ -169,10 +234,35 @@ type pageData struct {
 	IsTasks    bool
 	TaskGroups []taskGroup
 	IsGraph    bool
-	GraphSrc   string // mermaid source for the link graph
+	GraphData  *graphData // JSON model for the force-directed link graph
+
+	IsHome bool
+	Dash   *dashboard
+
+	IsActivity     bool
+	ActivityDays   []activityDay
+	ActivitySource string
+	Sources        []string
 
 	CanEdit bool   // editing enabled (nt web --edit)
 	CSRF    string // token the editor sends back on save
+}
+
+// dashboard is the agent-memory home page: what's ready to start, in flight, and
+// blocked — plus the latest activity. It's the "live state of your memory" view.
+type dashboard struct {
+	Ready     []taskRow
+	Doing     []taskRow
+	Blocked   []taskRow // each carries its Blocker reason
+	Recent    []activityEvent
+	OpenCount int
+	NoteCount int
+}
+
+// activityDay groups timeline events under one calendar date.
+type activityDay struct {
+	Date   string
+	Events []activityEvent
 }
 
 type linkRow struct{ URL, Title, Path string }
@@ -186,8 +276,10 @@ type taskGroup struct {
 	Tasks  []taskRow
 }
 type taskRow struct {
+	ID                                 string
 	Text, Status, Due, Source, Project string
 	Tags                               []string
+	Blocker                            string // on the dashboard: why this task is blocked
 }
 
 // flatNotes is the note index the ⌘K palette filters over.
@@ -209,13 +301,128 @@ func (s *Server) render(w http.ResponseWriter, notes []*note.Note, d *pageData) 
 
 // ---- handlers -------------------------------------------------------------
 
+// handleIndex serves the agent-memory dashboard (ready / doing / blocked +
+// recent activity) — the live state of the store. A fresh store still shows the
+// onboarding empty state. ?fragment=dash returns just the dashboard panel, so a
+// task action elsewhere can refresh it via the "tasks" SSE event.
 func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path != "/" {
 		http.NotFound(w, r)
 		return
 	}
-	_, notes := s.load()
-	s.render(w, notes, &pageData{Title: "nt notes", Tree: buildTree(notes, ""), Empty: len(notes) == 0})
+	snap := s.current()
+	empty := len(snap.notes) == 0 && (snap.doc == nil || len(snap.doc.Tasks()) == 0)
+	if r.URL.Query().Get("fragment") == "dash" {
+		s.renderDashboard(w, snap)
+		return
+	}
+	s.render(w, snap.notes, &pageData{
+		Title:   "nt",
+		Tree:    buildTree(snap.notes, ""),
+		Empty:   empty,
+		IsHome:  !empty,
+		Dash:    buildDashboard(snap),
+		CanEdit: s.allowEdit,
+		CSRF:    s.csrf,
+	})
+}
+
+func (s *Server) renderDashboard(w http.ResponseWriter, snap *snapshot) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	d := &pageData{Dash: buildDashboard(snap), CanEdit: s.allowEdit, CSRF: s.csrf}
+	if err := s.tmpl.ExecuteTemplate(w, "dashboard", d); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
+}
+
+// buildDashboard projects the task doc into ready / doing / blocked queues
+// (urgency-sorted, the same selection `nt ready` uses) plus the latest activity.
+func buildDashboard(snap *snapshot) *dashboard {
+	d := &dashboard{NoteCount: len(snap.notes)}
+	if snap.doc != nil {
+		tasks := snap.doc.Tasks()
+		task.SortByUrgency(tasks)
+		blocked := task.BlockedIDs(tasks)
+		for _, t := range tasks {
+			if t.Done {
+				continue
+			}
+			d.OpenCount++
+			row := taskRow{ID: t.ID(), Text: cleanTaskText(t.Text), Due: t.Due(), Source: t.Source(), Tags: t.Tags()}
+			if p := t.Projects(); len(p) > 0 {
+				row.Project = p[0]
+			}
+			switch task.EffectiveStatus(t, blocked[t.ID()]) {
+			case "doing":
+				row.Status = "doing"
+				d.Doing = append(d.Doing, row)
+			case "blocked":
+				row.Status = "blocked"
+				row.Blocker = blockerText(tasks, t.ID())
+				d.Blocked = append(d.Blocked, row)
+			default:
+				row.Status = "open"
+				d.Ready = append(d.Ready, row)
+			}
+		}
+	}
+	if len(snap.activity) > 8 {
+		d.Recent = snap.activity[:8]
+	} else {
+		d.Recent = snap.activity
+	}
+	return d
+}
+
+// blockerText returns the description of an open task blocking id (the "why").
+func blockerText(tasks []*task.Task, id string) string {
+	for _, b := range tasks {
+		if !b.Done && b.Blocks() == id {
+			return cleanTaskText(b.Text)
+		}
+	}
+	return ""
+}
+
+// handleActivity renders the provenance timeline (grouped by date), optionally
+// filtered to one source. ?fragment=1 returns just the list for live refresh.
+func (s *Server) handleActivity(w http.ResponseWriter, r *http.Request) {
+	snap := s.current()
+	src := r.URL.Query().Get("source")
+	days := groupActivity(snap.activity, src)
+	if r.URL.Query().Get("fragment") == "1" {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		if err := s.tmpl.ExecuteTemplate(w, "activitylist", &pageData{ActivityDays: days}); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+		}
+		return
+	}
+	s.render(w, snap.notes, &pageData{
+		Title:          "Activity",
+		Tree:           buildTree(snap.notes, ""),
+		IsActivity:     true,
+		ActivityDays:   days,
+		ActivitySource: src,
+		Sources:        snap.sources,
+	})
+}
+
+// groupActivity buckets events by calendar date (newest first), optionally
+// keeping only one source.
+func groupActivity(events []activityEvent, source string) []activityDay {
+	var days []activityDay
+	for _, e := range events {
+		if source != "" && e.Source != source {
+			continue
+		}
+		d := e.When.Format("Mon, Jan 2 2006")
+		if n := len(days); n > 0 && days[n-1].Date == d {
+			days[n-1].Events = append(days[n-1].Events, e)
+		} else {
+			days = append(days, activityDay{Date: d, Events: []activityEvent{e}})
+		}
+	}
+	return days
 }
 
 func (s *Server) handleNote(w http.ResponseWriter, r *http.Request) {
@@ -228,9 +435,10 @@ func (s *Server) handleNote(w http.ResponseWriter, r *http.Request) {
 		s.handleSave(w, r, handle)
 		return
 	}
-	doc, notes := s.load()
+	snap := s.current()
+	notes := snap.notes
 	if r.URL.Query().Get("missing") != "1" {
-		if n := findByHandle(notes, handle); n != nil {
+		if n := snap.findHandle(handle); n != nil {
 			if r.URL.Query().Get("preview") == "1" { // hover preview
 				w.Header().Set("Content-Type", "application/json")
 				_ = json.NewEncoder(w).Encode(map[string]string{"title": n.Title, "snippet": previewSnippet(n.Body)})
@@ -243,15 +451,16 @@ func (s *Server) handleNote(w http.ResponseWriter, r *http.Request) {
 				}
 				if data, err := store.ReadFile(n.Path); err == nil {
 					w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+					w.Header().Set("ETag", etag(data)) // editor sends this back as If-Match on save
 					_, _ = w.Write(data)
 				}
 				return
 			}
-			s.renderNote(w, n, doc, notes)
+			s.renderNote(w, n, snap)
 			return
 		}
-		if it, ok := links.Resolve(handle, doc, notes); ok && it.Kind == "note" {
-			if n := findByPath(notes, it.Path); n != nil {
+		if it, ok := links.Resolve(handle, snap.doc, notes); ok && it.Kind == "note" {
+			if n := snap.byPath[it.Path]; n != nil {
 				http.Redirect(w, r, "/n/"+url.PathEscape(noteHandle(n)), http.StatusFound)
 				return
 			}
@@ -260,8 +469,9 @@ func (s *Server) handleNote(w http.ResponseWriter, r *http.Request) {
 	s.renderMissing(w, handle, notes)
 }
 
-func (s *Server) renderNote(w http.ResponseWriter, n *note.Note, doc *task.Doc, notes []*note.Note) {
-	body, err := renderBody(n.Body, doc, notes)
+func (s *Server) renderNote(w http.ResponseWriter, n *note.Note, snap *snapshot) {
+	notes := snap.notes
+	body, err := renderBody(n.Body, snap.doc, notes)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -284,8 +494,8 @@ func (s *Server) renderNote(w http.ResponseWriter, n *note.Note, doc *task.Doc, 
 		NoteCreated: dateOnly(n.Created),
 		Tags:        n.Tags,
 		BodyHTML:    body,
-		Backlinks:   backlinksFor(s.eng.S, n, notes),
-		TaskRefs:    tasksReferencing(doc, n, notes),
+		Backlinks:   snap.backlinks[n.Path],
+		TaskRefs:    snap.taskRefs[n.Path],
 		Prev:        prev,
 		Next:        next,
 		CanEdit:     s.allowEdit,
@@ -305,11 +515,22 @@ func (s *Server) handleSave(w http.ResponseWriter, r *http.Request, handle strin
 		http.Error(w, "bad or missing CSRF token", http.StatusForbidden)
 		return
 	}
-	_, notes := s.load()
-	n := findByHandle(notes, handle)
+	n := s.current().findHandle(handle)
 	if n == nil {
 		http.NotFound(w, r)
 		return
+	}
+	// Lost-update guard: the editor captures the file's ETag on ?raw=1 and sends
+	// it back as If-Match. If the bytes on disk no longer match (an agent, the
+	// CLI, or another tab wrote this note since it was opened), refuse with 409
+	// instead of silently clobbering that write. Absent If-Match (e.g. a non-JS
+	// client) skips the check — the save is then plain last-writer-wins.
+	if ifMatch := r.Header.Get("If-Match"); ifMatch != "" {
+		cur, _ := store.ReadFile(n.Path)
+		if etag(cur) != ifMatch {
+			http.Error(w, "note changed on disk since you opened it — reload to merge", http.StatusConflict)
+			return
+		}
 	}
 	body, err := io.ReadAll(io.LimitReader(r.Body, 4<<20)) // 4 MiB cap
 	if err != nil {
@@ -319,11 +540,59 @@ func (s *Server) handleSave(w http.ResponseWriter, r *http.Request, handle strin
 	if len(body) > 0 && body[len(body)-1] != '\n' {
 		body = append(body, '\n')
 	}
+	s.writes.mark(n.Path) // suppress our own fsnotify event (no self-reload)
 	if err := store.WriteAtomic(n.Path, body, 0o644); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	s.rebuild() // refresh the read-model so the editor's reload sees the save
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// handlePreview renders an editor buffer to HTML for the live split-preview,
+// reusing the exact renderBody path the note page uses (so wikilinks, mermaid,
+// and syntax highlighting match what a save will produce). Edit-mode + CSRF
+// gated; it reads but never writes.
+func (s *Server) handlePreview(w http.ResponseWriter, r *http.Request) {
+	if !s.allowEdit {
+		http.NotFound(w, r)
+		return
+	}
+	if r.Header.Get("X-CSRF") != s.csrf {
+		http.Error(w, "bad or missing CSRF token", http.StatusForbidden)
+		return
+	}
+	body, err := io.ReadAll(io.LimitReader(r.Body, 4<<20))
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	snap := s.current()
+	html, err := renderBody(stripFrontmatter(string(body)), snap.doc, snap.notes)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	_, _ = io.WriteString(w, string(html))
+}
+
+// stripFrontmatter drops a leading YAML frontmatter block so the preview renders
+// the body the way the note page does (note.List parses frontmatter out). The
+// raw editor buffer still includes it; only the preview ignores it.
+func stripFrontmatter(s string) string {
+	if !strings.HasPrefix(s, "---\n") && !strings.HasPrefix(s, "---\r\n") {
+		return s
+	}
+	rest := s[3:]
+	if i := strings.Index(rest, "\n---"); i >= 0 {
+		after := rest[i+4:]
+		if j := strings.IndexByte(after, '\n'); j >= 0 {
+			return after[j+1:]
+		}
+		return ""
+	}
+	return s
 }
 
 // siblings returns the previous/next notes in the same folder (Rel order).
@@ -433,10 +702,11 @@ func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
 
 // handleOrphans lists notes with no inbound links — navigation gaps to curate.
 func (s *Server) handleOrphans(w http.ResponseWriter, r *http.Request) {
-	_, notes := s.load()
+	snap := s.current()
+	notes := snap.notes
 	var results []linkRow
 	for _, n := range notes {
-		if len(links.Backlinks(s.eng.S, n.ID, n.Rel)) == 0 {
+		if !snap.linked[n.Path] {
 			results = append(results, linkRow{URL: "/n/" + url.PathEscape(noteHandle(n)), Title: n.Title, Path: n.Rel})
 		}
 	}
@@ -471,75 +741,265 @@ func (s *Server) handleTags(w http.ResponseWriter, r *http.Request) {
 	s.render(w, notes, &pageData{Title: "Tags", Tree: buildTree(notes, ""), IsTags: true, TagRows: rows})
 }
 
-// handleTasks is the agent-memory dashboard: tasks grouped by status, urgency-sorted.
+// handleTasks is the agent-memory dashboard: tasks grouped by status,
+// urgency-sorted. With ?fragment=1 it returns just the task-list fragment (for
+// htmx swaps and SSE-driven refresh); otherwise the full page.
 func (s *Server) handleTasks(w http.ResponseWriter, r *http.Request) {
-	doc, notes := s.load()
+	snap := s.current()
+	if r.URL.Query().Get("fragment") == "1" {
+		s.renderTaskList(w, snap)
+		return
+	}
+	s.render(w, snap.notes, &pageData{
+		Title:      "Tasks",
+		Tree:       buildTree(snap.notes, ""),
+		IsTasks:    true,
+		TaskGroups: buildTaskGroups(snap.doc),
+		CanEdit:    s.allowEdit,
+		CSRF:       s.csrf,
+	})
+}
+
+// buildTaskGroups groups tasks by status (urgency-sorted within each), in the
+// display order doing → open → blocked → done.
+func buildTaskGroups(doc *task.Doc) []taskGroup {
+	if doc == nil {
+		return nil
+	}
+	tasks := doc.Tasks()
+	task.SortByUrgency(tasks)
+	byStatus := map[string][]taskRow{}
+	for _, t := range tasks {
+		row := taskRow{ID: t.ID(), Text: cleanTaskText(t.Text), Status: t.Status(), Due: t.Due(), Source: t.Source(), Tags: t.Tags()}
+		if p := t.Projects(); len(p) > 0 {
+			row.Project = p[0]
+		}
+		byStatus[t.Status()] = append(byStatus[t.Status()], row)
+	}
 	var groups []taskGroup
-	if doc != nil {
-		tasks := doc.Tasks()
-		task.SortByUrgency(tasks)
-		byStatus := map[string][]taskRow{}
-		for _, t := range tasks {
-			row := taskRow{Text: cleanTaskText(t.Text), Status: t.Status(), Due: t.Due(), Source: t.Source(), Tags: t.Tags()}
-			if p := t.Projects(); len(p) > 0 {
-				row.Project = p[0]
-			}
-			byStatus[t.Status()] = append(byStatus[t.Status()], row)
-		}
-		for _, st := range []string{"doing", "open", "blocked", "done"} {
-			if rows := byStatus[st]; len(rows) > 0 {
-				groups = append(groups, taskGroup{Status: st, Tasks: rows})
-			}
+	for _, st := range []string{"doing", "open", "blocked", "done"} {
+		if rows := byStatus[st]; len(rows) > 0 {
+			groups = append(groups, taskGroup{Status: st, Tasks: rows})
 		}
 	}
-	s.render(w, notes, &pageData{Title: "Tasks", Tree: buildTree(notes, ""), IsTasks: true, TaskGroups: groups})
+	return groups
 }
 
-// handleGraph renders the note link graph as a clickable Mermaid diagram (reuses
-// the vendored mermaid; the source is built from wikilink adjacency).
+// renderTaskList writes just the #tasklist fragment.
+func (s *Server) renderTaskList(w http.ResponseWriter, snap *snapshot) {
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	d := &pageData{TaskGroups: buildTaskGroups(snap.doc), CanEdit: s.allowEdit, CSRF: s.csrf}
+	if err := s.tmpl.ExecuteTemplate(w, "tasklist", d); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+	}
+}
+
+// taskWrite is the shared write path for the task action endpoints: it enforces
+// the --edit + CSRF gate, marks tasks.txt as a self-write (so the watcher
+// doesn't also broadcast a full reload), runs fn through mutate.Engine.Apply
+// (lock + re-read + undo journal), then refreshes the read-model, nudges other
+// clients ("tasks"), and returns the updated fragment.
+func (s *Server) taskWrite(w http.ResponseWriter, r *http.Request, op string, fn func(d *task.Doc, rec *mutate.Recorder) error) {
+	if !s.allowEdit {
+		http.Error(w, "editing is disabled — start with `nt web --edit`", http.StatusForbidden)
+		return
+	}
+	if r.Header.Get("X-CSRF") != s.csrf {
+		http.Error(w, "bad or missing CSRF token", http.StatusForbidden)
+		return
+	}
+	s.writes.mark(s.eng.S.TasksFile())
+	if err := s.eng.Apply(op, fn); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	s.rebuild()
+	s.hub.broadcast("tasks")
+	s.renderTaskList(w, s.current())
+}
+
+// resolveTask looks up the task addressed by the {id} path segment.
+func resolveTask(d *task.Doc, r *http.Request) (*task.Task, error) {
+	id := r.PathValue("id")
+	if t, amb := d.Resolve(id); t != nil && !amb {
+		return t, nil
+	}
+	return nil, fmt.Errorf("no such task %q", id)
+}
+
+func (s *Server) handleTaskDone(w http.ResponseWriter, r *http.Request) {
+	s.taskWrite(w, r, "done", func(d *task.Doc, rec *mutate.Recorder) error {
+		t, err := resolveTask(d, r)
+		if err != nil {
+			return err
+		}
+		mutate.Complete(d, rec, t, mutate.Today()) // spawns the next if recurring
+		return nil
+	})
+}
+
+func (s *Server) handleTaskReopen(w http.ResponseWriter, r *http.Request) {
+	s.taskWrite(w, r, "reopen", func(d *task.Doc, rec *mutate.Recorder) error {
+		t, err := resolveTask(d, r)
+		if err != nil {
+			return err
+		}
+		rec.Before(t)
+		t.SetDone(false, "")
+		t.SetState("open")
+		return nil
+	})
+}
+
+func (s *Server) handleTaskStatus(w http.ResponseWriter, r *http.Request) {
+	status := r.FormValue("status")
+	s.taskWrite(w, r, "update", func(d *task.Doc, rec *mutate.Recorder) error {
+		t, err := resolveTask(d, r)
+		if err != nil {
+			return err
+		}
+		rec.Before(t)
+		switch status {
+		case "open":
+			t.SetDone(false, "")
+			t.SetState("open")
+		case "doing", "blocked":
+			t.SetState(status)
+		case "done":
+			mutate.Complete(d, rec, t, mutate.Today())
+		default:
+			return fmt.Errorf("invalid status %q", status)
+		}
+		return nil
+	})
+}
+
+func (s *Server) handleTaskDelete(w http.ResponseWriter, r *http.Request) {
+	s.taskWrite(w, r, "delete", func(d *task.Doc, rec *mutate.Recorder) error {
+		t, err := resolveTask(d, r)
+		if err != nil {
+			return err
+		}
+		before, ok := d.Remove(t.ID())
+		if !ok {
+			return fmt.Errorf("no such task")
+		}
+		rec.Removed(t.ID(), before)
+		return nil
+	})
+}
+
+func (s *Server) handleTaskNew(w http.ResponseWriter, r *http.Request) {
+	text := strings.TrimSpace(r.FormValue("text"))
+	if text == "" {
+		http.Error(w, "task text is required", http.StatusBadRequest)
+		return
+	}
+	pri, due, project := r.FormValue("pri"), r.FormValue("due"), strings.TrimSpace(r.FormValue("project"))
+	priByte, okP := byte(0), true
+	if pri != "" {
+		priByte, okP = dateparse.Priority(pri)
+	}
+	dueVal, okD := "", true
+	if due != "" {
+		dueVal, okD = dateparse.Date(due)
+	}
+	if !okP || !okD {
+		http.Error(w, "invalid priority or due date", http.StatusBadRequest)
+		return
+	}
+	s.taskWrite(w, r, "add", func(d *task.Doc, rec *mutate.Recorder) error {
+		txt := text
+		if project != "" {
+			txt += " +" + project
+		}
+		t := task.New(txt)
+		if priByte != 0 {
+			t.SetPriority(priByte)
+		}
+		if dueVal != "" {
+			t.SetKey("due", dueVal)
+		}
+		t.SetKey("src", "web") // provenance: created from the GUI
+		d.Append(t)
+		rec.Added(t)
+		return nil
+	})
+}
+
+// graphNode/graphLink/graphData are the JSON model the client force-directed
+// canvas renders. Nodes carry folder/source/tags so the view can color and
+// filter; links index into Nodes.
+type graphNode struct {
+	ID     string   `json:"id"`     // note handle (for /n/<id>)
+	Title  string   `json:"title"`  //
+	URL    string   `json:"url"`    //
+	Folder string   `json:"folder"` // top-level folder (color/filter grouping)
+	Source string   `json:"source"` // provenance (claude/cli/web/…)
+	Tags   []string `json:"tags"`   //
+	Deg    int      `json:"deg"`    // degree, for node sizing
+}
+type graphLink struct {
+	S int `json:"s"`
+	T int `json:"t"`
+}
+type graphData struct {
+	Nodes []graphNode `json:"nodes"`
+	Links []graphLink `json:"links"`
+}
+
+// handleGraph renders the note link graph as an interactive force-directed
+// canvas. The adjacency is the snapshot's precomputed forward map; the client
+// (graph.js) runs the layout. Replaces the old Mermaid graph, which didn't pan/
+// zoom and visually collapsed past a few dozen nodes.
 func (s *Server) handleGraph(w http.ResponseWriter, r *http.Request) {
-	_, notes := s.load()
-	s.render(w, notes, &pageData{Title: "Graph", Tree: buildTree(notes, ""), IsGraph: true, GraphSrc: graphSource(notes)})
+	snap := s.current()
+	s.render(w, snap.notes, &pageData{Title: "Graph", Tree: buildTree(snap.notes, ""), IsGraph: true, GraphData: buildGraphData(snap)})
 }
 
-func graphSource(notes []*note.Note) string {
-	if len(notes) == 0 {
-		return ""
+func buildGraphData(snap *snapshot) *graphData {
+	idx := make(map[string]int, len(snap.notes))
+	g := &graphData{Nodes: make([]graphNode, 0, len(snap.notes))}
+	for i, n := range snap.notes {
+		idx[n.Path] = i
+		folder, _ := splitRel(n.Rel)
+		if j := strings.IndexByte(folder, '/'); j >= 0 {
+			folder = folder[:j] // top-level folder only
+		}
+		g.Nodes = append(g.Nodes, graphNode{
+			ID:     noteHandle(n),
+			Title:  n.Title,
+			URL:    "/n/" + url.PathEscape(noteHandle(n)),
+			Folder: folder,
+			Source: n.Source,
+			Tags:   n.Tags,
+		})
 	}
-	idOf := make(map[string]string, len(notes))
-	var b strings.Builder
-	b.WriteString("graph LR\n")
-	for i, n := range notes {
-		nid := fmt.Sprintf("n%d", i)
-		idOf[n.Path] = nid
-		fmt.Fprintf(&b, "  %s[\"%s\"]\n", nid, graphLabel(n.Title))
-	}
-	seen := map[string]bool{}
-	for _, n := range notes {
-		from := idOf[n.Path]
-		for _, raw := range links.Wikilinks(n.Body) {
-			if it, ok := links.Resolve(raw, nil, notes); ok && it.Kind == "note" {
-				to := idOf[it.Path]
-				if to == "" || to == from || seen[from+">"+to] {
-					continue
-				}
-				seen[from+">"+to] = true
-				fmt.Fprintf(&b, "  %s --> %s\n", from, to)
+	seen := map[[2]int]bool{} // undirected dedup
+	for path, outs := range snap.fwd {
+		from, ok := idx[path]
+		if !ok {
+			continue
+		}
+		for _, tgt := range outs {
+			to, ok := idx[tgt]
+			if !ok || to == from {
+				continue
 			}
+			key := [2]int{from, to}
+			if from > to {
+				key = [2]int{to, from}
+			}
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+			g.Links = append(g.Links, graphLink{S: from, T: to})
+			g.Nodes[from].Deg++
+			g.Nodes[to].Deg++
 		}
 	}
-	for i, n := range notes {
-		fmt.Fprintf(&b, "  click n%d \"/n/%s\"\n", i, url.PathEscape(noteHandle(n)))
-	}
-	return b.String()
-}
-
-func graphLabel(s string) string {
-	s = strings.ReplaceAll(strings.ReplaceAll(s, "\"", "'"), "\n", " ")
-	if len(s) > 40 {
-		s = s[:40] + "…"
-	}
-	return s
+	return g
 }
 
 func contains(ss []string, want string) bool {
@@ -562,6 +1022,12 @@ func (s *Server) handleStatic(w http.ResponseWriter, r *http.Request) {
 	case "app.js":
 		w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
 		s.writeAsset(w, "assets/app.js")
+	case "htmx.min.js":
+		w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
+		s.writeAsset(w, "assets/htmx.min.js")
+	case "graph.js":
+		w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
+		s.writeAsset(w, "assets/graph.js")
 	case "mermaid.min.js":
 		w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
 		w.Header().Set("Content-Encoding", "gzip") // embedded pre-gzipped (~900 KB vs 3.3 MB)
@@ -585,20 +1051,20 @@ func (s *Server) writeAsset(w http.ResponseWriter, path string) {
 
 type hub struct {
 	mu      sync.Mutex
-	clients map[chan struct{}]bool
+	clients map[chan string]bool
 }
 
-func newHub() *hub { return &hub{clients: map[chan struct{}]bool{}} }
+func newHub() *hub { return &hub{clients: map[chan string]bool{}} }
 
-func (h *hub) add() chan struct{} {
-	ch := make(chan struct{}, 1)
+func (h *hub) add() chan string {
+	ch := make(chan string, 4)
 	h.mu.Lock()
 	h.clients[ch] = true
 	h.mu.Unlock()
 	return ch
 }
 
-func (h *hub) remove(ch chan struct{}) {
+func (h *hub) remove(ch chan string) {
 	h.mu.Lock()
 	if h.clients[ch] {
 		delete(h.clients, ch)
@@ -607,11 +1073,14 @@ func (h *hub) remove(ch chan struct{}) {
 	h.mu.Unlock()
 }
 
-func (h *hub) broadcast() {
+// broadcast pushes a typed event payload to every connected client. "reload"
+// means "the page is stale, reload it" (an external change); finer kinds like
+// "tasks" let a listener refresh just one fragment instead of the whole page.
+func (h *hub) broadcast(kind string) {
 	h.mu.Lock()
 	for ch := range h.clients {
 		select {
-		case ch <- struct{}{}:
+		case ch <- kind:
 		default:
 		}
 	}
@@ -635,35 +1104,86 @@ func (s *Server) handleSSE(w http.ResponseWriter, r *http.Request) {
 		select {
 		case <-r.Context().Done():
 			return
-		case <-ch:
-			_, _ = fmt.Fprint(w, "data: reload\n\n")
+		case kind, ok := <-ch:
+			if !ok {
+				return
+			}
+			_, _ = fmt.Fprintf(w, "data: %s\n\n", kind)
 			fl.Flush()
 		}
 	}
 }
 
-// watch broadcasts a reload on any change under notes/ or the store dir.
+// watchDebounce coalesces a burst of fsnotify events (an atomic rename fires
+// several) into one rebuild (SPEC §6.5).
+const watchDebounce = 80 * time.Millisecond
+
+// watch maintains the read-model from disk and broadcasts live-reload. It is
+// debounced and self-write-aware: events for files the adapter just wrote (and
+// for hidden/temp files like the .nt-*.tmp atomic-write staging file) don't
+// bounce clients, and a burst collapses into a single rebuild. Idempotent —
+// safe to call more than once (Serve and embedders both may).
 func (s *Server) watch() {
+	s.mu.Lock()
+	if s.watching {
+		s.mu.Unlock()
+		return
+	}
+	s.watching = true
+	s.mu.Unlock()
+
 	wt, err := fsnotify.NewWatcher()
 	if err != nil {
+		s.mu.Lock()
+		s.watching = false
+		s.mu.Unlock()
 		return
 	}
 	addDirs(wt, s.eng.S.NotesDir())
 	_ = wt.Add(s.eng.S.Dir)
+	s.rebuild() // ensure the maintained snapshot is current before serving from it
+
 	go func() {
 		defer func() { _ = wt.Close() }()
+		var (
+			bmu      sync.Mutex
+			timer    *time.Timer
+			external bool // batch contains a change we didn't make ourselves
+		)
+		flush := func() {
+			bmu.Lock()
+			ext := external
+			external = false
+			bmu.Unlock()
+			s.rebuild()
+			if ext {
+				s.hub.broadcast("reload") // only nudge clients for changes they didn't trigger
+			}
+		}
 		for {
 			select {
 			case ev, ok := <-wt.Events:
 				if !ok {
 					return
 				}
+				if isTransient(ev.Name) {
+					continue // .nt-*.tmp staging, lock/undo/log — not content the UI shows
+				}
 				if ev.Op&fsnotify.Create != 0 {
 					if fi, err := os.Stat(ev.Name); err == nil && fi.IsDir() {
 						_ = wt.Add(ev.Name) // watch newly-created subfolders
 					}
 				}
-				s.hub.broadcast()
+				bmu.Lock()
+				if !s.writes.isSelf(ev.Name) {
+					external = true
+				}
+				if timer == nil {
+					timer = time.AfterFunc(watchDebounce, flush)
+				} else {
+					timer.Reset(watchDebounce)
+				}
+				bmu.Unlock()
 			case _, ok := <-wt.Errors:
 				if !ok {
 					return
@@ -671,6 +1191,22 @@ func (s *Server) watch() {
 			}
 		}
 	}()
+}
+
+// isTransient reports whether a path is store bookkeeping the viewer never
+// renders — the atomic-write staging file, the lock, the undo journal, the log,
+// and dotfiles (.git/.obsidian). Changes to these must not trigger a rebuild or
+// a live-reload; only tasks.txt / done.txt / notes matter.
+func isTransient(path string) bool {
+	base := filepath.Base(path)
+	if strings.HasPrefix(base, ".") {
+		return true
+	}
+	switch base {
+	case "tasks.txt.lock", "undo.jsonl", "nt.log":
+		return true
+	}
+	return false
 }
 
 func addDirs(wt *fsnotify.Watcher, root string) {
@@ -786,23 +1322,4 @@ func noteHandle(n *note.Note) string {
 		return n.ID
 	}
 	return n.Rel
-}
-
-// findByHandle matches a note by its id or its relative path.
-func findByHandle(notes []*note.Note, h string) *note.Note {
-	for _, n := range notes {
-		if (n.ID != "" && n.ID == h) || n.Rel == h {
-			return n
-		}
-	}
-	return nil
-}
-
-func findByPath(notes []*note.Note, path string) *note.Note {
-	for _, n := range notes {
-		if n.Path == path {
-			return n
-		}
-	}
-	return nil
 }

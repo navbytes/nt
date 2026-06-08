@@ -3,6 +3,7 @@ package web
 import (
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/navbytes/nt/internal/mutate"
 	"github.com/navbytes/nt/internal/note"
+	"github.com/navbytes/nt/internal/store"
 	"github.com/navbytes/nt/internal/task"
 )
 
@@ -31,6 +33,264 @@ func TestIdlessNoteRoutesByPath(t *testing.T) {
 	resp, body := get(t, s, "/n/deep%2Fnested%2Fbig.md")
 	if resp.StatusCode != 200 || !strings.Contains(body, ">Big Doc<") {
 		t.Fatalf("id-less note page didn't load: status=%d", resp.StatusCode)
+	}
+}
+
+// TestSnapshotLinkGraph: the read-model precomputes note→note backlinks, the
+// task→note reference panel, forward adjacency, and the orphan ("linked") set —
+// the maps the per-request ripgrep used to recompute.
+func TestSnapshotLinkGraph(t *testing.T) {
+	s := newTestServer(t)
+	b, _ := note.Create(s.eng.S, "Target", "the target note", nil, "cli", "")
+	a, _ := note.Create(s.eng.S, "Source", "see [[Target]] for context", nil, "cli", "")
+	if err := s.eng.Apply("add", func(d *task.Doc, rec *mutate.Recorder) error {
+		tk := task.New("wire up [[Target]]")
+		d.Append(tk)
+		rec.Added(tk)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	snap := buildSnapshot(s.eng)
+	if got := snap.backlinks[b.Path]; len(got) != 1 || got[0].Title != "Source" {
+		t.Fatalf("backlinks[Target] = %+v, want one from Source", got)
+	}
+	if got := snap.taskRefs[b.Path]; len(got) != 1 || !strings.Contains(got[0].Text, "wire up") {
+		t.Fatalf("taskRefs[Target] = %+v, want the linking task", got)
+	}
+	if !contains(snap.fwd[a.Path], b.Path) {
+		t.Fatalf("fwd[Source] = %v, want it to include Target", snap.fwd[a.Path])
+	}
+	if !snap.linked[b.Path] {
+		t.Error("Target should be linked (not an orphan)")
+	}
+	if snap.linked[a.Path] {
+		t.Error("Source has no inbound links — should be an orphan")
+	}
+}
+
+func postForm(s *Server, path, csrf string, form url.Values) (int, string) {
+	rec := httptest.NewRecorder()
+	var body *strings.Reader
+	r := httptest.NewRequest("POST", path, strings.NewReader(""))
+	if form != nil {
+		body = strings.NewReader(form.Encode())
+		r = httptest.NewRequest("POST", path, body)
+		r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	}
+	if csrf != "" {
+		r.Header.Set("X-CSRF", csrf)
+	}
+	s.routes().ServeHTTP(rec, r)
+	return rec.Code, rec.Body.String()
+}
+
+// addTask appends a task through the engine and returns its ULID.
+func addTask(t *testing.T, s *Server, text string) string {
+	t.Helper()
+	var id string
+	if err := s.eng.Apply("add", func(d *task.Doc, rec *mutate.Recorder) error {
+		tk := task.New(text)
+		d.Append(tk)
+		rec.Added(tk)
+		id = tk.ID()
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	return id
+}
+
+func TestTaskActionsGated(t *testing.T) {
+	s := newTestServer(t) // read-only
+	id := addTask(t, s, "guard me")
+	if code, _ := postForm(s, "/tasks/"+id+"/done", "", nil); code != 403 {
+		t.Errorf("done without --edit should 403, got %d", code)
+	}
+	s.allowEdit = true
+	if code, _ := postForm(s, "/tasks/"+id+"/done", "", nil); code != 403 {
+		t.Errorf("done without CSRF should 403, got %d", code)
+	}
+	if code, _ := postForm(s, "/tasks/"+id+"/done", "wrong", nil); code != 403 {
+		t.Errorf("done with bad CSRF should 403, got %d", code)
+	}
+}
+
+func TestTaskDoneReopenStatusDelete(t *testing.T) {
+	s := newTestServer(t)
+	s.allowEdit = true
+	id := addTask(t, s, "ship it")
+
+	code, body := postForm(s, "/tasks/"+id+"/done", s.csrf, nil)
+	if code != 200 || !strings.Contains(body, "s-done") {
+		t.Fatalf("done: code=%d body=%s", code, body)
+	}
+	if tk := mustDoc(t, s).FindByID(id); tk == nil || !tk.Done {
+		t.Fatal("task should be done")
+	}
+
+	code, _ = postForm(s, "/tasks/"+id+"/reopen", s.csrf, nil)
+	if code != 200 || mustDoc(t, s).FindByID(id).Done {
+		t.Fatalf("reopen failed: code=%d", code)
+	}
+
+	code, _ = postForm(s, "/tasks/"+id+"/status", s.csrf, url.Values{"status": {"doing"}})
+	if code != 200 || mustDoc(t, s).FindByID(id).State() != "doing" {
+		t.Fatalf("status doing failed: code=%d", code)
+	}
+
+	code, _ = postForm(s, "/tasks/"+id+"/delete", s.csrf, nil)
+	if code != 200 || mustDoc(t, s).FindByID(id) != nil {
+		t.Fatalf("delete failed: code=%d", code)
+	}
+}
+
+func TestTaskNew(t *testing.T) {
+	s := newTestServer(t)
+	s.allowEdit = true
+	code, body := postForm(s, "/tasks/new", s.csrf, url.Values{
+		"text": {"write the docs"}, "pri": {"high"}, "due": {"2026-07-01"}, "project": {"site"},
+	})
+	if code != 200 || !strings.Contains(body, "write the docs") {
+		t.Fatalf("new task: code=%d body=%s", code, body)
+	}
+	tasks := mustDoc(t, s).Tasks()
+	if len(tasks) != 1 {
+		t.Fatalf("want 1 task, got %d", len(tasks))
+	}
+	tk := tasks[0]
+	if tk.Source() != "web" || tk.Due() != "2026-07-01" || len(tk.Projects()) != 1 {
+		t.Fatalf("task fields wrong: src=%s due=%s proj=%v", tk.Source(), tk.Due(), tk.Projects())
+	}
+	// empty text is rejected
+	if code, _ := postForm(s, "/tasks/new", s.csrf, url.Values{"text": {"  "}}); code != 400 {
+		t.Errorf("empty task should 400, got %d", code)
+	}
+}
+
+func TestPreviewEndpoint(t *testing.T) {
+	s := newTestServer(t)
+	note.Create(s.eng.S, "Target", "x", nil, "cli", "")
+
+	// gated off when read-only
+	if code, _ := postBody(s, "/preview", "", "# hi"); code != 404 {
+		t.Errorf("preview should 404 when read-only, got %d", code)
+	}
+	s.allowEdit = true
+	if code, _ := postBody(s, "/preview", "", "# hi"); code != 403 {
+		t.Errorf("preview without CSRF should 403, got %d", code)
+	}
+	// renders markdown + resolves wikilinks the same way the note page does,
+	// and ignores leading frontmatter.
+	code, body := postBody(s, "/preview", s.csrf, "---\nid: x\n---\n\n## Heading\n\nsee [[Target]]")
+	if code != 200 {
+		t.Fatalf("preview code=%d", code)
+	}
+	if !strings.Contains(body, "<h2") || !strings.Contains(body, `class="wikilink"`) {
+		t.Fatalf("preview did not render markdown/wikilink:\n%s", body)
+	}
+	if strings.Contains(body, "id: x") {
+		t.Errorf("preview should strip frontmatter:\n%s", body)
+	}
+}
+
+// postBody POSTs a text/plain body with optional CSRF.
+func postBody(s *Server, path, csrf, body string) (int, string) {
+	rec := httptest.NewRecorder()
+	r := httptest.NewRequest("POST", path, strings.NewReader(body))
+	r.Header.Set("Content-Type", "text/plain")
+	if csrf != "" {
+		r.Header.Set("X-CSRF", csrf)
+	}
+	s.routes().ServeHTTP(rec, r)
+	return rec.Code, rec.Body.String()
+}
+
+func mustDoc(t *testing.T, s *Server) *task.Doc {
+	t.Helper()
+	d, err := s.eng.Read()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return d
+}
+
+func TestActivityFeed(t *testing.T) {
+	s := newTestServer(t)
+	note.Create(s.eng.S, "A Note", "body", nil, "claude", "")
+	id := addTask(t, s, "do a thing")
+	// complete it so a "completed" event is produced too
+	if _, err := s.eng.Read(); err != nil {
+		t.Fatal(err)
+	}
+	postFormSetup := func() { s.allowEdit = true }
+	postFormSetup()
+	postForm(s, "/tasks/"+id+"/done", s.csrf, nil)
+
+	snap := s.current()
+	if len(snap.activity) < 3 { // note added, task added, task completed
+		t.Fatalf("want ≥3 activity events, got %d: %+v", len(snap.activity), snap.activity)
+	}
+	// newest-first ordering
+	for i := 1; i < len(snap.activity); i++ {
+		if snap.activity[i-1].When.Before(snap.activity[i].When) {
+			t.Fatal("activity not sorted newest-first")
+		}
+	}
+	if !contains(snap.sources, "claude") {
+		t.Errorf("sources should include claude: %v", snap.sources)
+	}
+	// page renders + source filter
+	if _, body := get(t, s, "/activity"); !strings.Contains(body, "actlist") || !strings.Contains(body, "A Note") {
+		t.Fatalf("activity page missing entries:\n%s", body)
+	}
+	_, claudeOnly := get(t, s, "/activity?source=claude")
+	if !strings.Contains(claudeOnly, "A Note") {
+		t.Errorf("source filter dropped the claude note")
+	}
+}
+
+func TestHomeDashboard(t *testing.T) {
+	s := newTestServer(t)
+	// fresh store → onboarding
+	if _, body := get(t, s, "/"); !strings.Contains(body, "first task") {
+		t.Fatalf("empty store should onboard:\n%s", body)
+	}
+	ready := addTask(t, s, "ready task")
+	blocker := addTask(t, s, "blocker task")
+	if err := s.eng.Apply("block", func(d *task.Doc, rec *mutate.Recorder) error {
+		bt := d.FindByID(blocker)
+		rec.Before(bt)
+		bt.SetKey("blocks", ready)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	_, body := get(t, s, "/")
+	if !strings.Contains(body, "id=\"dashboard\"") || !strings.Contains(body, "Ready") || !strings.Contains(body, "Blocked") {
+		t.Fatalf("dashboard missing panels:\n%s", body)
+	}
+	if !strings.Contains(body, "blocker task") { // shown as the blocker reason
+		t.Errorf("blocked reason not shown")
+	}
+	// fragment endpoint
+	if _, frag := get(t, s, "/?fragment=dash"); !strings.Contains(frag, "dash__grid") {
+		t.Errorf("dashboard fragment missing")
+	}
+}
+
+func TestWriteTrackerSelfWrite(t *testing.T) {
+	wt := newWriteTracker()
+	if wt.isSelf("/x") {
+		t.Error("unmarked path should not be a self-write")
+	}
+	wt.mark("/x")
+	if !wt.isSelf("/x") {
+		t.Error("freshly-marked path should be a self-write")
+	}
+	if wt.isSelf("/y") {
+		t.Error("a different path should not be a self-write")
 	}
 }
 
@@ -223,6 +483,12 @@ func TestStaticAssets(t *testing.T) {
 	if resp.StatusCode != 200 || resp.Header.Get("Content-Encoding") != "gzip" {
 		t.Errorf("mermaid should be gzip-encoded: %d %q", resp.StatusCode, resp.Header.Get("Content-Encoding"))
 	}
+	if r, body := get(t, s, "/static/htmx.min.js"); r.StatusCode != 200 || !strings.Contains(body, "htmx") {
+		t.Errorf("htmx not served: %d", r.StatusCode)
+	}
+	if r, body := get(t, s, "/static/graph.js"); r.StatusCode != 200 || !strings.Contains(body, "force-directed") {
+		t.Errorf("graph.js not served: %d", r.StatusCode)
+	}
 }
 
 func TestTagsPage(t *testing.T) {
@@ -270,7 +536,7 @@ func TestTasksDashboard(t *testing.T) {
 
 func TestPaletteIndexAndOnboarding(t *testing.T) {
 	s := newTestServer(t)
-	if _, body := get(t, s, "/"); !strings.Contains(body, "No notes yet") {
+	if _, body := get(t, s, "/"); !strings.Contains(body, "first task") {
 		t.Fatalf("empty onboarding missing:\n%s", body)
 	}
 	_, _ = note.Create(s.eng.S, "Findme", "", nil, "cli", "")
@@ -328,13 +594,17 @@ func TestGraphView(t *testing.T) {
 	s := newTestServer(t)
 	_, _ = note.Create(s.eng.S, "Auth", "see [[token-rotation]]", nil, "cli", "")
 	_, _ = note.Create(s.eng.S, "Token Rotation", "x", nil, "cli", "")
-	_, notes := s.load()
-	src := graphSource(notes)
-	if !strings.Contains(src, "graph LR") || !strings.Contains(src, "-->") || !strings.Contains(src, "click n") {
-		t.Fatalf("graph source wrong:\n%s", src)
+	g := buildGraphData(s.current())
+	if len(g.Nodes) != 2 || len(g.Links) != 1 {
+		t.Fatalf("graph data wrong: %d nodes, %d links", len(g.Nodes), len(g.Links))
 	}
-	if _, body := get(t, s, "/graph"); !strings.Contains(body, `class="graphview"`) {
-		t.Fatalf("graph page missing graphview:\n%s", body)
+	if g.Nodes[0].Deg != 1 || g.Nodes[1].Deg != 1 {
+		t.Fatalf("degree not computed: %+v", g.Nodes)
+	}
+	_, body := get(t, s, "/graph")
+	if !strings.Contains(body, `id="graph-canvas"`) || !strings.Contains(body, `id="nt-graph"`) ||
+		!strings.Contains(body, "/static/graph.js") {
+		t.Fatalf("graph page missing canvas/data/script:\n%s", body)
 	}
 }
 
@@ -344,6 +614,15 @@ func postNote(s *Server, id, csrf, body string) int {
 	if csrf != "" {
 		r.Header.Set("X-CSRF", csrf)
 	}
+	s.routes().ServeHTTP(rec, r)
+	return rec.Code
+}
+
+func postNoteIfMatch(s *Server, id, csrf, ifMatch, body string) int {
+	rec := httptest.NewRecorder()
+	r := httptest.NewRequest("POST", "/n/"+id, strings.NewReader(body))
+	r.Header.Set("X-CSRF", csrf)
+	r.Header.Set("If-Match", ifMatch)
 	s.routes().ServeHTTP(rec, r)
 	return rec.Code
 }
@@ -382,5 +661,41 @@ func TestEditingSave(t *testing.T) {
 	b, _ := os.ReadFile(n.Path)
 	if !strings.Contains(string(b), "brand new body") || !strings.Contains(string(b), "id: keep") {
 		t.Fatalf("file not updated as written:\n%s", b)
+	}
+}
+
+// TestEditingLostUpdateGuard: when a note changes on disk after the editor
+// opened it (a concurrent agent/CLI write), a save carrying the stale ETag as
+// If-Match is refused with 409 instead of clobbering the other write. A save
+// with the current ETag goes through.
+func TestEditingLostUpdateGuard(t *testing.T) {
+	s := newTestServer(t)
+	s.allowEdit = true
+	n, _ := note.Create(s.eng.S, "X", "v1 body", nil, "cli", "")
+
+	resp, _ := get(t, s, "/n/"+n.ID+"?raw=1")
+	stale := resp.Header.Get("ETag")
+	if stale == "" {
+		t.Fatal("raw response missing ETag")
+	}
+
+	// Another writer (agent/CLI) rewrites the same note underneath the editor.
+	fresh := "---\nid: " + n.ID + "\n---\n\nagent wrote this\n"
+	if err := store.WriteAtomic(n.Path, []byte(fresh), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// The stale save is refused and the agent's write survives intact.
+	if code := postNoteIfMatch(s, n.ID, s.csrf, stale, "clobbered\n"); code != 409 {
+		t.Fatalf("stale save should 409, got %d", code)
+	}
+	if b, _ := os.ReadFile(n.Path); !strings.Contains(string(b), "agent wrote this") {
+		t.Fatalf("agent write was clobbered:\n%s", b)
+	}
+
+	// Re-opening yields the current ETag, which lets the save through.
+	resp2, _ := get(t, s, "/n/"+n.ID+"?raw=1")
+	if code := postNoteIfMatch(s, n.ID, s.csrf, resp2.Header.Get("ETag"), "---\nid: "+n.ID+"\n---\n\nmerged\n"); code != 204 {
+		t.Fatalf("fresh save should 204, got %d", code)
 	}
 }
