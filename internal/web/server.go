@@ -220,6 +220,7 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("POST /preview", s.handlePreview)
 	mux.HandleFunc("/events", s.handleSSE)
 	mux.HandleFunc("/static/", s.handleStatic)
+	s.apiRoutes(mux) // JSON API consumed by the Svelte SPA (Phase 1 of the rebuild)
 	return mux
 }
 
@@ -292,25 +293,33 @@ type dashboard struct {
 
 // activityDay groups timeline events under one calendar date.
 type activityDay struct {
-	Date   string
-	Events []activityEvent
+	Date   string          `json:"date"`
+	Events []activityEvent `json:"events"`
 }
 
-type linkRow struct{ URL, Title, Path string }
+type linkRow struct {
+	URL   string `json:"url"`
+	Title string `json:"title"`
+	Path  string `json:"path"`
+}
 type tagRow struct {
 	Name  string
 	Count int
 	URL   string
 }
 type taskGroup struct {
-	Status string
-	Tasks  []taskRow
+	Status string    `json:"status"`
+	Tasks  []taskRow `json:"tasks"`
 }
 type taskRow struct {
-	ID                                 string
-	Text, Status, Due, Source, Project string
-	Tags                               []string
-	Blocker                            string // on the dashboard: why this task is blocked
+	ID      string   `json:"id"`
+	Text    string   `json:"text"`
+	Status  string   `json:"status"`
+	Due     string   `json:"due,omitempty"`
+	Source  string   `json:"source,omitempty"`
+	Project string   `json:"project,omitempty"`
+	Tags    []string `json:"tags,omitempty"`
+	Blocker string   `json:"blocker,omitempty"` // on the dashboard: why this task is blocked
 }
 
 // flatNotes is the note index the ⌘K palette filters over.
@@ -831,22 +840,33 @@ func (s *Server) renderTaskList(w http.ResponseWriter, snap *snapshot) {
 // (lock + re-read + undo journal), then refreshes the read-model, nudges other
 // clients ("tasks"), and returns the updated fragment.
 func (s *Server) taskWrite(w http.ResponseWriter, r *http.Request, op string, fn func(d *task.Doc, rec *mutate.Recorder) error) {
+	if s.doTaskWrite(w, r, op, fn) {
+		s.renderTaskList(w, s.current())
+	}
+}
+
+// doTaskWrite enforces the --edit + CSRF gate, marks tasks.txt as a self-write
+// (so the watcher doesn't also broadcast a full reload), runs fn through
+// mutate.Engine.Apply (lock + re-read + undo journal), refreshes the read-model,
+// and nudges other clients ("tasks"). Returns true on success; on failure it has
+// already written the error response. Shared by the htmx and JSON task handlers.
+func (s *Server) doTaskWrite(w http.ResponseWriter, r *http.Request, op string, fn func(d *task.Doc, rec *mutate.Recorder) error) bool {
 	if !s.allowEdit {
 		http.Error(w, "editing is disabled — start with `nt web --edit`", http.StatusForbidden)
-		return
+		return false
 	}
 	if r.Header.Get("X-CSRF") != s.csrf {
 		http.Error(w, "bad or missing CSRF token", http.StatusForbidden)
-		return
+		return false
 	}
 	s.writes.mark(s.eng.S.TasksFile())
 	if err := s.eng.Apply(op, fn); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
+		return false
 	}
 	s.rebuild()
 	s.hub.broadcast("tasks")
-	s.renderTaskList(w, s.current())
+	return true
 }
 
 // resolveTask looks up the task addressed by the {id} path segment.
@@ -1258,12 +1278,12 @@ func addDirs(wt *fsnotify.Watcher, root string) {
 // ---- tree + helpers -------------------------------------------------------
 
 type treeNode struct {
-	Name     string
-	Path     string // folder path (persistence key for collapse state); "" for notes
-	URL      string
-	IsNote   bool
-	Current  bool
-	Children []*treeNode
+	Name     string      `json:"name"`
+	Path     string      `json:"path"` // folder path (persistence key for collapse state); "" for notes
+	URL      string      `json:"url"`
+	IsNote   bool        `json:"isNote"`
+	Current  bool        `json:"-"`
+	Children []*treeNode `json:"children,omitempty"`
 }
 
 // buildTree groups notes into a nested folder tree from their Rel paths.

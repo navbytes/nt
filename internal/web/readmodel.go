@@ -43,12 +43,12 @@ type snapshot struct {
 // It's the view nt can build but pure-PKM tools can't — because nt has agents
 // writing into the same store a human reads.
 type activityEvent struct {
-	When   time.Time
-	Action string // "added" | "updated" | "completed"
-	Kind   string // "note" | "task"
-	Source string // claude | cli | web | tui | …
-	Title  string
-	URL    string // /n/<id> for notes; "" for tasks (no task page yet)
+	When   time.Time `json:"when"`
+	Action string    `json:"action"` // "added" | "updated" | "completed"
+	Kind   string    `json:"kind"`   // "note" | "task"
+	Source string    `json:"source"` // claude | cli | web | tui | …
+	Title  string    `json:"title"`
+	URL    string    `json:"url,omitempty"` // /n/<id> for notes; "" for tasks (no task page yet)
 }
 
 // buildSnapshot reads the store once and precomputes the link graph. The
