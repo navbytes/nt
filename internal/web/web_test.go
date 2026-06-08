@@ -272,6 +272,9 @@ func TestStaticAssets(t *testing.T) {
 	if resp.StatusCode != 200 || resp.Header.Get("Content-Encoding") != "gzip" {
 		t.Errorf("mermaid should be gzip-encoded: %d %q", resp.StatusCode, resp.Header.Get("Content-Encoding"))
 	}
+	if r, body := get(t, s, "/static/htmx.min.js"); r.StatusCode != 200 || !strings.Contains(body, "htmx") {
+		t.Errorf("htmx not served: %d", r.StatusCode)
+	}
 }
 
 func TestTagsPage(t *testing.T) {

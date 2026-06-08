@@ -622,6 +622,9 @@ func (s *Server) handleStatic(w http.ResponseWriter, r *http.Request) {
 	case "app.js":
 		w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
 		s.writeAsset(w, "assets/app.js")
+	case "htmx.min.js":
+		w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
+		s.writeAsset(w, "assets/htmx.min.js")
 	case "mermaid.min.js":
 		w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
 		w.Header().Set("Content-Encoding", "gzip") // embedded pre-gzipped (~900 KB vs 3.3 MB)
@@ -645,20 +648,20 @@ func (s *Server) writeAsset(w http.ResponseWriter, path string) {
 
 type hub struct {
 	mu      sync.Mutex
-	clients map[chan struct{}]bool
+	clients map[chan string]bool
 }
 
-func newHub() *hub { return &hub{clients: map[chan struct{}]bool{}} }
+func newHub() *hub { return &hub{clients: map[chan string]bool{}} }
 
-func (h *hub) add() chan struct{} {
-	ch := make(chan struct{}, 1)
+func (h *hub) add() chan string {
+	ch := make(chan string, 4)
 	h.mu.Lock()
 	h.clients[ch] = true
 	h.mu.Unlock()
 	return ch
 }
 
-func (h *hub) remove(ch chan struct{}) {
+func (h *hub) remove(ch chan string) {
 	h.mu.Lock()
 	if h.clients[ch] {
 		delete(h.clients, ch)
@@ -667,11 +670,14 @@ func (h *hub) remove(ch chan struct{}) {
 	h.mu.Unlock()
 }
 
-func (h *hub) broadcast() {
+// broadcast pushes a typed event payload to every connected client. "reload"
+// means "the page is stale, reload it" (an external change); finer kinds like
+// "tasks" let a listener refresh just one fragment instead of the whole page.
+func (h *hub) broadcast(kind string) {
 	h.mu.Lock()
 	for ch := range h.clients {
 		select {
-		case ch <- struct{}{}:
+		case ch <- kind:
 		default:
 		}
 	}
@@ -695,8 +701,11 @@ func (s *Server) handleSSE(w http.ResponseWriter, r *http.Request) {
 		select {
 		case <-r.Context().Done():
 			return
-		case <-ch:
-			_, _ = fmt.Fprint(w, "data: reload\n\n")
+		case kind, ok := <-ch:
+			if !ok {
+				return
+			}
+			_, _ = fmt.Fprintf(w, "data: %s\n\n", kind)
 			fl.Flush()
 		}
 	}
@@ -745,7 +754,7 @@ func (s *Server) watch() {
 			bmu.Unlock()
 			s.rebuild()
 			if ext {
-				s.hub.broadcast() // only nudge clients for changes they didn't trigger
+				s.hub.broadcast("reload") // only nudge clients for changes they didn't trigger
 			}
 		}
 		for {

@@ -63,11 +63,18 @@
     }
   });
 
-  // ---- Live reload via server-sent events (/events) ----
+  // ---- Live updates via server-sent events (/events) ----
+  // Typed payloads: "reload" = page is stale (external change), reload it; a
+  // finer kind (e.g. "tasks") is dispatched as a "nt:<kind>" DOM event so a
+  // listener can refresh just one fragment instead of the whole page.
   window.onReload = function () { location.reload(); };
   try {
     var es = new EventSource("/events");
-    es.onmessage = function () { window.onReload(); };
+    es.onmessage = function (e) {
+      var kind = (e.data || "reload").trim();
+      if (kind === "reload") { window.onReload(); return; }
+      document.dispatchEvent(new CustomEvent("nt:" + kind));
+    };
   } catch (e) { /* SSE unavailable — static view still works */ }
 
   // ---- Reading enhancements: heading anchors, TOC, copy buttons ----
