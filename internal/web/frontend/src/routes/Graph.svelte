@@ -326,10 +326,8 @@
         .nodeVal((n: FGNode) => 1 + n.deg)
         .nodeLabel((n: FGNode) => n.title)
         .backgroundColor(cssBg)
-        .nodeColor((n: FGNode) => {
-          const base = R.color.get(n.id) ?? cssAccent;
-          return dimmed(n.id) ? base + "26" : base;
-        })
+        // Painting happens in nodeCanvasObject (drawNode); force-graph ignores
+        // nodeColor once a canvas-object accessor is set, so it's omitted here.
         .linkColor((l: any) => {
           const s = linkEndId(l.source);
           const t = linkEndId(l.target);

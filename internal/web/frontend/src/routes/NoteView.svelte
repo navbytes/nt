@@ -55,20 +55,41 @@
     activeId = id;
   }
 
-  // Run Mermaid on the rendered note body after mount / on body change.
+  // Run Mermaid on the rendered note body — after mount / on body change, and
+  // again on theme toggle so diagrams re-render in the matching light/dark theme.
   $effect(() => {
     const html = $noteQ.data?.bodyHTML;
     if (!html) return;
-    // Deferred so the DOM has been updated before we query it.
-    const id = setTimeout(async () => {
+    let cancelled = false;
+
+    async function render() {
       const el = document.querySelector(".prose");
-      if (!el || !el.querySelector(".mermaid")) return;
+      if (!el) return;
+      const divs = Array.from(el.querySelectorAll<HTMLElement>(".mermaid"));
+      if (!divs.length) return;
       const mermaid = (await import("mermaid")).default;
+      if (cancelled) return;
       const dark = document.documentElement.getAttribute("data-theme") === "dark";
       mermaid.initialize({ startOnLoad: false, theme: dark ? "dark" : "default" });
-      await mermaid.run({ nodes: Array.from(el.querySelectorAll(".mermaid")) as HTMLElement[] });
-    }, 0);
-    return () => clearTimeout(id);
+      // Cache each diagram's source on first run (mermaid replaces the div's
+      // text with SVG), then restore it so a re-run picks up the new theme.
+      for (const d of divs) {
+        const src = d.getAttribute("data-src") ?? d.textContent ?? "";
+        d.setAttribute("data-src", src);
+        d.removeAttribute("data-processed");
+        d.innerHTML = src;
+      }
+      await mermaid.run({ nodes: divs });
+    }
+
+    const id = setTimeout(render, 0); // defer so the DOM is updated first
+    const obs = new MutationObserver(() => render());
+    obs.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme", "class"] });
+    return () => {
+      cancelled = true;
+      clearTimeout(id);
+      obs.disconnect();
+    };
   });
 </script>
 

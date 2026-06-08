@@ -339,7 +339,6 @@ func siblings(notes []*note.Note, n *note.Note, folder string) (prev, next *link
 	return prev, next
 }
 
-
 // buildTaskGroups groups tasks by status (urgency-sorted within each), in the
 // display order doing → open → blocked → done.
 func buildTaskGroups(doc *task.Doc) []taskGroup {
@@ -364,7 +363,6 @@ func buildTaskGroups(doc *task.Doc) []taskGroup {
 	}
 	return groups
 }
-
 
 // doTaskWrite enforces the --edit + CSRF gate, marks tasks.txt as a self-write
 // (so the watcher doesn't also broadcast a full reload), runs fn through
@@ -398,7 +396,6 @@ func resolveTask(d *task.Doc, r *http.Request) (*task.Task, error) {
 	}
 	return nil, fmt.Errorf("no such task %q", id)
 }
-
 
 // graphNode/graphLink/graphData are the JSON model the client force-directed
 // canvas renders. Nodes carry folder/source/tags so the view can color and
@@ -474,7 +471,6 @@ func contains(ss []string, want string) bool {
 	}
 	return false
 }
-
 
 // ---- live reload (SSE + fsnotify) -----------------------------------------
 
