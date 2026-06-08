@@ -122,31 +122,55 @@ single-binary, offline constraints.
   string-building smell in `app.js` (palette, search, recent) and is the
   prerequisite for interactive tasks/editing without an SPA. Keeps every
   product value: single file, no build, offline.
-- **Performance pass.** Today every request calls `s.load()` (reads the whole
-  store) and rebuilds the folder tree (`buildTree`) and note index from
-  scratch. Fine at hundreds of notes, not at 5,000+. Add an in-memory cache
-  invalidated by the existing fsnotify watcher (we already know when the store
-  changes — the same signal that drives live-reload). This is the difference
+- **Performance pass — a *rebuildable read-model*, not a naive cache.** Today
+  every request calls `s.load()` (reads the whole store) and rebuilds the folder
+  tree (`buildTree`) and note index; link views run a full-store ripgrep *per
+  page load* (`links.Backlinks`). Fine at hundreds of notes, not at 5,000+. Add
+  an in-memory snapshot (parsed notes + tree + flat index + **backlink map** +
+  link adjacency) invalidated by the fsnotify watcher. **Caveat (per the
+  architecture review): the current watcher (`server.go:646`) has no debounce and
+  no self-write suppression — SPEC §6.5 requires both. A naive cache hung off it
+  causes reload storms and reloads the editing client mid-save. Do this as a
+  proper debounced, self-write-aware read-model** — see
+  [web-read-model-plan.md](web-read-model-plan.md). This is the difference
   between "snappy past 5k notes" (the Obsidian bar) and not.
 
 ### Tier 1 — Table stakes (close the obvious PKM gaps)
 
-- **Live Markdown editing, not a raw textarea.** The current editor is a plain
-  `<textarea>` (`app.js` editing IIFE). Upgrade to either (a) a **split live
-  preview** reusing the existing `renderBody` path verbatim (the ADR calls this
-  out as "seam #3"), or (b) **CodeMirror 6** (no-build via an ESM bundle,
-  vendored like mermaid) for syntax-highlighted editing with:
+> **Correctness ordering (per the architecture review).** Do the *safe* write
+> first, then the *risky* one — the reverse of how this was originally framed.
+> **Tasks are the easy, safe win:** task writes ride `mutate.Engine.Apply`'s
+> existing re-read-under-lock + undo-journal contract, so concurrent human+agent
+> writes are already handled. **Notes are the harder problem:** note saves go
+> straight to `store.WriteAtomic`, outside the journal, and the lost-update guard
+> (now landed — ETag/`If-Match` → 409) was missing. Build interactivity on top of
+> these guarantees, not before them.
+
+- **Interactive tasks** (the biggest single gap given nt's identity — and the
+  *safe* place to start). `/tasks` is read-only. Wire complete / reopen / set
+  status / due / priority / add / add-follow-up via htmx POSTs **routed through
+  `s.eng.Apply`** (which gives lock + re-read + undo for free), CSRF-guarded and
+  gated like `--edit`. This is what turns the web from a viewer into the memory
+  GUI.
+- **Live Markdown editing, not a raw textarea** (the harder path — notes lack the
+  task write guarantees, so pair it with the lost-update guard + journaling).
+  The current editor is a plain `<textarea>` (`app.js` editing IIFE). The
+  lost-update guard (ETag/`If-Match`) is **done**; still outstanding: route note
+  saves so they're undoable. Upgrade the surface to either (a) a **split live
+  preview** reusing the existing `renderBody` path verbatim (the ADR's "seam
+  #3"), or (b) **CodeMirror 6** for syntax-highlighted editing with:
   - inline `[[ ]]` wikilink autocomplete (fed by the existing note index),
   - `#tag` / `+project` autocomplete (fed by `/tags`),
   - slash-command insert, `⌘S` save (already wired), conflict-safe atomic write
     (already implemented).
   Recommendation: start with split live-preview (cheapest, reuses Go render),
-  layer CodeMirror autocomplete after. Avoid TipTap/Milkdown — they assume an
-  npm build and ProseMirror document model, which fights "plain files, no build."
-- **Interactive tasks** (the biggest single gap given nt's identity). `/tasks`
-  is read-only. Wire complete / reopen / set status / due / priority / add /
-  add-follow-up via htmx POSTs to the `mutate` engine (CSRF-guarded, gated like
-  `--edit`). This is what turns the web from a viewer into the memory GUI.
+  layer CodeMirror autocomplete after. **Note: CodeMirror 6 is *not* a single
+  vendored file like mermaid — it's many `@codemirror/*`/`@lezer/*` packages that
+  must be pre-bundled out-of-tree into one ESM artifact (~400 KB+). That keeps the
+  no-build-*in-repo* guarantee but adds an out-of-tree build step — gate it behind
+  whether autocomplete is actually demanded.** Avoid TipTap/Milkdown — they assume
+  an npm build and a ProseMirror document model, which fights "plain files, no
+  build."
 - **Note + folder creation from the web.** `handleSave` only writes existing
   notes. Add "New note" (and new folder), reusing `note.Create`. Right now you
   must drop to the terminal to start a note — a hard stop for GUI-first users.
