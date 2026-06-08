@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/url"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -51,6 +52,11 @@ func writeJSON(w http.ResponseWriter, v any) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	_ = json.NewEncoder(w).Encode(v)
 }
+
+// safeNoteFolder allowlists a note subfolder: letters, numbers, spaces, and
+// '/'/'-'/'_'. It forbids '.' (so no "..") and '\\', so a folder from the web
+// can't be coaxed into a path-traversal — the boundary guard for go/path-injection.
+var safeNoteFolder = regexp.MustCompile(`^[\p{L}\p{N} /_-]+$`)
 
 // ---- projections to the wire contract (apitypes) ---------------------------
 // The wire structs live in the apitypes package (the single source tygo turns
@@ -253,6 +259,14 @@ func (s *Server) apiNoteCreate(w http.ResponseWriter, r *http.Request) {
 	}
 	if title == "" {
 		http.Error(w, "a note title is required", http.StatusBadRequest)
+		return
+	}
+	// Allowlist the folder at the boundary: it becomes a real directory path, so
+	// forbid anything but letters/numbers/space/'/'/'-'/'_' — no "." (hence no
+	// "..") and no "\\". The title is safe regardless (note.Slug strips it to
+	// [a-z0-9-] for the filename).
+	if folder != "" && !safeNoteFolder.MatchString(folder) {
+		http.Error(w, "folder may contain only letters, numbers, spaces, '/', '-', '_'", http.StatusBadRequest)
 		return
 	}
 	n, err := note.Create(s.eng.S, title, "", nil, "web", folder)

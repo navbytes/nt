@@ -161,6 +161,11 @@ func TestAPINoteCreate(t *testing.T) {
 	if found.Source != "web" {
 		t.Errorf("note source should be web, got %q", found.Source)
 	}
+
+	// A traversal-y folder is rejected at the boundary (path-injection guard).
+	if code, _ := postForm(s, "/api/notes", s.csrf, mustValues("title", "x", "folder", "../../etc")); code != 400 {
+		t.Errorf("traversal folder should 400, got %d", code)
+	}
 }
 
 func TestAPINoteRawSaveGuard(t *testing.T) {
