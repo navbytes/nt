@@ -13,6 +13,7 @@ type State struct {
 	OpenCount int      `json:"openCount"`
 	NoteCount int      `json:"noteCount"`
 	Sources   []string `json:"sources"`
+	Warning   string   `json:"warning,omitempty"` // non-empty when the store couldn't be fully read
 }
 
 // NoteLink is a link to a note (sidebar index, search results, prev/next).

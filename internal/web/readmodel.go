@@ -36,6 +36,8 @@ type snapshot struct {
 	activity []activityEvent // every change, newest first (the provenance timeline)
 	sources  []string        // distinct sources seen, sorted (for the source filter)
 
+	readErr string // non-empty when reading tasks/notes failed (surfaced as a UI warning)
+
 	builtAt time.Time
 }
 
@@ -65,8 +67,18 @@ func flatNotes(notes []*note.Note) []linkRow {
 // same resolution the CLI/TUI/MCP use, so the rendered pages are byte-identical
 // to the old per-request path — only faster.
 func buildSnapshot(eng *mutate.Engine) *snapshot {
-	doc, _ := eng.Read()
-	notes, _ := note.List(eng.S)
+	doc, docErr := eng.Read()
+	notes, notesErr := note.List(eng.S)
+
+	// Surface read failures instead of silently rendering an empty store — a
+	// corrupt tasks.txt or unreadable notes/ otherwise looks like "no data".
+	readErr := ""
+	switch {
+	case docErr != nil:
+		readErr = "couldn't read tasks: " + docErr.Error()
+	case notesErr != nil:
+		readErr = "couldn't read notes: " + notesErr.Error()
+	}
 
 	s := &snapshot{
 		doc:       doc,
@@ -78,6 +90,7 @@ func buildSnapshot(eng *mutate.Engine) *snapshot {
 		taskRefs:  map[string][]TaskRef{},
 		linked:    map[string]bool{},
 		fwd:       map[string][]string{},
+		readErr:   readErr,
 		builtAt:   time.Now(),
 	}
 	for _, n := range notes {

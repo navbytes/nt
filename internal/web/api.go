@@ -167,6 +167,7 @@ func (s *Server) apiState(w http.ResponseWriter, r *http.Request) {
 		OpenCount: open,
 		NoteCount: len(snap.notes),
 		Sources:   snap.sources,
+		Warning:   snap.readErr,
 	})
 }
 

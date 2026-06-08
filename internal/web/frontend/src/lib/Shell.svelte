@@ -82,6 +82,10 @@
       <button class="icon-btn" onclick={toggleTheme} title="Toggle theme" aria-label="Toggle light/dark theme">◐</button>
     </header>
 
+    {#if $stateQ.data?.warning}
+      <div class="store-warning" role="alert">⚠ {$stateQ.data.warning}</div>
+    {/if}
+
     <main class="main" id="main-content" tabindex="-1">
       {#if path === "/"}
         <Home canEdit={$stateQ.data?.canEdit ?? false} />

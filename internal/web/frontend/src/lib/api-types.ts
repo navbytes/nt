@@ -22,6 +22,7 @@ export interface State {
   openCount: number /* int */;
   noteCount: number /* int */;
   sources: string[];
+  warning?: string; // non-empty when the store couldn't be fully read
 }
 /**
  * NoteLink is a link to a note (sidebar index, search results, prev/next).
