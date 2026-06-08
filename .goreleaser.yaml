@@ -8,6 +8,10 @@ project_name: nt
 before:
   hooks:
     - go mod tidy
+    # Build the SPA so the released binary embeds a fresh bundle (belt-and-
+    # suspenders on top of the committed internal/web/frontend/dist).
+    - npm --prefix internal/web/frontend ci
+    - npm --prefix internal/web/frontend run build
 
 builds:
   - id: nt
