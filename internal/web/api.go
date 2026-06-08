@@ -13,7 +13,6 @@ import (
 	"github.com/navbytes/nt/internal/mutate"
 	"github.com/navbytes/nt/internal/note"
 	"github.com/navbytes/nt/internal/quickadd"
-	"github.com/navbytes/nt/internal/search"
 	"github.com/navbytes/nt/internal/store"
 	"github.com/navbytes/nt/internal/task"
 	"github.com/navbytes/nt/internal/web/apitypes"
@@ -354,16 +353,12 @@ func (s *Server) apiOrphans(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, apitypes.OrphansResponse{Notes: notes})
 }
 
-// apiSearch mirrors handleSearch's resolution (title match + ripgrep literal,
-// optional tag filter) but returns JSON. Ranked snippets are a planned upgrade.
+// apiSearch ranks title matches first, then body matches with snippets, with an
+// optional tag filter. It scans the in-memory read-model (no per-query ripgrep).
 func (s *Server) apiSearch(w http.ResponseWriter, r *http.Request) {
 	q := strings.TrimSpace(r.URL.Query().Get("q"))
 	tag := strings.TrimSpace(r.URL.Query().Get("tag"))
 	snap := s.current()
-	byPath := make(map[string]*note.Note, len(snap.notes))
-	for _, n := range snap.notes {
-		byPath[n.Path] = n
-	}
 	seen := map[string]bool{}
 	results := make([]apitypes.SearchResult, 0)
 	add := func(n *note.Note, snippet string) {
@@ -384,20 +379,34 @@ func (s *Server) apiSearch(w http.ResponseWriter, r *http.Request) {
 		}
 	default:
 		// Rank title matches first (most relevant), then body matches — each
-		// carrying the matching line as a snippet for context.
+		// carrying the matching line as a snippet for context. Both scan the
+		// in-memory read-model (note bodies are already parsed + cached), so a
+		// search no longer spawns ripgrep per query and scales with the snapshot.
 		ql := strings.ToLower(q)
 		for _, n := range snap.notes {
 			if strings.Contains(strings.ToLower(n.Title), ql) {
 				add(n, "")
 			}
 		}
-		if hits, err := search.Literal(q, s.eng.S.NotesDir()); err == nil {
-			for _, h := range hits {
-				add(byPath[h.Path], snippetAround(h.Text, q))
+		for _, n := range snap.notes {
+			if line, ok := firstMatchingLine(n.Body, ql); ok {
+				add(n, snippetAround(line, q))
 			}
 		}
 	}
 	writeJSON(w, apitypes.SearchResponse{Results: results})
+}
+
+// firstMatchingLine returns the first line of body containing the (already
+// lower-cased) query, case-insensitively — the in-memory equivalent of a ripgrep
+// hit, used to build a search snippet from the cached note body.
+func firstMatchingLine(body, ql string) (string, bool) {
+	for _, line := range strings.Split(body, "\n") {
+		if strings.Contains(strings.ToLower(line), ql) {
+			return line, true
+		}
+	}
+	return "", false
 }
 
 // snippetAround trims a matching line to a short window centered on the query,

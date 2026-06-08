@@ -15,7 +15,7 @@ func TestSnapshotSurfacesReadError(t *testing.T) {
 	if err := os.Mkdir(tf, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if snap := buildSnapshot(s.eng); snap.readErr == "" {
+	if snap := buildSnapshot(s.eng, s.notes); snap.readErr == "" {
 		t.Fatal("expected buildSnapshot to surface a read error")
 	}
 }
