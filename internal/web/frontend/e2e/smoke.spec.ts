@@ -31,7 +31,8 @@ test("command palette (⌘K) finds a note and navigates to it", async ({ page })
   await expect(page.locator(".note > h1")).toHaveText("Design");
   // "On this page" outline built from the note's headings.
   await expect(page.getByText("On this page")).toBeVisible();
-  await expect(page.getByRole("link", { name: "Goals" })).toBeVisible();
+  // exact: otherwise "Goals" also matches the "Non-goals" TOC link.
+  await expect(page.getByRole("link", { name: "Goals", exact: true })).toBeVisible();
 });
 
 test("graph view renders a canvas with a node/link summary", async ({ page }) => {
