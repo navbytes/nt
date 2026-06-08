@@ -46,6 +46,50 @@ export interface NotesIndex {
   index: NoteLink[];
 }
 
+export interface Backlink {
+  title: string;
+  url: string;
+  text: string;
+  isNote: boolean;
+}
+
+export interface TaskRef {
+  text: string;
+  status: string;
+  source: string;
+}
+
+export interface NoteView {
+  id: string;
+  title: string;
+  folder: string;
+  file: string;
+  crumbs: string[];
+  source: string;
+  created: string;
+  tags: string[];
+  bodyHTML: string;
+  backlinks: Backlink[];
+  taskRefs: TaskRef[];
+  prev?: NoteLink;
+  next?: NoteLink;
+  etag: string;
+}
+
+export interface ActivityEvent {
+  when: string;
+  action: string;
+  kind: string;
+  source: string;
+  title: string;
+  url?: string;
+}
+
+export interface ActivityDay {
+  date: string;
+  events: ActivityEvent[];
+}
+
 let csrf = "";
 export function setCsrf(token: string): void {
   csrf = token;
@@ -66,14 +110,26 @@ async function postForm<T>(path: string, body?: Record<string, string>): Promise
     },
     body: body ? new URLSearchParams(body).toString() : undefined,
   });
-  if (!r.ok) throw new Error(`${path} → ${r.status}`);
+  if (!r.ok) throw new Error(`${path} → ${(await r.text()) || r.status}`);
   return (await r.json()) as T;
 }
 
 export const api = {
   state: () => getJSON<State>("/api/state"),
   notes: () => getJSON<NotesIndex>("/api/notes"),
+  note: (handle: string) => getJSON<NoteView>(`/api/notes/${encodeURIComponent(handle)}`),
   tasks: () => getJSON<{ groups: TaskGroup[] }>("/api/tasks"),
-  taskDone: (id: string) => postForm<{ groups: TaskGroup[] }>(`/api/tasks/${id}/done`),
+  activity: (source = "") =>
+    getJSON<{ days: ActivityDay[]; sources: string[] }>(
+      "/api/activity" + (source ? `?source=${encodeURIComponent(source)}` : ""),
+    ),
+  search: (q: string, tag = "") =>
+    getJSON<{ results: NoteLink[] }>(
+      `/api/search?q=${encodeURIComponent(q)}` + (tag ? `&tag=${encodeURIComponent(tag)}` : ""),
+    ),
   taskNew: (text: string) => postForm<{ groups: TaskGroup[] }>("/api/tasks", { text }),
+  taskDone: (id: string) => postForm<{ groups: TaskGroup[] }>(`/api/tasks/${id}/done`),
+  taskReopen: (id: string) => postForm<{ groups: TaskGroup[] }>(`/api/tasks/${id}/reopen`),
+  taskStatus: (id: string, status: string) =>
+    postForm<{ groups: TaskGroup[] }>(`/api/tasks/${id}/status`, { status }),
 };

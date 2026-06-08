@@ -7,7 +7,17 @@ import { svelte } from "@sveltejs/vite-plugin-svelte";
 const API = process.env.NT_API ?? "http://127.0.0.1:8765";
 
 export default defineConfig({
-  plugins: [svelte()],
+  plugins: [
+    svelte({
+      onwarn(warning, handler) {
+        // We pass route params (handle, q) into createQuery options and remount
+        // the route via {#key …} when they change, so capturing the initial
+        // value per mount is intentional — not the bug this warning guards.
+        if (warning.code === "state_referenced_locally") return;
+        handler?.(warning);
+      },
+    }),
+  ],
   // Assets are served from /assets by the Go binary; absolute base keeps URLs
   // stable regardless of the SPA route.
   base: "/",

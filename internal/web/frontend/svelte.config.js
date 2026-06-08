@@ -2,6 +2,7 @@ import { vitePreprocess } from "@sveltejs/vite-plugin-svelte";
 
 export default {
   preprocess: vitePreprocess(),
-  // Force Svelte 5 runes mode project-wide so $state/$derived are unambiguous.
-  compilerOptions: { runes: true },
+  // Runes mode auto-enables per-component when a rune is used; we don't force it
+  // globally so third-party legacy components (e.g. @tanstack/svelte-query) still
+  // compile. Our components all use runes, so they opt in automatically.
 };
