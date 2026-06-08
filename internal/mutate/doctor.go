@@ -10,14 +10,15 @@ import (
 
 // DoctorReport summarizes what Doctor found (and, unless dry-run, fixed).
 type DoctorReport struct {
-	DupIDsRemoved int      // duplicate-ULID lines dropped
+	DupIDsRemoved int      // duplicate-ULID lines dropped (within tasks.txt)
+	CrossFileDups int      // tasks dropped from tasks.txt because done.txt has them
 	IDsAssigned   int      // task lines that lacked an id and got one
 	Actions       []string // human-readable, one per fix
 	Warnings      []string // structural problems doctor reports but can't auto-fix
 }
 
 // Issues is the count of auto-fixable problems (used to decide whether to write).
-func (r DoctorReport) Issues() int { return r.DupIDsRemoved + r.IDsAssigned }
+func (r DoctorReport) Issues() int { return r.DupIDsRemoved + r.CrossFileDups + r.IDsAssigned }
 
 // HasProblems reports whether anything is wrong — fixable issues OR warnings —
 // so `nt doctor --check` exits non-zero on a dependency cycle / dangling edge
@@ -81,6 +82,29 @@ func (e *Engine) Doctor(apply bool) (DoctorReport, error) {
 			continue
 		}
 		kept = append(kept, n)
+	}
+
+	// 3b. Cross-file reconciliation: a task present in BOTH tasks.txt and done.txt
+	// is a crash-leftover from Archive, which appends to done.txt then rewrites
+	// tasks.txt in two steps — a crash between them duplicates the task across
+	// files. done.txt is authoritative (written first), so drop the tasks.txt copy.
+	if doneData, derr := store.ReadFile(e.S.DoneFile()); derr == nil && len(doneData) > 0 {
+		archived := map[string]bool{}
+		for _, n := range task.Parse(doneData).Nodes {
+			if n.Task != nil && n.Task.ID() != "" {
+				archived[n.Task.ID()] = true
+			}
+		}
+		pruned := kept[:0]
+		for _, n := range kept {
+			if n.Task != nil && n.Task.ID() != "" && archived[n.Task.ID()] {
+				rep.CrossFileDups++
+				rep.Actions = append(rep.Actions, fmt.Sprintf("dropped archived dup %s  %s", short(n.Task.ID()), clip(n.Task.Text)))
+				continue
+			}
+			pruned = append(pruned, n)
+		}
+		kept = pruned
 	}
 
 	// 4. Dependency-integrity warnings (not auto-fixable — breaking a cycle or a

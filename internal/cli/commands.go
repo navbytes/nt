@@ -1177,13 +1177,13 @@ func cmdDoctor(args []string) int {
 		return 0
 	}
 	if rep.Issues() > 0 {
+		verb := "fixed"
 		if *check {
-			fmt.Printf("found %d fixable issue(s): %d duplicate id(s), %d missing id(s) — run `nt doctor` to fix\n",
-				rep.Issues(), rep.DupIDsRemoved, rep.IDsAssigned)
-		} else {
-			fmt.Printf("fixed %d issue(s): %d duplicate id(s) removed, %d id(s) assigned\n",
-				rep.Issues(), rep.DupIDsRemoved, rep.IDsAssigned)
+			verb = "found"
 		}
+		fmt.Printf("%s %d issue(s): %d duplicate id(s), %d archived-dup(s), %d missing id(s)%s\n",
+			verb, rep.Issues(), rep.DupIDsRemoved, rep.CrossFileDups, rep.IDsAssigned,
+			map[bool]string{true: " — run `nt doctor` to fix", false: ""}[*check])
 	}
 	if len(rep.Warnings) > 0 {
 		fmt.Printf("%d dependency warning(s) need a manual fix (see ⚠ above)\n", len(rep.Warnings))
