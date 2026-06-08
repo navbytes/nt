@@ -1,7 +1,9 @@
 package tui
 
 import (
+	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -20,7 +22,7 @@ func watchStore(dir string) (<-chan struct{}, func(), error) {
 		return nil, nil, err
 	}
 	_ = w.Add(dir)
-	_ = w.Add(filepath.Join(dir, "notes"))
+	addNoteDirs(w, filepath.Join(dir, "notes")) // recursive: foldered notes refresh too
 
 	out := make(chan struct{}, 1)
 	go func() {
@@ -33,9 +35,16 @@ func watchStore(dir string) (<-chan struct{}, func(), error) {
 		}
 		for {
 			select {
-			case _, ok := <-w.Events:
+			case ev, ok := <-w.Events:
 				if !ok {
 					return
+				}
+				// A new note subfolder must itself be watched so its files
+				// trigger refreshes (fsnotify isn't recursive).
+				if ev.Op&fsnotify.Create != 0 {
+					if fi, err := os.Stat(ev.Name); err == nil && fi.IsDir() {
+						_ = w.Add(ev.Name)
+					}
 				}
 				if timer != nil {
 					timer.Stop()
@@ -49,6 +58,17 @@ func watchStore(dir string) (<-chan struct{}, func(), error) {
 		}
 	}()
 	return out, func() { _ = w.Close() }, nil
+}
+
+// addNoteDirs recursively watches the notes tree so changes in subfolders (which
+// renameNote can create) trigger live refreshes, not just the top-level dir.
+func addNoteDirs(w *fsnotify.Watcher, root string) {
+	_ = filepath.WalkDir(root, func(p string, d os.DirEntry, err error) error {
+		if err == nil && d.IsDir() && !strings.HasPrefix(d.Name(), ".") {
+			_ = w.Add(p)
+		}
+		return nil
+	})
 }
 
 // waitForChange blocks until the next coalesced store change, then yields a

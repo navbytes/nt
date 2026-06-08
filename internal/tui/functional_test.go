@@ -971,6 +971,40 @@ func TestLiveFilterNarrowsAsYouType(t *testing.T) {
 	}
 }
 
+// TestAddTaskFromNotesTabIsVisible: adding a task while on the notes tab must
+// switch to the tasks tab and select the new task (it was silently invisible).
+func TestAddTaskFromNotesTabIsVisible(t *testing.T) {
+	m := testModel(t)
+	m.width, m.height = 100, 30
+	m.tab = tabNotes // start on the notes tab
+	model := runInput(m, "a", "task added from notes tab")
+	mm := model.(*Model)
+	if mm.tab != tabTasks {
+		t.Fatalf("adding a task should switch to the tasks tab, got tab %v", mm.tab)
+	}
+	sel := mm.selectedTask()
+	if sel == nil || sel.Text != "task added from notes tab" {
+		t.Fatalf("new task not selected/visible; selected=%v", sel)
+	}
+}
+
+// TestToggleDoingStatus: `s` flips the selected task between doing and open.
+func TestToggleDoingStatus(t *testing.T) {
+	m := testModel(t)
+	m.width, m.height = 100, 30
+	id := m.selectedTask().ID()
+	model := press(m, "s")
+	mm := model.(*Model)
+	if st := mm.eng2find(t, id).State(); st != "doing" {
+		t.Fatalf("s should set doing, got %q", st)
+	}
+	model = press(mm, "s")
+	mm = model.(*Model)
+	if st := mm.eng2find(t, id).State(); st != "" && st != "open" {
+		t.Fatalf("s again should return to open, got %q", st)
+	}
+}
+
 // TestRenderAfterEachAction makes sure View doesn't panic mid-flow.
 func TestRenderAfterEachAction(t *testing.T) {
 	m := testModel(t)
