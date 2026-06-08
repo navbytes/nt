@@ -49,6 +49,7 @@ func writeJSON(w http.ResponseWriter, v any) {
 
 type apiStateDTO struct {
 	CanEdit   bool     `json:"canEdit"`
+	CSRF      string   `json:"csrf"` // token to echo as X-CSRF on writes; "" when read-only
 	Version   string   `json:"version"`
 	OpenCount int      `json:"openCount"`
 	NoteCount int      `json:"noteCount"`
@@ -107,8 +108,13 @@ func (s *Server) apiState(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+	csrf := ""
+	if s.allowEdit {
+		csrf = s.csrf
+	}
 	writeJSON(w, apiStateDTO{
 		CanEdit:   s.allowEdit,
+		CSRF:      csrf,
 		Version:   s.version,
 		OpenCount: open,
 		NoteCount: len(snap.notes),

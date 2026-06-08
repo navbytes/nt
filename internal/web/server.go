@@ -50,6 +50,8 @@ type Server struct {
 	allowEdit bool   // writes enabled (nt web --edit); read-only by default
 	csrf      string // per-process token required on save (blocks cross-site POSTs)
 
+	spa bool // serve the embedded Svelte SPA instead of the server-rendered UI
+
 	mu       sync.RWMutex  // guards snap + watching
 	snap     *snapshot     // in-memory read-model (see readmodel.go)
 	watching bool          // true once the fsnotify watcher maintains snap
@@ -160,8 +162,9 @@ func randToken() string {
 }
 
 // Serve opens the store and serves the viewer on addr (e.g. "127.0.0.1:0").
-// allowEdit enables note editing in the browser (read-only when false).
-func Serve(version, addr string, allowEdit bool) error {
+// allowEdit enables note editing in the browser (read-only when false). spa
+// serves the embedded Svelte SPA instead of the server-rendered UI (preview).
+func Serve(version, addr string, allowEdit, spa bool) error {
 	eng, err := mutate.Open()
 	if err != nil {
 		return err
@@ -171,17 +174,22 @@ func Serve(version, addr string, allowEdit bool) error {
 		return err
 	}
 	s.allowEdit = allowEdit
+	s.spa = spa
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
 		return err
 	}
 	s.watch()
+	ui := "server-rendered"
+	if spa {
+		ui = "Svelte SPA (--spa)"
+	}
 	fmt.Printf("nt web — serving notes at http://%s\n", ln.Addr().String())
 	mode := "read-only"
 	if allowEdit {
 		mode = "editing enabled (--edit)"
 	}
-	fmt.Printf("(localhost only · %s · live-reloads on change · Ctrl+C to stop)\n", mode)
+	fmt.Printf("(localhost only · %s · %s · live-reloads on change · Ctrl+C to stop)\n", ui, mode)
 	return http.Serve(ln, s.routes()) //nolint:gosec // localhost dev server, no timeouts needed
 }
 
@@ -195,12 +203,27 @@ func (s *Server) Handler() http.Handler { return s.routes() }
 // SetEdit toggles in-app editing (CSRF-guarded). Read-only by default.
 func (s *Server) SetEdit(v bool) { s.allowEdit = v }
 
+// SetSPA serves the embedded Svelte SPA instead of the server-rendered UI.
+func (s *Server) SetSPA(v bool) { s.spa = v }
+
 // StartWatch begins watching the store and pushing SSE live-reload events.
 // Serve calls this itself; embedders call it when they want live-reload.
 func (s *Server) StartWatch() { s.watch() }
 
 func (s *Server) routes() http.Handler {
 	mux := http.NewServeMux()
+	s.apiRoutes(mux) // JSON API — available in both UIs
+	mux.HandleFunc("/events", s.handleSSE)
+	if s.spa {
+		// New Svelte SPA: API + SSE + embedded bundle. None of the v1
+		// server-rendered page handlers are registered.
+		if err := s.spaRoutes(mux); err != nil {
+			// dist not built — fall back to v1 so the server still works.
+			s.spa = false
+		} else {
+			return mux
+		}
+	}
 	mux.HandleFunc("/", s.handleIndex)
 	mux.HandleFunc("/n/", s.handleNote)
 	mux.HandleFunc("/search", s.handleSearch)
@@ -218,9 +241,7 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("POST /tasks/{id}/delete", s.handleTaskDelete)
 	mux.HandleFunc("/graph", s.handleGraph)
 	mux.HandleFunc("POST /preview", s.handlePreview)
-	mux.HandleFunc("/events", s.handleSSE)
 	mux.HandleFunc("/static/", s.handleStatic)
-	s.apiRoutes(mux) // JSON API consumed by the Svelte SPA (Phase 1 of the rebuild)
 	return mux
 }
 
