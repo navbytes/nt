@@ -544,10 +544,14 @@ a:hover { text-decoration: underline; }
 .taskrow__due { margin-left: auto; }
 .taskrow .src-badge { flex: 0 0 auto; }
 
-/* Graph view (/graph) */
-.graphview { overflow: auto; border: 1px solid var(--border-soft); border-radius: var(--radius); padding: var(--s4); }
-.graphview .mermaid { background: transparent; border: 0; padding: 0; }
-.graphview .mermaid .node { cursor: pointer; }
+/* Graph view (/graph) — interactive force-directed canvas */
+.graph { border: 1px solid var(--border-soft); border-radius: var(--radius); overflow: hidden; background: var(--bg-elev); }
+.graph__bar { display: flex; gap: var(--s2); align-items: center; padding: var(--s2) var(--s3); border-bottom: 1px solid var(--border-soft); }
+.graph__filter { flex: 1 1 auto; font: inherit; font-size: 13px; padding: var(--s2) var(--s3); background: var(--bg-inset); border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--fg); }
+.graph__filter:focus { outline: none; border-color: var(--accent); }
+.graph__color { font: inherit; font-size: 12px; padding: var(--s2); background: var(--bg-inset); border: 1px solid var(--border); border-radius: var(--radius-sm); color: var(--fg-soft); }
+.graph__canvas { display: block; width: 100%; cursor: grab; }
+.graph__canvas:active { cursor: grabbing; }
 
 /* Hover link previews */
 .linkpop {

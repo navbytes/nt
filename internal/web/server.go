@@ -222,7 +222,7 @@ type pageData struct {
 	IsTasks    bool
 	TaskGroups []taskGroup
 	IsGraph    bool
-	GraphSrc   string // mermaid source for the link graph
+	GraphData  *graphData // JSON model for the force-directed link graph
 
 	CanEdit bool   // editing enabled (nt web --edit)
 	CSRF    string // token the editor sends back on save
@@ -774,51 +774,79 @@ func (s *Server) handleTaskNew(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// handleGraph renders the note link graph as a clickable Mermaid diagram (reuses
-// the vendored mermaid; the source is built from wikilink adjacency).
-func (s *Server) handleGraph(w http.ResponseWriter, r *http.Request) {
-	_, notes := s.load()
-	s.render(w, notes, &pageData{Title: "Graph", Tree: buildTree(notes, ""), IsGraph: true, GraphSrc: graphSource(notes)})
+// graphNode/graphLink/graphData are the JSON model the client force-directed
+// canvas renders. Nodes carry folder/source/tags so the view can color and
+// filter; links index into Nodes.
+type graphNode struct {
+	ID     string   `json:"id"`     // note handle (for /n/<id>)
+	Title  string   `json:"title"`  //
+	URL    string   `json:"url"`    //
+	Folder string   `json:"folder"` // top-level folder (color/filter grouping)
+	Source string   `json:"source"` // provenance (claude/cli/web/…)
+	Tags   []string `json:"tags"`   //
+	Deg    int      `json:"deg"`    // degree, for node sizing
+}
+type graphLink struct {
+	S int `json:"s"`
+	T int `json:"t"`
+}
+type graphData struct {
+	Nodes []graphNode `json:"nodes"`
+	Links []graphLink `json:"links"`
 }
 
-func graphSource(notes []*note.Note) string {
-	if len(notes) == 0 {
-		return ""
+// handleGraph renders the note link graph as an interactive force-directed
+// canvas. The adjacency is the snapshot's precomputed forward map; the client
+// (graph.js) runs the layout. Replaces the old Mermaid graph, which didn't pan/
+// zoom and visually collapsed past a few dozen nodes.
+func (s *Server) handleGraph(w http.ResponseWriter, r *http.Request) {
+	snap := s.current()
+	s.render(w, snap.notes, &pageData{Title: "Graph", Tree: buildTree(snap.notes, ""), IsGraph: true, GraphData: buildGraphData(snap)})
+}
+
+func buildGraphData(snap *snapshot) *graphData {
+	idx := make(map[string]int, len(snap.notes))
+	g := &graphData{Nodes: make([]graphNode, 0, len(snap.notes))}
+	for i, n := range snap.notes {
+		idx[n.Path] = i
+		folder, _ := splitRel(n.Rel)
+		if j := strings.IndexByte(folder, '/'); j >= 0 {
+			folder = folder[:j] // top-level folder only
+		}
+		g.Nodes = append(g.Nodes, graphNode{
+			ID:     noteHandle(n),
+			Title:  n.Title,
+			URL:    "/n/" + url.PathEscape(noteHandle(n)),
+			Folder: folder,
+			Source: n.Source,
+			Tags:   n.Tags,
+		})
 	}
-	idOf := make(map[string]string, len(notes))
-	var b strings.Builder
-	b.WriteString("graph LR\n")
-	for i, n := range notes {
-		nid := fmt.Sprintf("n%d", i)
-		idOf[n.Path] = nid
-		fmt.Fprintf(&b, "  %s[\"%s\"]\n", nid, graphLabel(n.Title))
-	}
-	seen := map[string]bool{}
-	for _, n := range notes {
-		from := idOf[n.Path]
-		for _, raw := range links.Wikilinks(n.Body) {
-			if it, ok := links.Resolve(raw, nil, notes); ok && it.Kind == "note" {
-				to := idOf[it.Path]
-				if to == "" || to == from || seen[from+">"+to] {
-					continue
-				}
-				seen[from+">"+to] = true
-				fmt.Fprintf(&b, "  %s --> %s\n", from, to)
+	seen := map[[2]int]bool{} // undirected dedup
+	for path, outs := range snap.fwd {
+		from, ok := idx[path]
+		if !ok {
+			continue
+		}
+		for _, tgt := range outs {
+			to, ok := idx[tgt]
+			if !ok || to == from {
+				continue
 			}
+			key := [2]int{from, to}
+			if from > to {
+				key = [2]int{to, from}
+			}
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+			g.Links = append(g.Links, graphLink{S: from, T: to})
+			g.Nodes[from].Deg++
+			g.Nodes[to].Deg++
 		}
 	}
-	for i, n := range notes {
-		fmt.Fprintf(&b, "  click n%d \"/n/%s\"\n", i, url.PathEscape(noteHandle(n)))
-	}
-	return b.String()
-}
-
-func graphLabel(s string) string {
-	s = strings.ReplaceAll(strings.ReplaceAll(s, "\"", "'"), "\n", " ")
-	if len(s) > 40 {
-		s = s[:40] + "…"
-	}
-	return s
+	return g
 }
 
 func contains(ss []string, want string) bool {
@@ -844,6 +872,9 @@ func (s *Server) handleStatic(w http.ResponseWriter, r *http.Request) {
 	case "htmx.min.js":
 		w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
 		s.writeAsset(w, "assets/htmx.min.js")
+	case "graph.js":
+		w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
+		s.writeAsset(w, "assets/graph.js")
 	case "mermaid.min.js":
 		w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
 		w.Header().Set("Content-Encoding", "gzip") // embedded pre-gzipped (~900 KB vs 3.3 MB)

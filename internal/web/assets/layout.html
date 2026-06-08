@@ -101,8 +101,20 @@
       {{else if .IsGraph}}
       <article class="note">
         <header class="note__header"><h1 class="note__title">Graph</h1></header>
-        {{if .GraphSrc}}
-        <div class="graphview"><div class="mermaid">{{.GraphSrc}}</div></div>
+        {{if .GraphData.Nodes}}
+        <div class="graph" id="graph">
+          <div class="graph__bar">
+            <input class="graph__filter" id="graph-filter" type="search" placeholder="Filter notes…" autocomplete="off" aria-label="Filter graph">
+            <select class="graph__color" id="graph-color" aria-label="Color nodes by">
+              <option value="folder">color: folder</option>
+              <option value="source">color: source</option>
+            </select>
+            <button class="icon-btn" id="graph-reset" title="Reset view">⊙</button>
+          </div>
+          <canvas class="graph__canvas" id="graph-canvas"></canvas>
+        </div>
+        <script id="nt-graph" type="application/json">{{json .GraphData}}</script>
+        <script src="/static/graph.js"></script>
         {{else}}
         <p class="backlinks__empty">No notes to graph yet.</p>
         {{end}}

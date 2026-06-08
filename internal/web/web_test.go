@@ -422,6 +422,9 @@ func TestStaticAssets(t *testing.T) {
 	if r, body := get(t, s, "/static/htmx.min.js"); r.StatusCode != 200 || !strings.Contains(body, "htmx") {
 		t.Errorf("htmx not served: %d", r.StatusCode)
 	}
+	if r, body := get(t, s, "/static/graph.js"); r.StatusCode != 200 || !strings.Contains(body, "force-directed") {
+		t.Errorf("graph.js not served: %d", r.StatusCode)
+	}
 }
 
 func TestTagsPage(t *testing.T) {
@@ -527,13 +530,17 @@ func TestGraphView(t *testing.T) {
 	s := newTestServer(t)
 	_, _ = note.Create(s.eng.S, "Auth", "see [[token-rotation]]", nil, "cli", "")
 	_, _ = note.Create(s.eng.S, "Token Rotation", "x", nil, "cli", "")
-	_, notes := s.load()
-	src := graphSource(notes)
-	if !strings.Contains(src, "graph LR") || !strings.Contains(src, "-->") || !strings.Contains(src, "click n") {
-		t.Fatalf("graph source wrong:\n%s", src)
+	g := buildGraphData(s.current())
+	if len(g.Nodes) != 2 || len(g.Links) != 1 {
+		t.Fatalf("graph data wrong: %d nodes, %d links", len(g.Nodes), len(g.Links))
 	}
-	if _, body := get(t, s, "/graph"); !strings.Contains(body, `class="graphview"`) {
-		t.Fatalf("graph page missing graphview:\n%s", body)
+	if g.Nodes[0].Deg != 1 || g.Nodes[1].Deg != 1 {
+		t.Fatalf("degree not computed: %+v", g.Nodes)
+	}
+	_, body := get(t, s, "/graph")
+	if !strings.Contains(body, `id="graph-canvas"`) || !strings.Contains(body, `id="nt-graph"`) ||
+		!strings.Contains(body, "/static/graph.js") {
+		t.Fatalf("graph page missing canvas/data/script:\n%s", body)
 	}
 }
 
