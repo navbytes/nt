@@ -227,3 +227,42 @@ func TestConcurrentAddsNoLostUpdate(t *testing.T) {
 		t.Fatalf("want %d tasks, got %d (lost update)", n, len(got))
 	}
 }
+
+func TestPeekUndoTracksDirection(t *testing.T) {
+	e := newEngine(t)
+
+	// Empty journal → nothing to peek.
+	if _, _, ok := e.PeekUndo(); ok {
+		t.Fatal("empty journal should peek not-ok")
+	}
+
+	if err := e.Apply("add", func(d *task.Doc, rec *Recorder) error {
+		nt := task.New("hello")
+		d.Append(nt)
+		rec.Added(nt)
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Fresh forward op: undoable, not a redo.
+	if label, isRedo, ok := e.PeekUndo(); !ok || isRedo || label != "add" {
+		t.Fatalf("after add: label=%q isRedo=%v ok=%v, want add/false/true", label, isRedo, ok)
+	}
+
+	if _, did, err := e.Undo(); err != nil || !did {
+		t.Fatalf("undo: did=%v err=%v", did, err)
+	}
+	// After undo: a redo is pending (label still 'add', stripped of redo:).
+	if label, isRedo, ok := e.PeekUndo(); !ok || !isRedo || label != "add" {
+		t.Fatalf("after undo: label=%q isRedo=%v ok=%v, want add/true/true", label, isRedo, ok)
+	}
+
+	if _, did, err := e.Undo(); err != nil || !did { // toggles: redoes the add
+		t.Fatalf("redo: did=%v err=%v", did, err)
+	}
+	// After redo: forward again (direction tracking, not stuck on the prefix).
+	if label, isRedo, ok := e.PeekUndo(); !ok || isRedo || label != "add" {
+		t.Fatalf("after redo: label=%q isRedo=%v ok=%v, want add/false/true", label, isRedo, ok)
+	}
+}

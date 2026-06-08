@@ -109,3 +109,32 @@ func (m *Model) eng2find(t *testing.T, id string) *task.Task {
 	}
 	return tk
 }
+
+// TestUndoRedoKeys: `u` undoes and `U` redoes, split by direction — a second
+// `u` does not redo (and a second `U` does not undo).
+func TestUndoRedoKeys(t *testing.T) {
+	m := testModel(t)
+	m.width, m.height = 100, 24
+	id := m.selectedTask().ID()
+
+	m = press(m, "x").(*Model) // complete it
+	if !m.eng2find(t, id).Done {
+		t.Fatal("x should complete the task")
+	}
+	m = press(m, "u").(*Model) // undo
+	if m.eng2find(t, id).Done {
+		t.Fatal("u should undo the completion")
+	}
+	m = press(m, "u").(*Model) // a second undo must NOT redo
+	if m.eng2find(t, id).Done {
+		t.Fatal("a second u must not redo — use U")
+	}
+	m = press(m, "U").(*Model) // redo
+	if !m.eng2find(t, id).Done {
+		t.Fatal("U should redo the completion")
+	}
+	m = press(m, "U").(*Model) // a second redo must NOT undo
+	if !m.eng2find(t, id).Done {
+		t.Fatal("a second U must not undo")
+	}
+}

@@ -234,13 +234,13 @@ func (m *Model) keybarPairs() [][2]string {
 		if hasTokens {
 			p = append(p, [2]string{"f", "follow"})
 		}
-		return append(p, [][2]string{{"/", "filter"}, {"1/2/3", "tab"}, {"u", "undo"}}...)
+		return append(p, [][2]string{{"/", "filter"}, {"1/2/3", "tab"}, {"u/U", "undo/redo"}}...)
 	case tabLogbook:
 		p := [][2]string{{"j/k", "move"}, {"enter", "detail"}, {"x", "reopen"}, {"y", "yank"}}
 		if hasTokens {
 			p = append(p, [2]string{"f", "follow"})
 		}
-		return append(p, [][2]string{{"/", "search"}, {"1/2/3", "tab"}, {"u", "undo"}}...)
+		return append(p, [][2]string{{"/", "search"}, {"1/2/3", "tab"}, {"u/U", "undo/redo"}}...)
 	default: // tasks
 		p := [][2]string{{"j/k", "move"}, {"enter", "detail"}}
 		if len(m.marked) > 0 {
@@ -259,7 +259,7 @@ func (m *Model) keybarPairs() [][2]string {
 		if m.width >= wideMin {
 			p = append(p, [2]string{"‹ ›", "width"})
 		}
-		return append(p, [2]string{"u", "undo"})
+		return append(p, [2]string{"u/U", "undo/redo"})
 	}
 }
 
@@ -883,7 +883,7 @@ func (m *Model) helpView() string {
 			{"a / A", "add task / note"},
 			{"r", "rename"}, {"e / E", "edit in $EDITOR"}, {"p", "cycle priority"},
 			{"D", "set due date"}, {"t / T", "add / remove tag"},
-			{"l / L", "add a [[link]] / jump to the first link"}, {"u", "undo (again = redo)"},
+			{"l / L", "add a [[link]] / jump to the first link"}, {"u / U", "undo / redo"},
 		}},
 		{"view", [][2]string{
 			{"f", "follow: pick any [[link]]/@tag/+project to open or scope (CAPS = group)"},
