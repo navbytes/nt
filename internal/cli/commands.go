@@ -27,9 +27,18 @@ import (
 // cmdWeb starts the localhost notes viewer (SPEC §12.1). Read-only browse/render
 // with mermaid; binds 127.0.0.1 by default.
 func cmdWeb(args []string) int {
+	// Config [web] port/host set the flag defaults; an explicit --port/--host wins.
+	cfg := loadConfig()
+	defPort, defHost := web.DefaultPort, "127.0.0.1"
+	if cfg.WebPort != 0 {
+		defPort = cfg.WebPort
+	}
+	if cfg.WebHost != "" {
+		defHost = cfg.WebHost
+	}
 	fs := flag.NewFlagSet("web", flag.ContinueOnError)
-	port := fs.Int("port", web.DefaultPort, fmt.Sprintf("port to listen on (%d by default; falls back to a free one if taken; 0 = always pick a free one)", web.DefaultPort))
-	host := fs.String("host", "127.0.0.1", "bind address (localhost only by default)")
+	port := fs.Int("port", defPort, fmt.Sprintf("port to listen on (%d by default; falls back to a free one if taken; 0 = always pick a free one)", defPort))
+	host := fs.String("host", defHost, "bind address (localhost only by default)")
 	edit := fs.Bool("edit", false, "allow editing notes in the browser (default: read-only)")
 	if err := fs.Parse(args); err != nil {
 		return 2
@@ -414,7 +423,13 @@ func cmdToday(args []string) int { return runAgenda(args, 0) }
 // cmdAgenda shows the date-windowed plan — overdue, today, and the next N days —
 // grouped by bucket and urgency-sorted, so nt is a planner, not just a list. It
 // excludes done, dependency-blocked, and not-yet-started (future t:) tasks.
-func cmdAgenda(args []string) int { return runAgenda(args, 7) }
+func cmdAgenda(args []string) int {
+	defDays := 7
+	if c := loadConfig(); c.AgendaDays > 0 {
+		defDays = c.AgendaDays // [defaults] agenda_days; an explicit --days still wins
+	}
+	return runAgenda(args, defDays)
+}
 
 func runAgenda(args []string, defDays int) int {
 	fs := flag.NewFlagSet("agenda", flag.ContinueOnError)
@@ -1425,7 +1440,11 @@ func extractLinks(body string) []string {
 }
 
 func runEditor(path string) int {
-	ed := os.Getenv("EDITOR")
+	// Precedence: config [defaults] editor → $EDITOR → vi.
+	ed := loadConfig().Editor
+	if ed == "" {
+		ed = os.Getenv("EDITOR")
+	}
 	if ed == "" {
 		ed = "vi"
 	}
