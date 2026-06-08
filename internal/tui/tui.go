@@ -101,6 +101,7 @@ type Model struct {
 	tabHits   []tabHit     // clickable tab-label ranges from the last header render
 
 	filter        string
+	filterBefore  string // filter value before opening the filter prompt, for Esc-to-cancel
 	scopeTag      string // active @tag scope (filters the list); "" = none
 	scopeProject  string // active +project scope; "" = none
 	detailFocus   bool   // detail pane is focused: j/k scroll the body, not the list

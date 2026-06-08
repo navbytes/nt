@@ -221,6 +221,7 @@ func (m *Model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "A":
 		return m, m.startInput(inAddNote, "", "new note title")
 	case "/":
+		m.filterBefore = m.filter // remember, so Esc can cancel a live edit
 		return m, m.startInput(inFilter, m.filter, "filter")
 	case "r":
 		if m.tab == tabNotes {
@@ -279,6 +280,13 @@ func (m *Model) startInput(ik inputKind, initial, placeholder string) tea.Cmd {
 func (m *Model) updateInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc":
+		// Cancel a live filter edit: restore the filter that was active before
+		// the prompt opened (search-as-you-type otherwise leaves it applied).
+		if m.ik == inFilter && m.filter != m.filterBefore {
+			m.filter = m.filterBefore
+			m.offset = 0
+			m.rebuild()
+		}
 		m.ik = inNone
 		m.input.Blur()
 		return m, nil
@@ -287,6 +295,16 @@ func (m *Model) updateInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	var cmd tea.Cmd
 	m.input, cmd = m.input.Update(msg)
+	// Live filter: apply on every keystroke so the list narrows as you type —
+	// the defining feel of a modern TUI filter (lazygit/aerc), versus only
+	// updating on Enter.
+	if m.ik == inFilter {
+		if v := strings.TrimSpace(m.input.Value()); v != m.filter {
+			m.filter = v
+			m.offset = 0
+			m.rebuild()
+		}
+	}
 	return m, cmd
 }
 
