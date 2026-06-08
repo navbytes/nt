@@ -10,6 +10,8 @@ import type {
   TasksResponse,
   ActivityResponse,
   SearchResponse,
+  TagsResponse,
+  OrphansResponse,
 } from "./api-types";
 
 export type * from "./api-types";
@@ -59,6 +61,8 @@ export const api = {
     getJSON<SearchResponse>(
       `/api/search?q=${encodeURIComponent(q)}` + (tag ? `&tag=${encodeURIComponent(tag)}` : ""),
     ),
+  tags: () => getJSON<TagsResponse>("/api/tags"),
+  orphans: () => getJSON<OrphansResponse>("/api/orphans"),
   taskNew: (text: string) => postForm<TasksResponse>("/api/tasks", { text }),
   taskDone: (id: string) => postForm<TasksResponse>(`/api/tasks/${id}/done`),
   taskReopen: (id: string) => postForm<TasksResponse>(`/api/tasks/${id}/reopen`),

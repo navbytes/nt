@@ -63,6 +63,8 @@ vi.mock("../lib/api", () => {
       tasks: vi.fn().mockResolvedValue({ groups }),
       activity: vi.fn().mockResolvedValue({ days: [], sources: ["cli"] }),
       search: vi.fn().mockResolvedValue({ results: [] }),
+      tags: vi.fn().mockResolvedValue({ tags: [{ name: "spec", count: 3 }] }),
+      orphans: vi.fn().mockResolvedValue({ notes: [{ url: "/n/z", title: "Lonely", path: "lonely.md" }] }),
       taskDone: vi.fn().mockResolvedValue({ groups }),
       taskReopen: vi.fn().mockResolvedValue({ groups }),
       taskNew: vi.fn().mockResolvedValue({ groups }),
@@ -76,6 +78,8 @@ import Sidebar from "../lib/Sidebar.svelte";
 import NoteView from "../routes/NoteView.svelte";
 import Editor from "../lib/Editor.svelte";
 import CommandPalette from "../lib/CommandPalette.svelte";
+import Tags from "../routes/Tags.svelte";
+import Orphans from "../routes/Orphans.svelte";
 import { navigate } from "../lib/router.svelte";
 import { openPalette, closePalette } from "../lib/palette.svelte";
 
@@ -152,5 +156,19 @@ describe("CommandPalette", () => {
 
     await fireEvent.keyDown(input, { key: "Enter" });
     expect(navigate).toHaveBeenCalledWith("/n/def");
+  });
+});
+
+describe("Tags & Orphans", () => {
+  it("renders tags with counts linking to tag search", async () => {
+    render(Harness, { props: { comp: Tags } });
+    const chip = await screen.findByText("#spec", { exact: false });
+    expect(chip.closest("a")?.getAttribute("href")).toBe("/search?tag=spec");
+    expect(screen.getByText("3")).toBeInTheDocument();
+  });
+
+  it("lists orphan notes", async () => {
+    render(Harness, { props: { comp: Orphans } });
+    expect(await screen.findByText("Lonely")).toBeInTheDocument();
   });
 });

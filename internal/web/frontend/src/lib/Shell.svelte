@@ -10,6 +10,8 @@
   import Tasks from "../routes/Tasks.svelte";
   import Activity from "../routes/Activity.svelte";
   import Search from "../routes/Search.svelte";
+  import Tags from "../routes/Tags.svelte";
+  import Orphans from "../routes/Orphans.svelte";
   import NotFound from "../routes/NotFound.svelte";
 
   const stateQ = createQuery({ queryKey: ["state"], queryFn: api.state });
@@ -74,9 +76,13 @@
       {:else if path === "/activity"}
         <Activity />
       {:else if path === "/search"}
-        {#key loc.query.get("q")}
-          <Search q={loc.query.get("q") ?? ""} />
+        {#key (loc.query.get("q") ?? "") + "|" + (loc.query.get("tag") ?? "")}
+          <Search q={loc.query.get("q") ?? ""} tag={loc.query.get("tag") ?? ""} />
         {/key}
+      {:else if path === "/tags"}
+        <Tags />
+      {:else if path === "/orphans"}
+        <Orphans />
       {:else}
         <NotFound {path} />
       {/if}

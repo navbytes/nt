@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/url"
+	"sort"
 	"strings"
 	"time"
 
@@ -39,6 +40,8 @@ func (s *Server) apiRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("DELETE /api/tasks/{id}", s.apiTaskDelete)
 	mux.HandleFunc("GET /api/activity", s.apiActivity)
 	mux.HandleFunc("GET /api/search", s.apiSearch)
+	mux.HandleFunc("GET /api/tags", s.apiTags)
+	mux.HandleFunc("GET /api/orphans", s.apiOrphans)
 	mux.HandleFunc("GET /api/graph", s.apiGraph)
 }
 
@@ -240,6 +243,47 @@ func (s *Server) apiActivity(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) apiGraph(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, buildGraphData(s.current()))
+}
+
+// apiTags lists the tag vocabulary (note + task tags) with counts, sorted by
+// name — same projection as the v1 /tags page.
+func (s *Server) apiTags(w http.ResponseWriter, r *http.Request) {
+	doc, notes := s.load()
+	counts := map[string]int{}
+	for _, n := range notes {
+		for _, t := range n.Tags {
+			counts[t]++
+		}
+	}
+	if doc != nil {
+		for _, tk := range doc.Tasks() {
+			for _, t := range tk.Tags() {
+				counts[t]++
+			}
+		}
+	}
+	names := make([]string, 0, len(counts))
+	for k := range counts {
+		names = append(names, k)
+	}
+	sort.Strings(names)
+	tags := make([]apitypes.Tag, 0, len(names))
+	for _, k := range names {
+		tags = append(tags, apitypes.Tag{Name: k, Count: counts[k]})
+	}
+	writeJSON(w, apitypes.TagsResponse{Tags: tags})
+}
+
+// apiOrphans lists notes that participate in no links (none in, none out).
+func (s *Server) apiOrphans(w http.ResponseWriter, r *http.Request) {
+	snap := s.current()
+	notes := make([]apitypes.NoteLink, 0)
+	for _, n := range snap.notes {
+		if !snap.linked[n.Path] {
+			notes = append(notes, apitypes.NoteLink{URL: "/n/" + url.PathEscape(noteHandle(n)), Title: n.Title, Path: n.Rel})
+		}
+	}
+	writeJSON(w, apitypes.OrphansResponse{Notes: notes})
 }
 
 // apiSearch mirrors handleSearch's resolution (title match + ripgrep literal,

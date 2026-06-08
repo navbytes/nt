@@ -148,3 +148,22 @@ export interface ActivityResponse {
 export interface SearchResponse {
   results: NoteLink[];
 }
+/**
+ * Tag is one entry in the tag vocabulary with its usage count.
+ */
+export interface Tag {
+  name: string;
+  count: number /* int */;
+}
+/**
+ * TagsResponse is GET /api/tags.
+ */
+export interface TagsResponse {
+  tags: Tag[];
+}
+/**
+ * OrphansResponse is GET /api/orphans — notes with no links in or out.
+ */
+export interface OrphansResponse {
+  notes: NoteLink[];
+}

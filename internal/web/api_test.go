@@ -117,6 +117,36 @@ func TestAPINoteRawSaveGuard(t *testing.T) {
 	}
 }
 
+func TestAPITagsAndOrphans(t *testing.T) {
+	s := newTestServer(t)
+	note.Create(s.eng.S, "Tagged", "body", []string{"spec"}, "cli", "")
+	note.Create(s.eng.S, "A", "see [[B]]", nil, "cli", "")
+	note.Create(s.eng.S, "B", "hi", nil, "cli", "")
+
+	_, body := get(t, s, "/api/tags")
+	tags := decode[apitypes.TagsResponse](t, body)
+	if len(tags.Tags) != 1 || tags.Tags[0].Name != "spec" || tags.Tags[0].Count != 1 {
+		t.Fatalf("tags wrong: %+v", tags)
+	}
+
+	// Orphans = notes with no inbound link. B is linked from A, so it's not an
+	// orphan; Tagged (nothing links to it) is.
+	_, body = get(t, s, "/api/orphans")
+	orph := decode[apitypes.OrphansResponse](t, body)
+	found := false
+	for _, n := range orph.Notes {
+		if n.Title == "Tagged" {
+			found = true
+		}
+		if n.Title == "B" {
+			t.Errorf("B has an inbound link and should not be an orphan")
+		}
+	}
+	if !found {
+		t.Fatalf("expected Tagged among orphans: %+v", orph)
+	}
+}
+
 func TestAPIActivityGraphSearch(t *testing.T) {
 	s := newTestServer(t)
 	note.Create(s.eng.S, "Hub", "see [[Spoke]]", nil, "claude", "")

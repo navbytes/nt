@@ -125,3 +125,19 @@ type ActivityResponse struct {
 type SearchResponse struct {
 	Results []NoteLink `json:"results"`
 }
+
+// Tag is one entry in the tag vocabulary with its usage count.
+type Tag struct {
+	Name  string `json:"name"`
+	Count int    `json:"count"`
+}
+
+// TagsResponse is GET /api/tags.
+type TagsResponse struct {
+	Tags []Tag `json:"tags"`
+}
+
+// OrphansResponse is GET /api/orphans — notes with no links in or out.
+type OrphansResponse struct {
+	Notes []NoteLink `json:"notes"`
+}

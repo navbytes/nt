@@ -477,6 +477,33 @@ code {
   border-top: 1px solid var(--border-soft);
 }
 
+/* ---- tags ---- */
+.tagcloud {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.tagchip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--bg-inset);
+  border: 1px solid var(--border);
+  color: var(--accent);
+  font-size: 13px;
+}
+.tagchip:hover {
+  border-color: var(--accent);
+  text-decoration: none;
+}
+.tagchip__n {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--muted);
+}
+
 /* ---- command palette ---- */
 .palette-btn {
   background: var(--bg-inset);
