@@ -190,6 +190,8 @@ func (m *Model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.startFollow()
 	case "y":
 		m.startYank()
+	case "s":
+		m.toggleDoing()
 	case "x":
 		m.toggleDone()
 	case "X":
@@ -375,8 +377,31 @@ func (m *Model) addTask(text string) {
 		return nil
 	})
 	m.reload()
+	// Surface the new task even when added from the notes/logbook tab or under a
+	// filter it doesn't match — otherwise the add looks like a no-op.
+	m.tab = tabTasks
+	m.filter = ""
+	m.cursor = 0
+	m.rebuild()
 	m.selectTaskByID(id)
 	m.setStatus("added")
+}
+
+// toggleDoing flips the selected task between "doing" and open — the in-progress
+// status the model supports but had no keybinding to reach.
+func (m *Model) toggleDoing() {
+	t := m.selectedTask()
+	if t == nil {
+		return
+	}
+	id := t.ID()
+	if t.State() == "doing" {
+		m.mutate("update", id, func(tk *task.Task) { tk.SetState("open") })
+		m.setStatus("status: open")
+	} else {
+		m.mutate("update", id, func(tk *task.Task) { tk.SetState("doing") })
+		m.setStatus("status: doing")
+	}
 }
 
 func (m *Model) addNote(title string) {
@@ -512,6 +537,7 @@ var writeKeys = map[string]bool{
 	"x": true, "X": true, "d": true, // done / delete / dd
 	"a": true, "A": true, "r": true, "e": true, "E": true, // add / rename / edit
 	"p": true, "D": true, "t": true, "T": true, "l": true, // priority / due / tag / link
+	"s": true, // toggle "doing" status
 	"u": true, // undo (reverses a write)
 }
 

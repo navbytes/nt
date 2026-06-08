@@ -878,7 +878,7 @@ func (m *Model) helpView() string {
 			{"esc", "clear marks → filter → scope"},
 		}},
 		{"edit (acts on marks if any, else current)", [][2]string{
-			{"x  or  dd", "toggle done"}, {"X", "delete (confirms; u to undo)"},
+			{"x  or  dd", "toggle done"}, {"s", "toggle doing"}, {"X", "delete (confirms; u to undo)"},
 			{"a / A", "add task / note"},
 			{"r", "rename"}, {"e / E", "edit in $EDITOR"}, {"p", "cycle priority"},
 			{"D", "set due date"}, {"t / T", "add / remove tag"},
