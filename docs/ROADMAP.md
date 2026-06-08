@@ -8,15 +8,27 @@ This roadmap synthesizes four expert audits (web UX, TUI, task-management produc
 
 nt's foundation is genuinely strong: clean ULID-keyed mutation engine, undo journal, provenance/source field, MCP + AI-sync, a just-shipped Obsidian-class graph view. The gap to "best app" is concentrated in **table-stakes task + editing flows**, and several capabilities are **already built in the backend but unused by the surfaces** (`dateparse`, `apiTaskStatus`/`apiTaskDelete`, `Task.Blocker`, `parent:`). The single biggest theme across three of four audits: **nt is a task *list*, not a task *manager*** — no start/defer date, no Today/Agenda view, and quick-add throws away structure.
 
-## Now (in flight / next)
+## ✅ Shipped (as of this push — 16 merged PRs)
 
-| # | Item | Surface | Effort | Status |
-|---|------|---------|--------|--------|
-| F1 | **Undo correctness** — post-image validation, no-resurrect, durable ordering + dir-fsync (SPEC §6.3) | core | M | ✅ PR #8 |
-| P1 | **Natural-language quick-add** — "ship report fri 5pm #work !high" → structured fields; parse chips. Backend `dateparse` mostly exists; web quick-add currently corrupts structure | core, web, tui, mcp | M | next |
-| P2 | **Start/defer date `t:` + Today / Upcoming / Agenda views** — turns the list into a planner; fixes misuse of "blocked"/future-due | core, cli, web, tui | M | next |
-| P3 | **Create notes from the web** — biggest web dead-end (`POST /api/notes`, "+ New note") | web | M | next |
-| P4 | **Wire up unused task backend** — interactive rows (open/inline-edit/delete/status cycle), render blockers/deps/projects | web | M | next |
+- **Foundation:** F1 undo correctness (post-image validation, no-resurrect, durable ordering) + store dir-fsync + first `store` tests; F7 recursive note watch; T3 dependency cycle detection + dangling-edge `doctor` checks (no more invisible deadlock); CI/security (fixed broken vuln-scan, patched stdlib CVEs via Go 1.25.11, path-injection hardening).
+- **Tasks:** P1 natural-language quick-add across CLI/TUI/web/MCP; P2 start/defer `t:` + `nt today`/`nt agenda` + hide-future-start; T2 recurrence correctness (strict vs floating, roll-forward, month clamp) + `nt skip`; T5 bulk `update`; T1 `nt list --tree` sub-tasks; T9 full A–Z priority; dateparse tests.
+- **Web:** P3 create-notes-from-web; P4 interactive task rows + agenda (date-grouped) view; W2 ranked search + highlighted snippets; W5 command palette (all routes + actions + listbox a11y); PWA + app icon; stable default port.
+- **TUI:** U1 live filter; U5 set-doing key; add-from-notes-tab fix.
+
+## Next up
+
+| # | Item | Surface | Effort |
+|---|------|---------|--------|
+| W1 | **CodeMirror 6 editor** — highlighted source + `[[` autocomplete (keep server goldmark render) | web | L |
+| W3 | **Daily notes / journal** — makes the AI-memory positioning a visible product | web | L |
+| W4 | **Mobile shell** — collapsible drawer (no mobile nav today) | web | M |
+| W7 | **a11y pass (beyond the palette)** — focus trap, skip-link, reduced-motion, aria-labels | web | M |
+| U2/U3 | **TUI command palette + fuzzy jumper** (fix `L` multi-link picker) | tui | M |
+| U8 | **TUI light theme** | tui | M |
+| T8 | **Time-of-day on dates + reminder hooks** | core | M |
+| F3/F4/F6 | Archive atomicity; TUI self-write suppression; surface read errors | core/tui | M |
+| E1/E2 | **Incremental read-model + persisted search index** — the scale work (>10k notes) | infra | L |
+| E3/E5 | Shared Query DSL across surfaces; `$NT_DIR/config.toml` | infra | M |
 
 ## Foundation / correctness (core audit)
 
