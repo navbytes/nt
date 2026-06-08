@@ -883,7 +883,7 @@ func (m *Model) helpView() string {
 			{"a / A", "add task / note"},
 			{"r", "rename"}, {"e / E", "edit in $EDITOR"}, {"p", "cycle priority"},
 			{"D", "set due date"}, {"t / T", "add / remove tag"},
-			{"l / L", "add a [[link]] / jump to the first link"}, {"u / U", "undo / redo"},
+			{"l / L", "add a [[link]] (task or note) / follow a link (picks when several)"}, {"u / U", "undo / redo"},
 		}},
 		{"view", [][2]string{
 			{"f", "follow: pick any [[link]]/@tag/+project to open or scope (CAPS = group)"},

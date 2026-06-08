@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
@@ -252,7 +253,11 @@ func (m *Model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m, m.startInput(inUntag, "", "remove tag: "+strings.Join(t.Tags(), " "))
 		}
 	case "l":
-		if m.selectedTask() != nil {
+		if m.tab == tabNotes {
+			if m.selectedNote() != nil {
+				return m, m.startInput(inLink, "", "link to add to this note (note slug or task id)")
+			}
+		} else if m.selectedTask() != nil {
 			return m, m.startInput(inLink, "", "link target (note slug or task id)")
 		}
 	case "e", "E":
@@ -359,7 +364,11 @@ func (m *Model) commitInput() (tea.Model, tea.Cmd) {
 		}
 	case inLink:
 		if val != "" {
-			m.addLinkTarget(val)
+			if m.tab == tabNotes {
+				m.addLinkToNote(val)
+			} else {
+				m.addLinkTarget(val)
+			}
 		}
 	}
 	return m, nil
@@ -610,6 +619,28 @@ func (m *Model) addLinkTarget(target string) {
 	}
 	target = strings.Trim(target, "[]")
 	m.mutate("link", t.ID(), func(tk *task.Task) { tk.AddLink(target) })
+}
+
+// addLinkToNote appends a [[target]] wikilink to the selected note's body and
+// saves it (frontmatter preserved by note.Save). The notes-tab counterpart to
+// addLinkTarget — `l` was tasks-only before (U7).
+func (m *Model) addLinkToNote(target string) {
+	n := m.selectedNote()
+	if n == nil {
+		return
+	}
+	target = strings.Trim(target, "[]")
+	if target == "" {
+		return
+	}
+	n.Body = strings.TrimRight(n.Body, "\n") + "\n\n[[" + target + "]]\n"
+	n.Updated = time.Now().Format(time.RFC3339)
+	if err := n.Save(); err != nil {
+		m.setStatus("link failed: " + err.Error())
+		return
+	}
+	m.reload()
+	m.setStatus("linked → [[" + target + "]]")
 }
 
 // undo reverses the last forward write. The journal is a single-entry toggle

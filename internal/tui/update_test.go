@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -177,5 +178,34 @@ func TestFollowLinkPicker(t *testing.T) {
 	m = press(m, "L").(*Model)
 	if m.followMode {
 		t.Fatal("L on a single-link task should not open a picker")
+	}
+}
+
+// TestAddLinkToNoteFromNotesTab: `l` on the notes tab appends a [[wikilink]] to
+// the selected note's body (was tasks-only before — U7).
+func TestAddLinkToNoteFromNotesTab(t *testing.T) {
+	m := testModel(t)
+	m.width, m.height = 100, 24
+	n, err := note.Create(m.eng.S, "Target Note", "original body", nil, "tui", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.reload()
+	m.tab = tabNotes
+	m.cursor = 0
+	if m.selectedNote() == nil {
+		t.Fatal("expected a selected note on the notes tab")
+	}
+
+	m = press(m, "l").(*Model)     // open the link prompt
+	m = press(m, "Other").(*Model) // type the target (one multi-rune msg)
+	press(m, "enter")              // commit (note is written to disk; m unused after)
+
+	got, _ := note.Load(n.Path)
+	if !strings.Contains(got.Body, "[[Other]]") {
+		t.Fatalf("note body should contain the added wikilink:\n%s", got.Body)
+	}
+	if !strings.Contains(got.Body, "original body") {
+		t.Errorf("existing body should be preserved:\n%s", got.Body)
 	}
 }
