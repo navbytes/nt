@@ -99,3 +99,20 @@ func TestCmdLinksOrphans(t *testing.T) {
 		t.Fatalf("orphans wrong (Hub is the orphan, Lonely is linked):\n%s", out)
 	}
 }
+
+func TestCmdTagBulk(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("NT_DIR", dir)
+	captureRun(t, "note", "Alpha")
+	captureRun(t, "note", "Beta")
+
+	if out, code := runWithStdout("tag", "alpha", "beta", "+reviewed"); code != 0 {
+		t.Fatalf("bulk tag exit %d: %s", code, out)
+	}
+	for _, slug := range []string{"alpha", "beta"} {
+		got, _ := os.ReadFile(filepath.Join(dir, "notes", slug+".md"))
+		if !strings.Contains(string(got), "reviewed") {
+			t.Errorf("%s should have @reviewed:\n%s", slug, got)
+		}
+	}
+}
