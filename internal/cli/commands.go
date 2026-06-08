@@ -227,9 +227,10 @@ func cmdList(args []string) int {
 	sortBy := fs.String("sort", "", "urgency|due|created")
 	all := fs.Bool("all", false, "include done tasks")
 	showBlocked := fs.Bool("show-blocked", false, "include dependency-blocked tasks")
+	tree := fs.Bool("tree", false, "show sub-tasks indented under their parent, with progress")
 	asJSON := fs.Bool("json", false, "machine-readable output")
 
-	flags, _ := splitArgs(args, map[string]bool{"all": true, "json": true, "show-blocked": true})
+	flags, _ := splitArgs(args, map[string]bool{"all": true, "json": true, "show-blocked": true, "tree": true})
 	if err := fs.Parse(flags); err != nil {
 		return 2
 	}
@@ -261,10 +262,55 @@ func cmdList(args []string) int {
 		fmt.Println("no tasks")
 		return 0
 	}
+	if *tree {
+		printTaskTree(rows, idx, blocked)
+		return 0
+	}
 	for _, t := range rows {
 		fmt.Println(formatRow(t, idx[t], blocked[t.ID()]))
 	}
 	return 0
+}
+
+// printTaskTree renders tasks as a parent/child outline: roots first, each
+// followed by its children indented, with a "(done/total)" progress marker on
+// any task that has children. A task whose parent isn't in the visible set is
+// treated as a root so nothing is hidden.
+func printTaskTree(rows []*task.Task, idx map[*task.Task]int, blocked map[string]bool) {
+	inSet := make(map[string]bool, len(rows))
+	for _, t := range rows {
+		inSet[t.ID()] = true
+	}
+	children := map[string][]*task.Task{}
+	var roots []*task.Task
+	for _, t := range rows {
+		if p := t.Parent(); p != "" && inSet[p] {
+			children[p] = append(children[p], t)
+		} else {
+			roots = append(roots, t)
+		}
+	}
+	var walk func(t *task.Task, depth int)
+	walk = func(t *task.Task, depth int) {
+		indent := strings.Repeat("  ", depth)
+		line := formatRow(t, idx[t], blocked[t.ID()])
+		if kids := children[t.ID()]; len(kids) > 0 {
+			done := 0
+			for _, k := range kids {
+				if k.Done {
+					done++
+				}
+			}
+			line += fmt.Sprintf("  (%d/%d)", done, len(kids))
+		}
+		fmt.Println(indent + line)
+		for _, k := range children[t.ID()] {
+			walk(k, depth+1)
+		}
+	}
+	for _, r := range roots {
+		walk(r, 0)
+	}
 }
 
 // cmdReady lists open, unblocked tasks by urgency — the canonical "what should I
@@ -547,7 +593,7 @@ func cmdUpdate(args []string) int {
 	if len(positional) == 0 {
 		return fail(fmt.Errorf("update: need a task id"))
 	}
-	handle := positional[0]
+	handles := positional // bulk: apply the same changes to every id given
 
 	// Validate parseable flags before locking.
 	var priByte byte
@@ -571,49 +617,57 @@ func cmdUpdate(args []string) int {
 	if !ok {
 		return 1
 	}
+	count := 0
 	err := e.Apply("update", func(d *task.Doc, rec *mutate.Recorder) error {
-		t, err := resolveHandle(d, handle)
-		if err != nil {
-			return fmt.Errorf("update: %w", err)
-		}
-		rec.Before(t)
-		switch *status {
-		case "":
-		case "done":
-			mutate.Complete(d, rec, t, mutate.Today()) // spawns next if recurring
-		case "open":
-			t.SetDone(false, "")
-			t.SetState("open")
-		case "doing", "blocked":
-			t.SetState(*status)
-		default:
-			return fmt.Errorf("update: invalid status %q", *status)
-		}
-		if *pri != "" {
-			t.SetPriority(priByte)
-		}
-		if *due != "" {
-			t.SetKey("due", dueVal)
-		}
-		if *recur != "" {
-			t.SetKey("rec", *recur)
-		}
-		if *parent != "" {
-			if pt, amb := d.Resolve(*parent); pt != nil && !amb {
-				t.SetKey("parent", pt.ID())
+		for _, handle := range handles {
+			t, err := resolveHandle(d, handle)
+			if err != nil {
+				return fmt.Errorf("update: %w", err)
 			}
-		}
-		if *blocks != "" {
-			if bt, amb := d.Resolve(*blocks); bt != nil && !amb {
-				t.SetKey("blocks", bt.ID())
+			rec.Before(t)
+			switch *status {
+			case "":
+			case "done":
+				mutate.Complete(d, rec, t, mutate.Today()) // spawns next if recurring
+			case "open":
+				t.SetDone(false, "")
+				t.SetState("open")
+			case "doing", "blocked":
+				t.SetState(*status)
+			default:
+				return fmt.Errorf("update: invalid status %q", *status)
 			}
+			if *pri != "" {
+				t.SetPriority(priByte)
+			}
+			if *due != "" {
+				t.SetKey("due", dueVal)
+			}
+			if *recur != "" {
+				t.SetKey("rec", *recur)
+			}
+			if *parent != "" {
+				if pt, amb := d.Resolve(*parent); pt != nil && !amb {
+					t.SetKey("parent", pt.ID())
+				}
+			}
+			if *blocks != "" {
+				if bt, amb := d.Resolve(*blocks); bt != nil && !amb {
+					t.SetKey("blocks", bt.ID())
+				}
+			}
+			count++
 		}
 		return nil
 	})
 	if err != nil {
 		return fail(err)
 	}
-	fmt.Println("updated")
+	if count == 1 {
+		fmt.Println("updated")
+	} else {
+		fmt.Printf("updated %d\n", count)
+	}
 	return 0
 }
 

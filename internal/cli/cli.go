@@ -215,7 +215,8 @@ USAGE
   nt log [--since|--days N]    completed tasks, newest first (the Logbook)
   nt done <id|task:N>         mark a task done       (alias: do)
   nt skip <id|task:N>         move a recurring task to its next occurrence
-  nt update <id|task:N> ...   change a task          (alias: up)
+  nt update <id…> [flags]     change one or more tasks (bulk)  (alias: up)
+  nt list --tree              show sub-tasks indented under their parent
   nt search "query" [--tag T]  full-text + tag search  (alias: q)
   nt tags                     list the tag vocabulary with counts
   nt tag <note> +x -y         retag a note (no $EDITOR; preserves frontmatter)

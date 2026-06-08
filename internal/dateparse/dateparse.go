@@ -58,18 +58,30 @@ func Date(s string) (string, bool) {
 	return "", false
 }
 
-// Priority maps high/med/low (or A/B/C) to a priority byte. "none"/"" clears it
-// (returns 0, true).
+// Priority maps a priority input to a todo.txt priority byte. It accepts the
+// friendly aliases high/med/low, and any single letter A–Z (todo.txt's full
+// priority range, e.g. "D"). "none"/"" clears it (returns 0, true).
 func Priority(s string) (byte, bool) {
-	switch strings.ToLower(strings.TrimSpace(s)) {
+	t := strings.TrimSpace(s)
+	switch strings.ToLower(t) {
 	case "", "none", "-":
 		return 0, true
-	case "high", "h", "a":
+	case "high", "h":
 		return 'A', true
-	case "med", "medium", "m", "b":
+	case "med", "medium", "m":
 		return 'B', true
-	case "low", "l", "c":
+	case "low", "l":
 		return 'C', true
+	}
+	// Any single A–Z letter is a literal todo.txt priority.
+	if len(t) == 1 {
+		c := t[0]
+		if c >= 'a' && c <= 'z' {
+			c -= 'a' - 'A'
+		}
+		if c >= 'A' && c <= 'Z' {
+			return c, true
+		}
 	}
 	return 0, false
 }
