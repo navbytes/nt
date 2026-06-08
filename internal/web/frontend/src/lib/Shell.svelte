@@ -27,6 +27,13 @@
     path.startsWith("/n/") ? decodeURIComponent(path.slice(3)) : "",
   );
 
+  // Mobile nav drawer: closed by default, auto-closes on navigation.
+  let drawerOpen = $state(false);
+  $effect(() => {
+    void path;
+    drawerOpen = false;
+  });
+
   function toggleTheme() {
     const root = document.documentElement;
     const dark =
@@ -46,10 +53,19 @@
 </script>
 
 <div class="layout">
-  <Sidebar {path} canEdit={$stateQ.data?.canEdit ?? false} />
+  <Sidebar {path} canEdit={$stateQ.data?.canEdit ?? false} open={drawerOpen} />
+  {#if drawerOpen}
+    <div class="scrim" role="presentation" onclick={() => (drawerOpen = false)}></div>
+  {/if}
 
   <div class="content">
     <header class="topbar">
+      <button
+        class="hamburger"
+        onclick={() => (drawerOpen = !drawerOpen)}
+        aria-label="Toggle navigation menu"
+        aria-expanded={drawerOpen}>☰</button
+      >
       <form class="topbar__search" onsubmit={onSearch}>
         <input name="q" placeholder="Search notes…" autocomplete="off" />
       </form>

@@ -4,7 +4,11 @@
   import { navigate } from "./router.svelte";
   import TreeItem from "./TreeItem.svelte";
 
-  let { path, canEdit = false }: { path: string; canEdit?: boolean } = $props();
+  let {
+    path,
+    canEdit = false,
+    open = false,
+  }: { path: string; canEdit?: boolean; open?: boolean } = $props();
 
   const qc = useQueryClient();
   const notesQ = createQuery({ queryKey: ["notes"], queryFn: api.notes });
@@ -35,7 +39,7 @@
   ];
 </script>
 
-<aside class="sidebar">
+<aside class="sidebar" class:sidebar--open={open}>
   <a class="brand" href="/">nt</a>
 
   <nav class="nav">

@@ -710,4 +710,58 @@ code {
   .editor__preview {
     display: none;
   }
+  /* Sidebar becomes an off-canvas drawer toggled by the topbar hamburger. */
+  .sidebar {
+    position: fixed;
+    left: 0;
+    top: 0;
+    height: 100vh;
+    z-index: 30;
+    transform: translateX(-100%);
+    transition: transform 0.2s ease;
+    box-shadow: 2px 0 18px rgba(0, 0, 0, 0.35);
+  }
+  .sidebar--open {
+    transform: translateX(0);
+  }
+  .scrim {
+    position: fixed;
+    inset: 0;
+    z-index: 25;
+    background: rgba(0, 0, 0, 0.45);
+  }
+  .hamburger {
+    display: inline-flex !important;
+  }
+  .main {
+    padding: 20px 16px 56px;
+  }
+  .topbar {
+    padding: 10px 12px;
+    gap: 10px;
+  }
+  .topbar__search {
+    flex: 1 1 auto;
+  }
+  /* Counts crowd the narrow topbar; the dashboard shows them anyway. */
+  .topbar .stat {
+    display: none;
+  }
+}
+
+/* Hamburger is hidden on desktop (the sidebar is always visible there). */
+.hamburger {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--fg-soft);
+  cursor: pointer;
+  font-size: 1.1rem;
+  padding: 3px 9px;
+}
+.scrim {
+  display: none;
 }
