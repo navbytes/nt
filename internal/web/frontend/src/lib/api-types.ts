@@ -143,10 +143,20 @@ export interface ActivityResponse {
   sources: string[];
 }
 /**
+ * SearchResult is one ranked search hit: title matches rank first (no snippet),
+ * body matches carry the matching line as a snippet for context.
+ */
+export interface SearchResult {
+  url: string;
+  title: string;
+  path: string;
+  snippet?: string; // matching line (body hits only)
+}
+/**
  * SearchResponse is GET /api/search.
  */
 export interface SearchResponse {
-  results: NoteLink[];
+  results: SearchResult[];
 }
 /**
  * Tag is one entry in the tag vocabulary with its usage count.
