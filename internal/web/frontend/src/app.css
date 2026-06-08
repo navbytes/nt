@@ -97,6 +97,35 @@ code {
   display: flex;
   min-height: 100vh;
 }
+
+/* Keyboard skip-link: off-screen until focused, then jumps into view. */
+.skip-link {
+  position: fixed;
+  left: 8px;
+  top: -64px;
+  z-index: 100;
+  background: var(--accent);
+  color: #fff;
+  padding: 8px 14px;
+  border-radius: var(--radius-sm);
+  transition: top 0.15s ease;
+}
+.skip-link:focus {
+  top: 8px;
+}
+
+/* Respect reduced-motion: neutralize animations/transitions globally (the graph
+   physics also honors this in JS). */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
 .sidebar {
   width: var(--sidebar-w);
   flex: 0 0 var(--sidebar-w);

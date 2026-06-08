@@ -88,11 +88,18 @@
     if (active > items.length - 1) active = Math.max(0, items.length - 1);
   });
 
+  // Move focus into the palette on open and restore it to the trigger on close
+  // (modal focus management).
+  let restoreFocus: HTMLElement | null = null;
   $effect(() => {
     if (palette.open) {
+      restoreFocus = document.activeElement as HTMLElement;
       q = "";
       active = 0;
       queueMicrotask(() => inputEl?.focus());
+    } else if (restoreFocus) {
+      restoreFocus.focus?.();
+      restoreFocus = null;
     }
   });
 
@@ -123,6 +130,10 @@
     } else if (e.key === "Escape") {
       e.preventDefault();
       closePalette();
+    } else if (e.key === "Tab") {
+      // Trap focus: the list is navigated with the arrow keys (aria-activedescendant),
+      // so Tab keeps focus on the input rather than escaping behind the backdrop.
+      e.preventDefault();
     }
   }
 
