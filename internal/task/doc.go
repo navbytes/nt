@@ -88,10 +88,10 @@ func (d *Doc) FindByID(id string) *Task {
 	return nil
 }
 
-// Resolve maps a user-supplied handle to a task. It accepts a full ULID, an
-// unambiguous short ULID prefix, or a 1-based positional "task:N" reference
-// (interactive-only, best-effort — SPEC §7.2). ambiguous is true when a short
-// prefix matches more than one task.
+// Resolve maps a user-supplied handle to a task. It accepts a full ULID, the
+// displayed trailing short code (id[len-6:]), or a 1-based positional "task:N"
+// reference (interactive-only, best-effort — SPEC §7.2). ambiguous is true when
+// a short code matches more than one task.
 func (d *Doc) Resolve(handle string) (t *Task, ambiguous bool) {
 	tasks := d.Tasks()
 	if n, ok := parsePositional(handle); ok {
