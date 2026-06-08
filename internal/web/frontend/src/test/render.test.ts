@@ -55,7 +55,8 @@ vi.mock("../lib/api", () => {
         source: "cli",
         created: "2026-06-08",
         tags: ["spec"],
-        bodyHTML: "<p>the rendered body</p>",
+        bodyHTML:
+          '<h2 id="overview">Overview</h2><p>the rendered body</p><h2 id="details">Details</h2>',
         backlinks: [{ title: "Welcome", url: "/n/abc", text: "", isNote: true }],
         taskRefs: [{ text: "do the thing", status: "open", source: "cli" }],
         etag: '"abc"',
@@ -119,6 +120,15 @@ describe("NoteView", () => {
     expect(screen.getByText("the rendered body")).toBeInTheDocument();
     expect(screen.getByText("do the thing")).toBeInTheDocument();
     expect(screen.getByText("Linked from")).toBeInTheDocument();
+  });
+
+  it("builds an On-this-page TOC from the body headings", async () => {
+    render(Harness, { props: { comp: NoteView, props: { handle: "def" } } });
+    await screen.findByRole("heading", { name: "Design" });
+    expect(screen.getByText("On this page")).toBeInTheDocument();
+    const link = screen.getByRole("link", { name: "Overview" });
+    expect(link.getAttribute("href")).toBe("#overview");
+    expect(screen.getByRole("link", { name: "Details" })).toBeInTheDocument();
   });
 });
 

@@ -137,9 +137,8 @@ code {
   color: var(--fg);
 }
 .main {
-  max-width: 980px;
-  margin: 0 auto;
-  padding: 28px 24px 64px;
+  width: 100%;
+  padding: 28px 36px 64px;
 }
 .stat {
   font-size: 13px;
@@ -404,8 +403,59 @@ code {
 }
 
 /* ---- note view ---- */
+.notewrap {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 220px;
+  gap: 40px;
+  align-items: start;
+}
 .note {
-  max-width: 760px;
+  min-width: 0; /* allow the prose column to shrink so wide code blocks wrap */
+}
+.toc {
+  position: sticky;
+  top: 64px;
+  max-height: calc(100vh - 96px);
+  overflow-y: auto;
+  font-size: 13px;
+}
+.toc__head {
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 11px;
+  color: var(--muted);
+  margin-bottom: 8px;
+}
+.toc__link {
+  display: block;
+  padding: 3px 10px;
+  color: var(--fg-soft);
+  border-left: 2px solid var(--border-soft);
+  line-height: 1.4;
+}
+.toc__link:hover {
+  color: var(--accent);
+  text-decoration: none;
+  background: var(--bg-inset);
+}
+.toc__link.active {
+  color: var(--accent);
+  border-left-color: var(--accent);
+}
+.toc__link--l2 {
+  padding-left: 22px;
+}
+.toc__link--l3 {
+  padding-left: 34px;
+  font-size: 12px;
+}
+@media (max-width: 900px) {
+  .notewrap {
+    grid-template-columns: 1fr;
+  }
+  .toc {
+    display: none;
+  }
 }
 .crumbs {
   display: flex;
@@ -437,6 +487,7 @@ code {
 .prose :global(h2),
 .prose :global(h3) {
   margin-top: 1.6em;
+  scroll-margin-top: 72px; /* clear the sticky topbar when jumping to an anchor */
 }
 .prose :global(pre) {
   background: var(--bg-inset);
