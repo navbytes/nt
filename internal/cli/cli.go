@@ -32,6 +32,10 @@ func Run(args []string) int {
 		return cmdList(rest)
 	case "ready":
 		return cmdReady(rest)
+	case "today":
+		return cmdToday(rest)
+	case "agenda":
+		return cmdAgenda(rest)
 	case "recall":
 		return cmdRecall(rest)
 	case "log":
@@ -203,6 +207,8 @@ USAGE
   nt note "title" [flags]     capture a note (--folder work files it in notes/work/)
   nt list [flags]             list tasks            (alias: ls)
   nt ready [flags]            open, unblocked tasks by urgency — start here
+  nt today [flags]            overdue + due-today + just-started, grouped
+  nt agenda [--days N]        the next N days, grouped Overdue/Today/Upcoming
   nt recall [flags]           read back prior items (for AI sessions)
   nt log [--since|--days N]    completed tasks, newest first (the Logbook)
   nt done <id|task:N>         mark a task done       (alias: do)
