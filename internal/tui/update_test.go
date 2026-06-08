@@ -138,3 +138,44 @@ func TestUndoRedoKeys(t *testing.T) {
 		t.Fatal("a second U must not undo")
 	}
 }
+
+// TestFollowLinkPicker: L on an item with several links opens the follow picker
+// (instead of silently following the first); with one link it follows directly.
+func TestFollowLinkPicker(t *testing.T) {
+	m := testModel(t)
+	m.width, m.height = 100, 24
+
+	var multi, single string
+	_ = m.eng.Apply("add", func(d *task.Doc, rec *mutate.Recorder) error {
+		a := task.New("see [[Alpha]] and [[Beta]]")
+		b := task.New("only [[Gamma]]")
+		d.Append(a)
+		d.Append(b)
+		rec.Added(a)
+		rec.Added(b)
+		multi, single = a.ID(), b.ID()
+		return nil
+	})
+	m.reload()
+
+	// Multi-link → picker opens listing both links.
+	m.selectByID(multi)
+	m = press(m, "L").(*Model)
+	if !m.followMode || len(m.followTargets) != 2 {
+		t.Fatalf("L on a 2-link task should open a 2-item picker, got followMode=%v n=%d", m.followMode, len(m.followTargets))
+	}
+	if m.followTargets[0].value != "Alpha" || m.followTargets[1].value != "Beta" {
+		t.Errorf("picker targets wrong: %+v", m.followTargets)
+	}
+	m = press(m, "esc").(*Model) // cancel
+	if m.followMode {
+		t.Fatal("esc should cancel the picker")
+	}
+
+	// Single-link → follows directly, no picker.
+	m.selectByID(single)
+	m = press(m, "L").(*Model)
+	if m.followMode {
+		t.Fatal("L on a single-link task should not open a picker")
+	}
+}
