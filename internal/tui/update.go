@@ -12,6 +12,7 @@ import (
 	"github.com/navbytes/nt/internal/links"
 	"github.com/navbytes/nt/internal/mutate"
 	"github.com/navbytes/nt/internal/note"
+	"github.com/navbytes/nt/internal/quickadd"
 	"github.com/navbytes/nt/internal/task"
 )
 
@@ -348,7 +349,7 @@ func (m *Model) commitInput() (tea.Model, tea.Cmd) {
 func (m *Model) addTask(text string) {
 	var id string
 	_ = m.eng.Apply("add", func(d *task.Doc, rec *mutate.Recorder) error {
-		t := task.New(text)
+		t := quickadd.New(text)
 		t.SetKey("src", "tui")
 		d.Append(t)
 		rec.Added(t)

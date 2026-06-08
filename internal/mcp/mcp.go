@@ -19,6 +19,7 @@ import (
 	"github.com/navbytes/nt/internal/links"
 	"github.com/navbytes/nt/internal/mutate"
 	"github.com/navbytes/nt/internal/note"
+	"github.com/navbytes/nt/internal/quickadd"
 	"github.com/navbytes/nt/internal/search"
 	"github.com/navbytes/nt/internal/task"
 )
@@ -218,7 +219,7 @@ func (s *server) add(a map[string]any) (string, error) {
 
 	var created *task.Task
 	err := s.eng.Apply("add", func(d *task.Doc, rec *mutate.Recorder) error {
-		t := task.New(text)
+		t := quickadd.New(text) // normalize inline due:/t:/!pri an agent may emit
 		if pri != 0 {
 			t.SetPriority(pri)
 		}

@@ -110,6 +110,7 @@ x 2026-06-05 2026-06-01 write migration +api parent:01JZ8RT3 id:01JZ8RT9
 | project           | `+project`                           | Native; one per task |
 | tags              | `@tag` (repeatable)                  | Native contexts, used as tags |
 | due date          | `due:YYYY-MM-DD`                      | De-facto standard key |
+| start / defer     | `t:YYYY-MM-DD`                        | todo.txt "threshold": not actionable until this date; agenda/ready hide future-start |
 | recurrence        | `rec:weekly`, `rec:3d`               | Completing spawns the next |
 | subtask           | `parent:<id>`                        | Typed task→task; one level only |
 | dependency        | `blocks:<id>`                        | Typed task→task; hides blocked |

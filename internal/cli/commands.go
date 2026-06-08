@@ -16,6 +16,7 @@ import (
 	"github.com/navbytes/nt/internal/links"
 	"github.com/navbytes/nt/internal/mutate"
 	"github.com/navbytes/nt/internal/note"
+	"github.com/navbytes/nt/internal/quickadd"
 	"github.com/navbytes/nt/internal/search"
 	"github.com/navbytes/nt/internal/task"
 	"github.com/navbytes/nt/internal/tui"
@@ -91,7 +92,7 @@ func cmdAdd(args []string) int {
 	}
 	var created *task.Task
 	err := e.Apply("add", func(d *task.Doc, rec *mutate.Recorder) error {
-		t := task.New(buildText(title, tags, *project, *noteSlug))
+		t := quickadd.New(buildText(title, tags, *project, *noteSlug))
 		if p != 0 {
 			t.SetPriority(p)
 		}
