@@ -346,6 +346,10 @@ code {
 }
 .row__text {
   flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap; /* long agent-written tasks clamp to one line (full text on hover) */
 }
 .row__text.done {
   color: var(--muted);

@@ -2,6 +2,7 @@
   import { onMount } from "svelte";
   import { createQuery } from "@tanstack/svelte-query";
   import { api } from "../lib/api";
+  import { displayTitle } from "../lib/text";
   import { navigate } from "../lib/router.svelte";
   import {
     toForceGraph,
@@ -180,12 +181,15 @@
       ctx.textAlign = "center";
       ctx.textBaseline = "top";
       const ty = y + r + 2 / scale;
+      // Long task labels (an agent's whole sentence) sprawl across the canvas —
+      // draw a short title; the full text stays in the hover tooltip (nodeLabel).
+      const label = displayTitle(n.title, 28);
       // halo for legibility over links/nodes
       ctx.lineWidth = 3 / scale;
       ctx.strokeStyle = cssBg;
-      ctx.strokeText(n.title, x, ty);
+      ctx.strokeText(label, x, ty);
       ctx.fillStyle = cssFg;
-      ctx.fillText(n.title, x, ty);
+      ctx.fillText(label, x, ty);
     }
   }
 
