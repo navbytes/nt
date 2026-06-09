@@ -593,31 +593,52 @@ func (m *Model) notesList(width, h int) string {
 	var hits []hitLine
 	for i, n := range m.notesView {
 		folder := relFolder(n.Rel)
+		// The folder prefix and title must collapse to a single line: like the
+		// task rows, fit the plain "folder/title  @tags" string to the column
+		// width with an ellipsis so a long title can't wrap and overflow the
+		// list/detail divider. Keep the folder visible; ellipsize the end.
+		prefix := ""
+		if folder != "" {
+			prefix = folder + "/"
+		}
+		tags := ""
+		if len(n.Tags) > 0 {
+			tags = "  @" + strings.Join(n.Tags, " @")
+		}
 		if i == m.cursor {
-			body := "▤ "
-			if folder != "" {
-				body += folder + "/"
-			}
-			body += n.Title
-			if len(n.Tags) > 0 {
-				body += "  @" + strings.Join(n.Tags, " @")
-			}
-			lines = append(lines, selRow(body, width, false))
+			// selRow truncates plain content itself; "▤ " glyph leads the body.
+			lines = append(lines, selRow("▤ "+prefix+n.Title+tags, width, false))
 		} else {
-			row := stDim.Render("▤") + " "
-			if folder != "" {
-				row += stDim.Render(folder + "/")
-			}
-			row += n.Title
-			if len(n.Tags) > 0 {
-				row += "  " + stTag.Render("@"+strings.Join(n.Tags, " @"))
-			}
+			// Budget the content after the "   ▤ " gutter (3 pad + glyph + space).
+			body := truncate(prefix+n.Title+tags, width-5)
+			row := stDim.Render("▤") + " " + styleNoteRow(body, prefix, tags)
 			lines = append(lines, "   "+row)
 		}
 		hits = append(hits, hitLine{item: i})
 	}
 	m.hitLines = hits
 	return m.viewport(lines, m.cursor, h)
+}
+
+// styleNoteRow re-applies the dim folder / tag styling to a note row body that
+// was already truncated as plain text. The original (untruncated) prefix and
+// tags strings mark the segment boundaries; only the part of each that survived
+// truncation is styled, so a row cut mid-folder or mid-tag still colors cleanly.
+func styleNoteRow(body, prefix, tags string) string {
+	out := ""
+	rest := body
+	if prefix != "" && strings.HasPrefix(rest, prefix) {
+		out += stDim.Render(prefix)
+		rest = rest[len(prefix):]
+	}
+	if tags != "" {
+		// The tag run is the suffix; locate where it begins in what's left.
+		if i := strings.LastIndex(rest, "  @"); i >= 0 {
+			out += rest[:i] + stTag.Render(rest[i:])
+			return out
+		}
+	}
+	return out + rest
 }
 
 // taskRow renders one task line sized to width, highlighting if selected.
@@ -705,10 +726,12 @@ func (m *Model) detailContent(w int) string {
 	kv("priority", priStr(t.Priority))
 	kv("due", dueStr(t.Due()))
 	if p := t.Projects(); len(p) > 0 {
-		kv("project", stProj.Render("+"+strings.Join(p, " +")))
+		// Truncate to one line before styling (w minus the 9-col label gutter) so
+		// a long +project run can't wrap past the detail-pane width.
+		kv("project", stProj.Render(truncate("+"+strings.Join(p, " +"), w-9)))
 	}
 	if tg := t.Tags(); len(tg) > 0 {
-		kv("tags", stTag.Render("@"+strings.Join(tg, " @")))
+		kv("tags", stTag.Render(truncate("@"+strings.Join(tg, " @"), w-9)))
 	}
 	kv("source", t.Source())
 	kv("id", stDim.Render(t.ID()))
@@ -812,7 +835,9 @@ func (m *Model) noteDetail(n *note.Note, w int) string {
 		b.WriteString(stDim.Render("folder   ") + stMuted.Render(folder+"/") + "\n")
 	}
 	if len(n.Tags) > 0 {
-		b.WriteString(stDim.Render("tags     ") + stTag.Render("@"+strings.Join(n.Tags, " @")) + "\n")
+		// Truncate to one line (w minus the 9-col label gutter) so a long tag run
+		// can't wrap onto a second line in the detail pane.
+		b.WriteString(stDim.Render("tags     ") + stTag.Render(truncate("@"+strings.Join(n.Tags, " @"), w-9)) + "\n")
 	}
 	if len(n.Aliases) > 0 {
 		b.WriteString(stDim.Render("aliases  ") + stMuted.Render(strings.Join(n.Aliases, ", ")) + "\n")
@@ -1011,8 +1036,15 @@ func dueStr(due string) string {
 	return lipgloss.NewStyle().Foreground(c).Render(l)
 }
 
+// recurGlyph is the subtle ↻ marker shown on recurring tasks (rec: token) so
+// they read distinctly from one-offs. Empty for non-recurring tasks.
+const recurGlyph = "↻"
+
 func metaStr(t *task.Task) string {
 	parts := []string{}
+	if t.Recur() != "" {
+		parts = append(parts, lipgloss.NewStyle().Foreground(cCyan).Render(recurGlyph))
+	}
 	if p := priStr(t.Priority); p != "" {
 		parts = append(parts, p)
 	}
@@ -1025,6 +1057,9 @@ func metaStr(t *task.Task) string {
 // plainMeta is metaStr without ANSI, for selected rows (rendered on a solid bg).
 func plainMeta(t *task.Task) string {
 	parts := []string{}
+	if t.Recur() != "" {
+		parts = append(parts, recurGlyph)
+	}
 	switch t.Priority {
 	case 'A':
 		parts = append(parts, "(A)")
@@ -1141,11 +1176,20 @@ func truncate(s string, max int) string {
 	if lipgloss.Width(s) <= max {
 		return s
 	}
-	r := []rune(s)
-	if len(r) > max-1 {
-		r = r[:max-1]
+	// Cut by DISPLAY width, not rune count, so a double-width rune (emoji, CJK)
+	// can't push the result past max and wrap the line. Reserve one cell for "…".
+	budget := max - 1
+	w := 0
+	var b strings.Builder
+	for _, r := range s {
+		rw := lipgloss.Width(string(r))
+		if w+rw > budget {
+			break
+		}
+		b.WriteRune(r)
+		w += rw
 	}
-	return string(r) + "…"
+	return b.String() + "…"
 }
 
 // viewport returns up to h lines, scrolling only when the selected line nears an
