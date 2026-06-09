@@ -45,6 +45,14 @@ var toolDefs = []toolDef{
 		}),
 	},
 	{
+		Name:        "nt_status",
+		Description: "One-call state of a project or area for a resuming session: in-progress + blocked tasks first, then open by urgency, recent completions, and the notes linked to this work. Scope with project and/or tag; omit both for everything.",
+		InputSchema: obj(map[string]any{
+			"project": st(),
+			"tag":     st(),
+		}),
+	},
+	{
 		Name:        "nt_add",
 		Description: "Capture a task. discovered_from chains work surfaced while doing another task.",
 		InputSchema: obj(map[string]any{
