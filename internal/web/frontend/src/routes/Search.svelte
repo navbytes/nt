@@ -35,7 +35,7 @@
 
 <h1>Search</h1>
 {#if tag}
-  <p class="muted">Notes tagged <a class="tagchip" href={`/search?tag=${encodeURIComponent(tag)}`}>#{tag}</a></p>
+  <p class="muted">Tagged <a class="tagchip" href={`/search?tag=${encodeURIComponent(tag)}`}>#{tag}</a></p>
 {:else}
   <p class="muted">Results for <strong>{q}</strong></p>
 {/if}
@@ -46,12 +46,13 @@
   <p class="muted">Searching…</p>
 {:else if $searchQ.data}
   <ul class="results">
-    {#each $searchQ.data.results as r (r.url)}
+    {#each $searchQ.data.results as r, i (i)}
       <li class="result">
+        {#if r.kind === "task"}<span class="result__kind">task</span>{/if}
         <a class="result__title" href={r.url}>
           {#each parts(r.title, q) as p}{#if p.hit}<mark>{p.text}</mark>{:else}{p.text}{/if}{/each}
         </a>
-        <span class="result__path">{r.path}</span>
+        {#if r.path}<span class="result__path">{r.path}</span>{/if}
         {#if r.snippet}
           <p class="result__snippet">
             {#each parts(r.snippet, q) as p}{#if p.hit}<mark>{p.text}</mark>{:else}{p.text}{/if}{/each}
@@ -80,6 +81,19 @@
   .result__title {
     font-weight: 600;
     font-size: 1rem;
+  }
+  .result__kind {
+    display: inline-block;
+    margin-right: 8px;
+    padding: 0 6px;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--accent) 18%, transparent);
+    color: var(--accent);
+    font-size: 0.66rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    vertical-align: middle;
   }
   .result__path {
     margin-left: 10px;

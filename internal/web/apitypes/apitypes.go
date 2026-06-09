@@ -122,13 +122,15 @@ type ActivityResponse struct {
 	Sources []string      `json:"sources"`
 }
 
-// SearchResult is one ranked search hit: title matches rank first (no snippet),
-// body matches carry the matching line as a snippet for context.
+// SearchResult is one ranked search hit. Notes rank first (title matches, then
+// body matches carrying the matching line as a snippet); tasks follow, flagged
+// by Kind so the UI can badge them and link to the task list.
 type SearchResult struct {
 	URL     string `json:"url"`
 	Title   string `json:"title"`
 	Path    string `json:"path"`
-	Snippet string `json:"snippet,omitempty"` // matching line (body hits only)
+	Kind    string `json:"kind,omitempty"`    // "" / "note" (default) | "task"
+	Snippet string `json:"snippet,omitempty"` // matching line (note body hits only)
 }
 
 // SearchResponse is GET /api/search.
