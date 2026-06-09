@@ -1,8 +1,9 @@
 <script lang="ts">
   import { createQuery, useQueryClient } from "@tanstack/svelte-query";
   import { api, type NoteLink } from "./api";
-  import { navigate } from "./router.svelte";
+  import { navigate, loc } from "./router.svelte";
   import { palette, openPalette, closePalette } from "./palette.svelte";
+  import { requestMoveNote } from "./noteUI.svelte";
 
   let q = $state("");
   let active = $state(0);
@@ -54,11 +55,13 @@
     navigate("/tasks");
   }
 
+  const onNotePage = $derived(loc.path.startsWith("/n/"));
   const actionItems = $derived<Item[]>([
     ...(canEdit
       ? [
           { label: "New note", kind: "action", run: newNote },
           { label: "New task", kind: "action", run: newTask },
+          ...(onNotePage ? [{ label: "Move note…", kind: "action", run: requestMoveNote }] : []),
         ]
       : []),
     { label: "Toggle theme", kind: "action", run: toggleTheme },

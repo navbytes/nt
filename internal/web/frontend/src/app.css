@@ -505,6 +505,34 @@ code {
   color: var(--muted);
   margin-bottom: 6px;
 }
+.movebar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0 0 12px;
+  padding: 8px 10px;
+  background: var(--bg-inset);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+.movebar__label {
+  font-size: 0.78rem;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.movebar__input {
+  flex: 1;
+  min-width: 160px;
+  font: inherit;
+  font-size: 14px;
+  padding: 5px 10px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--fg);
+}
 .crumbs span::after {
   content: "/";
   margin-left: 6px;

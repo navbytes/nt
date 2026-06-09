@@ -14,6 +14,7 @@ import type {
   OrphansResponse,
   GraphData,
   CreatedNote,
+  MovedNote,
   JournalResponse,
 } from "./api-types";
 
@@ -81,6 +82,9 @@ export const api = {
 
   noteCreate: (title: string, folder = "") =>
     postForm<CreatedNote>("/api/notes", folder ? { title, folder } : { title }),
+
+  noteMove: (handle: string, folder: string) =>
+    postForm<MovedNote>(`/api/notes/${encodeURIComponent(handle)}/move`, { folder }),
 
   // ---- editor ----
   raw: (handle: string) => getJSON<RawNote>(`/api/notes/${encodeURIComponent(handle)}/raw`),

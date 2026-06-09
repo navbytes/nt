@@ -216,6 +216,17 @@ export interface CreatedNote {
   url: string;
 }
 /**
+ * MovedNote is the result of POST /api/notes/{handle}/move — the (unchanged)
+ * handle/URL, the new path relative to notes/, and how many [[links]] were
+ * rewritten to follow the move.
+ */
+export interface MovedNote {
+  handle: string;
+  url: string;
+  rel: string;
+  updated: number /* int */;
+}
+/**
  * JournalDay is one existing daily note (date + the note's stable handle).
  */
 export interface JournalDay {

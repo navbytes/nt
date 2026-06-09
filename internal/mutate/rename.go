@@ -54,8 +54,13 @@ func (e *Engine) RenameNote(src *note.Note, all []*note.Note, dest string) (newR
 		}
 	}
 
-	// Move the file.
+	// Move the file. Defense in depth: the destination must stay within notes/ —
+	// the web boundary already allowlists the folder, and newRel is built from a
+	// trimmed dest, but assert containment so no caller (CLI included) can escape.
 	newPath := filepath.Join(e.S.NotesDir(), filepath.FromSlash(newRel))
+	if rel, e2 := filepath.Rel(e.S.NotesDir(), newPath); e2 != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", 0, fmt.Errorf("rename: destination escapes notes/: %q", dest)
+	}
 	if newPath != src.Path {
 		if _, e2 := os.Stat(newPath); e2 == nil {
 			return "", 0, fmt.Errorf("rename: %s already exists", newRel)
