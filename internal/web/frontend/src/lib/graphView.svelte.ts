@@ -57,7 +57,7 @@ const defaults: ViewState = {
   search: "",
   colorBy: "folder",
   shapeBy: "kind",
-  showTasks: true,
+  showTasks: false, // default to a notes-only knowledge graph; long task labels clutter it (audit)
   filterFolders: [],
   filterTags: [],
   filterSources: [],

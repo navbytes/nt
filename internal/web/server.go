@@ -206,6 +206,7 @@ type taskRow struct {
 	Project string   `json:"project,omitempty"`
 	Tags    []string `json:"tags,omitempty"`
 	Blocker string   `json:"blocker,omitempty"`
+	Recur   bool     `json:"recur,omitempty"`
 }
 
 // ---- handlers -------------------------------------------------------------
@@ -370,7 +371,7 @@ func buildTaskGroups(doc *task.Doc) []taskGroup {
 	task.SortByUrgency(tasks)
 	byStatus := map[string][]taskRow{}
 	for _, t := range tasks {
-		row := taskRow{ID: t.ID(), Text: cleanTaskText(t.Text), Status: t.Status(), Due: t.Due(), Source: t.Source(), Tags: t.Tags()}
+		row := taskRow{ID: t.ID(), Text: cleanTaskText(t.Text), Status: t.Status(), Due: t.Due(), Source: t.Source(), Tags: t.Tags(), Recur: t.Recur() != ""}
 		if p := t.Projects(); len(p) > 0 {
 			row.Project = p[0]
 		}
