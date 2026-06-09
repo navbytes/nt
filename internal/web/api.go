@@ -31,6 +31,7 @@ import (
 func (s *Server) apiRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/state", s.apiState)
 	mux.HandleFunc("GET /api/notes", s.apiNotes)
+	mux.HandleFunc("GET /api/notes/grid", s.apiNotesGrid)
 	mux.HandleFunc("POST /api/notes", s.apiNoteCreate)
 	mux.HandleFunc("GET /api/notes/{handle}", s.apiNote)
 	mux.HandleFunc("GET /api/notes/{handle}/raw", s.apiNoteRaw)
@@ -181,6 +182,69 @@ func (s *Server) apiState(w http.ResponseWriter, r *http.Request) {
 func (s *Server) apiNotes(w http.ResponseWriter, r *http.Request) {
 	snap := s.current()
 	writeJSON(w, apitypes.NotesIndex{Tree: toTree(buildTree(snap.notes, "")), Index: toLinks(snap.index)})
+}
+
+// apiNotesGrid projects every note as a card (title/folder/tags/preview/updated)
+// for the /notes overview, plus the distinct folders for the filter.
+func (s *Server) apiNotesGrid(w http.ResponseWriter, r *http.Request) {
+	snap := s.current()
+	folders := map[string]bool{}
+	cards := make([]apitypes.NoteCard, 0, len(snap.notes))
+	for _, n := range snap.notes {
+		folder, _ := splitRel(n.Rel)
+		if folder != "" {
+			folders[folder] = true
+		}
+		updated := n.Updated
+		if updated == "" {
+			updated = n.Created
+		}
+		cards = append(cards, apitypes.NoteCard{
+			Handle:  noteHandle(n),
+			Title:   n.Title,
+			URL:     "/n/" + url.PathEscape(noteHandle(n)),
+			Folder:  folder,
+			Tags:    n.Tags,
+			Preview: notePreview(n.Body),
+			Updated: dateOnly(updated),
+		})
+	}
+	folderList := make([]string, 0, len(folders))
+	for f := range folders {
+		folderList = append(folderList, f)
+	}
+	sort.Strings(folderList)
+	writeJSON(w, apitypes.NotesGrid{Notes: cards, Folders: folderList})
+}
+
+// notePreview returns a short plain-text snippet of a note body for a card: it
+// drops a leading "# H1" (usually the title, already shown), strips simple
+// markdown markers, collapses whitespace, and caps the length.
+func notePreview(body string) string {
+	const max = 180
+	var b strings.Builder
+	for _, line := range strings.Split(body, "\n") {
+		l := strings.TrimSpace(line)
+		if l == "" || strings.HasPrefix(l, "#") {
+			continue // skip blanks and headings (the H1 is the title)
+		}
+		l = strings.TrimLeft(l, "->*+ \t") // list/quote markers
+		if l == "" {
+			continue
+		}
+		if b.Len() > 0 {
+			b.WriteByte(' ')
+		}
+		b.WriteString(l)
+		if b.Len() >= max {
+			break
+		}
+	}
+	s := strings.Join(strings.Fields(b.String()), " ")
+	if len(s) > max {
+		s = strings.TrimSpace(s[:max]) + "…"
+	}
+	return s
 }
 
 func (s *Server) apiNote(w http.ResponseWriter, r *http.Request) {

@@ -216,6 +216,26 @@ export interface CreatedNote {
   url: string;
 }
 /**
+ * NoteCard is one note projected for the /notes grid view.
+ */
+export interface NoteCard {
+  handle: string;
+  title: string;
+  url: string;
+  folder: string; // "" for root
+  tags?: string[];
+  preview?: string; // first lines of the body, plain text
+  updated?: string; // YYYY-MM-DD (updated, else created)
+}
+/**
+ * NotesGrid is GET /api/notes/grid — every note as a card, plus the folder
+ * vocabulary for the filter.
+ */
+export interface NotesGrid {
+  notes: NoteCard[];
+  folders: string[];
+}
+/**
  * MovedNote is the result of POST /api/notes/{handle}/move — the (unchanged)
  * handle/URL, the new path relative to notes/, and how many [[links]] were
  * rewritten to follow the move.

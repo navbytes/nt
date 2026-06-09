@@ -185,6 +185,24 @@ type CreatedNote struct {
 	URL    string `json:"url"`
 }
 
+// NoteCard is one note projected for the /notes grid view.
+type NoteCard struct {
+	Handle  string   `json:"handle"`
+	Title   string   `json:"title"`
+	URL     string   `json:"url"`
+	Folder  string   `json:"folder"` // "" for root
+	Tags    []string `json:"tags,omitempty"`
+	Preview string   `json:"preview,omitempty"` // first lines of the body, plain text
+	Updated string   `json:"updated,omitempty"` // YYYY-MM-DD (updated, else created)
+}
+
+// NotesGrid is GET /api/notes/grid — every note as a card, plus the folder
+// vocabulary for the filter.
+type NotesGrid struct {
+	Notes   []NoteCard `json:"notes"`
+	Folders []string   `json:"folders"`
+}
+
 // MovedNote is the result of POST /api/notes/{handle}/move — the (unchanged)
 // handle/URL, the new path relative to notes/, and how many [[links]] were
 // rewritten to follow the move.
