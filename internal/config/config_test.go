@@ -27,6 +27,7 @@ editor = 'nvim'
 [web]
 port = 8080
 host = "0.0.0.0"
+edit = true
 
 [tui]
 theme = "light"
@@ -47,6 +48,7 @@ unknown_key = "skipped"
 		Editor:          "nvim",
 		WebPort:         8080,
 		WebHost:         "0.0.0.0",
+		WebEdit:         true,
 		TUITheme:        "light",
 	}
 	if *c != want {

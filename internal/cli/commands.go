@@ -36,7 +36,10 @@ func cmdWeb(args []string) int {
 	fs := flag.NewFlagSet("web", flag.ContinueOnError)
 	port := fs.Int("port", defPort, fmt.Sprintf("port to listen on (%d by default; falls back to a free one if taken; 0 = always pick a free one)", defPort))
 	host := fs.String("host", defHost, "bind address (localhost only by default)")
-	edit := fs.Bool("edit", false, "allow editing notes in the browser (default: read-only)")
+	// --edit defaults to the [web] edit config (read-only out of the box); pass
+	// --read-only to force read-only even when the config opts into editing.
+	edit := fs.Bool("edit", cfg.WebEdit, "allow editing notes in the browser (default: read-only, or [web] edit in config)")
+	readOnly := fs.Bool("read-only", false, "force read-only, overriding [web] edit in config")
 	detach := fs.Bool("detach", false, "run the server in the background (manage with --status / --stop)")
 	stop := fs.Bool("stop", false, "stop the backgrounded server")
 	status := fs.Bool("status", false, "report whether a backgrounded server is running")
@@ -44,6 +47,7 @@ func cmdWeb(args []string) int {
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
+	allowEdit := *edit && !*readOnly
 
 	switch {
 	case *stop:
@@ -51,17 +55,17 @@ func cmdWeb(args []string) int {
 	case *status:
 		return webStatus()
 	case *detach:
-		return webDetach(*host, *port, *edit)
+		return webDetach(*host, *port, allowEdit)
 	}
 
 	// The detached child records its real URL in the PID file once it's bound.
 	var onReady func(string)
 	if *detached {
 		onReady = func(url string) {
-			_ = writeWebProc(&webProc{PID: os.Getpid(), URL: url, Edit: *edit, Started: time.Now().Format(time.RFC3339)})
+			_ = writeWebProc(&webProc{PID: os.Getpid(), URL: url, Edit: allowEdit, Started: time.Now().Format(time.RFC3339)})
 		}
 	}
-	if err := web.Serve(Version, fmt.Sprintf("%s:%d", *host, *port), *edit, onReady); err != nil {
+	if err := web.Serve(Version, fmt.Sprintf("%s:%d", *host, *port), allowEdit, onReady); err != nil {
 		return fail(err)
 	}
 	return 0

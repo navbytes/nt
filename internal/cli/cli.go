@@ -260,7 +260,7 @@ USAGE
   nt hook                     sync a Claude Code TodoWrite event (PostToolUse hook)
   nt mcp                      run the MCP server (stdio) — typed tools for agents
   nt mcp install [--client]   register nt with an AI client (claude-code|claude-desktop)
-  nt web [--port N] [--edit]  browse/read notes in a browser (localhost; --edit to write)
+  nt web [--port N] [--edit]  browse notes in a browser (localhost; read-only unless --edit or [web] edit)
   nt web --detach             run the viewer in the background (--status / --stop to manage)
 
 ADD/UPDATE FLAGS

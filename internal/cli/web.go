@@ -82,6 +82,19 @@ func runningWebProc() *webProc {
 	return p
 }
 
+// detachChildArgs builds the argv for the re-exec'd detached child. It passes
+// the parent's *resolved* edit decision explicitly — --edit or --read-only — so
+// the child can't re-derive a different default from [web] edit in config (which
+// it re-reads). Without forcing --read-only, `--detach --read-only` over an
+// edit-config store would wrongly come up editable.
+func detachChildArgs(host string, port int, edit bool) []string {
+	args := []string{"web", "--host", host, "--port", strconv.Itoa(port), "--" + detachedFlag}
+	if edit {
+		return append(args, "--edit")
+	}
+	return append(args, "--read-only")
+}
+
 // webDetach re-execs nt as a background server detached from this terminal,
 // redirecting its output to $NT_DIR/web.log. The child writes the PID file with
 // its real URL once bound (see cmdWeb's onReady).
@@ -104,11 +117,7 @@ func webDetach(host string, port int, edit bool) int {
 	if err != nil {
 		return fail(err)
 	}
-	args := []string{"web", "--host", host, "--port", strconv.Itoa(port), "--" + detachedFlag}
-	if edit {
-		args = append(args, "--edit")
-	}
-	cmd := exec.Command(exe, args...)
+	cmd := exec.Command(exe, detachChildArgs(host, port, edit)...)
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = nil, logf, logf
 	cmd.SysProcAttr = detachAttr()
 	if err := cmd.Start(); err != nil {

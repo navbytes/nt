@@ -4,12 +4,21 @@ NT_INSTALL_DIR ?= $(HOME)/.local/bin
 INSTALL_DIR    := $(NT_INSTALL_DIR)
 LDFLAGS        := -s -w -X main.version=$(VERSION)
 
-.PHONY: build install uninstall test vet fmt render clean release snapshot desktop desktop-build web-build web-dev web-check web-types
+.PHONY: build install uninstall test vet fmt render clean release snapshot desktop desktop-build web web-stop web-build web-dev web-check web-types
 
 TYGO := github.com/gzuidhof/tygo@v0.2.21
 
 build:
 	go build -ldflags "$(LDFLAGS)" -o $(BINARY) .
+
+# Start the web UI in the background with editing enabled, over your real store
+# ($NT_DIR). Equivalent to `nt web --edit --detach`; stop it with `make web-stop`.
+web: build
+	./$(BINARY) web --edit --detach
+
+# Stop the backgrounded web UI (`nt web --stop`).
+web-stop: build
+	./$(BINARY) web --stop
 
 # --- Svelte SPA (internal/web/frontend) --------------------------------------
 # The built bundle is committed (internal/web/frontend/dist) so `go build` /
