@@ -90,6 +90,7 @@ type Model struct {
 	grp           groupMode
 	showDone      bool
 	showBlocked   bool
+	showArchived  bool // notes tab: reveal archived (retired) notes
 
 	tasks     []*task.Task
 	notes     []*note.Note
@@ -248,6 +249,9 @@ func (m *Model) storeSignature() uint64 {
 		_, _ = h.Write([]byte{0})
 		_, _ = io.WriteString(h, n.Body)
 		_, _ = h.Write([]byte{0})
+		if n.Archived { // so an archive flip (here or via CLI/web/MCP) triggers a rebuild
+			_, _ = h.Write([]byte{2})
+		}
 	}
 	return h.Sum64()
 }
@@ -269,6 +273,9 @@ func (m *Model) rebuild() {
 	needle := strings.ToLower(strings.TrimSpace(m.filter))
 	m.notesView = m.notesView[:0]
 	for _, n := range m.notes {
+		if n.Archived && !m.showArchived {
+			continue // retired notes hide until '.' reveals them
+		}
 		if m.scopeTag != "" && !contains(n.Tags, m.scopeTag) {
 			continue
 		}

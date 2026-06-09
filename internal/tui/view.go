@@ -605,12 +605,23 @@ func (m *Model) notesList(width, h int) string {
 		if len(n.Tags) > 0 {
 			tags = "  @" + strings.Join(n.Tags, " @")
 		}
-		if i == m.cursor {
+		// Archived notes only appear with the toggle on; mark them so they read as
+		// retired amid the active ones (· is a single cell — width-safe).
+		content := prefix + n.Title + tags
+		if n.Archived {
+			content += "  ·archived"
+		}
+		switch {
+		case i == m.cursor:
 			// selRow truncates plain content itself; "▤ " glyph leads the body.
-			lines = append(lines, selRow("▤ "+prefix+n.Title+tags, width, false))
-		} else {
+			lines = append(lines, selRow("▤ "+content, width, false))
+		case n.Archived:
+			// Recess the whole row (no tag styling) so it sits behind the working set.
+			body := truncate(content, width-5)
+			lines = append(lines, "   "+stDim.Render("▤ "+body))
+		default:
 			// Budget the content after the "   ▤ " gutter (3 pad + glyph + space).
-			body := truncate(prefix+n.Title+tags, width-5)
+			body := truncate(content, width-5)
 			row := stDim.Render("▤") + " " + styleNoteRow(body, prefix, tags)
 			lines = append(lines, "   "+row)
 		}
@@ -910,7 +921,7 @@ func (m *Model) helpView() string {
 			{"esc", "clear marks → filter → scope"},
 		}},
 		{"edit (acts on marks if any, else current)", [][2]string{
-			{"x  or  dd", "toggle done"}, {"s", "toggle doing"}, {"X", "delete (confirms; u to undo)"},
+			{"x  or  dd", "toggle done · on a note: archive / restore"}, {"s", "toggle doing"}, {"X", "delete (confirms; u to undo)"},
 			{"a / A", "add task / note"},
 			{"r", "rename"}, {"e / E", "edit in $EDITOR"}, {"p", "cycle priority"},
 			{"D", "set due date"}, {"t / T", "add / remove tag"},
@@ -925,7 +936,7 @@ func (m *Model) helpView() string {
 			{"v", "cycle grouping (date→project→tag)"},
 			{"‹ ›", "resize the list/detail split (or drag the divider)"},
 			{"ctrl+l", "lock / unlock (read-only: blocks all writes)"},
-			{".", "show / hide done"}, {"b", "show / hide blocked"},
+			{".", "show / hide done · on the notes tab: archived"}, {"b", "show / hide blocked"},
 			{"?", "this help"}, {"q", "back out one level, then quit"},
 		}},
 	}
