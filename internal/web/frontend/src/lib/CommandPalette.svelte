@@ -25,7 +25,6 @@
     { label: "Activity", url: "/activity", kind: "go" },
     { label: "Graph", url: "/graph", kind: "go" },
     { label: "Tags", url: "/tags", kind: "go" },
-    { label: "Orphans", url: "/orphans", kind: "go" },
   ];
 
   function toggleTheme() {

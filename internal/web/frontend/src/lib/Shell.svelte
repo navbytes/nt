@@ -12,7 +12,6 @@
   import Activity from "../routes/Activity.svelte";
   import Search from "../routes/Search.svelte";
   import Tags from "../routes/Tags.svelte";
-  import Orphans from "../routes/Orphans.svelte";
   import Graph from "../routes/Graph.svelte";
   import Journal from "../routes/Journal.svelte";
   import Notes from "../routes/Notes.svelte";
@@ -114,8 +113,6 @@
         {/key}
       {:else if path === "/tags"}
         <Tags />
-      {:else if path === "/orphans"}
-        <Orphans />
       {:else if path === "/graph"}
         {#key loc.query.get("focus") ?? ""}
           <Graph focus={loc.query.get("focus") ?? ""} />

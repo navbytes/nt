@@ -42,7 +42,6 @@
   const lenses = [
     { href: "/activity", label: "Activity" },
     { href: "/tags", label: "Tags" },
-    { href: "/orphans", label: "Orphans" },
   ];
 </script>
 
