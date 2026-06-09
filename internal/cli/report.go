@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -13,6 +14,7 @@ import (
 	"github.com/navbytes/nt/internal/note"
 	"github.com/navbytes/nt/internal/search"
 	"github.com/navbytes/nt/internal/task"
+	"github.com/navbytes/nt/internal/ulid"
 )
 
 // Read/report commands: the non-mutating verbs that list, query, and render
@@ -629,4 +631,134 @@ func cmdLog(args []string) int {
 		fmt.Printf("  ✓ %s  %s%s\n", shortID(t.ID()), t.Text, src)
 	}
 	return 0
+}
+
+// cmdReview is the weekly-review digest (T7): it surfaces what needs attention —
+// overdue tasks, ones that have languished, ones with no due date, and projects
+// where every open task is blocked (no next action). Read-only.
+func cmdReview(args []string) int {
+	fs := flag.NewFlagSet("review", flag.ContinueOnError)
+	staleDays := fs.Int("stale", 14, "flag open tasks older than N days as stale")
+	asJSON := fs.Bool("json", false, "machine-readable output")
+	flags, _ := splitArgs(args, map[string]bool{"json": true})
+	if err := fs.Parse(flags); err != nil {
+		return 2
+	}
+	e, ok := engine()
+	if !ok {
+		return 1
+	}
+	d, err := e.Read()
+	if err != nil {
+		return fail(err)
+	}
+	all := d.Tasks()
+	idx := indexMap(all)
+	blocked := task.BlockedIDs(all)
+	today := mutate.Today()
+
+	var overdue, stale, undated []*task.Task
+	seen := map[string]bool{}
+	put := func(set *[]*task.Task, t *task.Task) { *set = append(*set, t); seen[t.ID()] = true }
+
+	// Overdue: actionable, past due.
+	for _, t := range all {
+		if t.Done || isFutureStart(t, today) {
+			continue
+		}
+		if due := dateparse.DatePart(t.Due()); due != "" && due < today {
+			put(&overdue, t)
+		}
+	}
+	// Stale: actionable, not already overdue, not in progress, older than the threshold.
+	for _, t := range all {
+		if t.Done || seen[t.ID()] || isFutureStart(t, today) || t.State() == "doing" {
+			continue
+		}
+		if ct, ok := ulid.Time(t.ID()); ok && int(time.Since(ct).Hours()/24) >= *staleDays {
+			put(&stale, t)
+		}
+	}
+	// Undated: actionable, no due date, not already shown.
+	for _, t := range all {
+		if t.Done || seen[t.ID()] || isFutureStart(t, today) {
+			continue
+		}
+		if t.Due() == "" {
+			put(&undated, t)
+		}
+	}
+	stuck := stuckProjects(all, blocked, today)
+
+	if *asJSON {
+		return printJSON(reviewJSON{
+			Overdue:       tasksToJSON(overdue, idx),
+			Stale:         tasksToJSON(stale, idx),
+			Undated:       tasksToJSON(undated, idx),
+			StuckProjects: stuck,
+		})
+	}
+
+	if len(overdue)+len(stale)+len(undated)+len(stuck) == 0 {
+		fmt.Println("review: nothing needs attention — you're on top of it ✨")
+		return 0
+	}
+	section := func(title string, ts []*task.Task) {
+		if len(ts) == 0 {
+			return
+		}
+		sortTasks(ts, "urgency")
+		fmt.Printf("\n%s (%d)\n", title, len(ts))
+		for _, t := range ts {
+			fmt.Println("  " + formatRow(t, idx[t], blocked[t.ID()] && !t.Done))
+		}
+	}
+	section("Overdue", overdue)
+	section(fmt.Sprintf("Stale — open ≥ %dd, no progress", *staleDays), stale)
+	section("No due date — schedule or drop", undated)
+	if len(stuck) > 0 {
+		fmt.Printf("\nStuck projects — every open task is blocked (%d)\n", len(stuck))
+		for _, p := range stuck {
+			fmt.Println("  +" + p)
+		}
+	}
+	return 0
+}
+
+// stuckProjects returns projects whose every actionable (open, not deferred) task
+// is dependency-blocked — i.e. there is no next action to take on them.
+func stuckProjects(tasks []*task.Task, blocked map[string]bool, today string) []string {
+	type stat struct{ open, blockedOpen int }
+	stats := map[string]*stat{}
+	for _, t := range tasks {
+		if t.Done || isFutureStart(t, today) {
+			continue
+		}
+		for _, p := range t.Projects() {
+			s := stats[p]
+			if s == nil {
+				s = &stat{}
+				stats[p] = s
+			}
+			s.open++
+			if blocked[t.ID()] {
+				s.blockedOpen++
+			}
+		}
+	}
+	var out []string
+	for p, s := range stats {
+		if s.open > 0 && s.open == s.blockedOpen {
+			out = append(out, p)
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
+type reviewJSON struct {
+	Overdue       []taskJSON `json:"overdue"`
+	Stale         []taskJSON `json:"stale"`
+	Undated       []taskJSON `json:"undated"`
+	StuckProjects []string   `json:"stuckProjects"`
 }
