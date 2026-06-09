@@ -65,7 +65,8 @@
         {#if !dense && n.preview}<p class="notecard__preview">{n.preview}</p>{/if}
         {#if n.tags && n.tags.length}
           <div class="notecard__tags">
-            {#each n.tags as t (t)}<span class="chip">#{t}</span>{/each}
+            {#each n.tags.slice(0, 4) as t (t)}<span class="chip">#{t}</span>{/each}
+            {#if n.tags.length > 4}<span class="chip chip--more" title={n.tags.join(" ")}>+{n.tags.length - 4}</span>{/if}
           </div>
         {/if}
       </a>

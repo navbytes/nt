@@ -183,7 +183,7 @@
       const ty = y + r + 2 / scale;
       // Long task labels (an agent's whole sentence) sprawl across the canvas —
       // draw a short title; the full text stays in the hover tooltip (nodeLabel).
-      const label = displayTitle(n.title, 28);
+      const label = displayTitle(n.title, 20);
       // halo for legibility over links/nodes
       ctx.lineWidth = 3 / scale;
       ctx.strokeStyle = cssBg;

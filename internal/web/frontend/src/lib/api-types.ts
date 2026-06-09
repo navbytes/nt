@@ -61,6 +61,7 @@ export interface Task {
   project?: string;
   tags?: string[];
   blocker?: string;
+  recur?: boolean; // true when the task repeats (todo.txt rec:)
 }
 /**
  * TaskGroup is tasks bucketed by status (open/doing/blocked/done).

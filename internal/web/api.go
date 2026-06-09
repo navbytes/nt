@@ -74,7 +74,7 @@ const maxSearchResults = 50
 func toTask(t taskRow) apitypes.Task {
 	return apitypes.Task{
 		ID: t.ID, Text: t.Text, Status: t.Status, Due: t.Due,
-		Source: t.Source, Project: t.Project, Tags: t.Tags, Blocker: t.Blocker,
+		Source: t.Source, Project: t.Project, Tags: t.Tags, Blocker: t.Blocker, Recur: t.Recur,
 	}
 }
 
@@ -217,9 +217,15 @@ func (s *Server) apiNotesGrid(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, apitypes.NotesGrid{Notes: cards, Folders: folderList})
 }
 
+// previewWikilink matches a [[target]] so the card preview shows the link text,
+// not the raw bracket syntax. nt wikilinks have no alias form (links.go), so the
+// inner string is the display text.
+var previewWikilink = regexp.MustCompile(`\[\[([^\]]+)\]\]`)
+
 // notePreview returns a short plain-text snippet of a note body for a card: it
 // drops a leading "# H1" (usually the title, already shown), strips simple
-// markdown markers, collapses whitespace, and caps the length.
+// markdown markers and [[wikilink]] brackets, collapses whitespace, and caps the
+// length.
 func notePreview(body string) string {
 	const max = 180
 	var b strings.Builder
@@ -240,7 +246,8 @@ func notePreview(body string) string {
 			break
 		}
 	}
-	s := strings.Join(strings.Fields(b.String()), " ")
+	s := previewWikilink.ReplaceAllString(b.String(), "$1") // [[Note]] → Note
+	s = strings.Join(strings.Fields(s), " ")
 	if len(s) > max {
 		s = strings.TrimSpace(s[:max]) + "…"
 	}

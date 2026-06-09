@@ -48,6 +48,7 @@ type Task struct {
 	Project string   `json:"project,omitempty"`
 	Tags    []string `json:"tags,omitempty"`
 	Blocker string   `json:"blocker,omitempty"`
+	Recur   bool     `json:"recur,omitempty"` // true when the task repeats (todo.txt rec:)
 }
 
 // TaskGroup is tasks bucketed by status (open/doing/blocked/done).

@@ -126,6 +126,7 @@
               {/if}
             {/if}
             <span class="row__text" class:done={t.status === "done"} title={t.text}>{t.text}</span>
+            {#if t.recur}<span class="row__recur" title="Recurring task">↻</span>{/if}
             {#if t.status === "doing"}<span class="status-pill status-pill--doing">doing</span>{/if}
             {#if t.status === "blocked"}<span class="status-pill status-pill--blocked" title={t.blocker ? `blocked by: ${t.blocker}` : "blocked"}>⊘ blocked</span>{/if}
             {#if t.project}<a class="chip" href={`/search?tag=${encodeURIComponent(t.project)}`}>+{t.project}</a>{/if}

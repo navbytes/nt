@@ -6,7 +6,7 @@
   --bg-inset: #efece4;
   --fg: #2b2a26;
   --fg-soft: #4a4843;
-  --muted: #87837a;
+  --muted: #6e6a61; /* darkened for WCAG AA (≥4.5:1 on --bg); was #87837a (~3.5:1) */
   --border: #e2ddd2;
   --border-soft: #ece8df;
   --accent: #5a52d6;
@@ -26,7 +26,7 @@
     --bg-inset: #1f2335;
     --fg: #c0caf5;
     --fg-soft: #a9b1d6;
-    --muted: #565f89;
+    --muted: #7882a6;
     --border: #2a2b3c;
     --border-soft: #232431;
     --accent: #7aa2f7;
@@ -41,7 +41,7 @@
   --bg-inset: #1f2335;
   --fg: #c0caf5;
   --fg-soft: #a9b1d6;
-  --muted: #565f89;
+  --muted: #7882a6;
   --border: #2a2b3c;
   --border-soft: #232431;
   --accent: #7aa2f7;
@@ -322,6 +322,21 @@ code {
   gap: 10px;
   padding: 5px 0;
   border-bottom: 1px solid var(--border-soft);
+  min-width: 0; /* as a grid item, allow it to shrink so .row__text can ellipsize —
+                   otherwise a long agent-written task blows the row past the viewport
+                   and pushes priority/project/tags/due/actions off-screen (audit). */
+}
+.row > .chip,
+.row > .row__due,
+.row > .src,
+.row > .status-pill,
+.row > .row__recur,
+.row > .row__actions {
+  flex: none; /* metadata stays at intrinsic size; the title (flex:1) truncates against it */
+}
+.row__recur {
+  color: var(--muted);
+  font-size: 13px;
 }
 .check {
   align-self: center;
@@ -366,6 +381,9 @@ code {
   background: var(--bg-inset);
   border-radius: 4px;
   padding: 1px 7px;
+}
+.chip--more {
+  color: var(--muted); /* the "+N" overflow chip on capped tag lists */
 }
 .src,
 .kind {
