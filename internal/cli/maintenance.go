@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/navbytes/nt/internal/aisync"
 	"github.com/navbytes/nt/internal/links"
@@ -20,10 +21,26 @@ import (
 // rename/move, doctor, git-init, and the Claude Code TodoWrite hook. Split out of
 // commands.go to keep that file focused on the task/note verbs (E6).
 
+// cmdArchive does double duty: `nt archive <note…> [--undo]` retires (or
+// restores) notes via a frontmatter flag, while `nt archive` with no note
+// archives completed tasks to done.txt. They're the same idea — move finished
+// work out of the active view — on the two entity types.
 func cmdArchive(args []string) int {
+	fs := flag.NewFlagSet("archive", flag.ContinueOnError)
+	undo := fs.Bool("undo", false, "unarchive the given note(s) instead")
+	flags, handles := splitArgs(args, map[string]bool{"undo": true})
+	if err := fs.Parse(flags); err != nil {
+		return 2
+	}
 	e, ok := engine()
 	if !ok {
 		return 1
+	}
+	if len(handles) > 0 {
+		return archiveNotes(e, handles, *undo)
+	}
+	if *undo {
+		return fail(fmt.Errorf("archive: --undo needs a note handle (task archive isn't undoable; use `nt undo`)"))
 	}
 	n, err := e.Archive()
 	if err != nil {
@@ -34,6 +51,32 @@ func cmdArchive(args []string) int {
 		return 0
 	}
 	fmt.Printf("archived %d task(s) → done.txt (not undoable)\n", n)
+	return 0
+}
+
+// archiveNotes flips the archived frontmatter flag on each note. Archived notes
+// stay on disk (links intact, still greppable) but drop out of the active views
+// and search — a soft, reversible retire.
+func archiveNotes(e *mutate.Engine, handles []string, unarchive bool) int {
+	notes, _ := note.List(e.S)
+	count := 0
+	for _, h := range handles {
+		n, err := resolveNote(notes, h)
+		if err != nil {
+			return fail(fmt.Errorf("archive: %w", err))
+		}
+		n.Archived = !unarchive
+		n.Updated = time.Now().Format(time.RFC3339)
+		if err := n.Save(); err != nil {
+			return fail(err)
+		}
+		count++
+	}
+	verb := "archived"
+	if unarchive {
+		verb = "unarchived"
+	}
+	fmt.Printf("%s %d note(s)\n", verb, count)
 	return 0
 }
 

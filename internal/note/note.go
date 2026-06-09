@@ -18,17 +18,18 @@ import (
 
 // Note is a parsed markdown note.
 type Note struct {
-	Path    string
-	Rel     string // path relative to notes/ (slash-separated), set by List
-	ID      string
-	Title   string
-	Tags    []string
-	Aliases []string
-	Source  string
-	Created string
-	Updated string // stamped when nt rewrites the note (retag, --field)
-	Body    string
-	Extra   []string // raw frontmatter lines for keys nt doesn't model (preserved verbatim)
+	Path     string
+	Rel      string // path relative to notes/ (slash-separated), set by List
+	ID       string
+	Title    string
+	Tags     []string
+	Aliases  []string
+	Source   string
+	Created  string
+	Updated  string // stamped when nt rewrites the note (retag, --field)
+	Archived bool   // frontmatter archived: true — retired from active views, still on disk
+	Body     string
+	Extra    []string // raw frontmatter lines for keys nt doesn't model (preserved verbatim)
 }
 
 // Slug derives a filesystem-safe slug from a title, falling back to a timestamp
@@ -158,6 +159,9 @@ func (n *Note) Save() error {
 	if n.Updated != "" {
 		fmt.Fprintf(&b, "updated: %s\n", n.Updated)
 	}
+	if n.Archived {
+		b.WriteString("archived: true\n")
+	}
 	for _, line := range n.Extra { // unknown keys (Obsidian properties), verbatim
 		b.WriteString(line)
 		b.WriteByte('\n')
@@ -233,6 +237,8 @@ func parseFrontmatter(fm string, n *Note) {
 			n.Created = unquote(val)
 		case "updated":
 			n.Updated = unquote(val)
+		case "archived":
+			n.Archived = unquote(val) == "true"
 		case "title":
 			if v := unquote(val); v != "" {
 				n.Title = v
@@ -328,6 +334,19 @@ func humanizeFilename(path string) string {
 // .trash/, .git/) and non-.md files are skipped. Each note's Rel (path relative
 // to notes/, slash-separated) is set for link resolution; results are sorted by
 // Rel for deterministic ordering.
+// Active drops archived notes — the working set, for views/search that should
+// hide retired notes. List itself returns everything (archived included) so
+// link-rewriting and the archived view still see them.
+func Active(ns []*Note) []*Note {
+	out := ns[:0:0]
+	for _, n := range ns {
+		if !n.Archived {
+			out = append(out, n)
+		}
+	}
+	return out
+}
+
 func List(s *store.Store) ([]*Note, error) {
 	dir := s.NotesDir()
 	var out []*Note
