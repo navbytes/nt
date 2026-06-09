@@ -444,6 +444,25 @@ func TestAPINoteMove(t *testing.T) {
 	}
 }
 
+func TestAPIReview(t *testing.T) {
+	s := newTestServer(t)
+	addTask(t, s, "pay invoice due:2020-01-01") // long overdue
+	addTask(t, s, "vague idea")                 // no due date
+
+	_, body := get(t, s, "/api/review")
+	rev := decode[apitypes.ReviewResponse](t, body)
+
+	if len(rev.Overdue) != 1 || !strings.Contains(rev.Overdue[0].Text, "pay invoice") {
+		t.Errorf("overdue bucket should hold the past-due task, got %+v", rev.Overdue)
+	}
+	if len(rev.Undated) != 1 || !strings.Contains(rev.Undated[0].Text, "vague idea") {
+		t.Errorf("undated bucket should hold the no-due task, got %+v", rev.Undated)
+	}
+	if rev.StaleDays != 14 {
+		t.Errorf("staleDays = %d, want 14", rev.StaleDays)
+	}
+}
+
 func TestAPINotesGrid(t *testing.T) {
 	s := newTestServer(t)
 	long := strings.Repeat("alpha beta gamma ", 40) // ~680 chars, forces truncation

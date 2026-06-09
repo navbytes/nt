@@ -62,6 +62,16 @@ type TasksResponse struct {
 	Groups []TaskGroup `json:"groups"`
 }
 
+// ReviewResponse is GET /api/review — the weekly-triage buckets (what needs a
+// decision), mirroring `nt review`.
+type ReviewResponse struct {
+	Overdue       []Task   `json:"overdue"`
+	Stale         []Task   `json:"stale"`
+	Undated       []Task   `json:"undated"`
+	StuckProjects []string `json:"stuckProjects"`
+	StaleDays     int      `json:"staleDays"`
+}
+
 // Backlink is one "Linked from" entry on a note page.
 type Backlink struct {
 	Title  string `json:"title"`

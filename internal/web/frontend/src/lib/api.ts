@@ -9,6 +9,7 @@ import type {
   NoteView,
   RawNote,
   TasksResponse,
+  ReviewResponse,
   ActivityResponse,
   SearchResponse,
   TagsResponse,
@@ -59,6 +60,7 @@ export const api = {
   notesGrid: () => getJSON<NotesGrid>("/api/notes/grid"),
   note: (handle: string) => getJSON<NoteView>(`/api/notes/${encodeURIComponent(handle)}`),
   tasks: () => getJSON<TasksResponse>("/api/tasks"),
+  review: () => getJSON<ReviewResponse>("/api/review"),
   activity: (source = "") =>
     getJSON<ActivityResponse>(
       "/api/activity" + (source ? `?source=${encodeURIComponent(source)}` : ""),

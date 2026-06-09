@@ -8,6 +8,7 @@
   import Home from "../routes/Home.svelte";
   import NoteView from "../routes/NoteView.svelte";
   import Tasks from "../routes/Tasks.svelte";
+  import Review from "../routes/Review.svelte";
   import Activity from "../routes/Activity.svelte";
   import Search from "../routes/Search.svelte";
   import Tags from "../routes/Tags.svelte";
@@ -97,6 +98,8 @@
         {/key}
       {:else if path === "/tasks"}
         <Tasks canEdit={$stateQ.data?.canEdit ?? false} />
+      {:else if path === "/review"}
+        <Review />
       {:else if path === "/notes"}
         <Notes />
       {:else if path === "/journal"}
