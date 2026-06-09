@@ -177,3 +177,37 @@ func Priority(s string) (byte, bool) {
 	}
 	return 0, false
 }
+
+// Duration parses a human time estimate/elapsed into whole minutes: "90m", "2h",
+// "1h30m", "1.5h", or a bare integer (minutes). ok is false on an unparseable or
+// negative value. Used for task est:/spent: tracking (T6).
+func Duration(s string) (int, bool) {
+	s = strings.TrimSpace(strings.ToLower(s))
+	if s == "" {
+		return 0, false
+	}
+	if n, ok := atoi(s); ok { // bare integer = minutes
+		return n, true
+	}
+	d, err := time.ParseDuration(s)
+	if err != nil || d < 0 {
+		return 0, false
+	}
+	return int(d.Minutes()), true
+}
+
+// FmtDuration renders whole minutes as a compact "1h30m" / "2h" / "45m".
+func FmtDuration(mins int) string {
+	if mins <= 0 {
+		return "0m"
+	}
+	h, m := mins/60, mins%60
+	switch {
+	case h == 0:
+		return fmt.Sprintf("%dm", m)
+	case m == 0:
+		return fmt.Sprintf("%dh", h)
+	default:
+		return fmt.Sprintf("%dh%dm", h, m)
+	}
+}

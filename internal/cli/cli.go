@@ -50,6 +50,10 @@ func Run(args []string) int {
 		return cmdDone(rest)
 	case "skip":
 		return cmdSkip(rest)
+	case "start":
+		return cmdStart(rest)
+	case "stop":
+		return cmdStop(rest)
 	case "update", "up":
 		return cmdUpdate(rest)
 	case "search", "q":
@@ -234,6 +238,7 @@ USAGE
   nt log [--since|--days N]    completed tasks, newest first (the Logbook)
   nt done <id|task:N>         mark a task done       (alias: do)
   nt skip <id|task:N>         move a recurring task to its next occurrence
+  nt start <id…> / stop <id…> time-track a task (logs elapsed into spent:)
   nt update <id…> [flags]     change one or more tasks (bulk)  (alias: up)
   nt list --tree              show sub-tasks indented under their parent
   nt search "query" [--tag T]  full-text + tag search  (alias: q)
