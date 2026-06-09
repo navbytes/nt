@@ -8,7 +8,7 @@ This roadmap synthesizes four expert audits (web UX, TUI, task-management produc
 
 The original gap — "nt is a task *list*, not a task *manager*" — is **closed**, and so is essentially the rest of the audit backlog. Across v0.1→v0.6 the planner (start/defer dates, Today/Agenda, recurrence, sub-tasks, dependency-cycle detection, time-of-day, full A–Z priority, time tracking, weekly review), the web app (CodeMirror editor, ranked search, daily-notes journal, mobile/PWA, command palette, a11y, force-graph, notes grid, move-between-folders), the TUI (command palette, vim counts, fuzzy jump, in-pane capture, redo, light theme), and the infrastructure (incremental read-model, in-memory search, shared query/DTO layer, config file, bounded payloads, god-file splits, cross-platform file locking) all shipped over the same plain-text store.
 
-What's left is a **short polish/scale tail** — no remaining item is load-bearing for the core thesis. The one genuinely unstarted *feature* is **T4** (saved smart views); the rest are partial refinements (tasks in web search, web property editing, fuzzy filter ranking, more concurrency tests, TUI self-write de-flicker) and one deliberately-deferred scale item (**E2** persisted index, which only pays off past ~10k notes).
+What's left is a **short polish/scale tail** — no remaining item is load-bearing for the core thesis: partial refinements (tasks in web search, web property editing, fuzzy filter ranking, more concurrency tests, TUI self-write de-flicker) and one deliberately-deferred scale item (**E2** persisted index, which only pays off past ~10k notes). With **T4** (saved smart views) now shipped, there is no net-new *feature* left on the backlog.
 
 ## ✅ Shipped
 
@@ -27,6 +27,7 @@ What's left is a **short polish/scale tail** — no remaining item is load-beari
 - **P2** start/defer `t:` + `nt today` / `nt agenda` + hide-future-start
 - **T1** sub-tasks: `parent:` read, `nt list --tree`, progress rollup
 - **T2** recurrence correctness (strict vs floating, roll-forward, month-end clamp) + `nt skip`
+- **T4** saved smart views — `nt view save/recall/list/rm`, persisted to `$NT_DIR/views.json` via a shared `internal/view` package (a saved view filters/sorts identically to the equivalent `nt list` flags)
 - **T5** bulk ops — `nt update`, `nt tag` (retag), `nt rm`
 - **T6** time tracking — `est:` estimates + `nt start`/`nt stop` logging elapsed into `spent:`
 - **T7** weekly review — `nt review`: overdue, stale, undated, stuck projects
@@ -71,7 +72,6 @@ What's left is a **short polish/scale tail** — no remaining item is load-beari
 
 | # | Item | Surface | Effort | Status |
 |---|------|---------|--------|--------|
-| **T4** | saved smart views (`nt view save/recall`; presets) | core/cli | S/M | next — in progress |
 | W2 | add **tasks** to search results (notes are ranked already) | web | S | partial |
 | W8 | frontmatter/properties **editing** in the web editor (backlinks-while-editing done) | web | M | partial |
 | U1 | rank the live filter fuzzily, not by substring (filter itself shipped) | tui | S | partial |
@@ -81,9 +81,9 @@ What's left is a **short polish/scale tail** — no remaining item is load-beari
 
 ## Suggested sequencing for what's left
 
-1. **T4 saved views** — the one remaining feature; pairs naturally with the config file (a `[views]` section / views file). Mirror across CLI → TUI/web (or defer a surface explicitly).
-2. **Search + editor polish** — W2 (tasks in web search), W8 (web property editing), U1 (fuzzy filter ranking). Small, high-visibility.
-3. **Robustness** — F2 (concurrency stress) and F4 (TUI de-flicker).
+1. **Search + editor polish** — W2 (tasks in web search), W8 (web property editing), U1 (fuzzy filter ranking). Small, high-visibility.
+2. **Robustness** — F2 (concurrency stress) and F4 (TUI de-flicker).
+3. **Surface the saved views** — T4 ships on the CLI with a surface-agnostic `internal/view` store; the TUI and web can now expose the same saved views (a view picker / palette entries). Optional follow-up.
 4. **Scale, only when needed** — E2 persisted index. Defer until a real >10k-note store shows a cold-start cost.
 
 Each surface change should be mirrored across CLI, TUI, web, and MCP (or explicitly deferred) — ideally via the shared query/DTO layer (E3) — to avoid the drift the core audit flagged.

@@ -34,6 +34,8 @@ func Run(args []string) int {
 		return cmdJournal(rest)
 	case "list", "ls":
 		return cmdList(rest)
+	case "view", "views":
+		return cmdView(rest)
 	case "ready":
 		return cmdReady(rest)
 	case "today":
@@ -230,6 +232,7 @@ USAGE
   nt note "title" [flags]     capture a note (--folder work files it in notes/work/)
   nt journal [--date D]       open today's daily note in $EDITOR  (alias: j)
   nt list [flags]             list tasks            (alias: ls)
+  nt view <name>              run a saved view; save/list/rm to manage them
   nt ready [flags]            open, unblocked tasks by urgency — start here
   nt today [flags]            overdue + due-today + just-started, grouped
   nt agenda [--days N]        the next N days, grouped Overdue/Today/Upcoming

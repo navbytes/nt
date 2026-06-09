@@ -75,6 +75,7 @@ text, forever readable, and directly writable by an AI agent without an integrat
 ├── tasks.txt                 # active tasks — todo.txt format, one line per task
 ├── done.txt                  # archived completed tasks (via `nt archive`)
 ├── undo.jsonl                # append-only undo transaction journal (§6.3)
+├── views.json                # saved smart views — `nt view save/recall` (optional)
 ├── tasks.txt.lock            # advisory lock file (§6.4)
 ├── notes/
 │   ├── jwt-token-lifetime.md
