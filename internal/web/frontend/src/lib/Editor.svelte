@@ -7,6 +7,9 @@
 
   const qc = useQueryClient();
   const rawQ = createQuery({ queryKey: ["raw", handle], queryFn: () => api.raw(handle) });
+  // The note view (cached from the page) carries backlinks + task refs — keep
+  // them visible while editing so you have context for what links here (W8).
+  const noteQ = createQuery({ queryKey: ["note", handle], queryFn: () => api.note(handle) });
   // Cached note index powers [[ wikilink autocomplete in the editor.
   const notesQ = createQuery({ queryKey: ["notes"], queryFn: api.notes });
 
@@ -70,6 +73,20 @@
     <span class="kbd">⌘/Ctrl+S</span>
     {#if error}<span class="error">{error}</span>{/if}
   </div>
+
+  {#if $noteQ.data && ($noteQ.data.backlinks.length > 0 || $noteQ.data.taskRefs.length > 0)}
+    <div class="editor__context">
+      {#if $noteQ.data.backlinks.length > 0}
+        <span class="editor__context-label">Linked from</span>
+        {#each $noteQ.data.backlinks as b (b.url)}
+          <a class="editor__chip" href={b.url} target="_blank" rel="external" title={b.text}>{b.title}</a>
+        {/each}
+      {/if}
+      {#if $noteQ.data.taskRefs.length > 0}
+        <span class="editor__context-label">{$noteQ.data.taskRefs.length} task{$noteQ.data.taskRefs.length > 1 ? "s" : ""}</span>
+      {/if}
+    </div>
+  {/if}
 
   {#if $rawQ.isPending}
     <p class="muted">Loading…</p>
