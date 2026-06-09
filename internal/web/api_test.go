@@ -408,3 +408,44 @@ func TestAPINoteMove(t *testing.T) {
 		t.Errorf("traversal folder should 400, got %d", code)
 	}
 }
+
+func TestAPINotesGrid(t *testing.T) {
+	s := newTestServer(t)
+	long := strings.Repeat("alpha beta gamma ", 40) // ~680 chars, forces truncation
+	note.Create(s.eng.S, "Auth", "# Auth\n\n- "+long, []string{"spec"}, "cli", "work")
+	note.Create(s.eng.S, "Standup", "# Standup\n\nnotes", nil, "cli", "daily")
+	note.Create(s.eng.S, "Loose", "# Loose\n\nat the root", nil, "cli", "")
+
+	_, body := get(t, s, "/api/notes/grid")
+	grid := decode[apitypes.NotesGrid](t, body)
+
+	if len(grid.Notes) != 3 {
+		t.Fatalf("want 3 cards, got %d: %+v", len(grid.Notes), grid.Notes)
+	}
+	// Distinct folders only, sorted; the root note contributes none.
+	if got := strings.Join(grid.Folders, ","); got != "daily,work" {
+		t.Errorf("folders = %q, want daily,work", got)
+	}
+
+	byTitle := map[string]apitypes.NoteCard{}
+	for _, c := range grid.Notes {
+		byTitle[c.Title] = c
+	}
+	auth := byTitle["Auth"]
+	if auth.Folder != "work" || auth.Handle == "" || auth.URL == "" {
+		t.Errorf("Auth card wrong: %+v", auth)
+	}
+	if len(auth.Tags) != 1 || auth.Tags[0] != "spec" {
+		t.Errorf("Auth tags = %v, want [spec]", auth.Tags)
+	}
+	// Preview skips the "# Auth" heading + list marker, and is capped with an ellipsis.
+	if strings.Contains(auth.Preview, "#") || !strings.HasPrefix(auth.Preview, "alpha beta") {
+		t.Errorf("preview should start at the body text, got %q", auth.Preview)
+	}
+	if !strings.HasSuffix(auth.Preview, "…") || len([]rune(auth.Preview)) > 182 {
+		t.Errorf("long preview should be truncated with …, got %d runes: %q", len([]rune(auth.Preview)), auth.Preview)
+	}
+	if byTitle["Loose"].Folder != "" {
+		t.Errorf("root note folder should be empty, got %q", byTitle["Loose"].Folder)
+	}
+}

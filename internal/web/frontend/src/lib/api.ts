@@ -5,6 +5,7 @@
 import type {
   State,
   NotesIndex,
+  NotesGrid,
   NoteView,
   RawNote,
   TasksResponse,
@@ -55,6 +56,7 @@ async function postForm<T>(path: string, body?: Record<string, string>): Promise
 export const api = {
   state: () => getJSON<State>("/api/state"),
   notes: () => getJSON<NotesIndex>("/api/notes"),
+  notesGrid: () => getJSON<NotesGrid>("/api/notes/grid"),
   note: (handle: string) => getJSON<NoteView>(`/api/notes/${encodeURIComponent(handle)}`),
   tasks: () => getJSON<TasksResponse>("/api/tasks"),
   activity: (source = "") =>

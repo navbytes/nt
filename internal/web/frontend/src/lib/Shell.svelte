@@ -14,6 +14,7 @@
   import Orphans from "../routes/Orphans.svelte";
   import Graph from "../routes/Graph.svelte";
   import Journal from "../routes/Journal.svelte";
+  import Notes from "../routes/Notes.svelte";
   import NotFound from "../routes/NotFound.svelte";
 
   const stateQ = createQuery({ queryKey: ["state"], queryFn: api.state });
@@ -96,6 +97,8 @@
         {/key}
       {:else if path === "/tasks"}
         <Tasks canEdit={$stateQ.data?.canEdit ?? false} />
+      {:else if path === "/notes"}
+        <Notes />
       {:else if path === "/journal"}
         {#key loc.query.get("date") ?? ""}
           <Journal date={loc.query.get("date") ?? ""} canEdit={$stateQ.data?.canEdit ?? false} />
