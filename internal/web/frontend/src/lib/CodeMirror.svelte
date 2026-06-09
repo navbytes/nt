@@ -8,6 +8,7 @@
   import { autocompletion, completionKeymap } from "@codemirror/autocomplete";
   import { tags as t } from "@lezer/highlight";
   import { makeWikilinkSource } from "./cmWikilink";
+  import { slashSource } from "./cmSlash";
   import type { NoteLink } from "./api";
 
   let {
@@ -88,7 +89,7 @@
           EditorView.lineWrapping,
           markdown(),
           syntaxHighlighting(highlight),
-          autocompletion({ override: [wikilinkSource], icons: false }),
+          autocompletion({ override: [wikilinkSource, slashSource], icons: false }),
           theme,
           keymap.of([
             { key: "Mod-s", preventDefault: true, run: () => (latest.onSave(), true) },
