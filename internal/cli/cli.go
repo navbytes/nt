@@ -40,6 +40,8 @@ func Run(args []string) int {
 		return cmdToday(rest)
 	case "agenda":
 		return cmdAgenda(rest)
+	case "review":
+		return cmdReview(rest)
 	case "recall":
 		return cmdRecall(rest)
 	case "log":
@@ -227,6 +229,7 @@ USAGE
   nt ready [flags]            open, unblocked tasks by urgency — start here
   nt today [flags]            overdue + due-today + just-started, grouped
   nt agenda [--days N]        the next N days, grouped Overdue/Today/Upcoming
+  nt review [--stale N]       weekly digest: overdue, stale, undated, stuck projects
   nt recall [flags]           read back prior items (for AI sessions)
   nt log [--since|--days N]    completed tasks, newest first (the Logbook)
   nt done <id|task:N>         mark a task done       (alias: do)
