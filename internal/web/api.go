@@ -58,6 +58,10 @@ func writeJSON(w http.ResponseWriter, v any) {
 // can't be coaxed into a path-traversal — the boundary guard for go/path-injection.
 var safeNoteFolder = regexp.MustCompile(`^[\p{L}\p{N} /_-]+$`)
 
+// maxSearchResults bounds the /api/search payload (E4); the client is told when
+// more matched so it can prompt the user to narrow the query.
+const maxSearchResults = 50
+
 // ---- projections to the wire contract (apitypes) ---------------------------
 // The wire structs live in the apitypes package (the single source tygo turns
 // into TS); these converters project the web package's internal read-model
@@ -309,7 +313,7 @@ func toGraph(g *graphData) apitypes.GraphData {
 	for i, l := range g.Links {
 		links[i] = apitypes.GraphLink{S: l.S, T: l.T}
 	}
-	return apitypes.GraphData{Nodes: nodes, Links: links}
+	return apitypes.GraphData{Nodes: nodes, Links: links, Truncated: g.Truncated}
 }
 
 // apiTags lists the tag vocabulary (note + task tags) with counts, sorted by
@@ -394,7 +398,13 @@ func (s *Server) apiSearch(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	writeJSON(w, apitypes.SearchResponse{Results: results})
+	// Bound the payload: return at most maxSearchResults, flagging when there
+	// are more so the client can say so (E4).
+	truncated := false
+	if len(results) > maxSearchResults {
+		results, truncated = results[:maxSearchResults], true
+	}
+	writeJSON(w, apitypes.SearchResponse{Results: results, Truncated: truncated})
 }
 
 // firstMatchingLine returns the first line of body containing the (already

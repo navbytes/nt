@@ -566,7 +566,11 @@
       onFit={fit}
     />
 
-    {#if allNodes.length > 1500 && view.mode === "global"}
+    {#if $graphQ.data?.truncated && view.mode === "global"}
+      <div class="graph-banner">
+        Showing the {allNodes.length} most-connected notes. Select a node and switch to <strong>Local</strong> to explore the rest.
+      </div>
+    {:else if allNodes.length > 1500 && view.mode === "global"}
       <div class="graph-banner">
         Large graph ({allNodes.length} notes). Select a node and switch to <strong>Local</strong> for a faster, clearer view.
       </div>

@@ -429,9 +429,15 @@ type graphLink struct {
 	T int `json:"t"`
 }
 type graphData struct {
-	Nodes []graphNode `json:"nodes"`
-	Links []graphLink `json:"links"`
+	Nodes     []graphNode `json:"nodes"`
+	Links     []graphLink `json:"links"`
+	Truncated bool        `json:"truncated,omitempty"` // capped to the most-connected nodes (E4)
 }
+
+// maxGraphNodes bounds the /api/graph payload. Past this, only the most-connected
+// nodes (and links between them) are sent, so the force layout stays responsive
+// and the wire payload bounded on very large stores (E4).
+const maxGraphNodes = 600
 
 func buildGraphData(snap *snapshot) *graphData {
 	g := &graphData{}
@@ -529,7 +535,38 @@ func buildGraphData(snap *snapshot) *graphData {
 			}
 		}
 	}
-	return g
+	return capGraph(g)
+}
+
+// capGraph bounds the graph to maxGraphNodes by keeping the highest-degree nodes
+// (the hubs) and only the links between survivors, then reindexes. Degree is
+// final by the time this runs, so the most-connected structure is preserved.
+func capGraph(g *graphData) *graphData {
+	if len(g.Nodes) <= maxGraphNodes {
+		return g
+	}
+	order := make([]int, len(g.Nodes))
+	for i := range order {
+		order[i] = i
+	}
+	sort.SliceStable(order, func(a, b int) bool { return g.Nodes[order[a]].Deg > g.Nodes[order[b]].Deg })
+
+	keep := order[:maxGraphNodes]
+	remap := make(map[int]int, len(keep)) // old index → new index
+	nodes := make([]graphNode, len(keep))
+	for newI, oldI := range keep {
+		remap[oldI] = newI
+		nodes[newI] = g.Nodes[oldI]
+	}
+	var links []graphLink
+	for _, l := range g.Links {
+		if s, ok := remap[l.S]; ok {
+			if t, ok2 := remap[l.T]; ok2 {
+				links = append(links, graphLink{S: s, T: t})
+			}
+		}
+	}
+	return &graphData{Nodes: nodes, Links: links, Truncated: true}
 }
 
 func contains(ss []string, want string) bool {

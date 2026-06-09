@@ -133,7 +133,8 @@ type SearchResult struct {
 
 // SearchResponse is GET /api/search.
 type SearchResponse struct {
-	Results []SearchResult `json:"results"`
+	Results   []SearchResult `json:"results"`
+	Truncated bool           `json:"truncated,omitempty"` // more matched than were returned
 }
 
 // Tag is one entry in the tag vocabulary with its usage count.
@@ -172,8 +173,9 @@ type GraphLink struct {
 
 // GraphData is GET /api/graph — the note↔note wikilink graph.
 type GraphData struct {
-	Nodes []GraphNode `json:"nodes"`
-	Links []GraphLink `json:"links"`
+	Nodes     []GraphNode `json:"nodes"`
+	Links     []GraphLink `json:"links"`
+	Truncated bool        `json:"truncated,omitempty"` // capped to the most-connected nodes (E4)
 }
 
 // CreatedNote is the result of POST /api/notes — the new note's stable handle

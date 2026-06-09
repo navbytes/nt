@@ -158,6 +158,7 @@ export interface SearchResult {
  */
 export interface SearchResponse {
   results: SearchResult[];
+  truncated?: boolean; // more matched than were returned
 }
 /**
  * Tag is one entry in the tag vocabulary with its usage count.
@@ -204,6 +205,7 @@ export interface GraphLink {
 export interface GraphData {
   nodes: GraphNode[];
   links: GraphLink[];
+  truncated?: boolean; // capped to the most-connected nodes (E4)
 }
 /**
  * CreatedNote is the result of POST /api/notes — the new note's stable handle
