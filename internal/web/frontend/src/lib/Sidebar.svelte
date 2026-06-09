@@ -29,14 +29,18 @@
     }
   }
 
-  const nav = [
+  // Two tiers: the places you work, then the lenses you look through. Keeps the
+  // daily-driver destinations visually distinct from the utility views (audit).
+  const primary = [
     { href: "/", label: "Dashboard" },
     { href: "/tasks", label: "Tasks" },
     { href: "/review", label: "Review" },
     { href: "/notes", label: "Notes" },
     { href: "/journal", label: "Journal" },
-    { href: "/activity", label: "Activity" },
     { href: "/graph", label: "Graph" },
+  ];
+  const lenses = [
+    { href: "/activity", label: "Activity" },
     { href: "/tags", label: "Tags" },
     { href: "/orphans", label: "Orphans" },
   ];
@@ -46,7 +50,11 @@
   <a class="brand" href="/">nt</a>
 
   <nav class="nav">
-    {#each nav as item (item.href)}
+    {#each primary as item (item.href)}
+      <a class="nav__link" class:active={path === item.href} href={item.href}>{item.label}</a>
+    {/each}
+    <div class="nav__label">Lenses</div>
+    {#each lenses as item (item.href)}
       <a class="nav__link" class:active={path === item.href} href={item.href}>{item.label}</a>
     {/each}
   </nav>
