@@ -315,7 +315,20 @@ func (s *server) add(a map[string]any) (string, error) {
 	if source == "" {
 		source = "claude"
 	}
+
+	// Paragraph-length capture → keep the task one actionable line and move the
+	// full text into a linked note (where the reasoning belongs). Agents tend to
+	// dump multi-sentence reasoning into the task text; this keeps the list clean.
 	text := title
+	splitNote := ""
+	if short, full, split := quickadd.SplitLong(title); split {
+		if n, nerr := note.Create(s.eng.S, short, full, nil, source, ""); nerr == nil {
+			// The task is just a link to the detail note — its short title shows
+			// (no duplication), and following it opens the full reasoning.
+			text = "[[" + n.Title + "]]"
+			splitNote = n.Title
+		}
+	}
 	for _, tg := range strSlice(a, "tags") {
 		text += " @" + tg
 	}
@@ -345,6 +358,13 @@ func (s *server) add(a map[string]any) (string, error) {
 	})
 	if err != nil {
 		return "", err
+	}
+	if splitNote != "" {
+		return jsonText(map[string]any{
+			"task": taskToOut(created),
+			"note": splitNote,
+			"hint": "text was long, so the detail was moved to a linked note. Keep task text to one actionable line; put reasoning in nt_note.",
+		}), nil
 	}
 	return jsonText(taskToOut(created)), nil
 }

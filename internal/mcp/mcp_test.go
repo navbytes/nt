@@ -76,6 +76,45 @@ func TestMCPToolFlow(t *testing.T) {
 	}
 }
 
+func TestMCPAddSplitsLongCapture(t *testing.T) {
+	s := newServer(t)
+	long := "Investigate and resolve the intermittent 500 errors during peak traffic by " +
+		"correlating traces across the gateway and token service, validating the connection " +
+		"pool exhaustion hypothesis, and coordinating with the infra team on a scaling change."
+
+	out, err := s.dispatch("nt_add", map[string]any{"text": long, "project": "ops"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var res struct {
+		Task taskOut `json:"task"`
+		Note string  `json:"note"`
+	}
+	if err := json.Unmarshal([]byte(out), &res); err != nil {
+		t.Fatal(err)
+	}
+	if res.Note == "" {
+		t.Fatalf("a paragraph-length capture should create a linked note; got %s", out)
+	}
+	if n := len([]rune(res.Task.Text)); n > 90 {
+		t.Errorf("task text should be a short line, got %d runes: %q", n, res.Task.Text)
+	}
+	if !strings.Contains(res.Task.Text, "[[") {
+		t.Errorf("the split task should link its detail note: %q", res.Task.Text)
+	}
+	// The full text is preserved in the note body (retrievable via recall).
+	rout, _ := s.dispatch("nt_recall", map[string]any{})
+	if !strings.Contains(rout, "connection pool exhaustion") {
+		t.Error("the note should hold the full original text")
+	}
+
+	// A normal short capture is untouched (no note, no link).
+	out2, _ := s.dispatch("nt_add", map[string]any{"text": "buy milk"})
+	if strings.Contains(out2, "\"note\"") {
+		t.Errorf("a short task should not split: %s", out2)
+	}
+}
+
 func TestMCPStatus(t *testing.T) {
 	s := newServer(t)
 	// A note + two tasks in +auth (one linked to the note), one marked doing.
