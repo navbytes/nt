@@ -42,6 +42,7 @@ func (s *Server) apiRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/tasks", s.apiTasks)
 	mux.HandleFunc("GET /api/review", s.apiReview)
 	mux.HandleFunc("POST /api/tasks", s.apiTaskNew)
+	mux.HandleFunc("POST /api/tasks/{id}", s.apiTaskEdit)
 	mux.HandleFunc("POST /api/tasks/{id}/done", s.apiTaskDone)
 	mux.HandleFunc("POST /api/tasks/{id}/reopen", s.apiTaskReopen)
 	mux.HandleFunc("POST /api/tasks/{id}/status", s.apiTaskStatus)
@@ -736,6 +737,29 @@ func (s *Server) apiTaskStatus(w http.ResponseWriter, r *http.Request) {
 		default:
 			return errBadStatus(status)
 		}
+		return nil
+	}) {
+		s.respondTasks(w)
+	}
+}
+
+// apiTaskEdit replaces a task's description text, preserving its id, due,
+// priority, status, source, and creation time (SetText only touches the
+// description — inline +project/@tag in the new text are re-parsed on the next
+// read, the metadata is not). This is the web face of `nt edit` for a task.
+func (s *Server) apiTaskEdit(w http.ResponseWriter, r *http.Request) {
+	text := strings.TrimSpace(r.FormValue("text"))
+	if text == "" {
+		http.Error(w, "task text is required", http.StatusBadRequest)
+		return
+	}
+	if s.doTaskWrite(w, r, "edit", func(d *task.Doc, rec *mutate.Recorder) error {
+		t, err := resolveTask(d, r)
+		if err != nil {
+			return err
+		}
+		rec.Before(t)
+		t.SetText(text)
 		return nil
 	}) {
 		s.respondTasks(w)

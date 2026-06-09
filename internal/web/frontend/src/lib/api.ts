@@ -75,6 +75,7 @@ export const api = {
   graph: () => getJSON<GraphData>("/api/graph"),
   journal: () => getJSON<JournalResponse>("/api/journal"),
   taskNew: (text: string) => postForm<TasksResponse>("/api/tasks", { text }),
+  taskEdit: (id: string, text: string) => postForm<TasksResponse>(`/api/tasks/${id}`, { text }),
   taskDone: (id: string) => postForm<TasksResponse>(`/api/tasks/${id}/done`),
   taskReopen: (id: string) => postForm<TasksResponse>(`/api/tasks/${id}/reopen`),
   taskStatus: (id: string, status: string) =>

@@ -23,6 +23,45 @@
     onSuccess: synced,
   });
   const deleteMut = createMutation({ mutationFn: api.taskDelete, onSuccess: synced });
+  const editMut = createMutation({
+    mutationFn: (a: { id: string; text: string }) => api.taskEdit(a.id, a.text),
+    onSuccess: synced,
+  });
+
+  // Inline edit of the task text — also the way to read a long title in full
+  // (the list clamps it; the editor shows everything).
+  let editing = $state(false);
+  let draft = $state("");
+  function startEdit() {
+    draft = t.text;
+    editing = true;
+  }
+  function saveEdit() {
+    const v = draft.trim();
+    if (v && v !== t.text) $editMut.mutate({ id: t.id, text: v });
+    editing = false;
+  }
+  function onEditKey(e: KeyboardEvent) {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      saveEdit();
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      editing = false;
+    }
+  }
+  // Focus the editor, drop the cursor at the end, and grow it to fit the text.
+  function autoedit(node: HTMLTextAreaElement) {
+    const grow = () => {
+      node.style.height = "auto";
+      node.style.height = node.scrollHeight + "px";
+    };
+    node.focus();
+    node.setSelectionRange(node.value.length, node.value.length);
+    grow();
+    node.addEventListener("input", grow);
+    return { destroy: () => node.removeEventListener("input", grow) };
+  }
 
   function todayISO(): string {
     const d = new Date();
@@ -41,7 +80,7 @@
   }
 </script>
 
-<li class="row" class:row--doing={t.status === "doing"}>
+<li class="row" class:row--doing={t.status === "doing"} class:row--editing={editing}>
   {#if canEdit}
     {#if t.status === "done"}
       <button class="check check--done" title="Reopen" aria-label="Reopen task" onclick={() => $reopenMut.mutate(t.id)}>●</button>
@@ -49,19 +88,35 @@
       <button class="check" title="Mark done" aria-label="Mark task done" onclick={() => $doneMut.mutate(t.id)}>○</button>
     {/if}
   {/if}
-  <span class="row__text" class:done={t.status === "done"} title={t.text}>{t.text}</span>
-  {#if t.recur}<span class="row__recur" title="Recurring task">↻</span>{/if}
-  {#if t.status === "doing"}<span class="status-pill status-pill--doing">doing</span>{/if}
-  {#if t.status === "blocked"}<span class="status-pill status-pill--blocked" title={t.blocker ? `blocked by: ${t.blocker}` : "blocked"}>⊘ blocked</span>{/if}
-  {#if t.project}<a class="chip" href={`/search?tag=${encodeURIComponent(t.project)}`}>+{t.project}</a>{/if}
-  {#each t.tags ?? [] as tag (tag)}<a class="chip chip--tag" href={`/search?tag=${encodeURIComponent(tag)}`}>@{tag}</a>{/each}
-  {#if t.due}<span class="row__due" class:row__due--over={dateOf(t.due) < todayISO() && t.status !== "done"}>{fmtDue(t.due)}</span>{/if}
-  {#if t.source}<span class="src">{t.source}</span>{/if}
-  {#if canEdit && t.status !== "done"}
-    <span class="row__actions">
-      <button class="rowbtn" title={t.status === "doing" ? "Stop (set open)" : "Start (set doing)"} onclick={toggleDoing}>◐</button>
-      <button class="rowbtn rowbtn--danger" title="Delete (undoable)" onclick={del}>×</button>
+  {#if editing}
+    <textarea
+      class="row__edit"
+      bind:value={draft}
+      rows="1"
+      aria-label="Edit task text"
+      use:autoedit
+      onkeydown={onEditKey}
+    ></textarea>
+    <span class="row__actions row__actions--shown">
+      <button class="rowbtn" title="Save (↵)" aria-label="Save" onclick={saveEdit}>✓</button>
+      <button class="rowbtn rowbtn--danger" title="Cancel (esc)" aria-label="Cancel" onclick={() => (editing = false)}>×</button>
     </span>
+  {:else}
+    <span class="row__text" class:done={t.status === "done"} title={t.text}>{t.text}</span>
+    {#if t.recur}<span class="row__recur" title="Recurring task">↻</span>{/if}
+    {#if t.status === "doing"}<span class="status-pill status-pill--doing">doing</span>{/if}
+    {#if t.status === "blocked"}<span class="status-pill status-pill--blocked" title={t.blocker ? `blocked by: ${t.blocker}` : "blocked"}>⊘ blocked</span>{/if}
+    {#if t.project}<a class="chip" href={`/search?tag=${encodeURIComponent(t.project)}`}>+{t.project}</a>{/if}
+    {#each t.tags ?? [] as tag (tag)}<a class="chip chip--tag" href={`/search?tag=${encodeURIComponent(tag)}`}>@{tag}</a>{/each}
+    {#if t.due}<span class="row__due" class:row__due--over={dateOf(t.due) < todayISO() && t.status !== "done"}>{fmtDue(t.due)}</span>{/if}
+    {#if t.source}<span class="src">{t.source}</span>{/if}
+    {#if canEdit && t.status !== "done"}
+      <span class="row__actions">
+        <button class="rowbtn" title="Edit text" aria-label="Edit task text" onclick={startEdit}>✎</button>
+        <button class="rowbtn" title={t.status === "doing" ? "Stop (set open)" : "Start (set doing)"} onclick={toggleDoing}>◐</button>
+        <button class="rowbtn rowbtn--danger" title="Delete (undoable)" onclick={del}>×</button>
+      </span>
+    {/if}
   {/if}
 </li>
 
@@ -86,6 +141,28 @@
   }
   .row:hover .row__actions {
     opacity: 1;
+  }
+  .row__actions--shown {
+    opacity: 1; /* save/cancel stay visible while the row is in edit mode */
+  }
+  .row--editing {
+    align-items: flex-start; /* the editor can be multi-line; top-align the check */
+  }
+  .row__edit {
+    flex: 1;
+    min-width: 0;
+    font: inherit;
+    line-height: 1.45;
+    resize: none;
+    overflow: hidden;
+    padding: 3px 8px;
+    background: var(--bg-elev);
+    border: 1px solid var(--accent);
+    border-radius: var(--radius-sm);
+    color: var(--fg);
+  }
+  .row__edit:focus {
+    outline: none;
   }
   .rowbtn {
     background: none;
