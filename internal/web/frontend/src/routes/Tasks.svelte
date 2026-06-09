@@ -1,12 +1,17 @@
 <script lang="ts">
   import TaskRows from "../lib/TaskRows.svelte";
   import Board from "../lib/Board.svelte";
+  import Review from "./Review.svelte";
 
-  let { canEdit }: { canEdit: boolean } = $props();
+  type TaskView = "agenda" | "status" | "board" | "review";
+  // initialView is set when the app lands on /review (the old Review route now
+  // resolves to the Tasks "Review" tab).
+  let { canEdit, initialView }: { canEdit: boolean; initialView?: TaskView } = $props();
 
-  // Persist the chosen view so it sticks across visits.
-  let view = $state<"agenda" | "status" | "board">(
-    (localStorage.getItem("nt-tasks-view") as "agenda" | "status" | "board") ?? "agenda",
+  // Persist the chosen view so it sticks across visits; an explicit initialView
+  // (from /review) wins on landing.
+  let view = $state<TaskView>(
+    initialView ?? (localStorage.getItem("nt-tasks-view") as TaskView) ?? "agenda",
   );
   $effect(() => localStorage.setItem("nt-tasks-view", view));
 
@@ -29,11 +34,14 @@
     <button class:seg--on={view === "agenda"} onclick={() => (view = "agenda")}>Agenda</button>
     <button class:seg--on={view === "status"} onclick={() => (view = "status")}>Status</button>
     <button class:seg--on={view === "board"} onclick={() => (view = "board")}>Board</button>
+    <button class:seg--on={view === "review"} onclick={() => (view = "review")}>Review</button>
   </div>
 </div>
 
 {#if view === "board" && !narrow}
   <Board {canEdit} />
+{:else if view === "review"}
+  <Review {canEdit} embedded />
 {:else}
   <TaskRows {canEdit} showAdd={true} view={view === "board" ? "status" : view} />
 {/if}
