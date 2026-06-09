@@ -6,6 +6,8 @@
 package tui
 
 import (
+	"hash/fnv"
+	"io"
 	"os"
 	"strings"
 	"time"
@@ -93,6 +95,7 @@ type Model struct {
 	notes     []*note.Note
 	notesView []*note.Note    // notes after the active filter
 	blocked   map[string]bool // task ULIDs blocked by an open dependency
+	lastSig   uint64          // content signature of the last rebuilt store (F4: skip redundant reloads)
 
 	groups    []group      // tasks tab, current grouping
 	flat      []*task.Task // selectable tasks in display order
@@ -210,13 +213,43 @@ func readyAfter() tea.Msg {
 
 type readyMsg struct{}
 
-// reload re-reads tasks and notes from disk and rebuilds the grouped view.
+// reload re-reads tasks and notes from disk and rebuilds the grouped view. It
+// skips the rebuild when the store content is byte-for-byte what was last built
+// (F4): every mutation reloads synchronously, and the directory watcher then
+// fires its own ~80ms-debounced echo of that same write — reloading on the echo
+// re-sorts the view and bumps the cursor for no reason (a visible flicker).
+// Comparing a content signature suppresses that echo while still rebuilding on
+// any genuine external change (a CLI call, an AI session) where the bytes differ.
 func (m *Model) reload() {
 	if d, err := m.eng.Read(); err == nil {
 		m.tasks = d.Tasks()
 	}
 	m.notes, _ = note.List(m.eng.S)
-	m.rebuild()
+	if sig := m.storeSignature(); sig != m.lastSig {
+		m.lastSig = sig
+		m.rebuild()
+	}
+}
+
+// storeSignature hashes the loaded tasks and notes into a content fingerprint.
+// It covers everything the view derives from — task lines and each note's path
+// + body — so any real edit changes it, while a re-read of unchanged bytes
+// (our own write's watcher echo) reproduces it exactly. The zero value never
+// collides with a real signature, so the first reload always builds.
+func (m *Model) storeSignature() uint64 {
+	h := fnv.New64a()
+	for _, t := range m.tasks {
+		_, _ = io.WriteString(h, t.Line())
+		_, _ = h.Write([]byte{0})
+	}
+	_, _ = h.Write([]byte{1}) // delimit tasks from notes
+	for _, n := range m.notes {
+		_, _ = io.WriteString(h, n.Rel)
+		_, _ = h.Write([]byte{0})
+		_, _ = io.WriteString(h, n.Body)
+		_, _ = h.Write([]byte{0})
+	}
+	return h.Sum64()
 }
 
 // rebuild recomputes groups + the flat selectable list from the current tasks,
