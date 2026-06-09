@@ -80,7 +80,6 @@ import NoteView from "../routes/NoteView.svelte";
 import Editor from "../lib/Editor.svelte";
 import CommandPalette from "../lib/CommandPalette.svelte";
 import Tags from "../routes/Tags.svelte";
-import Orphans from "../routes/Orphans.svelte";
 import { navigate } from "../lib/router.svelte";
 import { openPalette, closePalette } from "../lib/palette.svelte";
 
@@ -171,16 +170,11 @@ describe("CommandPalette", () => {
   });
 });
 
-describe("Tags & Orphans", () => {
+describe("Tags", () => {
   it("renders tags with counts linking to tag search", async () => {
     render(Harness, { props: { comp: Tags } });
     const chip = await screen.findByText("#spec", { exact: false });
     expect(chip.closest("a")?.getAttribute("href")).toBe("/search?tag=spec");
     expect(screen.getByText("3")).toBeInTheDocument();
-  });
-
-  it("lists orphan notes", async () => {
-    render(Harness, { props: { comp: Orphans } });
-    expect(await screen.findByText("Lonely")).toBeInTheDocument();
   });
 });

@@ -4,10 +4,15 @@
   import type { NoteCard } from "../lib/api";
 
   const gridQ = createQuery({ queryKey: ["notesGrid"], queryFn: api.notesGrid });
+  // Orphans (notes with no links in or out) fold in here as a filter, rather
+  // than a separate top-level route.
+  const orphansQ = createQuery({ queryKey: ["orphans"], queryFn: api.orphans });
+  const orphanUrls = $derived(new Set(($orphansQ.data?.notes ?? []).map((n) => n.url)));
 
   // Persisted view controls.
   let dense = $state(localStorage.getItem("nt-notes-dense") === "1");
   let folder = $state("");
+  let orphansOnly = $state(false);
   let sort = $state<"updated" | "title" | "folder">(
     (localStorage.getItem("nt-notes-sort") as "updated" | "title" | "folder") ?? "updated",
   );
@@ -17,6 +22,7 @@
   const cards = $derived.by((): NoteCard[] => {
     let ns = [...($gridQ.data?.notes ?? [])];
     if (folder) ns = ns.filter((n) => n.folder === folder || n.folder.startsWith(folder + "/"));
+    if (orphansOnly) ns = ns.filter((n) => orphanUrls.has(n.url));
     ns.sort((a, b) => {
       if (sort === "title") return a.title.localeCompare(b.title);
       if (sort === "folder") return a.folder.localeCompare(b.folder) || a.title.localeCompare(b.title);
@@ -43,6 +49,13 @@
         <button class:seg--on={!dense} onclick={() => (dense = false)}>Cards</button>
         <button class:seg--on={dense} onclick={() => (dense = true)}>Compact</button>
       </div>
+      <button
+        class="notes-toggle"
+        class:notes-toggle--on={orphansOnly}
+        aria-pressed={orphansOnly}
+        title="Show only notes with no links in or out"
+        onclick={() => (orphansOnly = !orphansOnly)}
+      >Orphans{#if $orphansQ.data?.notes.length}<span class="notes-toggle__count"> {$orphansQ.data.notes.length}</span>{/if}</button>
     {/if}
   </div>
 </div>
@@ -52,7 +65,9 @@
 {:else if $gridQ.error}
   <p class="error">Couldn't load notes.</p>
 {:else if cards.length === 0}
-  {#if folder}
+  {#if orphansOnly}
+    <p class="muted">No orphan notes — every note is linked. ✨</p>
+  {:else if folder}
     <p class="muted">No notes in {folder} yet.</p>
   {:else}
     <div class="empty">
@@ -91,6 +106,42 @@
     align-items: center;
     gap: 8px;
     flex-wrap: wrap;
+  }
+  /* Segmented density control + the orphans toggle, sharing one pill look. */
+  .seg {
+    display: flex;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+  }
+  .seg button {
+    padding: 5px 12px;
+    background: var(--bg-inset);
+    border: none;
+    color: var(--fg-soft);
+    cursor: pointer;
+    font-size: 0.8rem;
+  }
+  .seg button.seg--on {
+    background: var(--accent);
+    color: #fff;
+  }
+  .notes-toggle {
+    padding: 5px 12px;
+    background: var(--bg-inset);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    color: var(--fg-soft);
+    cursor: pointer;
+    font-size: 0.8rem;
+  }
+  .notes-toggle--on {
+    background: var(--accent);
+    color: #fff;
+    border-color: var(--accent);
+  }
+  .notes-toggle__count {
+    opacity: 0.8;
   }
   .notegrid {
     display: grid;
