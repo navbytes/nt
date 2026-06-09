@@ -233,6 +233,14 @@ code {
   color: var(--accent);
   font-weight: 600;
 }
+.nav__label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+  padding: 4px 10px;
+  margin-top: 8px;
+}
 .tree__head {
   font-size: 11px;
   text-transform: uppercase;
