@@ -74,7 +74,7 @@ const maxSearchResults = 50
 
 func toTask(t taskRow) apitypes.Task {
 	return apitypes.Task{
-		ID: t.ID, Text: t.Text, Status: t.Status, Due: t.Due,
+		ID: t.ID, Text: t.Text, Status: t.Status, Priority: t.Priority, Due: t.Due,
 		Source: t.Source, Project: t.Project, Tags: t.Tags, Blocker: t.Blocker, Recur: t.Recur,
 	}
 }
@@ -278,6 +278,9 @@ func reviewTasks(ts []*task.Task, blocked map[string]bool) []apitypes.Task {
 	out := make([]apitypes.Task, 0, len(ts))
 	for _, t := range ts {
 		row := taskRow{ID: t.ID(), Text: cleanTaskText(t.Text), Status: t.Status(), Due: t.Due(), Source: t.Source(), Tags: t.Tags(), Recur: t.Recur() != ""}
+		if t.Priority != 0 {
+			row.Priority = string(t.Priority)
+		}
 		if p := t.Projects(); len(p) > 0 {
 			row.Project = p[0]
 		}
@@ -671,6 +674,7 @@ func (s *Server) apiTaskStatus(w http.ResponseWriter, r *http.Request) {
 			t.SetDone(false, "")
 			t.SetState("open")
 		case "doing", "blocked":
+			t.SetDone(false, "") // a task can't be both done and in-progress (board drag from Done)
 			t.SetState(status)
 		case "done":
 			mutate.Complete(d, rec, t, mutate.Today())
