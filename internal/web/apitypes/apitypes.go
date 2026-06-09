@@ -185,6 +185,16 @@ type CreatedNote struct {
 	URL    string `json:"url"`
 }
 
+// MovedNote is the result of POST /api/notes/{handle}/move — the (unchanged)
+// handle/URL, the new path relative to notes/, and how many [[links]] were
+// rewritten to follow the move.
+type MovedNote struct {
+	Handle  string `json:"handle"`
+	URL     string `json:"url"`
+	Rel     string `json:"rel"`
+	Updated int    `json:"updated"`
+}
+
 // JournalDay is one existing daily note (date + the note's stable handle).
 type JournalDay struct {
 	Date   string `json:"date"`   // YYYY-MM-DD

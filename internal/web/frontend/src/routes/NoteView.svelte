@@ -1,14 +1,62 @@
 <script lang="ts">
-  import { createQuery } from "@tanstack/svelte-query";
+  import { createQuery, useQueryClient } from "@tanstack/svelte-query";
   import { api } from "../lib/api";
+  import { noteUI } from "../lib/noteUI.svelte";
   import Editor from "../lib/Editor.svelte";
 
   let { handle, canEdit = false }: { handle: string; canEdit?: boolean } = $props();
 
+  const qc = useQueryClient();
   const noteQ = createQuery({ queryKey: ["note", handle], queryFn: () => api.note(handle) });
+  const notesQ = createQuery({ queryKey: ["notes"], queryFn: api.notes });
 
   let editing = $state(false);
   let activeId = $state("");
+
+  // ---- move to folder (the note keeps its id/URL; links are rewritten) ----
+  let moving = $state(false);
+  let moveTarget = $state("");
+  let moveErr = $state("");
+  let moveBusy = $state(false);
+
+  // Existing folders, for the picker's autocomplete (you can also type a new one).
+  const folders = $derived.by(() => {
+    const set = new Set<string>();
+    for (const link of $notesQ.data?.index ?? []) {
+      const i = link.path.lastIndexOf("/");
+      if (i > 0) set.add(link.path.slice(0, i));
+    }
+    return [...set].sort();
+  });
+
+  function openMove() {
+    moveErr = "";
+    moveTarget = $noteQ.data?.folder ?? "";
+    moving = true;
+  }
+
+  // Open the move picker when the command palette requests it (canEdit only).
+  let seenMoveReq = noteUI.moveRequest;
+  $effect(() => {
+    if (canEdit && noteUI.moveRequest !== seenMoveReq) {
+      seenMoveReq = noteUI.moveRequest;
+      openMove();
+    }
+  });
+  async function doMove() {
+    moveErr = "";
+    moveBusy = true;
+    try {
+      await api.noteMove(handle, moveTarget.trim());
+      await qc.invalidateQueries({ queryKey: ["notes"] });
+      await qc.invalidateQueries({ queryKey: ["note", handle] });
+      moving = false;
+    } catch (e) {
+      moveErr = String(e);
+    } finally {
+      moveBusy = false;
+    }
+  }
 
   interface TocItem {
     id: string;
@@ -108,8 +156,29 @@
         <span class="crumbs__file">{n.file}</span>
         <span class="spacer"></span>
         <a class="btn btn--ghost btn--sm" href={`/graph?focus=${encodeURIComponent(handle)}`}>Graph ⌖</a>
-        {#if canEdit}<button class="btn btn--ghost btn--sm" onclick={() => (editing = true)}>Edit</button>{/if}
+        {#if canEdit}
+          <button class="btn btn--ghost btn--sm" onclick={openMove}>Move</button>
+          <button class="btn btn--ghost btn--sm" onclick={() => (editing = true)}>Edit</button>
+        {/if}
       </div>
+      {#if moving}
+        <div class="movebar">
+          <span class="movebar__label">Move to folder</span>
+          <input
+            class="movebar__input"
+            list="note-folders"
+            bind:value={moveTarget}
+            placeholder="(root)"
+            onkeydown={(e) => e.key === "Enter" && doMove()}
+          />
+          <datalist id="note-folders">
+            {#each folders as f (f)}<option value={f}></option>{/each}
+          </datalist>
+          <button class="btn btn--sm" onclick={doMove} disabled={moveBusy}>{moveBusy ? "Moving…" : "Move"}</button>
+          <button class="btn btn--ghost btn--sm" onclick={() => (moving = false)}>Cancel</button>
+          {#if moveErr}<span class="error small">{moveErr}</span>{/if}
+        </div>
+      {/if}
       <h1>{n.title}</h1>
       <div class="note__meta">
         {#if n.source}<span class="src">{n.source}</span>{/if}

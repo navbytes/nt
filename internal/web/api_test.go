@@ -367,3 +367,44 @@ func TestCapGraph(t *testing.T) {
 		}
 	}
 }
+
+// TestAPINoteMove: POST .../move relocates a note into a folder (id/handle
+// unchanged), edit+CSRF gated, and rejects traversal folders.
+func TestAPINoteMove(t *testing.T) {
+	s := newTestServer(t)
+	target, _ := note.Create(s.eng.S, "Target", "body", nil, "cli", "")
+	note.Create(s.eng.S, "Linker", "see [[Target]]", nil, "cli", "")
+
+	// gated off read-only
+	if code, _ := postForm(s, "/api/notes/"+target.ID+"/move", "", mustValues("folder", "work")); code != 403 {
+		t.Errorf("move should 403 read-only, got %d", code)
+	}
+	s.allowEdit = true
+
+	code, body := postForm(s, "/api/notes/"+target.ID+"/move", s.csrf, mustValues("folder", "work/auth"))
+	if code != 200 {
+		t.Fatalf("move: %d %s", code, body)
+	}
+	res := decode[apitypes.MovedNote](t, body)
+	if res.Rel != "work/auth/target.md" {
+		t.Errorf("new rel = %q, want work/auth/target.md", res.Rel)
+	}
+	if res.Handle != target.ID {
+		t.Errorf("handle/URL must be stable across a move: %q vs %q", res.Handle, target.ID)
+	}
+	notes, _ := note.List(s.eng.S)
+	var moved *note.Note
+	for _, n := range notes {
+		if n.Title == "Target" {
+			moved = n
+		}
+	}
+	if moved == nil || moved.Rel != "work/auth/target.md" {
+		t.Fatalf("note should now live at work/auth/, got %+v", moved)
+	}
+
+	// traversal folder rejected
+	if code, _ := postForm(s, "/api/notes/"+target.ID+"/move", s.csrf, mustValues("folder", "../etc")); code != 400 {
+		t.Errorf("traversal folder should 400, got %d", code)
+	}
+}

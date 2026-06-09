@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/url"
+	"path"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
@@ -33,6 +35,7 @@ func (s *Server) apiRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/notes/{handle}", s.apiNote)
 	mux.HandleFunc("GET /api/notes/{handle}/raw", s.apiNoteRaw)
 	mux.HandleFunc("POST /api/notes/{handle}", s.apiNoteSave)
+	mux.HandleFunc("POST /api/notes/{handle}/move", s.apiNoteMove)
 	mux.HandleFunc("POST /api/preview", s.handlePreview) // returns rendered HTML
 	mux.HandleFunc("GET /api/tasks", s.apiTasks)
 	mux.HandleFunc("POST /api/tasks", s.apiTaskNew)
@@ -240,6 +243,47 @@ func (s *Server) apiNoteRaw(w http.ResponseWriter, r *http.Request) {
 // atomic write + rebuild) — the lost-update guard is preserved verbatim.
 func (s *Server) apiNoteSave(w http.ResponseWriter, r *http.Request) {
 	s.handleSave(w, r, r.PathValue("handle"))
+}
+
+// apiNoteMove moves a note into a different folder (--edit + CSRF gated),
+// rewriting every [[link]] to it via the shared RenameNote. The note keeps its
+// filename and its id, so its handle/URL is unchanged. An empty folder moves it
+// to the notes/ root.
+func (s *Server) apiNoteMove(w http.ResponseWriter, r *http.Request) {
+	if !s.allowEdit {
+		http.Error(w, "editing is disabled — start with `nt web --edit`", http.StatusForbidden)
+		return
+	}
+	if r.Header.Get("X-CSRF") != s.csrf {
+		http.Error(w, "bad or missing CSRF token", http.StatusForbidden)
+		return
+	}
+	snap := s.current()
+	n := snap.findHandle(r.PathValue("handle"))
+	if n == nil {
+		http.NotFound(w, r)
+		return
+	}
+	folder := strings.Trim(strings.TrimSpace(r.FormValue("folder")), "/")
+	if folder != "" && !safeNoteFolder.MatchString(folder) {
+		http.Error(w, "folder may contain only letters, numbers, spaces, '/', '-', '_'", http.StatusBadRequest)
+		return
+	}
+	dest := path.Base(n.Rel)
+	if folder != "" {
+		dest = folder + "/" + dest
+	}
+	newRel, updated, err := s.eng.RenameNote(n, snap.notes, dest)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	s.writes.mark(filepath.Join(s.eng.S.NotesDir(), filepath.FromSlash(newRel)))
+	s.rebuild()
+	s.hub.broadcast("reload")
+	writeJSON(w, apitypes.MovedNote{
+		Handle: noteHandle(n), URL: "/n/" + url.PathEscape(noteHandle(n)), Rel: newRel, Updated: updated,
+	})
 }
 
 // apiNoteCreate creates a new note (--edit + CSRF gated) and returns its handle
