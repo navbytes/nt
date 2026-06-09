@@ -62,6 +62,9 @@
       <p class="muted">No matches.</p>
     {/each}
   </ul>
+  {#if $searchQ.data.truncated}
+    <p class="muted small">Showing the first {$searchQ.data.results.length} matches — narrow your query for more.</p>
+  {/if}
 {/if}
 
 <style>

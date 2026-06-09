@@ -2,6 +2,7 @@ package web
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http/httptest"
 	"net/url"
 	"strings"
@@ -326,5 +327,43 @@ func TestAPIJournal(t *testing.T) {
 	}
 	if jr.Days[0].Handle == "" {
 		t.Error("each day should carry a note handle")
+	}
+}
+
+// TestAPISearchCap: a query matching more than maxSearchResults is capped and
+// flagged truncated (E4).
+func TestAPISearchCap(t *testing.T) {
+	s := newTestServer(t)
+	for i := 0; i < maxSearchResults+10; i++ {
+		note.Create(s.eng.S, fmt.Sprintf("Widget %03d", i), "all about widgets", nil, "cli", "")
+	}
+	_, body := get(t, s, "/api/search?q=widget")
+	r := decode[apitypes.SearchResponse](t, body)
+	if len(r.Results) != maxSearchResults || !r.Truncated {
+		t.Fatalf("search should cap at %d and flag truncated, got %d trunc=%v", maxSearchResults, len(r.Results), r.Truncated)
+	}
+}
+
+func TestCapGraph(t *testing.T) {
+	g := &graphData{}
+	for i := 0; i < maxGraphNodes+50; i++ {
+		g.Nodes = append(g.Nodes, graphNode{ID: fmt.Sprintf("n%d", i), Deg: i}) // higher i = higher degree
+	}
+	g.Links = []graphLink{
+		{S: maxGraphNodes + 10, T: maxGraphNodes + 20}, // both high-degree → kept
+		{S: 0, T: 1}, // both low-degree → dropped
+	}
+	out := capGraph(g)
+	if len(out.Nodes) != maxGraphNodes || !out.Truncated {
+		t.Fatalf("expected %d nodes truncated, got %d trunc=%v", maxGraphNodes, len(out.Nodes), out.Truncated)
+	}
+	if len(out.Links) != 1 {
+		t.Errorf("only links between kept (high-degree) nodes should survive, got %d", len(out.Links))
+	}
+	// Survivors are the highest-degree nodes.
+	for _, n := range out.Nodes {
+		if n.Deg < 50 {
+			t.Errorf("a low-degree node (%d) survived the cap", n.Deg)
+		}
 	}
 }
