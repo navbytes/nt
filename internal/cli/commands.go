@@ -8,7 +8,9 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/navbytes/nt/internal/dateparse"
 	"github.com/navbytes/nt/internal/mutate"
@@ -72,6 +74,7 @@ func cmdAdd(args []string) int {
 	discovered := fs.String("discovered-from", "", "task this was discovered while working on")
 	recur := fs.String("recur", "", "recurrence: weekly|3d|… (prefix + for strict, e.g. +monthly)")
 	noteSlug := fs.String("note", "", "link to a note slug")
+	est := fs.String("est", "", "time estimate (90m, 2h, 1h30m)")
 	fs.Var(&tags, "tag", "tag (repeatable)")
 
 	flags, positional := splitArgs(args, nil)
@@ -90,6 +93,14 @@ func cmdAdd(args []string) int {
 	if !ok {
 		return fail(fmt.Errorf("add: invalid due date %q", *due))
 	}
+	estVal := ""
+	if *est != "" {
+		m, ok := dateparse.Duration(*est)
+		if !ok {
+			return fail(fmt.Errorf("add: invalid estimate %q", *est))
+		}
+		estVal = dateparse.FmtDuration(m)
+	}
 
 	e, ok2 := engine()
 	if !ok2 {
@@ -105,6 +116,9 @@ func cmdAdd(args []string) int {
 			t.SetKey("due", dueVal)
 		}
 		t.SetKey("src", *source)
+		if estVal != "" {
+			t.SetKey("est", estVal)
+		}
 		if *recur != "" {
 			t.SetKey("rec", *recur)
 		}
@@ -169,6 +183,83 @@ func cmdSkip(args []string) int {
 		return fail(err)
 	}
 	fmt.Printf("skipped to next occurrence (%d)\n", moved)
+	return 0
+}
+
+// cmdStart begins time-tracking a task: stamps started: (now, unix seconds) and
+// sets s:doing. Pair with `nt stop` to log the elapsed time into spent: (T6).
+func cmdStart(args []string) int {
+	if len(args) == 0 {
+		return fail(fmt.Errorf("start: need a task id"))
+	}
+	e, ok := engine()
+	if !ok {
+		return 1
+	}
+	now := strconv.FormatInt(time.Now().Unix(), 10)
+	n := 0
+	err := e.Apply("start", func(d *task.Doc, rec *mutate.Recorder) error {
+		for _, h := range args {
+			t, err := resolveHandle(d, h)
+			if err != nil {
+				return fmt.Errorf("start: %w", err)
+			}
+			rec.Before(t)
+			t.SetKey("started", now)
+			t.SetState("doing")
+			n++
+		}
+		return nil
+	})
+	if err != nil {
+		return fail(err)
+	}
+	fmt.Printf("started %d task(s) — `nt stop` to log the time\n", n)
+	return 0
+}
+
+// cmdStop ends time-tracking: adds the elapsed time since started: into spent:,
+// clears started:, and returns the task to s:open (T6).
+func cmdStop(args []string) int {
+	if len(args) == 0 {
+		return fail(fmt.Errorf("stop: need a task id"))
+	}
+	e, ok := engine()
+	if !ok {
+		return 1
+	}
+	now := time.Now().Unix()
+	var summary string
+	err := e.Apply("stop", func(d *task.Doc, rec *mutate.Recorder) error {
+		for _, h := range args {
+			t, err := resolveHandle(d, h)
+			if err != nil {
+				return fmt.Errorf("stop: %w", err)
+			}
+			startedStr := t.Key("started")
+			if startedStr == "" {
+				return fmt.Errorf("stop: %s isn't being tracked — `nt start` it first", shortID(t.ID()))
+			}
+			started, _ := strconv.ParseInt(startedStr, 10, 64)
+			elapsed := int((now - started) / 60)
+			if elapsed < 0 {
+				elapsed = 0
+			}
+			prev, _ := dateparse.Duration(t.Key("spent"))
+			total := prev + elapsed
+			rec.Before(t)
+			t.SetKey("spent", dateparse.FmtDuration(total))
+			t.SetKey("started", "") // clear the running timer
+			t.SetState("open")
+			summary = fmt.Sprintf("stopped %s — logged %s (total spent %s)",
+				shortID(t.ID()), dateparse.FmtDuration(elapsed), dateparse.FmtDuration(total))
+		}
+		return nil
+	})
+	if err != nil {
+		return fail(err)
+	}
+	fmt.Println(summary)
 	return 0
 }
 
@@ -295,6 +386,7 @@ func cmdUpdate(args []string) int {
 	recur := fs.String("recur", "", "recurrence (stored; Phase 3)")
 	parent := fs.String("parent", "", "parent id")
 	blocks := fs.String("blocks", "", "blocks id")
+	est := fs.String("est", "", "time estimate (90m, 2h; 'none' clears)")
 
 	flags, positional := splitArgs(args, nil)
 	if err := fs.Parse(flags); err != nil {
@@ -321,6 +413,17 @@ func cmdUpdate(args []string) int {
 			return fail(fmt.Errorf("update: invalid due %q", *due))
 		}
 		dueVal = v
+	}
+	estVal, estSet := "", false
+	if *est != "" {
+		estSet = true
+		if *est != "none" && *est != "-" {
+			m, ok := dateparse.Duration(*est)
+			if !ok {
+				return fail(fmt.Errorf("update: invalid estimate %q", *est))
+			}
+			estVal = dateparse.FmtDuration(m)
+		}
 	}
 
 	e, ok := engine()
@@ -352,6 +455,9 @@ func cmdUpdate(args []string) int {
 			}
 			if *due != "" {
 				t.SetKey("due", dueVal)
+			}
+			if estSet {
+				t.SetKey("est", estVal) // "" clears it
 			}
 			if *recur != "" {
 				t.SetKey("rec", *recur)
@@ -522,6 +628,12 @@ func formatRow(t *task.Task, idx int, isBlocked bool) string {
 	}
 	if d := t.Due(); d != "" {
 		meta = append(meta, "due:"+d)
+	}
+	if e := t.Key("est"); e != "" {
+		meta = append(meta, "est:"+e)
+	}
+	if sp := t.Key("spent"); sp != "" {
+		meta = append(meta, "spent:"+sp)
 	}
 	tail := ""
 	if len(meta) > 0 {

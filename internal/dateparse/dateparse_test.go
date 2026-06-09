@@ -91,3 +91,22 @@ func TestDatePart(t *testing.T) {
 		t.Error("DatePart of a bare date is itself")
 	}
 }
+
+func TestDuration(t *testing.T) {
+	cases := []struct {
+		in   string
+		want int
+		ok   bool
+	}{
+		{"90m", 90, true}, {"2h", 120, true}, {"1h30m", 90, true},
+		{"45", 45, true}, {"1.5h", 90, true}, {"", 0, false}, {"soon", 0, false},
+	}
+	for _, c := range cases {
+		if got, ok := Duration(c.in); got != c.want || ok != c.ok {
+			t.Errorf("Duration(%q) = (%d,%v), want (%d,%v)", c.in, got, ok, c.want, c.ok)
+		}
+	}
+	if FmtDuration(90) != "1h30m" || FmtDuration(120) != "2h" || FmtDuration(45) != "45m" {
+		t.Errorf("FmtDuration wrong: %q %q %q", FmtDuration(90), FmtDuration(120), FmtDuration(45))
+	}
+}
