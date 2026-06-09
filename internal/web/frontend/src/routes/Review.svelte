@@ -2,6 +2,9 @@
   import { createQuery } from "@tanstack/svelte-query";
   import { api } from "../lib/api";
   import type { Task, ReviewResponse } from "../lib/api";
+  import TaskRow from "../lib/TaskRow.svelte";
+
+  let { canEdit = false }: { canEdit?: boolean } = $props();
 
   const reviewQ = createQuery({ queryKey: ["review"], queryFn: api.review });
 
@@ -23,14 +26,7 @@
       </h2>
       <ul class="rows">
         {#each tasks as t (t.id)}
-          <li class="row">
-            <span class="row__text" title={t.text}>{t.text}</span>
-            {#if t.recur}<span class="row__recur" title="Recurring task">↻</span>{/if}
-            {#if t.status === "blocked"}<span class="status-pill status-pill--blocked">⊘ blocked</span>{/if}
-            {#if t.project}<a class="chip" href={`/search?tag=${encodeURIComponent(t.project)}`}>+{t.project}</a>{/if}
-            {#each t.tags ?? [] as tag (tag)}<a class="chip chip--tag" href={`/search?tag=${encodeURIComponent(tag)}`}>@{tag}</a>{/each}
-            {#if t.due}<span class="row__due" class:row__due--over={danger}>{t.due}</span>{/if}
-          </li>
+          <TaskRow {t} {canEdit} />
         {/each}
       </ul>
     </section>

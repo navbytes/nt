@@ -98,7 +98,7 @@
       {:else if path === "/tasks"}
         <Tasks canEdit={$stateQ.data?.canEdit ?? false} />
       {:else if path === "/review"}
-        <Review />
+        <Review canEdit={$stateQ.data?.canEdit ?? false} />
       {:else if path === "/notes"}
         <Notes />
       {:else if path === "/journal"}
