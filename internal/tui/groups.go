@@ -96,30 +96,16 @@ func logDateLabel(ymd string) string {
 // byDate buckets tasks into Overdue / Today / This week / Later / No date, with
 // a trailing Done bucket for any completed tasks present.
 func byDate(tasks []*task.Task) []group {
-	order := []string{"Overdue", "Today", "This week", "Later", "No date", "Done"}
 	buckets := map[string][]*task.Task{}
 	today := time.Now().Format("2006-01-02")
 	weekOut := time.Now().AddDate(0, 0, 7).Format("2006-01-02")
 	for _, t := range tasks {
-		var k string
-		switch {
-		case t.Done:
-			k = "Done"
-		case t.Due() == "":
-			k = "No date"
-		case t.Due() < today:
-			k = "Overdue"
-		case t.Due() == today:
-			k = "Today"
-		case t.Due() <= weekOut:
-			k = "This week"
-		default:
-			k = "Later"
-		}
+		// Shared planner bucketing (date-prefix aware) — same rule as the web.
+		k := task.DueBucket(t, today, weekOut)
 		buckets[k] = append(buckets[k], t)
 	}
 	var out []group
-	for _, name := range order {
+	for _, name := range task.DueBuckets {
 		ts := buckets[name]
 		if len(ts) == 0 {
 			continue

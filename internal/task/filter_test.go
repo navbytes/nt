@@ -25,3 +25,26 @@ func TestVisibleInList(t *testing.T) {
 		}
 	}
 }
+
+func TestDueBucketHandlesTimeOfDay(t *testing.T) {
+	today, weekEnd := "2026-06-09", "2026-06-16"
+	mk := func(line string) *Task { return Parse([]byte(line + "\n")).Tasks()[0] }
+
+	cases := []struct {
+		line, want string
+	}{
+		{"x done id:01A", BucketDone},
+		{"no due id:01B", BucketNoDate},
+		{"overdue due:2026-06-01 id:01C", BucketOverdue},
+		{"today due:2026-06-09 id:01D", BucketToday},
+		{"today timed due:2026-06-09T17:00 id:01E", BucketToday}, // the bug: was "This week"
+		{"this week due:2026-06-12 id:01F", BucketThisWeek},
+		{"this week timed due:2026-06-12T09:00 id:01G", BucketThisWeek},
+		{"later due:2026-07-01 id:01H", BucketLater},
+	}
+	for _, c := range cases {
+		if got := DueBucket(mk(c.line), today, weekEnd); got != c.want {
+			t.Errorf("%q: got %q want %q", c.line, got, c.want)
+		}
+	}
+}
