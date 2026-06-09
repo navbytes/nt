@@ -7,3 +7,6 @@
 # The compiled spike binary from `make desktop-build`
 /nt-desktop
 nt
+
+# A bare `go build` in this module emits a binary named after the dir (~16MB)
+/desktop
