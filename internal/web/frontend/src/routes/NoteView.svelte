@@ -58,6 +58,33 @@
     }
   }
 
+  // ---- new task linked to this note (closes the note→task loop) ----
+  let addingTask = $state(false);
+  let taskText = $state("");
+  let taskErr = $state("");
+  let taskBusy = $state(false);
+
+  async function doAddTask() {
+    const body = taskText.trim();
+    if (!body) return;
+    taskErr = "";
+    taskBusy = true;
+    try {
+      // Append a [[wikilink]] to the note title so the task references this note
+      // (it then shows under "Referenced by tasks").
+      await api.taskNew(`${body} [[${$noteQ.data?.title ?? handle}]]`);
+      await qc.invalidateQueries({ queryKey: ["note", handle] });
+      await qc.invalidateQueries({ queryKey: ["tasks"] });
+      await qc.invalidateQueries({ queryKey: ["state"] });
+      taskText = "";
+      addingTask = false;
+    } catch (e) {
+      taskErr = String(e);
+    } finally {
+      taskBusy = false;
+    }
+  }
+
   interface TocItem {
     id: string;
     text: string;
@@ -157,10 +184,25 @@
         <span class="spacer"></span>
         <a class="btn btn--ghost btn--sm" href={`/graph?focus=${encodeURIComponent(handle)}`}>Graph ⌖</a>
         {#if canEdit}
+          <button class="btn btn--ghost btn--sm" onclick={() => (addingTask = !addingTask)}>＋ Task</button>
           <button class="btn btn--ghost btn--sm" onclick={openMove}>Move</button>
           <button class="btn btn--ghost btn--sm" onclick={() => (editing = true)}>Edit</button>
         {/if}
       </div>
+      {#if addingTask}
+        <div class="movebar">
+          <span class="movebar__label">New task</span>
+          <input
+            class="movebar__input"
+            bind:value={taskText}
+            placeholder="what needs doing? (linked to this note)"
+            onkeydown={(e) => e.key === "Enter" && doAddTask()}
+          />
+          <button class="btn btn--sm" onclick={doAddTask} disabled={taskBusy}>{taskBusy ? "Adding…" : "Add task"}</button>
+          <button class="btn btn--ghost btn--sm" onclick={() => (addingTask = false)}>Cancel</button>
+          {#if taskErr}<span class="error small">{taskErr}</span>{/if}
+        </div>
+      {/if}
       {#if moving}
         <div class="movebar">
           <span class="movebar__label">Move to folder</span>

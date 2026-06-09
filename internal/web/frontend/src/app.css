@@ -385,6 +385,22 @@ code {
 .chip--more {
   color: var(--muted); /* the "+N" overflow chip on capped tag lists */
 }
+.empty {
+  max-width: 46ch;
+  margin: 28px 0;
+}
+.empty__lead {
+  font-size: 1.05rem;
+  font-weight: 600;
+  margin: 0 0 6px;
+}
+.empty code {
+  font-family: var(--font-mono);
+  font-size: 0.85em;
+  background: var(--bg-inset);
+  padding: 1px 5px;
+  border-radius: 4px;
+}
 .src,
 .kind {
   font-family: var(--font-mono);
