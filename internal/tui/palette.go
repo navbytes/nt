@@ -38,6 +38,7 @@ func paletteCommands() []paletteCmd {
 		{"undo", "revert the last change", true, func(m *Model) tea.Cmd { m.undo(); return nil }},
 		{"redo", "re-apply the last undone change", true, func(m *Model) tea.Cmd { m.redo(); return nil }},
 		{"archive done", "move completed tasks to done.txt", true, func(m *Model) tea.Cmd { m.archiveDone(); return nil }},
+		{"archive note", "retire / restore the selected note (reversible)", true, func(m *Model) tea.Cmd { m.archiveNote(); return nil }},
 		{"filter", "filter the list", false, prompt(inFilter, "filter")},
 		{"follow link/tag", "pick a token to open or scope", false, func(m *Model) tea.Cmd { m.startFollow(); return nil }},
 		{"go to tasks", "switch to the tasks tab", false, func(m *Model) tea.Cmd { m.tab, m.cursor, m.offset = tabTasks, 0, 0; return nil }},
@@ -48,6 +49,7 @@ func paletteCommands() []paletteCmd {
 		{"group by tag", "group tasks by tag", false, func(m *Model) tea.Cmd { m.grp = groupTag; m.rebuild(); return nil }},
 		{"toggle done visibility", "show / hide completed tasks", false, func(m *Model) tea.Cmd { m.showDone = !m.showDone; m.rebuild(); return nil }},
 		{"toggle blocked visibility", "show / hide dependency-blocked tasks", false, func(m *Model) tea.Cmd { m.showBlocked = !m.showBlocked; m.rebuild(); return nil }},
+		{"toggle archived visibility", "show / hide retired notes (notes tab)", false, func(m *Model) tea.Cmd { m.showArchived = !m.showArchived; m.rebuild(); return nil }},
 		{"help", "show the key reference", false, func(m *Model) tea.Cmd { m.help = true; m.helpScroll = 0; return nil }},
 	}
 }

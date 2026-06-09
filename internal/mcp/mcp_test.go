@@ -236,3 +236,73 @@ func TestMCPRetrievalTools(t *testing.T) {
 		t.Fatalf("nt_tag result: %s", out)
 	}
 }
+
+// TestMCPArchive: an agent can retire stale memory (and restore it). Archived
+// notes drop out of search/recall and out of backlinks, but the note is still
+// addressable by handle (so undo works).
+func TestMCPArchive(t *testing.T) {
+	s := newServer(t)
+	must := func(name string, a map[string]any) string {
+		t.Helper()
+		out, err := s.dispatch(name, a)
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		return out
+	}
+	must("nt_note", map[string]any{"title": "Keeper", "tags": []any{"keep"}, "body": "the durable decision"})
+	must("nt_note", map[string]any{"title": "Stale Note", "tags": []any{"keep"}, "body": "obsoletemarker — points at [[keeper]]"})
+
+	searchKeep := func() int {
+		var sr struct {
+			Notes []noteOut `json:"notes"`
+		}
+		json.Unmarshal([]byte(must("nt_search", map[string]any{"tag": "keep", "type": "note"})), &sr)
+		return len(sr.Notes)
+	}
+
+	// Baseline: both notes searchable; Keeper carries a backlink from Stale Note.
+	if n := searchKeep(); n != 2 {
+		t.Fatalf("baseline search tag=keep → %d, want 2", n)
+	}
+	if out := must("nt_links", map[string]any{"handle": "keeper"}); !strings.Contains(out, "Stale Note") {
+		t.Fatalf("baseline nt_links keeper should show the backlink: %s", out)
+	}
+
+	// Archive Stale Note.
+	var ar noteOut
+	json.Unmarshal([]byte(must("nt_archive", map[string]any{"handle": "stale-note"})), &ar)
+	if !ar.Archived {
+		t.Fatalf("nt_archive result should report archived: %+v", ar)
+	}
+
+	// It drops out of search, recall, and Keeper's backlinks.
+	if n := searchKeep(); n != 1 {
+		t.Errorf("after archive, search tag=keep → %d, want 1", n)
+	}
+	if out := must("nt_recall", map[string]any{}); strings.Contains(out, "obsoletemarker") {
+		t.Error("nt_recall must not return an archived note")
+	}
+	if out := must("nt_links", map[string]any{"handle": "keeper"}); strings.Contains(out, "Stale Note") {
+		t.Errorf("an archived note must not appear as a backlink: %s", out)
+	}
+
+	// Undo restores it everywhere. (Fresh var: the result omits archived when
+	// false, so reusing `ar` would keep its stale true.)
+	var un noteOut
+	json.Unmarshal([]byte(must("nt_archive", map[string]any{"handle": "stale-note", "undo": true})), &un)
+	if un.Archived {
+		t.Error("nt_archive undo should clear the flag")
+	}
+	if n := searchKeep(); n != 2 {
+		t.Errorf("after undo, search tag=keep → %d, want 2", n)
+	}
+
+	// Validation.
+	if _, err := s.dispatch("nt_archive", map[string]any{}); err == nil {
+		t.Error("nt_archive should require a handle")
+	}
+	if _, err := s.dispatch("nt_archive", map[string]any{"handle": "nope"}); err == nil {
+		t.Error("nt_archive should error on an unknown note")
+	}
+}

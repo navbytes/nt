@@ -160,6 +160,8 @@ func (s *server) dispatch(name string, a map[string]any) (string, error) {
 		return s.mv(a)
 	case "nt_tag":
 		return s.tag(a)
+	case "nt_archive":
+		return s.archive(a)
 	default:
 		return "", fmt.Errorf("unknown tool %q", name)
 	}
@@ -206,6 +208,7 @@ func (s *server) status(a map[string]any) (string, error) {
 	}
 	project, tag := strings.TrimSpace(str(a, "project")), strings.TrimSpace(str(a, "tag"))
 	notes, _ := note.List(s.eng.S)
+	notes = note.Active(notes) // a resuming agent gets the working set, not retired memory
 	blocked := task.BlockedIDs(d.Tasks())
 
 	inScope := func(t *task.Task) bool {
@@ -474,6 +477,7 @@ func (s *server) recall(a map[string]any) (string, error) {
 		tasks = append(tasks, t)
 	}
 	notes, _ := note.List(s.eng.S)
+	notes = note.Active(notes) // recall restores active context; archived notes are retired
 	var nout []noteOut
 	for _, n := range notes {
 		if source != "" && n.Source != source {
@@ -526,6 +530,7 @@ func (s *server) search(a map[string]any) (string, error) {
 		return "", err
 	}
 	notes, _ := note.List(s.eng.S)
+	notes = note.Active(notes) // search returns the working set (body scan below skips archived too)
 	ql := strings.ToLower(q)
 
 	var nout []noteOut
@@ -664,6 +669,37 @@ func (s *server) tag(a map[string]any) (string, error) {
 	return jsonText(noteToOut(n)), nil
 }
 
+// archive retires a note from the agent's working set (recall/search/status) by
+// flipping the soft `archived` frontmatter flag, or restores it with undo. The
+// file stays on disk with its links intact — the same reversible retire the CLI
+// and web offer. It resolves against all notes (archived included) so an already
+// retired note can be found to unarchive.
+func (s *server) archive(a map[string]any) (string, error) {
+	handle := strings.TrimSpace(str(a, "handle"))
+	if handle == "" {
+		return "", fmt.Errorf("handle is required")
+	}
+	unarchive := boolArg(a, "undo")
+	notes, _ := note.List(s.eng.S)
+	it, ok := links.Resolve(handle, nil, notes)
+	if !ok || it.Kind != "note" {
+		return "", fmt.Errorf("no note %q", handle)
+	}
+	var n *note.Note
+	for _, x := range notes {
+		if x.Path == it.Path {
+			n = x
+			break
+		}
+	}
+	n.Archived = !unarchive
+	n.Updated = time.Now().Format(time.RFC3339)
+	if err := n.Save(); err != nil {
+		return "", err
+	}
+	return jsonText(noteToOut(n)), nil
+}
+
 func removeTag(ss []string, want string) []string {
 	out := ss[:0]
 	for _, s := range ss {
@@ -712,16 +748,17 @@ func tasksOut(ts []*task.Task) []taskOut {
 }
 
 type noteOut struct {
-	ID     string   `json:"id,omitempty"`
-	Rel    string   `json:"rel,omitempty"` // path handle (notes authored outside nt have no id)
-	Title  string   `json:"title"`
-	Tags   []string `json:"tags,omitempty"`
-	Source string   `json:"source,omitempty"`
-	Body   string   `json:"body,omitempty"`
+	ID       string   `json:"id,omitempty"`
+	Rel      string   `json:"rel,omitempty"` // path handle (notes authored outside nt have no id)
+	Title    string   `json:"title"`
+	Tags     []string `json:"tags,omitempty"`
+	Source   string   `json:"source,omitempty"`
+	Archived bool     `json:"archived,omitempty"` // retired from recall/search/status
+	Body     string   `json:"body,omitempty"`
 }
 
 func noteToOut(n *note.Note) noteOut {
-	return noteOut{ID: n.ID, Rel: n.Rel, Title: n.Title, Tags: n.Tags, Source: n.Source, Body: strings.TrimSpace(n.Body)}
+	return noteOut{ID: n.ID, Rel: n.Rel, Title: n.Title, Tags: n.Tags, Source: n.Source, Archived: n.Archived, Body: strings.TrimSpace(n.Body)}
 }
 
 // linkOut is one forward link in the nt_links result.
@@ -750,6 +787,9 @@ func backlinksOut(hits []search.Hit, notes []*note.Note) []map[string]string {
 	out := []map[string]string{}
 	for _, h := range hits {
 		if n, ok := byPath[h.Path]; ok {
+			if n.Archived {
+				continue // a retired note is out of the graph — no backlink from it
+			}
 			hk := noteHandle(n)
 			if seen[hk] {
 				continue
@@ -821,6 +861,11 @@ func intArg(a map[string]any, k string) int {
 		return int(f)
 	}
 	return 0
+}
+
+func boolArg(a map[string]any, k string) bool {
+	b, _ := a[k].(bool)
+	return b
 }
 
 func contains(ss []string, v string) bool {

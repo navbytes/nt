@@ -194,8 +194,14 @@ func (m *Model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case ">":
 		m.nudgeSplit(4) // widen the list
 	case ".":
-		m.showDone = !m.showDone
-		m.rebuild()
+		if m.tab == tabNotes {
+			m.showArchived = !m.showArchived
+			m.rebuild()
+			m.setStatus("archived: " + onOff(m.showArchived))
+		} else {
+			m.showDone = !m.showDone
+			m.rebuild()
+		}
 	case "b":
 		m.showBlocked = !m.showBlocked
 		m.rebuild()
@@ -220,7 +226,11 @@ func (m *Model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "s":
 		m.toggleDoing()
 	case "x":
-		m.toggleDone()
+		if m.tab == tabNotes {
+			m.archiveNote()
+		} else {
+			m.toggleDone()
+		}
 	case "X":
 		m.deleteTargets()
 	case "d":
@@ -672,6 +682,29 @@ func (m *Model) addLinkToNote(target string) {
 	}
 	m.reload()
 	m.setStatus("linked → [[" + target + "]]")
+}
+
+// archiveNote toggles the soft `archived` flag on the selected note — the TUI
+// face of the same reversible retire the CLI/web/MCP offer. An archived note
+// drops out of the notes list (press '.' to reveal the retired set) but stays on
+// disk with its links intact.
+func (m *Model) archiveNote() {
+	n := m.selectedNote()
+	if n == nil {
+		return
+	}
+	n.Archived = !n.Archived
+	n.Updated = time.Now().Format(time.RFC3339)
+	verb, title := "archived", n.Title
+	if !n.Archived {
+		verb = "unarchived"
+	}
+	if err := n.Save(); err != nil {
+		m.setStatus("archive failed: " + err.Error())
+		return
+	}
+	m.reload()
+	m.setStatus(verb + " “" + title + "”")
 }
 
 // undo reverses the last forward write. The journal is a single-entry toggle

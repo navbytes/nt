@@ -139,4 +139,12 @@ var toolDefs = []toolDef{
 			"remove": at(),
 		}, "handle"),
 	},
+	{
+		Name:        "nt_archive",
+		Description: "Retire a note from recall/search/status when its memory is stale or superseded — reversible, and the file stays on disk with its links intact. Set undo to bring it back.",
+		InputSchema: obj(map[string]any{
+			"handle": sp("the note to archive (slug/title/id)"),
+			"undo":   map[string]any{"type": "boolean", "description": "unarchive instead"},
+		}, "handle"),
+	},
 }
