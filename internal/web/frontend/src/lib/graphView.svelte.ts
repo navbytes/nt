@@ -7,6 +7,15 @@
 export type ColorBy = "folder" | "tag" | "source" | "none";
 export type ShapeBy = "kind" | "source" | "folder" | "tag" | "none";
 export type Mode = "global" | "local";
+// Visual finish: how much glow/bloom the canvas renders. "off" is the original
+// flat look (zero per-frame cost); "full" adds gradient links + animated
+// depth-of-field on top of the glow. Auto-downgraded at runtime for large graphs
+// / reduced-motion (see Graph.svelte computeFx).
+export type Effects = "off" | "subtle" | "full";
+export type LinkStyle = "curved" | "straight";
+// Renderer: 2D canvas (force-graph) or 3D WebGL constellation with bloom
+// (3d-force-graph, lazy-loaded only when selected).
+export type Dim = "2d" | "3d";
 
 const KEY = "nt-graph-view";
 
@@ -24,6 +33,10 @@ const PERSIST_KEYS = [
   "centerGravity",
   "labelThreshold",
   "depth",
+  "effects",
+  "linkStyle",
+  "colorLinks",
+  "dim",
 ] as const;
 
 interface ViewState {
@@ -47,6 +60,10 @@ interface ViewState {
   linkDistance: number;
   centerGravity: number;
   labelThreshold: number;
+  effects: Effects;
+  linkStyle: LinkStyle;
+  colorLinks: boolean;
+  dim: Dim;
 }
 
 const defaults: ViewState = {
@@ -70,6 +87,10 @@ const defaults: ViewState = {
   linkDistance: 30,
   centerGravity: 0.08,
   labelThreshold: 1.2,
+  effects: "full",
+  linkStyle: "curved",
+  colorLinks: true,
+  dim: "2d",
 };
 
 function loadPersisted(): Partial<ViewState> {

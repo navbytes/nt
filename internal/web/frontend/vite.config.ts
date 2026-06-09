@@ -51,6 +51,11 @@ export default defineConfig({
       },
     }),
   ],
+  resolve: {
+    // The 3D graph (3d-force-graph) and the UnrealBloomPass we import for its
+    // glow must resolve to ONE three instance, or the bloom pass won't attach.
+    dedupe: ["three"],
+  },
   // Assets are served from /assets by the Go binary; absolute base keeps URLs
   // stable regardless of the SPA route.
   base: "/",

@@ -48,6 +48,19 @@ export function nodeColor(n: FGNode, colorBy: ColorBy): string {
 
 // legendEntries lists the distinct {value,color} pairs present in the data for
 // the active dimension, sorted, for the interactive legend.
+// withAlpha returns an rgba() string for a #rgb / #rrggbb color at alpha a. The
+// graph palette + accent tokens are all hex; this lets the canvas tint nodes and
+// links at runtime without re-deriving colors. Non-hex input is returned as-is.
+export function withAlpha(hex: string, a: number): string {
+  let h = hex.trim();
+  if (h[0] === "#") h = h.slice(1);
+  if (h.length === 3) h = h[0]! + h[0]! + h[1]! + h[1]! + h[2]! + h[2]!;
+  if (h.length !== 6) return hex;
+  const n = parseInt(h, 16);
+  if (Number.isNaN(n)) return hex;
+  return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`;
+}
+
 export function legendEntries(
   nodes: FGNode[],
   colorBy: ColorBy,

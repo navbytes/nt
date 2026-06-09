@@ -18,6 +18,10 @@
   --sidebar-w: 260px;
   --font-ui: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  /* graph canvas (Graph.svelte reads these via getComputedStyle on theme change) */
+  --graph-bg-edge: rgba(58, 52, 40, 0.07); /* vignette: faint warm corner darkening */
+  --graph-glow-alpha: 0.3; /* node halo strength — soft colored drop-shadow on light */
+  --graph-glow-blur: 6; /* halo softness knob */
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
@@ -33,6 +37,9 @@
     --accent-2: #7dcfff;
     --green: #9ece6a;
     --red: #f7768e;
+    --graph-bg-edge: rgba(0, 0, 0, 0.5); /* deeper vignette for "cosmos" depth */
+    --graph-glow-alpha: 0.6; /* additive glow reads brighter on dark */
+    --graph-glow-blur: 10;
   }
 }
 [data-theme="dark"] {
@@ -48,6 +55,9 @@
   --accent-2: #7dcfff;
   --green: #9ece6a;
   --red: #f7768e;
+  --graph-bg-edge: rgba(0, 0, 0, 0.5);
+  --graph-glow-alpha: 0.6;
+  --graph-glow-blur: 10;
 }
 
 * {
