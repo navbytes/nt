@@ -85,6 +85,23 @@ func (m *Model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
+	// Vim count prefix: 1-9 (and 0 after a non-zero) accumulate a repeat count the
+	// next motion consumes (e.g. 5j, 12G). The tab keys moved to [ ] to free the
+	// digits. Only in the list (not while scrolling the detail pane).
+	if !m.detailFocus && (len(key) == 1 && key[0] >= '1' && key[0] <= '9' || (key == "0" && m.count > 0)) {
+		m.count = min(m.count*10+int(key[0]-'0'), 99999)
+		m.setStatus(fmt.Sprintf("%d…", m.count))
+		return m, nil
+	}
+	// Any other key consumes the count: n is the repeat (≥1), hadCount records
+	// whether one was actually typed (for G's "go to line N" vs "go to end").
+	hadCount := m.count > 0
+	n := m.count
+	m.count = 0
+	if n < 1 {
+		n = 1
+	}
+
 	// Clear the pending-'d' hint (and its status) on any other key. The status
 	// line is NOT wiped on every key, so action feedback persists until replaced.
 	if key != "d" && m.pendD {
@@ -119,13 +136,13 @@ func (m *Model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.detailFocus {
 			m.detailScroll++
 		} else {
-			m.move(1)
+			m.move(n) // n = vim count (default 1)
 		}
 	case "k", "up":
 		if m.detailFocus {
 			m.detailScroll--
 		} else {
-			m.move(-1)
+			m.move(-n)
 		}
 	case "ctrl+d":
 		if m.detailFocus {
@@ -146,18 +163,22 @@ func (m *Model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.cursor, m.offset = 0, 0
 		}
 	case "G", "end":
-		if m.detailFocus {
+		switch {
+		case m.detailFocus:
 			m.detailScroll = 1 << 20 // clamped to the bottom on render
-		} else {
+		case hadCount: // NG → jump to the N-th row (1-based)
+			m.cursor = n - 1
+			m.clampCursor()
+		default:
 			m.cursor = m.selectableLen() - 1
 			m.clampCursor()
 		}
-	case "1":
-		m.tab, m.cursor, m.offset = tabTasks, 0, 0
-	case "2":
-		m.tab, m.cursor, m.offset = tabNotes, 0, 0
-	case "3":
-		m.tab, m.cursor, m.offset = tabLogbook, 0, 0
+	case "]": // next tab (digits 1-3 freed for vim counts)
+		m.tab = (m.tab + 1) % tabCount
+		m.cursor, m.offset = 0, 0
+	case "[", "shift+tab": // previous tab
+		m.tab = (m.tab + tabCount - 1) % tabCount
+		m.cursor, m.offset = 0, 0
 	case "tab":
 		m.tab = (m.tab + 1) % tabCount
 		m.cursor, m.offset = 0, 0

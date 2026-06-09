@@ -41,14 +41,14 @@ func TestStartupKeyGate(t *testing.T) {
 	m.ready = false
 	m.width, m.height = 100, 24
 	var model tea.Model = m
-	// A stray "2" before ready must be dropped (stay on the tasks tab).
-	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("2")})
+	// A stray "]" (next tab) before ready must be dropped (stay on tasks).
+	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("]")})
 	if model.(*Model).tab != tabTasks {
 		t.Fatal("key before ready should be ignored")
 	}
-	// After ready, "2" switches to the notes tab.
+	// After ready, "]" switches to the next (notes) tab.
 	model, _ = model.Update(readyMsg{})
-	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("2")})
+	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("]")})
 	if model.(*Model).tab != tabNotes {
 		t.Fatal("key after ready should be handled")
 	}

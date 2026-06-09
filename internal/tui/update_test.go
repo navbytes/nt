@@ -209,3 +209,41 @@ func TestAddLinkToNoteFromNotesTab(t *testing.T) {
 		t.Errorf("existing body should be preserved:\n%s", got.Body)
 	}
 }
+
+// TestVimCountsAndTabKeys: digit prefixes repeat motions (3j/2k/5G), and tabs
+// moved to [ / ] (U6).
+func TestVimCountsAndTabKeys(t *testing.T) {
+	m := testModel(t)
+	m.width, m.height = 100, 24
+	for i := 0; i < 10; i++ {
+		_ = m.eng.Apply("add", func(d *task.Doc, rec *mutate.Recorder) error {
+			nt := task.New("filler task")
+			d.Append(nt)
+			rec.Added(nt)
+			return nil
+		})
+	}
+	m.reload()
+	m.cursor = 0
+
+	if mm := press(m, "3", "j").(*Model); mm.cursor != 3 {
+		t.Fatalf("3j should land on row 3, got %d", mm.cursor)
+	}
+	m.cursor = 3
+	if mm := press(m, "2", "k").(*Model); mm.cursor != 1 {
+		t.Fatalf("2k from row 3 should be row 1, got %d", mm.cursor)
+	}
+	if mm := press(m, "5", "G").(*Model); mm.cursor != 4 {
+		t.Fatalf("5G should jump to row 5 (index 4), got %d", mm.cursor)
+	}
+
+	// Tab keys: ] next, [ prev.
+	m.tab = tabTasks
+	if mm := press(m, "]").(*Model); mm.tab != tabNotes {
+		t.Fatalf("] should advance to the notes tab, got %v", mm.tab)
+	}
+	m.tab = tabTasks
+	if mm := press(m, "[").(*Model); mm.tab != tabLogbook {
+		t.Fatalf("[ should wrap to the logbook tab, got %v", mm.tab)
+	}
+}
