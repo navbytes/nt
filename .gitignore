@@ -2,6 +2,9 @@
 /nt
 /nt-e2e
 
+# goreleaser snapshot/release output (the embedded SPA dist/ lives under internal/)
+/dist/
+
 # editor / OS cruft
 *.swp
 .DS_Store

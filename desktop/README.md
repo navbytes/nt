@@ -15,14 +15,15 @@ tagging a release builds and uploads native bundles (see below).
 Each `vX.Y.Z` release attaches native bundles built by the `desktop` job in
 [`.github/workflows/release.yml`](../.github/workflows/release.yml):
 
-- **macOS** — `nt_<ver>_macos_universal.zip` (universal; signed + notarized once
-  the Apple secrets in [RELEASING.md](RELEASING.md) are set, otherwise ad-hoc:
-  right-click → Open the first time).
-- **Linux** — `nt_<ver>_linux_amd64.tar.gz` (needs `libgtk-3` +
+- **macOS** — `nt-desktop_<ver>_macos_universal.zip` (universal; signed +
+  notarized once the Apple secrets in [RELEASING.md](RELEASING.md) are set,
+  otherwise ad-hoc: right-click → Open the first time).
+- **Linux** — `nt-desktop_<ver>_linux_amd64.tar.gz` (needs `libgtk-3` +
   `libwebkit2gtk-4.1`).
-- **Windows** — `nt_<ver>_windows_amd64.zip` (uses the Edge WebView2 runtime).
+- **Windows** — `nt-desktop_<ver>_windows_amd64.zip` (uses the Edge WebView2 runtime).
 
-This is separate from the `nt` **CLI**, which installs via `go install` / curl /
+The `nt-desktop_` prefix keeps these GUI bundles distinct from the `nt_` **CLI**
+archives (`nt_<ver>_<os>_<arch>`), which install via `go install` / curl /
 Homebrew. A GUI app can't ship through `go install` (CGO + a build tag + a
 WebView runtime are required), so the two have different channels by design.
 

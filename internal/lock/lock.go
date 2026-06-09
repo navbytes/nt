@@ -3,14 +3,17 @@
 // tasks.txt itself — so the atomic rename that replaces tasks.txt can't swap
 // the inode out from under a held lock.
 //
-// flock(2) is local-filesystem only; on NFS it may silently no-op. The store is
-// documented as local-FS only for concurrent access.
+// The OS primitive differs per platform: flock(2) on Unix, LockFileEx on
+// Windows (see lock_unix.go / lock_windows.go). Both are advisory and released
+// automatically when the file handle closes or the process exits, so a crash
+// can't strand the store. Both are local-filesystem only; on NFS/SMB the lock
+// may silently no-op, so the store is documented as local-FS only for
+// concurrent access.
 package lock
 
 import (
 	"fmt"
 	"os"
-	"syscall"
 	"time"
 )
 
@@ -24,7 +27,8 @@ type Handle struct {
 
 // Acquire takes an exclusive advisory lock on path, waiting up to timeout. It
 // returns a clear "store is busy" error rather than blocking forever or
-// silently succeeding.
+// silently succeeding. The OS lock primitive is non-blocking (tryLockExclusive)
+// and we poll, so the timeout is honored on every platform.
 func Acquire(path string, timeout time.Duration) (*Handle, error) {
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o644)
 	if err != nil {
@@ -32,11 +36,11 @@ func Acquire(path string, timeout time.Duration) (*Handle, error) {
 	}
 	deadline := time.Now().Add(timeout)
 	for {
-		err = syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
-		if err == nil {
+		ok, err := tryLockExclusive(f)
+		if ok {
 			return &Handle{f: f}, nil
 		}
-		if err != syscall.EWOULDBLOCK {
+		if err != nil {
 			f.Close()
 			return nil, fmt.Errorf("lock: %w", err)
 		}
@@ -53,7 +57,7 @@ func (h *Handle) Release() error {
 	if h == nil || h.f == nil {
 		return nil
 	}
-	_ = syscall.Flock(int(h.f.Fd()), syscall.LOCK_UN)
+	_ = unlock(h.f)
 	err := h.f.Close()
 	h.f = nil
 	return err
