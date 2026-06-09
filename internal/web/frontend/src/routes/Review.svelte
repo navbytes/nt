@@ -4,7 +4,9 @@
   import type { Task, ReviewResponse } from "../lib/api";
   import TaskRow from "../lib/TaskRow.svelte";
 
-  let { canEdit = false }: { canEdit?: boolean } = $props();
+  // `embedded` renders Review as a tab inside Tasks (no own page title — the
+  // Tasks header + the active "Review" tab already label it).
+  let { canEdit = false, embedded = false }: { canEdit?: boolean; embedded?: boolean } = $props();
 
   const reviewQ = createQuery({ queryKey: ["review"], queryFn: api.review });
 
@@ -15,8 +17,8 @@
     (r.stuckProjects?.length ?? 0);
 </script>
 
-<div class="pagehead"><h1>Review</h1></div>
-<p class="muted">Weekly triage — overdue, stale, undated, and stuck projects that need a decision.</p>
+{#if !embedded}<div class="pagehead"><h1>Review</h1></div>{/if}
+<p class="muted" class:rev-sub--embedded={embedded}>Weekly triage — overdue, stale, undated, and stuck projects that need a decision.</p>
 
 {#snippet bucket(title: string, tasks: Task[], danger = false)}
   {#if tasks.length}
@@ -88,5 +90,9 @@
   .big {
     font-size: 1rem;
     margin-top: 20px;
+  }
+  /* As a Tasks tab there's no page title above; give the subtitle some air. */
+  .rev-sub--embedded {
+    margin-top: 12px;
   }
 </style>
