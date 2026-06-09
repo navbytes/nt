@@ -39,7 +39,9 @@
     "@codemirror/state": "^6.6.0",
     "@codemirror/view": "^6.43.0",
     "@tanstack/svelte-query": "^5.90.2",
+    "3d-force-graph": "^1.80.0",
     "force-graph": "^1.51.4",
-    "mermaid": "^11.15.0"
+    "mermaid": "^11.15.0",
+    "three": "^0.184.0"
   }
 }

@@ -1,5 +1,13 @@
 <script lang="ts">
-  import { view, toggleIn, resetFilters, exitLocal, type ColorBy, type ShapeBy } from "./graphView.svelte";
+  import {
+    view,
+    toggleIn,
+    resetFilters,
+    exitLocal,
+    type ColorBy,
+    type ShapeBy,
+    type Effects,
+  } from "./graphView.svelte";
   import ShapeGlyph from "./ShapeGlyph.svelte";
   import type { ShapeKind } from "./graphShapes";
 
@@ -43,6 +51,12 @@
     { v: "none", label: "None" },
   ];
 
+  const effectsOptions: { v: Effects; label: string }[] = [
+    { v: "full", label: "Full (glow + animation)" },
+    { v: "subtle", label: "Subtle (glow)" },
+    { v: "off", label: "Off (flat)" },
+  ];
+
   const hasFilters = $derived(
     view.search !== "" ||
       view.filterFolders.length > 0 ||
@@ -82,6 +96,14 @@
           <button class:seg--on={view.mode === "global"} onclick={exitLocal}>Global</button>
           <button class:seg--on={view.mode === "local"} disabled={!view.rootId && !view.selectedId}
             onclick={() => { view.mode = "local"; view.rootId = view.rootId ?? view.selectedId; }}>Local</button>
+        </div>
+      </div>
+
+      <!-- Renderer: 2D canvas / 3D WebGL constellation -->
+      <div class="gctl__row">
+        <div class="seg" role="group" aria-label="Renderer dimension">
+          <button class:seg--on={view.dim === "2d"} onclick={() => (view.dim = "2d")}>2D</button>
+          <button class:seg--on={view.dim === "3d"} onclick={() => (view.dim = "3d")} title="3D constellation with bloom">3D ✦</button>
         </div>
       </div>
       {#if view.mode === "local"}
@@ -178,6 +200,22 @@
             <label><input type="checkbox" bind:checked={view.showLabels} /> Labels</label>
             <label><input type="checkbox" bind:checked={view.showArrows} /> Arrows</label>
             <label><input type="checkbox" bind:checked={view.particles} /> Flow</label>
+          </div>
+          <div class="gctl__field">
+            <label for="g-effects">Effects</label>
+            <select id="g-effects" bind:value={view.effects}>
+              {#each effectsOptions as o (o.v)}<option value={o.v}>{o.label}</option>{/each}
+            </select>
+          </div>
+          <div class="gctl__inline">
+            <label><input type="checkbox" bind:checked={view.colorLinks} /> Color links</label>
+            <label>
+              <input
+                type="checkbox"
+                checked={view.linkStyle === "curved"}
+                onchange={(e) => (view.linkStyle = e.currentTarget.checked ? "curved" : "straight")}
+              /> Curved links
+            </label>
           </div>
           <label><input type="checkbox" bind:checked={view.frozen} /> Freeze layout</label>
           <div class="gctl__slider">

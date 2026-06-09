@@ -12,9 +12,10 @@
     type FGNode,
     type FGLink,
   } from "../lib/graph";
-  import { nodeColor as colorOfNode, legendEntries } from "../lib/graphColors";
+  import { nodeColor as colorOfNode, legendEntries, withAlpha } from "../lib/graphColors";
   import { nodeShape, tracePath, shapeLegendEntries, type ShapeKind } from "../lib/graphShapes";
-  import { view, savePersisted, enterLocal, exitLocal } from "../lib/graphView.svelte";
+  import { SpriteCache, drawRadius, type SpriteVariant } from "../lib/graphSprites";
+  import { view, savePersisted, enterLocal, exitLocal, type Effects } from "../lib/graphView.svelte";
   import GraphControls from "../lib/GraphControls.svelte";
   import GraphDetails from "../lib/GraphDetails.svelte";
   import GraphContextMenu from "../lib/GraphContextMenu.svelte";
@@ -28,32 +29,75 @@
   let hoveredId = $state<string | null>(null);
   let pinned = $state<Set<string>>(new Set());
   let menu = $state<{ x: number; y: number; node: FGNode } | null>(null);
+  // Effective visual level after reduced-motion / size / layout downgrades
+  // (computeFx). Read by the hot draw loop and the link/vignette wiring.
+  let fxLevel = $state<Effects>("full");
+  let engineRunning = $state(false);
+  // renderer construction state (2D force-graph ⟷ 3D constellation)
+  let built3d = false; // which renderer is currently mounted
+  let built = false; // first build finished (gates dim-toggle rebuilds)
+  let fitPending = false; // zoom-to-fit once the next layout settles
+  let destroyed = false; // component torn down (guards async builds)
+  let bloomPass: any = null; // three UnrealBloomPass (3D only)
+  const BG3D = "#05060d"; // deep-space background — bloom needs near-black
 
   const reduce =
     typeof window !== "undefined" &&
     window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
 
-  // ---- precomputed render state (rebuilt on data/filter/hover change, read as
-  // O(1) lookups by the per-frame canvas accessors — never recomputed per frame).
+  // ---- precomputed render state (rebuilt on data/filter change, read as O(1)
+  // lookups by the per-frame canvas accessors — never recomputed per frame).
   const adjacency = $derived(
     $graphQ.data ? buildAdjacency($graphQ.data) : new Map<string, Set<string>>(),
   );
-  let R: { color: Map<string, string>; bright: Set<string>; shape: Map<string, ShapeKind> } = {
+  // R.pass = ids passing the active filters (persistent). Hover/selection
+  // depth-of-field is layered on at draw time via focusSet + dofT, so it can
+  // animate without rebuilding R on every hover.
+  let R: { color: Map<string, string>; pass: Set<string>; shape: Map<string, ShapeKind> } = {
     color: new Map(),
-    bright: new Set(),
+    pass: new Set(),
     shape: new Map(),
   };
+
+  // Depth-of-field: focusSet = hovered node + neighbors (kept through the fade-out
+  // so un-dimming animates too); dofT ramps 0→1 = full-context → dimmed-context.
+  let focusSet: Set<string> | null = null;
+  let dofT = 0;
+  let dofRAF = 0;
+  let dofFrom = 0;
+  let dofTo = 0;
+  let dofStart = 0;
+  const DOF_MS = 180;
+  const DIM = 0.15; // dimmed-node alpha (matches the original base + "26")
+
+  // Pre-rendered glow sprites (graphSprites). Style is set from theme in readTheme.
+  const sprites = new SpriteCache({ theme: "dark", glowAlpha: 0.6, glowBlur: 10 });
 
   // Cached theme colors (refreshed on theme change) so the draw loop doesn't hit
   // getComputedStyle every frame.
   let cssFg = "#c0caf5";
   let cssBg = "#16161e";
   let cssAccent = "#7aa2f7";
+  let cssGraphEdge = "rgba(0,0,0,0.5)";
+  function isDarkHex(hex: string): boolean {
+    const h = hex.replace("#", "");
+    if (h.length < 6) return false;
+    const n = parseInt(h.slice(0, 6), 16);
+    if (Number.isNaN(n)) return false;
+    return 0.299 * ((n >> 16) & 255) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255) < 128;
+  }
   function readTheme() {
     const cs = getComputedStyle(document.documentElement);
     cssFg = cs.getPropertyValue("--fg").trim() || cssFg;
     cssBg = cs.getPropertyValue("--bg").trim() || cssBg;
     cssAccent = cs.getPropertyValue("--accent").trim() || cssAccent;
+    cssGraphEdge = cs.getPropertyValue("--graph-bg-edge").trim() || cssGraphEdge;
+    // theme is derived from the resolved bg luminance — covers the media-query
+    // and [data-theme] paths uniformly without re-deriving the CSS selectors.
+    const theme = isDarkHex(cssBg) ? "dark" : "light";
+    const glowAlpha = parseFloat(cs.getPropertyValue("--graph-glow-alpha")) || 0.4;
+    const glowBlur = parseFloat(cs.getPropertyValue("--graph-glow-blur")) || 8;
+    sprites.setStyle({ theme, glowAlpha, glowBlur });
   }
 
   // ---- derived option lists for the controls panel ----
@@ -97,49 +141,82 @@
     return { nodes, links };
   }
 
-  // recompute rebuilds the color + bright sets once per relevant change.
+  // recompute rebuilds the color + shape + pass sets once per relevant change.
   function recompute() {
     const data = $graphQ.data;
     if (!data) return;
     const nodes = toForceGraph(data).nodes;
     const color = new Map<string, string>();
     const shape = new Map<string, ShapeKind>();
+    const pass = new Set<string>();
     for (const n of nodes) {
       color.set(n.id, colorOfNode(n, view.colorBy));
       shape.set(n.id, nodeShape(n, view.shapeBy));
+      if (passes(n)) pass.add(n.id);
     }
-
-    const hoverSet =
-      hoveredId && adjacency.has(hoveredId)
-        ? new Set<string>([hoveredId, ...(adjacency.get(hoveredId) ?? [])])
-        : null;
-
-    const bright = new Set<string>();
-    for (const n of nodes) {
-      if (passes(n) && (!hoverSet || hoverSet.has(n.id))) bright.add(n.id);
-    }
-    R = { color, bright, shape };
-    visibleCount = bright.size;
-    graph?.refresh?.();
+    R = { color, pass, shape };
+    visibleCount = pass.size;
+    refreshFx(); // pass-size may cross a perf threshold
+    if (built3d) refresh3dColors();
+    repaint();
   }
 
   // ---- canvas helpers ----
   function nodeRadius(n: FGNode): number {
     return Math.min(12, Math.sqrt(1 + n.deg) * 3);
   }
-  function dimmed(id: string): boolean {
-    return !R.bright.has(id);
+  // nodeAlpha folds the two kinds of dimming: filtered-out nodes are always faint;
+  // hover/selection context fades smoothly via dofT (the depth-of-field tween).
+  function nodeAlpha(id: string): number {
+    if (!R.pass.has(id)) return DIM;
+    if (focusSet && !focusSet.has(id)) return 1 - (1 - DIM) * dofT;
+    return 1;
   }
   const LINK_BRIGHT = "rgba(128,128,128,0.5)";
   const LINK_DIM = "rgba(128,128,128,0.08)";
   const LINK_HOVER = "rgba(128,128,128,0.85)";
+  // linkAlpha mirrors nodeAlpha for edges (used by the gradient painter).
+  function linkAlpha(s: string, t: string): number {
+    if (!R.pass.has(s) || !R.pass.has(t)) return 0.08;
+    if (focusSet && !(focusSet.has(s) && focusSet.has(t))) return 0.08 + 0.42 * (1 - dofT);
+    return 0.5;
+  }
+
+  // force-graph v1.51 exposes no refresh(), and re-setting a style prop to its
+  // current value is a no-op (kapsule skips equal values). Un-pausing the rAF
+  // redraw loop for one frame reliably repaints even when cooled/frozen. The
+  // dofRAF guard avoids stomping an in-flight depth-of-field tween (which manages
+  // autoPauseRedraw itself).
+  function repaint() {
+    if (!graph || built3d) return; // 3D renders continuously; only 2D needs nudging
+    graph.autoPauseRedraw(false);
+    requestAnimationFrame(() => {
+      if (!dofRAF) graph?.autoPauseRedraw(true);
+    });
+  }
+
+  // computeFx downgrades the requested level for reduced-motion, large graphs, and
+  // active layout so the hot loop stays affordable. Off = original flat look.
+  function computeFx(): Effects {
+    let fx = view.effects;
+    const n = R.pass.size;
+    if (reduce && fx === "full") fx = "subtle"; // glow stays, animated DOF off
+    if (n > 5000) return "off"; // plain fill on very large graphs
+    if (fx === "full" && (n > 2500 || engineRunning)) fx = "subtle"; // drop gradient + DOF
+    return fx;
+  }
+  function refreshFx() {
+    fxLevel = computeFx();
+  }
 
   function drawNode(n: FGNode, ctx: CanvasRenderingContext2D, scale: number) {
     const x = n.x ?? 0;
     const y = n.y ?? 0;
     const r = nodeRadius(n);
     const base = R.color.get(n.id) ?? cssAccent;
-    const dim = dimmed(n.id);
+    const shape = R.shape.get(n.id) ?? "circle";
+    const alpha = nodeAlpha(n.id);
+    const dim = alpha < 0.99;
 
     // root / selected ring
     if (n.id === view.rootId || n.id === view.selectedId) {
@@ -149,21 +226,35 @@
       ctx.lineWidth = 1.5 / scale;
       ctx.stroke();
     }
-    // node — shape encodes view.shapeBy (source/folder/tag); circle by default
-    tracePath(ctx, R.shape.get(n.id) ?? "circle", x, y, r);
-    ctx.fillStyle = dim ? base + "26" : base;
-    ctx.fill();
+    // node body
+    if (fxLevel !== "off") {
+      // glowing orb sprite (hovered / selected nodes bloom brighter via "focus")
+      const variant: SpriteVariant =
+        (focusSet?.has(n.id) ?? false) || n.id === view.selectedId ? "focus" : "bright";
+      const sprite = sprites.get(shape, base, variant);
+      const rd = drawRadius(r);
+      ctx.save();
+      if (alpha < 1) ctx.globalAlpha = alpha;
+      ctx.drawImage(sprite, x - rd, y - rd, rd * 2, rd * 2);
+      ctx.restore();
+    } else {
+      // flat fill — the "Effects: Off" fallback (pixel-equivalent to the original)
+      tracePath(ctx, shape, x, y, r);
+      ctx.fillStyle = dim ? withAlpha(base, alpha) : base;
+      ctx.fill();
+    }
     // orphans (no links) read as a hollow outline so they stand out
     if (n.deg === 0) {
+      tracePath(ctx, shape, x, y, r);
       ctx.lineWidth = 1 / scale;
-      ctx.strokeStyle = dim ? base + "55" : base;
+      ctx.strokeStyle = withAlpha(base, dim ? 0.33 : 1);
       ctx.stroke();
     }
     // pinned indicator
     if (pinned.has(n.id)) {
       ctx.beginPath();
       ctx.arc(x, y, r + 1.5, 0, 2 * Math.PI);
-      ctx.strokeStyle = dim ? cssFg + "55" : cssFg;
+      ctx.strokeStyle = withAlpha(cssFg, dim ? 0.33 : 1);
       ctx.lineWidth = 0.8 / scale;
       ctx.setLineDash([2 / scale, 2 / scale]);
       ctx.stroke();
@@ -193,10 +284,113 @@
     }
   }
 
+  // ---- links ----
+  // Flat stroke accessor — used when the gradient painter is idle (Effects off,
+  // or "Color links" off). Off mode keeps the original neutral grey exactly.
+  function linkColorAccessor(l: any): string {
+    const s = linkEndId(l.source);
+    const t = linkEndId(l.target);
+    if (hoveredId && (s === hoveredId || t === hoveredId)) return LINK_HOVER;
+    const bright = linkAlpha(s, t) >= 0.5;
+    if (view.colorLinks && fxLevel !== "off") {
+      return withAlpha(R.color.get(s) ?? cssAccent, bright ? 0.55 : 0.12);
+    }
+    return bright ? LINK_BRIGHT : LINK_DIM;
+  }
+
+  // Gradient painter — replaces the link stroke only in "full" + colorLinks mode.
+  // Arrows + particles still render (force-graph paints them in separate passes).
+  // Reads link.__controlPoints (set by force-graph this frame) to follow the curve.
+  function drawLink(l: any, ctx: CanvasRenderingContext2D, scale: number) {
+    if (!(view.colorLinks && fxLevel === "full")) return; // idle → default stroke used
+    const s = l.source;
+    const t = l.target;
+    if (!s || !t || s.x == null || t.x == null) return;
+    const sid = linkEndId(s);
+    const tid = linkEndId(t);
+    const hov = hoveredId === sid || hoveredId === tid;
+    const a = hov ? 0.85 : linkAlpha(sid, tid);
+    const grad = ctx.createLinearGradient(s.x, s.y, t.x, t.y);
+    grad.addColorStop(0, withAlpha(R.color.get(sid) ?? cssAccent, a));
+    grad.addColorStop(1, withAlpha(R.color.get(tid) ?? cssAccent, a));
+    ctx.strokeStyle = grad;
+    ctx.lineWidth = (hov ? 2 : 1) / scale;
+    ctx.beginPath();
+    ctx.moveTo(s.x, s.y);
+    const cp = l.__controlPoints;
+    if (!cp) ctx.lineTo(t.x, t.y);
+    else if (cp.length === 2) ctx.quadraticCurveTo(cp[0], cp[1], t.x, t.y);
+    else ctx.bezierCurveTo(cp[0], cp[1], cp[2], cp[3], t.x, t.y);
+    ctx.stroke();
+  }
+
+  // Radial vignette painted under the graph each frame for depth. The frame ctx is
+  // in world coords (zoom×dpr), so reset to CSS pixels to keep it screen-fixed.
+  function vignette(ctx: CanvasRenderingContext2D) {
+    if (!container) return;
+    const dpr = window.devicePixelRatio || 1;
+    const w = container.clientWidth;
+    const h = container.clientHeight;
+    ctx.save();
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    const g = ctx.createRadialGradient(
+      w / 2,
+      h / 2,
+      Math.min(w, h) * 0.25,
+      w / 2,
+      h / 2,
+      Math.hypot(w, h) / 2,
+    );
+    g.addColorStop(0, "rgba(0,0,0,0)");
+    g.addColorStop(1, cssGraphEdge);
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, w, h);
+    ctx.restore();
+  }
+
+  // ---- depth-of-field: animate the hover focus fade in/out ----
+  function startDof(active: boolean) {
+    if (built3d) return; // 3D conveys focus via depth/parallax, not canvas dimming
+    if (active && hoveredId && adjacency.has(hoveredId)) {
+      focusSet = new Set<string>([hoveredId, ...(adjacency.get(hoveredId) ?? [])]);
+    }
+    const target = active ? 1 : 0;
+    if (reduce || fxLevel !== "full") {
+      dofT = target;
+      if (!active) focusSet = null;
+      repaint();
+      return;
+    }
+    dofFrom = dofT;
+    dofTo = target;
+    dofStart = performance.now();
+    if (!dofRAF) {
+      graph?.autoPauseRedraw?.(false); // free-run the rAF loop during the tween
+      const step = () => {
+        const p = Math.min(1, (performance.now() - dofStart) / DOF_MS);
+        const e = 1 - (1 - p) * (1 - p); // ease-out quad
+        dofT = dofFrom + (dofTo - dofFrom) * e;
+        if (p < 1) {
+          dofRAF = requestAnimationFrame(step);
+        } else {
+          dofRAF = 0;
+          if (dofTo === 0) focusSet = null;
+          graph?.autoPauseRedraw?.(true);
+          repaint();
+        }
+      };
+      dofRAF = requestAnimationFrame(step);
+    }
+  }
+
   // ---- selection / navigation ----
   function selectNode(n: FGNode) {
     view.selectedId = n.id;
-    if (n.x != null && n.y != null) graph?.centerAt(n.x, n.y, reduce ? 0 : 450);
+    if (built3d) {
+      focusCamera3d(n);
+    } else if (n.x != null && n.y != null) {
+      graph?.centerAt(n.x, n.y, reduce ? 0 : 450);
+    }
   }
 
   let clickTO: ReturnType<typeof setTimeout> | undefined;
@@ -327,20 +521,106 @@
     if (graph && container) graph.width(container.clientWidth).height(container.clientHeight);
   }
 
-  onMount(() => {
-    let destroyed = false;
-    let ro: ResizeObserver | undefined;
-    let fitPending = false;
-    readTheme();
+  // ---- 3D renderer helpers (sphere + line materials, bloom, camera) ----
+  function node3dColor(n: FGNode): string {
+    const base = R.color.get(n.id) ?? cssAccent;
+    return R.pass.has(n.id) ? base : withAlpha(base, 0.1); // dimmed = recede
+  }
+  function link3dColor(l: any): string {
+    const s = linkEndId(l.source);
+    const t = linkEndId(l.target);
+    const bright = R.pass.has(s) && R.pass.has(t);
+    if (view.colorLinks) return withAlpha(R.color.get(s) ?? cssAccent, bright ? 0.6 : 0.08);
+    return bright ? "rgba(160,166,190,0.5)" : "rgba(160,166,190,0.08)";
+  }
+  function bloomStrength(): number {
+    return view.effects === "off" ? 0 : view.effects === "subtle" ? 1.1 : 2.0;
+  }
+  // 3D: re-set the color accessors with fresh closures so three rebuilds the
+  // materials after a filter / colorBy change (2D just repaints).
+  function refresh3dColors() {
+    graph?.nodeColor?.((n: FGNode) => node3dColor(n));
+    graph?.linkColor?.((l: any) => link3dColor(l));
+  }
+  // Fly the 3D camera to frame a node (2D uses centerAt instead).
+  function focusCamera3d(n: FGNode) {
+    const x = (n as any).x ?? 0;
+    const y = (n as any).y ?? 0;
+    const z = (n as any).z ?? 0;
+    const ratio = 1 + 130 / (Math.hypot(x, y, z) || 1);
+    graph?.cameraPosition?.({ x: x * ratio, y: y * ratio, z: z * ratio }, n, reduce ? 0 : 800);
+  }
 
-    // re-fit whenever a fresh scoped dataset settles
-    feedHook = () => {
-      fitPending = true;
-    };
+  // buildGraph (re)constructs the renderer for the active view.dim. It tears down
+  // any previous instance so the 2D ⟷ 3D toggle can swap them in the same <div>.
+  async function buildGraph() {
+    if (!container || destroyed) return;
+    try {
+      graph?._destructor?.();
+    } catch {
+      /* best-effort teardown */
+    }
+    graph = null;
+    bloomPass = null;
+    container.innerHTML = "";
 
-    void (async () => {
+    if (view.dim === "3d") {
+      const { default: ForceGraph3D } = await import("3d-force-graph");
+      // @ts-ignore - three 0.184 ships no bundled type declarations; only Vector2 is used
+      const THREE: any = await import("three");
+      if (!container || destroyed) return;
+      const g: any = new ForceGraph3D(container, { controlType: "orbit" });
+      g.nodeId("id")
+        .nodeVal((n: FGNode) => 1 + n.deg)
+        .nodeLabel((n: FGNode) => n.title)
+        .nodeColor((n: FGNode) => node3dColor(n))
+        .nodeOpacity(0.92)
+        .nodeResolution(14)
+        .linkColor((l: any) => link3dColor(l))
+        .linkOpacity(0.55)
+        .linkWidth(0)
+        .linkCurvature(view.linkStyle === "curved" ? 0.18 : 0)
+        .backgroundColor(BG3D)
+        .showNavInfo(false)
+        .onNodeHover((n: FGNode | null) => {
+          hoveredId = n?.id ?? null;
+          if (container) container.style.cursor = n ? "pointer" : "";
+        })
+        .onNodeClick((n: FGNode, evt: MouseEvent) => onNodeClick(n, evt))
+        .onNodeRightClick((n: FGNode, evt: MouseEvent) => {
+          evt.preventDefault?.();
+          menu = { x: evt.clientX, y: evt.clientY, node: n };
+        })
+        .onBackgroundClick(() => {
+          closeMenu();
+          view.selectedId = null;
+        })
+        .onEngineTick(() => {
+          if (!engineRunning) engineRunning = true;
+        })
+        .onEngineStop(() => {
+          engineRunning = false;
+          if (fitPending) {
+            fitPending = false;
+            fit();
+          }
+        });
+
+      // Bloom — the additive glow that makes the constellation read as premium.
+      try {
+        // @ts-ignore - three 0.184 ships no type declarations for this addons subpath
+        const { UnrealBloomPass } = await import("three/examples/jsm/postprocessing/UnrealBloomPass.js"); // prettier-ignore
+        const bloom = new UnrealBloomPass(new THREE.Vector2(1, 1), bloomStrength(), 0.85, 0.05);
+        g.postProcessingComposer().addPass(bloom);
+        bloomPass = bloom;
+      } catch (e) {
+        console.warn("3D bloom unavailable:", e);
+      }
+      built3d = true;
+      graph = g;
+    } else {
       const { default: ForceGraph } = await import("force-graph");
-      if (destroyed || !container) return;
+      if (!container || destroyed) return;
       const g = new ForceGraph<FGNode, FGLink>(container)
         .nodeId("id")
         .nodeVal((n: FGNode) => 1 + n.deg)
@@ -348,18 +628,21 @@
         .backgroundColor(cssBg)
         // Painting happens in nodeCanvasObject (drawNode); force-graph ignores
         // nodeColor once a canvas-object accessor is set, so it's omitted here.
-        .linkColor((l: any) => {
-          const s = linkEndId(l.source);
-          const t = linkEndId(l.target);
-          if (hoveredId && (s === hoveredId || t === hoveredId)) return LINK_HOVER;
-          return R.bright.has(s) && R.bright.has(t) ? LINK_BRIGHT : LINK_DIM;
-        })
+        .linkColor(linkColorAccessor)
         .linkWidth((l: any) =>
           hoveredId && (linkEndId(l.source) === hoveredId || linkEndId(l.target) === hoveredId)
             ? 2
             : 1,
         )
+        .linkCurvature(view.linkStyle === "curved" ? 0.12 : 0)
+        // Gradient painter replaces the stroke only in "full" + colorLinks mode
+        // (mode "after" elsewhere → drawLink no-ops and the flat stroke shows).
+        .linkCanvasObject(drawLink)
+        .linkCanvasObjectMode(() => (view.colorLinks && fxLevel === "full" ? "replace" : "after"))
         .nodeCanvasObject(drawNode)
+        .onRenderFramePre((ctx: CanvasRenderingContext2D) => {
+          if (fxLevel !== "off") vignette(ctx);
+        })
         .nodePointerAreaPaint((n: FGNode, color: string, ctx: CanvasRenderingContext2D) => {
           ctx.beginPath();
           ctx.arc(n.x ?? 0, n.y ?? 0, nodeRadius(n) + 2, 0, 2 * Math.PI);
@@ -389,7 +672,11 @@
           evt.preventDefault?.();
           closeMenu();
         })
+        .onEngineTick(() => {
+          if (!engineRunning) engineRunning = true;
+        })
         .onEngineStop(() => {
+          engineRunning = false;
           if (fitPending) {
             fitPending = false;
             fit();
@@ -405,24 +692,39 @@
       g.d3Force("y", forceY(0).strength(view.centerGravity));
 
       if (reduce) g.warmupTicks(80).cooldownTicks(0);
-
+      built3d = false;
       graph = g;
-      size();
-      ro = new ResizeObserver(size);
-      ro.observe(container);
-    })();
+    }
 
+    built = true;
+    size();
+    fitPending = true;
+    graph.graphData(scopedData());
+    recompute();
+  }
+
+  onMount(() => {
+    let ro: ResizeObserver | undefined;
+    readTheme();
+    void buildGraph().then(() => {
+      if (container && !destroyed) {
+        ro = new ResizeObserver(size);
+        ro.observe(container);
+      }
+    });
     return () => {
       destroyed = true;
       if (clickTO) clearTimeout(clickTO);
+      if (dofRAF) cancelAnimationFrame(dofRAF);
       ro?.disconnect();
-      graph?._destructor?.();
+      try {
+        graph?._destructor?.();
+      } catch {
+        /* best-effort teardown */
+      }
       graph = null;
     };
   });
-
-  // hook the feed effect calls into onMount-scoped fitPending
-  let feedHook: (() => void) | null = null;
 
   // ---- honor deep-link focus once the graph data (and adjacency) is ready ----
   $effect(() => {
@@ -435,13 +737,14 @@
     // establish dependencies
     void [view.mode, view.depth, view.rootId, view.showTasks, data];
     if (!graph || !data) return;
-    feedHook?.();
+    fitPending = true;
     graph.graphData(scopedData());
     // local mode roots a fresh layout — clear stale pins from the previous scope
     if (view.mode === "global") pinned = new Set();
   });
 
-  // ---- recompute color/bright sets on filter/hover/colorBy change ----
+  // ---- recompute color/shape/pass sets on filter/colorBy change ----
+  // (hover/selection is handled by the depth-of-field effect below, not here.)
   $effect(() => {
     void [
       $graphQ.data,
@@ -452,12 +755,46 @@
       view.filterTags,
       view.filterSources,
       view.hideOrphans,
-      hoveredId,
       view.mode,
       view.depth,
       view.rootId,
     ];
     recompute();
+  });
+
+  // ---- depth-of-field: hover drives the focus fade (selection keeps its ring) ----
+  $effect(() => {
+    void hoveredId;
+    startDof(hoveredId !== null);
+  });
+
+  // ---- keep the effective level current on effects-pref / layout change ----
+  $effect(() => {
+    void [view.effects, engineRunning];
+    refreshFx();
+  });
+
+  // ---- 2D link styling: curvature + gradient on/off → repaint (matters when frozen) ----
+  $effect(() => {
+    void [view.linkStyle, view.colorLinks, fxLevel];
+    if (!graph || built3d) return;
+    graph.linkCurvature(view.linkStyle === "curved" ? 0.12 : 0);
+    repaint();
+  });
+
+  // ---- 3D styling: bloom strength + link color/curvature on pref change ----
+  $effect(() => {
+    void [view.effects, view.colorLinks, view.linkStyle, view.dim];
+    if (!graph || !built3d) return;
+    if (bloomPass) bloomPass.strength = bloomStrength();
+    graph.linkColor((l: any) => link3dColor(l));
+    graph.linkCurvature(view.linkStyle === "curved" ? 0.18 : 0);
+  });
+
+  // ---- rebuild the renderer when the 2D/3D toggle flips ----
+  $effect(() => {
+    const want3d = view.dim === "3d";
+    if (built && want3d !== built3d) void buildGraph();
   });
 
   // ---- physics ----
@@ -481,9 +818,11 @@
       if (frozen) {
         n.fx = n.x;
         n.fy = n.y;
+        (n as any).fz = (n as any).z;
       } else if (!pinned.has(n.id)) {
         n.fx = undefined;
         n.fy = undefined;
+        (n as any).fz = undefined;
       }
     }
     if (!frozen) graph.d3ReheatSimulation();
@@ -500,7 +839,7 @@
   // ---- redraw on label-pref change (matters when the sim is frozen) ----
   $effect(() => {
     void [view.showLabels, view.labelThreshold, pinned];
-    graph?.refresh?.();
+    repaint();
   });
 
   // ---- persist look/physics prefs ----
@@ -516,6 +855,10 @@
       view.centerGravity,
       view.labelThreshold,
       view.depth,
+      view.effects,
+      view.linkStyle,
+      view.colorLinks,
+      view.dim,
     ];
     savePersisted();
   });
@@ -526,14 +869,14 @@
     const obs = new MutationObserver(() => {
       readTheme();
       graph?.backgroundColor(cssBg);
-      graph?.refresh?.();
+      repaint();
     });
     obs.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme", "class"] });
     const mq = window.matchMedia?.("(prefers-color-scheme: dark)");
     const onMq = () => {
       readTheme();
       graph?.backgroundColor(cssBg);
-      graph?.refresh?.();
+      repaint();
     };
     mq?.addEventListener?.("change", onMq);
     return () => {
