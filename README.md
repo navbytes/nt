@@ -48,7 +48,8 @@ That's it — you're up. `nt help` lists every command; [more install options be
 - **📦 One static binary.** Pure Go, no CGo, no system dependencies, no runtime. `curl | bash` and go. Works fully offline.
 - **🔗 Wikilinks & backlinks.** `[[link]]` any task or note to any other; "linked from" is computed on demand by scanning files — no index to corrupt. Rename a note and every link follows.
 - **🧩 Obsidian-compatible.** Notes are plain `.md` + frontmatter, so you can point an Obsidian vault at the `notes/` folder and use it as your GUI while `nt` owns tasks, the CLI/TUI, and the AI loop.
-- **⛓️ Real task semantics.** Priorities, due dates, projects, tags, recurrence, dependencies (`blocks:`/`parent:`), and typed provenance (`discovered-from`).
+- **⛓️ Real task semantics.** Full A–Z priorities, due dates (with optional time-of-day), start/defer dates, projects, tags, recurrence, sub-tasks and dependencies (`blocks:`/`parent:`) with **cycle detection**, time **estimates + start/stop tracking**, and typed provenance (`discovered-from`).
+- **🗓️ A planner, not just a list.** `nt today` / `nt agenda` group your work by date, `nt review` is a weekly triage (overdue · stale · undated · stuck projects), and **daily notes** (`nt journal`) give you a dated log your agents can append to.
 - **🔒 Safe by construction.** Every write goes through one locking, atomic, ULID-keyed engine with transactional **undo/redo** — so a concurrent `nt add` from an AI session is never clobbered. Lossless todo.txt round-trip is enforced by test.
 - **🌿 Git-native.** `nt git-init` sets up `merge=union` so branches don't conflict on every add; `nt doctor` reconciles after a merge.
 
@@ -78,7 +79,7 @@ nt recall --source claude --json
 
 ### Terminal UI — just run `nt`
 
-A Bubble Tea TUI that adapts to your terminal width (compact strip → standard list → wide split with a live detail pane) and **live-refreshes** via fsnotify when a CLI call or an AI session writes the store. Three tabs — **tasks**, **notes**, and a **Logbook** of completed work grouped by date — with multi-select bulk ops, search-as-you-type, mouse support, undo/redo, and a read-only lock. Press `?` for the full keymap.
+A Bubble Tea TUI that adapts to your terminal width (compact strip → standard list → wide split with a live detail pane) and **live-refreshes** via fsnotify when a CLI call or an AI session writes the store. Three tabs — **tasks**, **notes**, and a **Logbook** of completed work grouped by date — with multi-select bulk ops, search-as-you-type, mouse support, undo/**redo**, and a read-only lock. A **`:` command palette** runs any action by name, **vim motions take counts** (`5j`, `12G`), notes capture inline (no `$EDITOR` bounce), and the whole UI follows your terminal's **light/dark** theme. Press `?` for the full keymap.
 
 | Notes | Logbook |
 |---|---|
@@ -88,7 +89,7 @@ A Bubble Tea TUI that adapts to your terminal width (compact strip → standard 
 
 A fast single-page app (Svelte + TypeScript) **compiled into the binary** — still one static file, still fully offline, no CDN, no external requests. Browse the folder tree, read Markdown with `[[wikilink]]` navigation, **Mermaid diagrams**, and syntax-highlighted code in light/dark Tokyo Night.
 
-It's built for moving fast: a **⌘K command palette** to jump anywhere, **ranked search** with highlighted snippets, a **`/tasks`** dashboard, a clickable **`/graph`** of your links, **`/tags`** and **`/orphans`** browsers, an **activity** feed, an in-note table of contents + backlinks, and a **mobile-friendly** layout you can install as a PWA. Pass `--edit` to create and edit notes *and* tasks right in the browser (split live-preview; saves are guarded by a per-process CSRF token and an `If-Match` check so nothing gets clobbered). Binds `127.0.0.1` only and **read-only by default** — your notes are never on the network.
+It's built for moving fast: a **⌘K command palette** to jump anywhere, **ranked search** with highlighted snippets, a **`/tasks`** planner with an agenda view, a **`/journal`** of daily notes, a clickable **`/graph`** of your links, **`/tags`** and **`/orphans`** browsers, an **activity** feed, an in-note table of contents + backlinks, and a **mobile-friendly** layout you can install as a PWA. Pass `--edit` for a real **CodeMirror editor** — markdown highlighting, `[[`-wikilink and `/`-slash-command autocomplete, live preview, and backlinks while you write — to create and edit notes *and* tasks right in the browser (saves are guarded by a per-process CSRF token and an `If-Match` check so nothing gets clobbered). Binds `127.0.0.1` only and **read-only by default** — your notes are never on the network.
 
 <div align="center">
 <picture>
@@ -123,17 +124,20 @@ nt log --since 2026-01-01 --json                         # the Logbook, machine-
 <summary><b>Full command cheatsheet</b></summary>
 
 ```bash
-nt add "title" --pri high --due today --tag t --project p   # capture a task (a = alias)
+nt add "title" --pri high --due "fri 5pm" --est 2h --tag t --project p   # capture a task (a = alias)
 nt note "title" --folder work --field status=stable         # capture a note (folders + frontmatter)
+nt journal                  # open today's daily note (j = alias)
 nt                          # TUI            nt list [--status|--tag|--sort urgency|--tree|--all|--json]
 nt ready / today / agenda   # what's next    nt done <id|task:N>     nt update <id> --status doing
-nt search <q> [--tag…]      # find           nt tags                 nt tag <note> +ref -inbox
+nt review [--stale N]       # weekly triage  nt start <id> … nt stop <id>   (time tracking → spent:)
+nt search <q> [--tag…]      # find           nt tags                 nt tag <note…> +ref -inbox
 nt links <id> [--orphans]   # graph          nt recall [--source] [--json]   nt log [--since|--days N]
-nt mv <note> <dest>         # rename+rewrite links           nt rm <note> [--force]   (→ .trash/)
-nt edit <id|task:N>         # safe $EDITOR round-trip        nt undo   (undo-again = redo)
-nt web [--edit] [--port N]  # browser app    nt mcp [install]        nt hook   (Claude integration)
-nt git-init && nt doctor    # version-control the store + reconcile merges
+nt skip <id>                # recurring: next occurrence      nt mv <note> <dest>   (rewrites [[links]])
+nt edit <id|task:N>         # safe $EDITOR round-trip        nt rm <note> [--force]   (→ .trash/)
+nt web [--edit] [--port N]  # browser app    nt undo / "redo"        nt mcp [install]   nt hook
+nt git-init && nt doctor    # version-control the store + reconcile merges (+ dependency checks)
 nt path                     # print $NT_DIR  nt archive   nt --version   nt help
+# Optional defaults live in $NT_DIR/config.toml ([defaults]/[web]/[tui]).
 ```
 </details>
 
@@ -169,7 +173,7 @@ A task line is just todo.txt with a few conventions:
 (A) fix auth bug +api @backend due:2026-06-05 [[jwt-expiry]] src:claude id:01JZ8RT3
 ```
 
-`(A)/(B)/(C)` priority · `+project` · `@tag` · `due:` · `src:` origin · `id:` ULID · `[[target]]` links to any note or task · `parent:`/`blocks:` are typed task links. Unknown `key:value` tokens from other todo.txt tools are preserved byte-for-byte.
+`(A)`–`(Z)` priority · `+project` · `@tag` · `due:` (optionally `…T17:00`) · `t:` start/defer · `rec:` recurrence · `est:`/`spent:` time · `src:` origin · `id:` ULID · `[[target]]` links to any note or task · `parent:`/`blocks:` are typed task links. Unknown `key:value` tokens from other todo.txt tools are preserved byte-for-byte.
 
 <details>
 <summary><b>Notes ↔ Obsidian (use Obsidian as the GUI, nt as the brain)</b></summary>
@@ -183,7 +187,8 @@ Rename/move is **nt-native**: `nt mv <note> <new>` (or `r` in the TUI) renames t
 
 - **Lossless round-trip** — an unmodified `tasks.txt` line is re-emitted byte-for-byte, preserving unknown tokens from other todo.txt tools (enforced by test).
 - **No lost updates** — every write locks, re-reads, mutates, and atomically renames through one ULID-keyed engine, so a concurrent AI-session write is never clobbered (concurrency test included).
-- **Transactional undo** — each change journals before-images keyed by ULID; `nt undo` reverses them and supports undo-again-to-redo.
+- **Transactional undo/redo** — each change journals before-images keyed by ULID; `nt undo` reverses them and `nt`'s redo re-applies them.
+- **Dependency integrity** — `nt doctor` detects dependency **cycles** (so a `blocks:` deadlock never silently hides tasks) and stale/dangling links, and reconciles duplicate ids after a git merge.
 
 ## 🙅 When nt is *not* for you
 
