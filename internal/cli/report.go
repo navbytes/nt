@@ -343,6 +343,9 @@ func cmdRecall(args []string) int {
 	if *typ != "task" {
 		all, _ := note.List(e.S)
 		for _, n := range all {
+			if n.Archived {
+				continue // recall is the active context — archived notes are retired
+			}
 			if *source != "" && n.Source != *source {
 				continue
 			}
@@ -402,6 +405,7 @@ func cmdSearch(args []string) int {
 	found := 0
 	if *typ != "task" {
 		notes, _ := note.List(e.S)
+		notes = note.Active(notes)
 		if query != "" {
 			tagsByPath := make(map[string][]string, len(notes))
 			for _, n := range notes {
@@ -410,6 +414,9 @@ func cmdSearch(args []string) int {
 			emitted := map[string]bool{}
 			hits, _ := search.Literal(query, e.S.NotesDir())
 			for _, h := range hits {
+				if _, active := tagsByPath[h.Path]; !active {
+					continue // body scan reads files directly; skip archived notes
+				}
 				if len(tags) > 0 && !hasAll(tagsByPath[h.Path]) {
 					continue
 				}
@@ -473,6 +480,9 @@ func cmdLinks(args []string) int {
 	if *orphans {
 		found := 0
 		for _, n := range notes {
+			if n.Archived {
+				continue // archived notes are retired, not orphans to reconnect
+			}
 			if len(links.Backlinks(e.S, n.ID, n.Rel)) == 0 {
 				fmt.Printf("orphan  %s  %s\n", n.Rel, n.Title)
 				found++

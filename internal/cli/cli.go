@@ -252,6 +252,7 @@ USAGE
   nt mv <note> <new|path>     rename/move a note, updating all [[links]] to it
   nt rm <id|note> [--force]   delete tasks (undoable) or notes (to .trash/)
   nt archive                  move done tasks to done.txt
+  nt archive <note> [--undo]  retire a note from the active views (reversible; still on disk)
   nt undo                     revert the last change
   nt path                     print the store directory
   nt git-init                 set up the store for git (union-merge + .gitignore)
