@@ -128,6 +128,7 @@ nt add "title" --pri high --due "fri 5pm" --est 2h --tag t --project p   # captu
 nt note "title" --folder work --field status=stable         # capture a note (folders + frontmatter)
 nt journal                  # open today's daily note (j = alias)
 nt                          # TUI            nt list [--status|--tag|--sort urgency|--tree|--all|--json]
+nt view <name>              # saved views    nt view save <name> [list flags]   nt view list / rm <name>
 nt ready / today / agenda   # what's next    nt done <id|task:N>     nt update <id> --status doing
 nt review [--stale N]       # weekly triage  nt start <id> … nt stop <id>   (time tracking → spent:)
 nt search <q> [--tag…]      # find           nt tags                 nt tag <note…> +ref -inbox

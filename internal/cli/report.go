@@ -15,6 +15,7 @@ import (
 	"github.com/navbytes/nt/internal/search"
 	"github.com/navbytes/nt/internal/task"
 	"github.com/navbytes/nt/internal/ulid"
+	"github.com/navbytes/nt/internal/view"
 )
 
 // Read/report commands: the non-mutating verbs that list, query, and render
@@ -36,6 +37,22 @@ func cmdList(args []string) int {
 	if err := fs.Parse(flags); err != nil {
 		return 2
 	}
+	return runList(view.Spec{
+		Status:      *status,
+		Tag:         *tag,
+		Project:     *project,
+		Sort:        *sortBy,
+		All:         *all,
+		ShowBlocked: *showBlocked,
+		Tree:        *tree,
+	}, *asJSON)
+}
+
+// runList renders the task list selected by spec — the shared core behind both
+// `nt list` and `nt view recall`, so a saved view filters/sorts exactly as the
+// equivalent flags would. asJSON is a recall-time output choice, kept out of the
+// saved Spec.
+func runList(spec view.Spec, asJSON bool) int {
 	e, ok := engine()
 	if !ok {
 		return 1
@@ -50,21 +67,21 @@ func cmdList(args []string) int {
 
 	var rows []*task.Task
 	for _, t := range all3 {
-		if !keep(t, *status, *tag, *project, *all, *showBlocked, blocked) {
+		if !keep(t, spec.Status, spec.Tag, spec.Project, spec.All, spec.ShowBlocked, blocked) {
 			continue
 		}
 		rows = append(rows, t)
 	}
-	sortTasks(rows, *sortBy)
+	sortTasks(rows, spec.Sort)
 
-	if *asJSON {
+	if asJSON {
 		return printJSON(tasksToJSON(rows, idx))
 	}
 	if len(rows) == 0 {
 		fmt.Println("no tasks")
 		return 0
 	}
-	if *tree {
+	if spec.Tree {
 		printTaskTree(rows, idx, blocked)
 		return 0
 	}
