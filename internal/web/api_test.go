@@ -90,6 +90,49 @@ func TestAPITasksReadAndWrite(t *testing.T) {
 	}
 }
 
+// TestAPITaskBoardTransitions covers the board's wire needs: priority is
+// exposed (the card color cue), and dragging a *done* task back to Doing
+// un-dones it (the API can't leave a task both done and in-progress).
+func TestAPITaskBoardTransitions(t *testing.T) {
+	s := newTestServer(t)
+	s.allowEdit = true
+	code, body := postForm(s, "/api/tasks", s.csrf, mustValues("text", "fix it", "pri", "high"))
+	if code != 200 {
+		t.Fatalf("new: %d", code)
+	}
+	if !strings.Contains(body, `"priority":"A"`) {
+		t.Errorf("priority should be in the tasks response (board color cue): %s", body)
+	}
+	var id string
+	for _, g := range decode[apitypes.TasksResponse](t, body).Groups {
+		for _, tk := range g.Tasks {
+			if strings.Contains(tk.Text, "fix it") {
+				id = tk.ID
+			}
+		}
+	}
+	if id == "" {
+		t.Fatal("created task not found in response")
+	}
+
+	if code, _ := postForm(s, "/api/tasks/"+id+"/done", s.csrf, nil); code != 200 {
+		t.Fatalf("done: %d", code)
+	}
+	if !mustDoc(t, s).FindByID(id).Done {
+		t.Fatal("task should be done")
+	}
+	if code, _ := postForm(s, "/api/tasks/"+id+"/status", s.csrf, mustValues("status", "doing")); code != 200 {
+		t.Fatalf("status doing: %d", code)
+	}
+	tk := mustDoc(t, s).FindByID(id)
+	if tk.Done {
+		t.Error("moving a done task to Doing should un-done it")
+	}
+	if tk.State() != "doing" {
+		t.Errorf("state should be doing, got %q", tk.State())
+	}
+}
+
 // TestAPIQuickAddNormalizesInlineTokens: the web quick-add box sends raw text;
 // inline natural-language tokens ("due:fri", "!high") must be normalized into a
 // real due date + priority rather than stored as the literal string (the bug the

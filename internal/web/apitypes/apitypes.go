@@ -40,15 +40,16 @@ type NotesIndex struct {
 
 // Task is one todo.txt task projected for the UI.
 type Task struct {
-	ID      string   `json:"id"`
-	Text    string   `json:"text"`
-	Status  string   `json:"status"`
-	Due     string   `json:"due,omitempty"`
-	Source  string   `json:"source,omitempty"`
-	Project string   `json:"project,omitempty"`
-	Tags    []string `json:"tags,omitempty"`
-	Blocker string   `json:"blocker,omitempty"`
-	Recur   bool     `json:"recur,omitempty"` // true when the task repeats (todo.txt rec:)
+	ID       string   `json:"id"`
+	Text     string   `json:"text"`
+	Status   string   `json:"status"`
+	Priority string   `json:"priority,omitempty"` // "A".."Z" or "" (drives the board's color cue)
+	Due      string   `json:"due,omitempty"`
+	Source   string   `json:"source,omitempty"`
+	Project  string   `json:"project,omitempty"`
+	Tags     []string `json:"tags,omitempty"`
+	Blocker  string   `json:"blocker,omitempty"`
+	Recur    bool     `json:"recur,omitempty"` // true when the task repeats (todo.txt rec:)
 }
 
 // TaskGroup is tasks bucketed by status (open/doing/blocked/done).

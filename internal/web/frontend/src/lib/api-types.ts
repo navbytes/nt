@@ -56,6 +56,7 @@ export interface Task {
   id: string;
   text: string;
   status: string;
+  priority?: string; // "A".."Z" or "" (drives the board's color cue)
   due?: string;
   source?: string;
   project?: string;
