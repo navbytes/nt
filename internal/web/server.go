@@ -110,8 +110,11 @@ const DefaultPort = 4321
 // Serve opens the store and serves the SPA on addr (e.g. "127.0.0.1:4321").
 // allowEdit enables note editing in the browser (read-only when false). If the
 // requested port is taken, it falls back to a free one (so the port is stable
-// run-to-run but a conflict doesn't crash the command).
-func Serve(version, addr string, allowEdit bool) error {
+// run-to-run but a conflict doesn't crash the command). onReady, if non-nil, is
+// called with the final base URL once the listener is bound — used by the
+// detached server (`nt web --detach`) to record its real address in the PID
+// file even when the port fell back.
+func Serve(version, addr string, allowEdit bool, onReady func(url string)) error {
 	eng, err := mutate.Open()
 	if err != nil {
 		return err
@@ -132,7 +135,11 @@ func Serve(version, addr string, allowEdit bool) error {
 		return err
 	}
 	s.watch()
-	fmt.Printf("nt web — serving notes at http://%s\n", ln.Addr().String())
+	url := "http://" + ln.Addr().String()
+	if onReady != nil {
+		onReady(url)
+	}
+	fmt.Printf("nt web — serving notes at %s\n", url)
 	mode := "read-only"
 	if allowEdit {
 		mode = "editing enabled (--edit)"

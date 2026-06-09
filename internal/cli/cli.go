@@ -260,6 +260,7 @@ USAGE
   nt mcp                      run the MCP server (stdio) — typed tools for agents
   nt mcp install [--client]   register nt with an AI client (claude-code|claude-desktop)
   nt web [--port N] [--edit]  browse/read notes in a browser (localhost; --edit to write)
+  nt web --detach             run the viewer in the background (--status / --stop to manage)
 
 ADD/UPDATE FLAGS
   --pri high|med|low   --due today|tomorrow|fri|+3d|YYYY-MM-DD

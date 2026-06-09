@@ -135,7 +135,8 @@ nt search <q> [--tag…]      # find           nt tags                 nt tag <n
 nt links <id> [--orphans]   # graph          nt recall [--source] [--json]   nt log [--since|--days N]
 nt skip <id>                # recurring: next occurrence      nt mv <note> <dest>   (rewrites [[links]])
 nt edit <id|task:N>         # safe $EDITOR round-trip        nt rm <note> [--force]   (→ .trash/)
-nt web [--edit] [--port N]  # browser app    nt undo / "redo"        nt mcp [install]   nt hook
+nt web [--edit] [--port N]  # browser app (--detach to run in the background; --status / --stop)
+nt undo / "redo"   nt mcp [install]   nt hook
 nt git-init && nt doctor    # version-control the store + reconcile merges (+ dependency checks)
 nt path                     # print $NT_DIR  nt archive   nt --version   nt help
 # Optional defaults live in $NT_DIR/config.toml ([defaults]/[web]/[tui]).
