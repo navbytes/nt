@@ -8,12 +8,18 @@
     statuses = null,
     showAdd = false,
     view = "status",
+    buckets: scopeBuckets = null,
+    emptyText = "",
   }: {
     canEdit?: boolean;
     statuses?: string[] | null;
     showAdd?: boolean;
     /** "status" groups by doing/open/blocked/done; "agenda" groups by due date. */
     view?: "status" | "agenda";
+    /** When set (agenda view), keep only these date buckets — e.g. Today's cockpit. */
+    buckets?: string[] | null;
+    /** Replaces the default "No tasks yet" lead when the (scoped) list is empty. */
+    emptyText?: string;
   } = $props();
 
   const qc = useQueryClient();
@@ -68,7 +74,7 @@
       }
     }
     return (Object.entries(buckets) as [string, Task[]][])
-      .filter(([, tasks]) => tasks.length > 0)
+      .filter(([status, tasks]) => tasks.length > 0 && (!scopeBuckets || scopeBuckets.includes(status)))
       .map(([status, tasks]) => ({ status, tasks }));
   });
 
@@ -112,11 +118,13 @@
     </section>
   {:else}
     <div class="empty">
-      <p class="empty__lead">No tasks yet.</p>
-      <p class="muted">
-        Capture one above, or run <code>nt mcp install</code> so your AI agent can add and
-        complete tasks through <code>nt_add</code> / <code>nt_done</code> — they share this same list.
-      </p>
+      <p class="empty__lead">{emptyText || "No tasks yet."}</p>
+      {#if !emptyText}
+        <p class="muted">
+          Capture one above, or run <code>nt mcp install</code> so your AI agent can add and
+          complete tasks through <code>nt_add</code> / <code>nt_done</code> — they share this same list.
+        </p>
+      {/if}
     </div>
   {/each}
 {/if}

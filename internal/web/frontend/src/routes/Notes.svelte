@@ -2,6 +2,14 @@
   import { createQuery } from "@tanstack/svelte-query";
   import { api } from "../lib/api";
   import type { NoteCard } from "../lib/api";
+  import { loc, navigate } from "../lib/router.svelte";
+  import Journal from "./Journal.svelte";
+
+  let { canEdit = false }: { canEdit?: boolean } = $props();
+
+  // Daily (journal) is a view of Notes, selected by the /journal path. The grid
+  // is the default; the header toggle switches between them.
+  const daily = $derived(loc.path === "/journal");
 
   const gridQ = createQuery({ queryKey: ["notesGrid"], queryFn: api.notesGrid });
   // Orphans (notes with no links in or out) fold in here as a filter, rather
@@ -40,10 +48,17 @@
 </script>
 
 <div class="pagehead">
-  <h1>Notes</h1>
-  <div class="notes-controls">
-    {#if $gridQ.data}
-      <select class="select" bind:value={folder} aria-label="Filter by folder">
+  <div class="notes-head">
+    <h1>Notes</h1>
+    <div class="seg" role="group" aria-label="Notes view">
+      <button class:seg--on={!daily} onclick={() => navigate("/notes")}>All</button>
+      <button class:seg--on={daily} onclick={() => navigate("/journal")}>Daily</button>
+    </div>
+  </div>
+  {#if !daily}
+    <div class="notes-controls">
+      {#if $gridQ.data}
+        <select class="select" bind:value={folder} aria-label="Filter by folder">
         <option value="">All folders</option>
         {#each $gridQ.data.folders as f (f)}<option value={f}>{f}</option>{/each}
       </select>
@@ -73,10 +88,13 @@
         >📦 Archived{#if archivedCount}<span class="notes-toggle__count"> {archivedCount}</span>{/if}</button>
       {/if}
     {/if}
-  </div>
+    </div>
+  {/if}
 </div>
 
-{#if $gridQ.isPending}
+{#if daily}
+  <Journal {canEdit} />
+{:else if $gridQ.isPending}
   <p class="muted">Loading…</p>
 {:else if $gridQ.error}
   <p class="error">Couldn't load notes.</p>
@@ -119,6 +137,11 @@
 {/if}
 
 <style>
+  .notes-head {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+  }
   .notes-controls {
     display: flex;
     align-items: center;
