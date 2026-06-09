@@ -469,18 +469,15 @@ func onboard(e *mutate.Engine) {
 // --- shared helpers ------------------------------------------------------
 
 func keep(t *task.Task, status, tag, project string, all, showBlocked bool, blocked map[string]bool) bool {
-	isBlocked := blocked[t.ID()] && !t.Done
+	blockedByDep := blocked[t.ID()]
 	if status != "" {
-		if task.EffectiveStatus(t, isBlocked) != status {
+		if task.EffectiveStatus(t, blockedByDep && !t.Done) != status {
 			return false
 		}
-	} else {
-		if !all && t.Done {
-			return false
-		}
-		if !all && !showBlocked && isBlocked {
-			return false // dependency-blocked tasks hide from the default list
-		}
+	} else if !task.VisibleInList(t, blockedByDep, all, all || showBlocked) {
+		// default list: done hides unless --all; dependency-blocked hides unless
+		// --all / --show-blocked (the rule shared with the TUI/web via task).
+		return false
 	}
 	if tag != "" && !contains(t.Tags(), tag) {
 		return false
