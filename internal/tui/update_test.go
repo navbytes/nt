@@ -247,3 +247,50 @@ func TestVimCountsAndTabKeys(t *testing.T) {
 		t.Fatalf("[ should wrap to the logbook tab, got %v", mm.tab)
 	}
 }
+
+// TestCommandPalette: ':' opens the palette, typing filters it, and Enter runs
+// the selected command (U2).
+func TestCommandPalette(t *testing.T) {
+	m := testModel(t)
+	m.width, m.height = 100, 24
+
+	mm := press(m, ":").(*Model)
+	if !mm.palette {
+		t.Fatal(": should open the command palette")
+	}
+	if !strings.Contains(mm.View(), "command palette") {
+		t.Error("palette view should render")
+	}
+
+	// Filter to "go to notes" and run it.
+	mm = press(mm, "go to notes").(*Model)
+	cmds := mm.filteredPalette()
+	if len(cmds) == 0 || cmds[0].name != "go to notes" {
+		t.Fatalf("filter should surface 'go to notes', got %v", cmds)
+	}
+	mm = press(mm, "enter").(*Model)
+	if mm.palette {
+		t.Fatal("enter should close the palette")
+	}
+	if mm.tab != tabNotes {
+		t.Fatalf("running 'go to notes' should switch to the notes tab, got %v", mm.tab)
+	}
+
+	// Write commands are blocked under the read-only lock.
+	m2 := testModel(t)
+	m2.width, m2.height = 100, 24
+	m2.locked = true
+	m2 = press(m2, ":").(*Model)
+	m2 = press(m2, "add task").(*Model)
+	m2 = press(m2, "enter").(*Model)
+	if m2.ik != inNone {
+		t.Error("a write command should be blocked while locked (no prompt opens)")
+	}
+
+	// esc cancels.
+	mm = press(m, ":").(*Model)
+	mm = press(mm, "esc").(*Model)
+	if mm.palette {
+		t.Fatal("esc should close the palette")
+	}
+}

@@ -44,6 +44,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.bodyEdit {
 			return m.updateBodyEdit(msg)
 		}
+		if m.palette {
+			return m.updatePalette(msg)
+		}
 		if m.ik != inNone {
 			return m.updateInput(msg)
 		}
@@ -240,6 +243,8 @@ func (m *Model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.cyclePriority()
 	case "L":
 		m.followLink()
+	case ":":
+		return m, m.openPalette()
 	case "?":
 		m.help = true
 		m.helpScroll = 0
