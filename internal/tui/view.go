@@ -23,6 +23,9 @@ func (m *Model) View() string {
 	if m.bodyEdit {
 		return m.bodyEditView()
 	}
+	if m.palette {
+		return m.paletteView()
+	}
 	header := m.headerView()
 	footer := m.footerView()
 	bodyH := m.height - lipgloss.Height(header) - lipgloss.Height(footer)
@@ -63,9 +66,9 @@ func (m *Model) headerView() string {
 		}
 		return stTabOff.Render(s)
 	}
-	t1 := tab(m.tab == tabTasks, " 1 tasks ", " 1 ")
-	t2 := tab(m.tab == tabNotes, " 2 notes ", " 2 ")
-	t3 := tab(m.tab == tabLogbook, " 3 log ", " 3 ")
+	t1 := tab(m.tab == tabTasks, " tasks ", " T ")
+	t2 := tab(m.tab == tabNotes, " notes ", " N ")
+	t3 := tab(m.tab == tabLogbook, " log ", " L ")
 	p1, brand, p2 := stHeader.Render("  "), stBrand.Render(" nt "), stHeader.Render("  ")
 	left := p1 + brand + p2 + t1 + t2 + t3
 	// Record the clickable tab-label column ranges (header row 0) for the mouse.
@@ -237,13 +240,13 @@ func (m *Model) keybarPairs() [][2]string {
 		if hasTokens {
 			p = append(p, [2]string{"f", "follow"})
 		}
-		return append(p, [][2]string{{"/", "filter"}, {"[ ]", "tab"}, {"u/U", "undo/redo"}}...)
+		return append(p, [][2]string{{"/", "filter"}, {":", "cmds"}, {"u/U", "undo/redo"}}...)
 	case tabLogbook:
 		p := [][2]string{{"j/k", "move"}, {"enter", "detail"}, {"x", "reopen"}, {"y", "yank"}}
 		if hasTokens {
 			p = append(p, [2]string{"f", "follow"})
 		}
-		return append(p, [][2]string{{"/", "search"}, {"[ ]", "tab"}, {"u/U", "undo/redo"}}...)
+		return append(p, [][2]string{{"/", "search"}, {":", "cmds"}, {"u/U", "undo/redo"}}...)
 	default: // tasks
 		p := [][2]string{{"j/k", "move"}, {"enter", "detail"}}
 		if len(m.marked) > 0 {
@@ -889,6 +892,7 @@ func (m *Model) helpView() string {
 			{"l / L", "add a [[link]] (task or note) / follow a link (picks when several)"}, {"u / U", "undo / redo"},
 		}},
 		{"view", [][2]string{
+			{":", "command palette — run any action by name (↑↓ select · ↵ run)"},
 			{"f", "follow: pick any [[link]]/@tag/+project to open or scope (CAPS = group)"},
 			{"mouse", "wheel scrolls · click selects · click a token activates it"},
 			{"/", "filter (searches note bodies on the notes tab)"},

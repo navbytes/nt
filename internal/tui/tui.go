@@ -135,6 +135,9 @@ type Model struct {
 	bodyArea   textarea.Model // multi-line body editor for fast capture
 	bodyNoteID string         // ULID of the note whose body is being captured
 
+	palette    bool // : command palette is open (U2)
+	paletteSel int  // selected row in the filtered command list
+
 	editTmp string // temp file for an in-progress external task edit
 	editID  string // ULID of the task being edited externally
 
