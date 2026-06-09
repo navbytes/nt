@@ -479,9 +479,18 @@ func (s *Server) apiSearch(w http.ResponseWriter, r *http.Request) {
 		}
 		seen[noteHandle(n)] = true
 		results = append(results, apitypes.SearchResult{
-			URL: "/n/" + url.PathEscape(noteHandle(n)), Title: n.Title, Path: n.Rel, Snippet: snippet,
+			URL: "/n/" + url.PathEscape(noteHandle(n)), Title: n.Title, Path: n.Rel, Kind: "note", Snippet: snippet,
 		})
 	}
+	// addTask appends a task hit (text + tag filter applied by the caller). Tasks
+	// have no page of their own, so they all link to the task list (matching the
+	// graph's task-node convention).
+	addTask := func(t *task.Task, text string) {
+		results = append(results, apitypes.SearchResult{
+			URL: "/tasks", Title: text, Path: t.Source(), Kind: "task",
+		})
+	}
+	taskTagged := func(t *task.Task) bool { return tag == "" || contains(t.Tags(), tag) }
 	switch {
 	case q == "" && tag == "":
 		// nothing
@@ -489,11 +498,17 @@ func (s *Server) apiSearch(w http.ResponseWriter, r *http.Request) {
 		for _, n := range snap.notes {
 			add(n, "")
 		}
+		for _, t := range snap.doc.Tasks() {
+			if taskTagged(t) {
+				addTask(t, cleanTaskText(t.Text))
+			}
+		}
 	default:
 		// Rank title matches first (most relevant), then body matches — each
 		// carrying the matching line as a snippet for context. Both scan the
 		// in-memory read-model (note bodies are already parsed + cached), so a
 		// search no longer spawns ripgrep per query and scales with the snapshot.
+		// Tasks come last: their cleaned text is matched the same way.
 		ql := strings.ToLower(q)
 		for _, n := range snap.notes {
 			if strings.Contains(strings.ToLower(n.Title), ql) {
@@ -503,6 +518,12 @@ func (s *Server) apiSearch(w http.ResponseWriter, r *http.Request) {
 		for _, n := range snap.notes {
 			if line, ok := firstMatchingLine(n.Body, ql); ok {
 				add(n, snippetAround(line, q))
+			}
+		}
+		for _, t := range snap.doc.Tasks() {
+			text := cleanTaskText(t.Text)
+			if taskTagged(t) && strings.Contains(strings.ToLower(text), ql) {
+				addTask(t, text)
 			}
 		}
 	}

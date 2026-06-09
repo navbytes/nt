@@ -306,6 +306,41 @@ func TestAPISearchRankingAndSnippets(t *testing.T) {
 	}
 }
 
+func TestAPISearchIncludesTasks(t *testing.T) {
+	s := newTestServer(t)
+	note.Create(s.eng.S, "Mutex Guide", "how to use locks", nil, "cli", "")
+	addTask(t, s, "fix the mutex deadlock in the scheduler")
+	addTask(t, s, "unrelated errand")
+
+	_, body := get(t, s, "/api/search?q=mutex")
+	res := decode[apitypes.SearchResponse](t, body).Results
+
+	var taskHit *apitypes.SearchResult
+	for i := range res {
+		if res[i].Kind == "task" {
+			taskHit = &res[i]
+		}
+	}
+	if taskHit == nil {
+		t.Fatalf("a matching task should appear in search results: %s", body)
+	}
+	if taskHit.URL != "/tasks" {
+		t.Errorf("task result should link to /tasks, got %q", taskHit.URL)
+	}
+	if !strings.Contains(taskHit.Title, "deadlock") {
+		t.Errorf("task title should be the cleaned task text, got %q", taskHit.Title)
+	}
+	// The non-matching task must not surface, and notes rank ahead of tasks.
+	for _, r := range res {
+		if r.Kind == "task" && strings.Contains(r.Title, "errand") {
+			t.Errorf("non-matching task leaked into results: %+v", r)
+		}
+	}
+	if res[0].Kind == "task" {
+		t.Errorf("notes should rank before tasks; first result was a task: %+v", res[0])
+	}
+}
+
 // TestAPIJournal: the journal index lists existing daily notes (journal/<date>)
 // newest-first with handles, plus today's date — and ignores non-date notes.
 func TestAPIJournal(t *testing.T) {

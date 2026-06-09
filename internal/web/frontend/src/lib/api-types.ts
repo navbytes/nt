@@ -144,14 +144,16 @@ export interface ActivityResponse {
   sources: string[];
 }
 /**
- * SearchResult is one ranked search hit: title matches rank first (no snippet),
- * body matches carry the matching line as a snippet for context.
+ * SearchResult is one ranked search hit. Notes rank first (title matches, then
+ * body matches carrying the matching line as a snippet); tasks follow, flagged
+ * by Kind so the UI can badge them and link to the task list.
  */
 export interface SearchResult {
   url: string;
   title: string;
   path: string;
-  snippet?: string; // matching line (body hits only)
+  kind?: string; // "" / "note" (default) | "task"
+  snippet?: string; // matching line (note body hits only)
 }
 /**
  * SearchResponse is GET /api/search.
