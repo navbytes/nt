@@ -54,7 +54,7 @@ var toolDefs = []toolDef{
 	},
 	{
 		Name:        "nt_add",
-		Description: "Capture a task. discovered_from chains work surfaced while doing another task.",
+		Description: "Capture a task. Keep text to one actionable line; put reasoning/detail in nt_note (paragraph-length text is auto-moved to a linked note). discovered_from chains work surfaced while doing another task.",
 		InputSchema: obj(map[string]any{
 			"text":            st(),
 			"priority":        enum("high", "med", "low"),
