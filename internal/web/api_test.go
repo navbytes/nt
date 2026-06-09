@@ -448,6 +448,36 @@ func TestCapGraph(t *testing.T) {
 
 // TestAPINoteMove: POST .../move relocates a note into a folder (id/handle
 // unchanged), edit+CSRF gated, and rejects traversal folders.
+func TestAPITaskEdit(t *testing.T) {
+	s := newTestServer(t)
+	s.allowEdit = true
+	id := addTask(t, s, "fix the bug @backend +api")
+
+	// gated: no CSRF → 403; empty text → 400.
+	if code, _ := postForm(s, "/api/tasks/"+id, "", mustValues("text", "x")); code != 403 {
+		t.Errorf("edit without CSRF should 403, got %d", code)
+	}
+	if code, _ := postForm(s, "/api/tasks/"+id, s.csrf, mustValues("text", "   ")); code != 400 {
+		t.Errorf("empty text should 400, got %d", code)
+	}
+
+	// Edit the description; the id is preserved and the inline tags re-parse.
+	code, body := postForm(s, "/api/tasks/"+id, s.csrf, mustValues("text", "fix the AUTH bug @security +api"))
+	if code != 200 {
+		t.Fatalf("edit: %d %s", code, body)
+	}
+	tk := mustDoc(t, s).FindByID(id)
+	if tk == nil {
+		t.Fatal("task vanished after edit (id must be preserved)")
+	}
+	if !strings.Contains(tk.Text, "AUTH") {
+		t.Errorf("edit should update the description, got %q", tk.Text)
+	}
+	if !contains(tk.Tags(), "security") || contains(tk.Tags(), "backend") {
+		t.Errorf("inline tags should re-parse (security in, backend out), got %v", tk.Tags())
+	}
+}
+
 func TestAPINoteMove(t *testing.T) {
 	s := newTestServer(t)
 	target, _ := note.Create(s.eng.S, "Target", "body", nil, "cli", "")

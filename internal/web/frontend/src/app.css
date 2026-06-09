@@ -371,8 +371,13 @@ code {
   flex: 1;
   min-width: 0;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap; /* long agent-written tasks clamp to one line (full text on hover) */
+  /* Wrap up to 3 lines so a longer title is readable (was clamped to one line);
+     anything beyond that is reachable by editing the task (or the hover title). */
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+  overflow-wrap: anywhere;
 }
 .row__text.done {
   color: var(--muted);
