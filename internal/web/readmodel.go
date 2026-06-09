@@ -23,10 +23,11 @@ import (
 // rebuild constructs a fresh value and swaps the pointer under the Server lock.
 type snapshot struct {
 	doc      *task.Doc
-	notes    []*note.Note
+	notes    []*note.Note          // every note on disk (archived included)
+	active   []*note.Note          // notes minus archived — the working set (tree, grid count, state count)
 	byHandle map[string]*note.Note // id AND rel → note (replaces findByHandle scan)
 	byPath   map[string]*note.Note
-	index    []linkRow // flat ⌘K palette index
+	index    []linkRow // flat ⌘K palette index (active only)
 
 	backlinks map[string][]Backlink // note path → note-source backlinks (de-duped)
 	taskRefs  map[string][]TaskRef  // note path → tasks linking to it
@@ -80,12 +81,19 @@ func buildSnapshot(eng *mutate.Engine, cache *note.Cache) *snapshot {
 		readErr = "couldn't read notes: " + notesErr.Error()
 	}
 
+	// active excludes archived notes: they stay in snap.notes (so the grid, the
+	// note view, and unarchive can reach them) but drop out of the ⌘K index and
+	// the link graph below — so the sidebar, graph, orphans, and backlinks show
+	// only the working set.
+	active := note.Active(notes)
+
 	s := &snapshot{
 		doc:       doc,
 		notes:     notes,
+		active:    active,
 		byHandle:  make(map[string]*note.Note, len(notes)*2),
 		byPath:    make(map[string]*note.Note, len(notes)),
-		index:     flatNotes(notes),
+		index:     flatNotes(active),
 		backlinks: map[string][]Backlink{},
 		taskRefs:  map[string][]TaskRef{},
 		linked:    map[string]bool{},
@@ -103,8 +111,10 @@ func buildSnapshot(eng *mutate.Engine, cache *note.Cache) *snapshot {
 
 	// Note → note edges (backlinks, forward adjacency, "linked" set). Scanning
 	// line by line lets each backlink carry its matching line as a snippet, the
-	// same context the old ripgrep-backed path showed.
-	for _, src := range notes {
+	// same context the old ripgrep-backed path showed. Iterating `active` (not
+	// `notes`) keeps archived notes out of the graph and backlinks; an archived
+	// target is filtered below so it can't become a node via an inbound link.
+	for _, src := range active {
 		seenTarget := map[string]bool{} // one backlink entry per (source, target)
 		fwdSeen := map[string]bool{}
 		for _, line := range strings.Split(src.Body, "\n") {
@@ -112,6 +122,9 @@ func buildSnapshot(eng *mutate.Engine, cache *note.Cache) *snapshot {
 				it, ok := links.Resolve(raw, doc, notes)
 				if !ok || it.Kind != "note" || it.Path == src.Path {
 					continue
+				}
+				if tn := s.byPath[it.Path]; tn != nil && tn.Archived {
+					continue // an inbound link must not revive an archived note as a node
 				}
 				tgt := it.Path
 				s.linked[tgt] = true
@@ -140,6 +153,9 @@ func buildSnapshot(eng *mutate.Engine, cache *note.Cache) *snapshot {
 				it, ok := links.Resolve(raw, doc, notes)
 				if !ok || it.Kind != "note" {
 					continue
+				}
+				if tn := s.byPath[it.Path]; tn != nil && tn.Archived {
+					continue // a task linking an archived note doesn't revive it
 				}
 				tgt := it.Path
 				s.linked[tgt] = true

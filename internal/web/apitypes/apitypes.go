@@ -98,6 +98,7 @@ type NoteView struct {
 	Source    string     `json:"source"`
 	Created   string     `json:"created"`
 	Tags      []string   `json:"tags"`
+	Archived  bool       `json:"archived,omitempty"` // retired from active views (still on disk)
 	BodyHTML  string     `json:"bodyHTML"`
 	Backlinks []Backlink `json:"backlinks"`
 	TaskRefs  []TaskRef  `json:"taskRefs"`
@@ -201,13 +202,14 @@ type CreatedNote struct {
 
 // NoteCard is one note projected for the /notes grid view.
 type NoteCard struct {
-	Handle  string   `json:"handle"`
-	Title   string   `json:"title"`
-	URL     string   `json:"url"`
-	Folder  string   `json:"folder"` // "" for root
-	Tags    []string `json:"tags,omitempty"`
-	Preview string   `json:"preview,omitempty"` // first lines of the body, plain text
-	Updated string   `json:"updated,omitempty"` // YYYY-MM-DD (updated, else created)
+	Handle   string   `json:"handle"`
+	Title    string   `json:"title"`
+	URL      string   `json:"url"`
+	Folder   string   `json:"folder"` // "" for root
+	Tags     []string `json:"tags,omitempty"`
+	Preview  string   `json:"preview,omitempty"`  // first lines of the body, plain text
+	Updated  string   `json:"updated,omitempty"`  // YYYY-MM-DD (updated, else created)
+	Archived bool     `json:"archived,omitempty"` // retired; hidden unless the grid's "Archived" toggle is on
 }
 
 // NotesGrid is GET /api/notes/grid — every note as a card, plus the folder
@@ -225,6 +227,14 @@ type MovedNote struct {
 	URL     string `json:"url"`
 	Rel     string `json:"rel"`
 	Updated int    `json:"updated"`
+}
+
+// ArchivedNote is the result of POST /api/notes/{handle}/archive — the note's
+// (unchanged) handle and its new archived state, so the client can flip its UI
+// without a full refetch.
+type ArchivedNote struct {
+	Handle   string `json:"handle"`
+	Archived bool   `json:"archived"`
 }
 
 // JournalDay is one existing daily note (date + the note's stable handle).

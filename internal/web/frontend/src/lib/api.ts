@@ -17,6 +17,7 @@ import type {
   GraphData,
   CreatedNote,
   MovedNote,
+  ArchivedNote,
   JournalResponse,
 } from "./api-types";
 
@@ -89,6 +90,11 @@ export const api = {
 
   noteMove: (handle: string, folder: string) =>
     postForm<MovedNote>(`/api/notes/${encodeURIComponent(handle)}/move`, { folder }),
+
+  noteArchive: (handle: string, archived: boolean) =>
+    postForm<ArchivedNote>(`/api/notes/${encodeURIComponent(handle)}/archive`, {
+      archived: String(archived),
+    }),
 
   // ---- editor ----
   raw: (handle: string) => getJSON<RawNote>(`/api/notes/${encodeURIComponent(handle)}/raw`),

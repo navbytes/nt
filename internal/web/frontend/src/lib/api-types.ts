@@ -117,6 +117,7 @@ export interface NoteView {
   source: string;
   created: string;
   tags: string[];
+  archived?: boolean; // retired from active views (still on disk)
   bodyHTML: string;
   backlinks: Backlink[];
   taskRefs: TaskRef[];
@@ -241,6 +242,7 @@ export interface NoteCard {
   tags?: string[];
   preview?: string; // first lines of the body, plain text
   updated?: string; // YYYY-MM-DD (updated, else created)
+  archived?: boolean; // retired; hidden unless the grid's "Archived" toggle is on
 }
 /**
  * NotesGrid is GET /api/notes/grid — every note as a card, plus the folder
@@ -260,6 +262,15 @@ export interface MovedNote {
   url: string;
   rel: string;
   updated: number /* int */;
+}
+/**
+ * ArchivedNote is the result of POST /api/notes/{handle}/archive — the note's
+ * (unchanged) handle and its new archived state, so the client can flip its UI
+ * without a full refetch.
+ */
+export interface ArchivedNote {
+  handle: string;
+  archived: boolean;
 }
 /**
  * JournalDay is one existing daily note (date + the note's stable handle).

@@ -9,10 +9,15 @@
   const orphansQ = createQuery({ queryKey: ["orphans"], queryFn: api.orphans });
   const orphanUrls = $derived(new Set(($orphansQ.data?.notes ?? []).map((n) => n.url)));
 
+  // Archived notes ride along in the grid payload (flagged), hidden by default;
+  // the Archived toggle reveals them — a dedicated view of the retired set.
+  const archivedCount = $derived(($gridQ.data?.notes ?? []).filter((n) => n.archived).length);
+
   // Persisted view controls.
   let dense = $state(localStorage.getItem("nt-notes-dense") === "1");
   let folder = $state("");
   let orphansOnly = $state(false);
+  let archivedOnly = $state(false);
   let sort = $state<"updated" | "title" | "folder">(
     (localStorage.getItem("nt-notes-sort") as "updated" | "title" | "folder") ?? "updated",
   );
@@ -21,6 +26,8 @@
 
   const cards = $derived.by((): NoteCard[] => {
     let ns = [...($gridQ.data?.notes ?? [])];
+    // Default view is the working set; the Archived toggle flips to retired only.
+    ns = ns.filter((n) => (archivedOnly ? n.archived : !n.archived));
     if (folder) ns = ns.filter((n) => n.folder === folder || n.folder.startsWith(folder + "/"));
     if (orphansOnly) ns = ns.filter((n) => orphanUrls.has(n.url));
     ns.sort((a, b) => {
@@ -56,6 +63,15 @@
         title="Show only notes with no links in or out"
         onclick={() => (orphansOnly = !orphansOnly)}
       >Orphans{#if $orphansQ.data?.notes.length}<span class="notes-toggle__count"> {$orphansQ.data.notes.length}</span>{/if}</button>
+      {#if archivedCount > 0 || archivedOnly}
+        <button
+          class="notes-toggle"
+          class:notes-toggle--on={archivedOnly}
+          aria-pressed={archivedOnly}
+          title="Show retired notes (hidden from the sidebar, search, and graph)"
+          onclick={() => (archivedOnly = !archivedOnly)}
+        >📦 Archived{#if archivedCount}<span class="notes-toggle__count"> {archivedCount}</span>{/if}</button>
+      {/if}
     {/if}
   </div>
 </div>
@@ -67,6 +83,8 @@
 {:else if cards.length === 0}
   {#if orphansOnly}
     <p class="muted">No orphan notes — every note is linked. ✨</p>
+  {:else if archivedOnly}
+    <p class="muted">No archived notes.</p>
   {:else if folder}
     <p class="muted">No notes in {folder} yet.</p>
   {:else}
