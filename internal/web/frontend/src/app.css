@@ -465,6 +465,44 @@ code {
   align-items: baseline;
   gap: 10px;
   padding: 4px 0;
+  min-width: 0;
+}
+.actrow > .act,
+.actrow > .kind,
+.actrow > .src {
+  flex: none;
+}
+.act__title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap; /* long agent task titles clamp to one line (full on hover) */
+}
+/* Mobile capture FAB — hidden on desktop, thumb-reachable on small screens. */
+.fab {
+  display: none;
+  position: fixed;
+  right: 18px;
+  bottom: 18px;
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  border: none;
+  background: var(--accent);
+  color: #fff;
+  font-size: 26px;
+  line-height: 1;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25);
+  cursor: pointer;
+  z-index: 40;
+  align-items: center;
+  justify-content: center;
+}
+@media (max-width: 760px) {
+  .fab {
+    display: flex;
+  }
 }
 .act {
   font-size: 11px;

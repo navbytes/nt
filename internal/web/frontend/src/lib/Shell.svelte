@@ -126,5 +126,8 @@
     </main>
   </div>
 
+  <!-- Mobile-only capture affordance: thumb-reachable, jumps to the task add. -->
+  <button class="fab" aria-label="New task" title="New task" onclick={() => navigate("/tasks")}>＋</button>
+
   <CommandPalette />
 </div>
