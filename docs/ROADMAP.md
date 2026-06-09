@@ -37,7 +37,7 @@ What's left is a **short polish/scale tail** — no remaining item is load-beari
 **Web** (SPA is the default; old htmx UI removed)
 - Obsidian-class force-graph; **P3** create-notes-from-web; **P4** interactive task rows + agenda view
 - **W1** CodeMirror 6 editor — markdown highlighting + `[[` wikilink autocomplete ([#33](https://github.com/navbytes/nt/pull/33))
-- **W2** ranked note search + highlighted snippets ([#21](https://github.com/navbytes/nt/pull/21)) *(note bodies; task results still pending — see below)*
+- **W2** ranked search + highlighted snippets ([#21](https://github.com/navbytes/nt/pull/21)) — notes (title + body) and tasks, tasks badged + linked to the task list ([#64](https://github.com/navbytes/nt/pull/64))
 - **W3** daily notes / journal — web route + `nt journal` ([#30](https://github.com/navbytes/nt/pull/30))
 - **W4** mobile shell — hamburger + off-canvas drawer ([#23](https://github.com/navbytes/nt/pull/23))
 - **W5** command palette — all routes + actions + listbox a11y ([#20](https://github.com/navbytes/nt/pull/20))
@@ -50,7 +50,7 @@ What's left is a **short polish/scale tail** — no remaining item is load-beari
 - PWA + app icon; stable default port
 
 **TUI**
-- **U1** live filter (search-as-you-type)
+- **U1** live filter (search-as-you-type) — fuzzy subsequence matching, fzf-style space-separated AND terms (so `fmb` finds "fix my bug")
 - **U2** command palette (`:`) — fuzzy action list
 - **U3** fuzzy "go to anything" jumper + `L` multi-link picker fix
 - **U4** fast capture + in-pane body textarea (no more two-step `$EDITOR`)
@@ -72,16 +72,14 @@ What's left is a **short polish/scale tail** — no remaining item is load-beari
 
 | # | Item | Surface | Effort | Status |
 |---|------|---------|--------|--------|
-| W2 | add **tasks** to search results (notes are ranked already) | web | S | partial |
 | W8 | frontmatter/properties **editing** in the web editor (backlinks-while-editing done) | web | M | partial |
-| U1 | rank the live filter fuzzily, not by substring (filter itself shipped) | tui | S | partial |
 | F2 | broaden concurrency tests — concurrent add/done/archive/undo (lock + store tests done) | core | M | partial |
 | F4 | TUI self-write suppression (watcher reloads its own writes → flicker) | tui | M | not started |
 | E2 | **persisted** on-disk index (cold start still re-reads all; in-memory shipped) | infra | L | deferred — only matters >10k notes |
 
 ## Suggested sequencing for what's left
 
-1. **Search + editor polish** — W2 (tasks in web search), W8 (web property editing), U1 (fuzzy filter ranking). Small, high-visibility.
+1. **Editor polish** — W8 (frontmatter/properties editing in the web editor). Small, high-visibility.
 2. **Robustness** — F2 (concurrency stress) and F4 (TUI de-flicker).
 3. **Surface the saved views** — T4 ships on the CLI with a surface-agnostic `internal/view` store; the TUI and web can now expose the same saved views (a view picker / palette entries). Optional follow-up.
 4. **Scale, only when needed** — E2 persisted index. Defer until a real >10k-note store shows a cold-start cost.

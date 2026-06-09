@@ -11,14 +11,13 @@ import (
 // buildGroups buckets and orders tasks for display according to the grouping
 // mode, the active filter, and whether done tasks are shown.
 func buildGroups(tasks []*task.Task, grp groupMode, filter string, showDone, showBlocked bool, blocked map[string]bool) []group {
-	needle := strings.ToLower(strings.TrimSpace(filter))
 	var visible []*task.Task
 	for _, t := range tasks {
 		// Shared done/blocked visibility rule (SPEC §9) — same as the CLI/web.
 		if !task.VisibleInList(t, blocked[t.ID()], showDone, showBlocked) {
 			continue
 		}
-		if needle != "" && !strings.Contains(strings.ToLower(t.Line()), needle) {
+		if !fuzzyMatch(t.Line(), filter) {
 			continue
 		}
 		visible = append(visible, t)
@@ -48,11 +47,10 @@ func buildGroups(tasks []*task.Task, grp groupMode, filter string, showDone, sho
 // domain rule (task.CompletedSince); this adapter adds only the interactive text
 // filter and the human-friendly date headers. Scope is applied by the caller.
 func buildLogbook(tasks []*task.Task, filter string) ([]group, []*task.Task) {
-	needle := strings.ToLower(strings.TrimSpace(filter))
 	var order []string
 	buckets := map[string][]*task.Task{}
 	for _, t := range task.CompletedSince(tasks, "") {
-		if needle != "" && !strings.Contains(strings.ToLower(t.Line()), needle) {
+		if !fuzzyMatch(t.Line(), filter) {
 			continue
 		}
 		k := t.Completed
