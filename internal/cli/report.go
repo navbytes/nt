@@ -4,7 +4,6 @@ import (
 	"flag"
 	"fmt"
 	"path/filepath"
-	"sort"
 	"strings"
 	"time"
 
@@ -14,7 +13,6 @@ import (
 	"github.com/navbytes/nt/internal/note"
 	"github.com/navbytes/nt/internal/search"
 	"github.com/navbytes/nt/internal/task"
-	"github.com/navbytes/nt/internal/ulid"
 	"github.com/navbytes/nt/internal/view"
 )
 
@@ -674,38 +672,9 @@ func cmdReview(args []string) int {
 	blocked := task.BlockedIDs(all)
 	today := mutate.Today()
 
-	var overdue, stale, undated []*task.Task
-	seen := map[string]bool{}
-	put := func(set *[]*task.Task, t *task.Task) { *set = append(*set, t); seen[t.ID()] = true }
-
-	// Overdue: actionable, past due.
-	for _, t := range all {
-		if t.Done || isFutureStart(t, today) {
-			continue
-		}
-		if due := dateparse.DatePart(t.Due()); due != "" && due < today {
-			put(&overdue, t)
-		}
-	}
-	// Stale: actionable, not already overdue, not in progress, older than the threshold.
-	for _, t := range all {
-		if t.Done || seen[t.ID()] || isFutureStart(t, today) || t.State() == "doing" {
-			continue
-		}
-		if ct, ok := ulid.Time(t.ID()); ok && int(time.Since(ct).Hours()/24) >= *staleDays {
-			put(&stale, t)
-		}
-	}
-	// Undated: actionable, no due date, not already shown.
-	for _, t := range all {
-		if t.Done || seen[t.ID()] || isFutureStart(t, today) {
-			continue
-		}
-		if t.Due() == "" {
-			put(&undated, t)
-		}
-	}
-	stuck := stuckProjects(all, blocked, today)
+	// Shared triage (also powers the web /review) so the buckets never drift.
+	rev := task.BuildReview(all, blocked, *staleDays, today)
+	overdue, stale, undated, stuck := rev.Overdue, rev.Stale, rev.Undated, rev.StuckProjects
 
 	if *asJSON {
 		return printJSON(reviewJSON{
@@ -740,37 +709,6 @@ func cmdReview(args []string) int {
 		}
 	}
 	return 0
-}
-
-// stuckProjects returns projects whose every actionable (open, not deferred) task
-// is dependency-blocked — i.e. there is no next action to take on them.
-func stuckProjects(tasks []*task.Task, blocked map[string]bool, today string) []string {
-	type stat struct{ open, blockedOpen int }
-	stats := map[string]*stat{}
-	for _, t := range tasks {
-		if t.Done || isFutureStart(t, today) {
-			continue
-		}
-		for _, p := range t.Projects() {
-			s := stats[p]
-			if s == nil {
-				s = &stat{}
-				stats[p] = s
-			}
-			s.open++
-			if blocked[t.ID()] {
-				s.blockedOpen++
-			}
-		}
-	}
-	var out []string
-	for p, s := range stats {
-		if s.open > 0 && s.open == s.blockedOpen {
-			out = append(out, p)
-		}
-	}
-	sort.Strings(out)
-	return out
 }
 
 type reviewJSON struct {

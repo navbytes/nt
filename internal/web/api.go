@@ -39,6 +39,7 @@ func (s *Server) apiRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/notes/{handle}/move", s.apiNoteMove)
 	mux.HandleFunc("POST /api/preview", s.handlePreview) // returns rendered HTML
 	mux.HandleFunc("GET /api/tasks", s.apiTasks)
+	mux.HandleFunc("GET /api/review", s.apiReview)
 	mux.HandleFunc("POST /api/tasks", s.apiTaskNew)
 	mux.HandleFunc("POST /api/tasks/{id}/done", s.apiTaskDone)
 	mux.HandleFunc("POST /api/tasks/{id}/reopen", s.apiTaskReopen)
@@ -252,6 +253,40 @@ func notePreview(body string) string {
 		s = strings.TrimSpace(s[:max]) + "…"
 	}
 	return s
+}
+
+// apiReview is GET /api/review — the weekly-triage buckets, using the shared
+// task.BuildReview so the web and `nt review` never drift.
+func (s *Server) apiReview(w http.ResponseWriter, r *http.Request) {
+	snap := s.current()
+	all := snap.doc.Tasks()
+	blocked := task.BlockedIDs(all)
+	const staleDays = 14
+	rev := task.BuildReview(all, blocked, staleDays, mutate.Today())
+	writeJSON(w, apitypes.ReviewResponse{
+		Overdue:       reviewTasks(rev.Overdue, blocked),
+		Stale:         reviewTasks(rev.Stale, blocked),
+		Undated:       reviewTasks(rev.Undated, blocked),
+		StuckProjects: rev.StuckProjects,
+		StaleDays:     rev.StaleDays,
+	})
+}
+
+// reviewTasks projects a list of tasks to the wire Task shape (the same fields
+// the tasks board uses), flagging dependency-blocked ones.
+func reviewTasks(ts []*task.Task, blocked map[string]bool) []apitypes.Task {
+	out := make([]apitypes.Task, 0, len(ts))
+	for _, t := range ts {
+		row := taskRow{ID: t.ID(), Text: cleanTaskText(t.Text), Status: t.Status(), Due: t.Due(), Source: t.Source(), Tags: t.Tags(), Recur: t.Recur() != ""}
+		if p := t.Projects(); len(p) > 0 {
+			row.Project = p[0]
+		}
+		if blocked[t.ID()] && !t.Done {
+			row.Status = "blocked"
+		}
+		out = append(out, toTask(row))
+	}
+	return out
 }
 
 func (s *Server) apiNote(w http.ResponseWriter, r *http.Request) {

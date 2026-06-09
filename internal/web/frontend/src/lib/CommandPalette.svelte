@@ -19,6 +19,7 @@
   const navItems: Item[] = [
     { label: "Dashboard", url: "/", kind: "go" },
     { label: "Tasks", url: "/tasks", kind: "go" },
+    { label: "Review", url: "/review", kind: "go" },
     { label: "Notes", url: "/notes", kind: "go" },
     { label: "Journal (today)", url: "/journal", kind: "go" },
     { label: "Activity", url: "/activity", kind: "go" },

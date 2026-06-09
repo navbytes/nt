@@ -77,6 +77,17 @@ export interface TasksResponse {
   groups: TaskGroup[];
 }
 /**
+ * ReviewResponse is GET /api/review — the weekly-triage buckets (what needs a
+ * decision), mirroring `nt review`.
+ */
+export interface ReviewResponse {
+  overdue: Task[];
+  stale: Task[];
+  undated: Task[];
+  stuckProjects: string[];
+  staleDays: number /* int */;
+}
+/**
  * Backlink is one "Linked from" entry on a note page.
  */
 export interface Backlink {
