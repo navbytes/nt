@@ -17,13 +17,13 @@
   type Item = { label: string; sub?: string; kind: string; url?: string; run?: () => void };
 
   const navItems: Item[] = [
-    { label: "Dashboard", url: "/", kind: "go" },
+    { label: "Today", url: "/", kind: "go" },
     { label: "Tasks", url: "/tasks", kind: "go" },
-    { label: "Review", url: "/review", kind: "go" },
+    { label: "Review (triage)", url: "/review", kind: "go" },
     { label: "Notes", url: "/notes", kind: "go" },
-    { label: "Journal (today)", url: "/journal", kind: "go" },
-    { label: "Activity", url: "/activity", kind: "go" },
+    { label: "Daily note (today)", url: "/journal", kind: "go" },
     { label: "Graph", url: "/graph", kind: "go" },
+    { label: "Activity", url: "/activity", kind: "go" },
     { label: "Tags", url: "/tags", kind: "go" },
   ];
 

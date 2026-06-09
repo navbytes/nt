@@ -163,7 +163,7 @@ describe("CommandPalette", () => {
     const hit = await screen.findByText("Design");
     expect(hit).toBeInTheDocument();
     // Nav items not matching the query are filtered out.
-    expect(screen.queryByText("Dashboard")).not.toBeInTheDocument();
+    expect(screen.queryByText("Today")).not.toBeInTheDocument();
 
     await fireEvent.keyDown(input, { key: "Enter" });
     expect(navigate).toHaveBeenCalledWith("/n/def");

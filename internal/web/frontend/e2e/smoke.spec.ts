@@ -7,8 +7,9 @@ import { test, expect } from "@playwright/test";
 // (e.g. a task shows in both the list and the activity feed; a note title also
 // appears as a body heading).
 
-test("dashboard lists seeded tasks", async ({ page }) => {
+test("Today lists due-now tasks", async ({ page }) => {
   await page.goto("/");
+  // The Today cockpit shows overdue + due-today; the seeded task is due today.
   await expect(page.locator(".row__text", { hasText: "ship the SPA" })).toBeVisible();
 });
 

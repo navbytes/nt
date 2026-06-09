@@ -12,7 +12,9 @@ go build -C "$ROOT" -o "$BIN" .
 NT_DIR="$(mktemp -d)"
 export NT_DIR
 
-"$BIN" add "ship the SPA" --pri high >/dev/null
+# due today so it lands in the Today cockpit (overdue + due-today); "review
+# graph view" stays undated and is exercised from the full Tasks list.
+"$BIN" add "ship the SPA" --pri high --due today >/dev/null
 "$BIN" add "review graph view" >/dev/null
 "$BIN" note "Welcome" --body $'# Welcome\n\nSee [[Design]] for details.' >/dev/null
 "$BIN" note "Design" --body $'# Design\n\n## Goals\n\nRefs [[Welcome]].\n\n## Non-goals\n\nlater.' >/dev/null

@@ -29,19 +29,28 @@
     }
   }
 
-  // Two tiers: the places you work, then the lenses you look through. Keeps the
-  // daily-driver destinations visually distinct from the utility views (audit).
+  // Two tiers: the entities you own (your daily cockpit + the two things you
+  // create), then the cross-cutting views you explore them through. Review lives
+  // under Tasks and Daily under Notes — they're views, not peers.
   const primary = [
-    { href: "/", label: "Dashboard" },
+    { href: "/", label: "Today" },
     { href: "/tasks", label: "Tasks" },
     { href: "/notes", label: "Notes" },
-    { href: "/journal", label: "Journal" },
-    { href: "/graph", label: "Graph" },
   ];
-  const lenses = [
+  const explore = [
+    { href: "/graph", label: "Graph" },
     { href: "/activity", label: "Activity" },
     { href: "/tags", label: "Tags" },
   ];
+
+  // A nav item is active on its own path, and on the routes of the views nested
+  // under it (Review → Tasks, Daily → Notes), so the parent stays highlighted.
+  function isActive(href: string): boolean {
+    if (path === href) return true;
+    if (href === "/tasks" && path === "/review") return true;
+    if (href === "/notes" && path === "/journal") return true;
+    return false;
+  }
 </script>
 
 <aside class="sidebar" class:sidebar--open={open}>
@@ -49,11 +58,11 @@
 
   <nav class="nav">
     {#each primary as item (item.href)}
-      <a class="nav__link" class:active={path === item.href} href={item.href}>{item.label}</a>
+      <a class="nav__link" class:active={isActive(item.href)} href={item.href}>{item.label}</a>
     {/each}
-    <div class="nav__label">Lenses</div>
-    {#each lenses as item (item.href)}
-      <a class="nav__link" class:active={path === item.href} href={item.href}>{item.label}</a>
+    <div class="nav__label">Explore</div>
+    {#each explore as item (item.href)}
+      <a class="nav__link" class:active={isActive(item.href)} href={item.href}>{item.label}</a>
     {/each}
   </nav>
 

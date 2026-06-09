@@ -12,7 +12,6 @@
   import Search from "../routes/Search.svelte";
   import Tags from "../routes/Tags.svelte";
   import Graph from "../routes/Graph.svelte";
-  import Journal from "../routes/Journal.svelte";
   import Notes from "../routes/Notes.svelte";
   import NotFound from "../routes/NotFound.svelte";
 
@@ -98,12 +97,8 @@
         <Tasks canEdit={$stateQ.data?.canEdit ?? false} />
       {:else if path === "/review"}
         <Tasks canEdit={$stateQ.data?.canEdit ?? false} initialView="review" />
-      {:else if path === "/notes"}
-        <Notes />
-      {:else if path === "/journal"}
-        {#key loc.query.get("date") ?? ""}
-          <Journal date={loc.query.get("date") ?? ""} canEdit={$stateQ.data?.canEdit ?? false} />
-        {/key}
+      {:else if path === "/notes" || path === "/journal"}
+        <Notes canEdit={$stateQ.data?.canEdit ?? false} />
       {:else if path === "/activity"}
         <Activity />
       {:else if path === "/search"}

@@ -1,16 +1,17 @@
 <script lang="ts">
   import { createQuery, useQueryClient } from "@tanstack/svelte-query";
   import { api } from "../lib/api";
-  import { navigate } from "../lib/router.svelte";
+  import { loc, navigate } from "../lib/router.svelte";
   import NoteView from "./NoteView.svelte";
 
-  let { date = "", canEdit = false }: { date?: string; canEdit?: boolean } = $props();
+  let { canEdit = false }: { canEdit?: boolean } = $props();
 
   const qc = useQueryClient();
   const journalQ = createQuery({ queryKey: ["journal"], queryFn: api.journal });
 
-  // The active day is the ?date= query, falling back to today (from the server).
-  const active = $derived(date || $journalQ.data?.today || "");
+  // The active day is the ?date= query (read from the router so it stays live
+  // while embedded in the Notes "Daily" view), falling back to today.
+  const active = $derived(loc.query.get("date") || $journalQ.data?.today || "");
   const handle = $derived($journalQ.data?.days.find((d) => d.date === active)?.handle ?? "");
   const isToday = $derived(!!$journalQ.data && active === $journalQ.data.today);
 
