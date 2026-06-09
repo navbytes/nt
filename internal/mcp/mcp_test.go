@@ -76,6 +76,57 @@ func TestMCPToolFlow(t *testing.T) {
 	}
 }
 
+func TestMCPStatus(t *testing.T) {
+	s := newServer(t)
+	// A note + two tasks in +auth (one linked to the note), one marked doing.
+	if _, err := s.dispatch("nt_note", map[string]any{"title": "Auth Design", "body": "the plan", "tags": []any{"auth"}}); err != nil {
+		t.Fatal(err)
+	}
+	s.dispatch("nt_add", map[string]any{"text": "ship auth [[Auth Design]]", "project": "auth"})
+	s.dispatch("nt_add", map[string]any{"text": "review auth", "project": "auth"})
+	s.dispatch("nt_add", map[string]any{"text": "buy milk"}) // out of scope
+
+	out, _ := s.dispatch("nt_ready", map[string]any{"project": "auth"})
+	var ready []taskOut
+	json.Unmarshal([]byte(out), &ready)
+	if len(ready) == 0 {
+		t.Fatal("seeded +auth tasks should be ready")
+	}
+	s.dispatch("nt_update", map[string]any{"id": ready[0].ID, "status": "doing"})
+
+	out, err := s.dispatch("nt_status", map[string]any{"project": "auth"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var st struct {
+		Scope       string              `json:"scope"`
+		Counts      map[string]int      `json:"counts"`
+		Doing       []taskOut           `json:"doing"`
+		LinkedNotes []map[string]string `json:"linkedNotes"`
+	}
+	if err := json.Unmarshal([]byte(out), &st); err != nil {
+		t.Fatal(err)
+	}
+	if st.Scope != "+auth" {
+		t.Errorf("scope = %q, want +auth", st.Scope)
+	}
+	if len(st.Doing) != 1 {
+		t.Errorf("expected 1 doing task, got %d", len(st.Doing))
+	}
+	if st.Counts["open"] < 1 {
+		t.Errorf("expected open tasks in +auth, got counts %v", st.Counts)
+	}
+	found := false
+	for _, n := range st.LinkedNotes {
+		if n["title"] == "Auth Design" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("the [[Auth Design]] note should surface as a linked note, got %+v", st.LinkedNotes)
+	}
+}
+
 func TestMCPProtocol(t *testing.T) {
 	s := newServer(t)
 

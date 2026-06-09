@@ -138,6 +138,8 @@ func (s *server) dispatch(name string, a map[string]any) (string, error) {
 	switch name {
 	case "nt_ready":
 		return s.ready(a)
+	case "nt_status":
+		return s.status(a)
 	case "nt_add":
 		return s.add(a)
 	case "nt_done":
@@ -190,6 +192,110 @@ func (s *server) ready(a map[string]any) (string, error) {
 	}
 	task.SortByUrgency(rows)
 	return jsonText(tasksOut(rows)), nil
+}
+
+// status synthesizes the state of a project/area in one call, so a resuming
+// session doesn't have to stitch together several ready/recall/links calls. It
+// reads the store only. doing + blocked come first (that's what a resumer needs
+// to unblock), then open by urgency, recent completions, and the notes those
+// tasks link to — nt's edge over embedding memory is showing the real WHY.
+func (s *server) status(a map[string]any) (string, error) {
+	d, err := s.eng.Read()
+	if err != nil {
+		return "", err
+	}
+	project, tag := strings.TrimSpace(str(a, "project")), strings.TrimSpace(str(a, "tag"))
+	notes, _ := note.List(s.eng.S)
+	blocked := task.BlockedIDs(d.Tasks())
+
+	inScope := func(t *task.Task) bool {
+		if project != "" && !contains(t.Projects(), project) {
+			return false
+		}
+		if tag != "" && !contains(t.Tags(), tag) {
+			return false
+		}
+		return true
+	}
+
+	var scoped, doing, blockedT, open []*task.Task
+	doneN := 0
+	for _, t := range d.Tasks() {
+		if !inScope(t) {
+			continue
+		}
+		scoped = append(scoped, t)
+		switch {
+		case t.Done:
+			doneN++
+		case t.Status() == "doing":
+			doing = append(doing, t)
+		case blocked[t.ID()] || t.Status() == "blocked":
+			blockedT = append(blockedT, t)
+		default:
+			open = append(open, t)
+		}
+	}
+	task.SortByUrgency(open)
+	openShown := open
+	if len(openShown) > 10 {
+		openShown = openShown[:10]
+	}
+	recent := task.CompletedSince(scoped, "") // completed, newest first
+	if len(recent) > 5 {
+		recent = recent[:5]
+	}
+
+	// Linked notes: the notes these tasks point at via [[links]], plus any note
+	// carrying the scope tag. This is the context a resuming agent wants.
+	seen := map[string]bool{}
+	linked := []map[string]string{}
+	addNote := func(n *note.Note) {
+		if n == nil || seen[n.Path] {
+			return
+		}
+		seen[n.Path] = true
+		linked = append(linked, map[string]string{"handle": noteHandle(n), "title": n.Title, "path": n.Rel})
+	}
+	for _, t := range scoped {
+		for _, raw := range t.Links() {
+			if it, ok := links.Resolve(raw, d, notes); ok && it.Kind == "note" {
+				for _, n := range notes {
+					if n.Path == it.Path {
+						addNote(n)
+						break
+					}
+				}
+			}
+		}
+	}
+	if tag != "" {
+		for _, n := range notes {
+			if contains(n.Tags, tag) {
+				addNote(n)
+			}
+		}
+	}
+
+	scope := "all work"
+	switch {
+	case project != "" && tag != "":
+		scope = "+" + project + " @" + tag
+	case project != "":
+		scope = "+" + project
+	case tag != "":
+		scope = "@" + tag
+	}
+
+	return jsonText(map[string]any{
+		"scope":         scope,
+		"counts":        map[string]int{"doing": len(doing), "blocked": len(blockedT), "open": len(open), "done": doneN},
+		"doing":         tasksOut(doing),
+		"blocked":       tasksOut(blockedT),
+		"openByUrgency": tasksOut(openShown),
+		"recentlyDone":  tasksOut(recent),
+		"linkedNotes":   linked,
+	}), nil
 }
 
 func (s *server) add(a map[string]any) (string, error) {
