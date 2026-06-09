@@ -52,7 +52,18 @@
 {:else if $gridQ.error}
   <p class="error">Couldn't load notes.</p>
 {:else if cards.length === 0}
-  <p class="muted">No notes{folder ? ` in ${folder}` : ""} yet.</p>
+  {#if folder}
+    <p class="muted">No notes in {folder} yet.</p>
+  {:else}
+    <div class="empty">
+      <p class="empty__lead">No notes yet.</p>
+      <p class="muted">
+        Notes are your durable memory — the “why” behind decisions, shared with your AI agent.
+        Create one with the <strong>＋</strong> in the sidebar, or run <code>nt mcp install</code> so an
+        agent can capture them via <code>nt_note</code>.
+      </p>
+    </div>
+  {/if}
 {:else}
   <div class="notegrid" class:notegrid--dense={dense}>
     {#each cards as n (n.handle)}

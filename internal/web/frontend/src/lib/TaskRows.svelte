@@ -145,7 +145,13 @@
       {#if group.tasks.length === 0}<p class="muted small">none</p>{/if}
     </section>
   {:else}
-    <p class="muted">No tasks.</p>
+    <div class="empty">
+      <p class="empty__lead">No tasks yet.</p>
+      <p class="muted">
+        Capture one above, or run <code>nt mcp install</code> so your AI agent can add and
+        complete tasks through <code>nt_add</code> / <code>nt_done</code> — they share this same list.
+      </p>
+    </div>
   {/each}
 {/if}
 
