@@ -34,7 +34,7 @@
         <li class="actrow">
           <span class="act act--{ev.action}">{ev.action}</span>
           <span class="kind">{ev.kind}</span>
-          {#if ev.url}<a href={ev.url}>{ev.title}</a>{:else}<span>{ev.title}</span>{/if}
+          {#if ev.url}<a class="act__title" href={ev.url} title={ev.title}>{ev.title}</a>{:else}<span class="act__title" title={ev.title}>{ev.title}</span>{/if}
           <span class="src">{ev.source}</span>
         </li>
       {/each}
