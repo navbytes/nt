@@ -328,9 +328,9 @@ func TestLogbookShowsCompleted(t *testing.T) {
 	if len(mm.logFlat) != 1 || mm.logFlat[0].ID() != id {
 		t.Fatalf("completed task should appear in the logbook, got %d entries", len(mm.logFlat))
 	}
-	mm = press(mm, "3").(*Model)
+	mm = press(mm, "[").(*Model) // prev tab: tasks → logbook (tabs wrap)
 	if mm.tab != tabLogbook {
-		t.Fatal("'3' should switch to the logbook tab")
+		t.Fatal("'[' should switch to the logbook tab")
 	}
 	if st := mm.selectedTask(); st == nil || st.ID() != id {
 		t.Fatal("logbook selection should resolve to the completed task")
@@ -511,7 +511,7 @@ func TestReadOnlyLock(t *testing.T) {
 		t.Fatal("locked: navigation should still work")
 	}
 	// Tab switching still works.
-	mm = press(mm, "2").(*Model)
+	mm = press(mm, "]").(*Model)
 	if mm.tab != tabNotes {
 		t.Fatal("locked: tab switching should still work")
 	}

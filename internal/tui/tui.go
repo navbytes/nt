@@ -128,6 +128,7 @@ type Model struct {
 	input  textinput.Model
 	ik     inputKind
 	pendD  bool   // first 'd' of a 'dd'
+	count  int    // vim repeat-count prefix being typed (0 = none)
 	status string // transient status line
 
 	bodyEdit   bool           // in-TUI note-body capture is active (U4)

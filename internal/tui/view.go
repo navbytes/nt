@@ -223,7 +223,7 @@ func barPad(n int) string {
 func (m *Model) keybarPairs() [][2]string {
 	if m.locked {
 		// Read-only: advertise only what still works, plus the unlock key.
-		p := [][2]string{{"j/k", "move"}, {"enter", "detail"}, {"1/2/3", "tab"},
+		p := [][2]string{{"j/k", "move"}, {"enter", "detail"}, {"[ ]", "tab"},
 			{"/", "filter"}, {"y", "yank"}}
 		if len(m.collectTargets()) > 0 {
 			p = append(p, [2]string{"f", "follow"})
@@ -237,13 +237,13 @@ func (m *Model) keybarPairs() [][2]string {
 		if hasTokens {
 			p = append(p, [2]string{"f", "follow"})
 		}
-		return append(p, [][2]string{{"/", "filter"}, {"1/2/3", "tab"}, {"u/U", "undo/redo"}}...)
+		return append(p, [][2]string{{"/", "filter"}, {"[ ]", "tab"}, {"u/U", "undo/redo"}}...)
 	case tabLogbook:
 		p := [][2]string{{"j/k", "move"}, {"enter", "detail"}, {"x", "reopen"}, {"y", "yank"}}
 		if hasTokens {
 			p = append(p, [2]string{"f", "follow"})
 		}
-		return append(p, [][2]string{{"/", "search"}, {"1/2/3", "tab"}, {"u/U", "undo/redo"}}...)
+		return append(p, [][2]string{{"/", "search"}, {"[ ]", "tab"}, {"u/U", "undo/redo"}}...)
 	default: // tasks
 		p := [][2]string{{"j/k", "move"}, {"enter", "detail"}}
 		if len(m.marked) > 0 {
@@ -871,8 +871,8 @@ func (m *Model) helpView() string {
 		rows  [][2]string
 	}{
 		{"navigate", [][2]string{
-			{"j / k, ↑ ↓", "move"}, {"Ctrl+d / Ctrl+u", "half-page down / up"},
-			{"g / G", "top / bottom"}, {"1 / 2 / 3 / tab", "tasks / notes / logbook"},
+			{"j / k, ↑ ↓", "move (with a count: 5j, 3k)"}, {"Ctrl+d / Ctrl+u", "half-page down / up"},
+			{"g / G", "top / bottom (NG → row N)"}, {"[ / ] / tab", "previous / next tab"},
 			{"enter", "focus detail (then j/k scroll the body)"}, {"esc", "back to list"},
 		}},
 		{"select", [][2]string{
