@@ -37,6 +37,7 @@ func (s *Server) apiRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/notes/{handle}/raw", s.apiNoteRaw)
 	mux.HandleFunc("POST /api/notes/{handle}", s.apiNoteSave)
 	mux.HandleFunc("POST /api/notes/{handle}/move", s.apiNoteMove)
+	mux.HandleFunc("POST /api/notes/{handle}/archive", s.apiNoteArchive)
 	mux.HandleFunc("POST /api/preview", s.handlePreview) // returns rendered HTML
 	mux.HandleFunc("GET /api/tasks", s.apiTasks)
 	mux.HandleFunc("GET /api/review", s.apiReview)
@@ -174,7 +175,7 @@ func (s *Server) apiState(w http.ResponseWriter, r *http.Request) {
 		CSRF:      csrf,
 		Version:   s.version,
 		OpenCount: open,
-		NoteCount: len(snap.notes),
+		NoteCount: len(snap.active),
 		Sources:   snap.sources,
 		Warning:   snap.readErr,
 	})
@@ -182,7 +183,9 @@ func (s *Server) apiState(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) apiNotes(w http.ResponseWriter, r *http.Request) {
 	snap := s.current()
-	writeJSON(w, apitypes.NotesIndex{Tree: toTree(buildTree(snap.notes, "")), Index: toLinks(snap.index)})
+	// Sidebar tree + ⌘K index show the working set only; archived notes are
+	// reachable from the grid (with the toggle on) and their own page.
+	writeJSON(w, apitypes.NotesIndex{Tree: toTree(buildTree(snap.active, "")), Index: toLinks(snap.index)})
 }
 
 // apiNotesGrid projects every note as a card (title/folder/tags/preview/updated)
@@ -193,7 +196,9 @@ func (s *Server) apiNotesGrid(w http.ResponseWriter, r *http.Request) {
 	cards := make([]apitypes.NoteCard, 0, len(snap.notes))
 	for _, n := range snap.notes {
 		folder, _ := splitRel(n.Rel)
-		if folder != "" {
+		// The folder filter lists the working set's folders only — an archived
+		// note still rides along as a card (flagged), revealed by the grid toggle.
+		if folder != "" && !n.Archived {
 			folders[folder] = true
 		}
 		updated := n.Updated
@@ -201,13 +206,14 @@ func (s *Server) apiNotesGrid(w http.ResponseWriter, r *http.Request) {
 			updated = n.Created
 		}
 		cards = append(cards, apitypes.NoteCard{
-			Handle:  noteHandle(n),
-			Title:   n.Title,
-			URL:     "/n/" + url.PathEscape(noteHandle(n)),
-			Folder:  folder,
-			Tags:    n.Tags,
-			Preview: notePreview(n.Body),
-			Updated: dateOnly(updated),
+			Handle:   noteHandle(n),
+			Title:    n.Title,
+			URL:      "/n/" + url.PathEscape(noteHandle(n)),
+			Folder:   folder,
+			Tags:     n.Tags,
+			Preview:  notePreview(n.Body),
+			Updated:  dateOnly(updated),
+			Archived: n.Archived,
 		})
 	}
 	folderList := make([]string, 0, len(folders))
@@ -321,6 +327,7 @@ func (s *Server) apiNote(w http.ResponseWriter, r *http.Request) {
 		Source:    n.Source,
 		Created:   dateOnly(n.Created),
 		Tags:      n.Tags,
+		Archived:  n.Archived,
 		BodyHTML:  string(html),
 		Backlinks: toBacklinks(snap.backlinks[n.Path]),
 		TaskRefs:  toTaskRefs(snap.taskRefs[n.Path]),
@@ -393,6 +400,51 @@ func (s *Server) apiNoteMove(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, apitypes.MovedNote{
 		Handle: noteHandle(n), URL: "/n/" + url.PathEscape(noteHandle(n)), Rel: newRel, Updated: updated,
 	})
+}
+
+// apiNoteArchive flips a note's archived frontmatter flag (--edit + CSRF gated):
+// a soft, reversible retire that drops the note from the sidebar, ⌘K, search,
+// orphans, and the link graph while leaving it on disk and reachable from the
+// grid (with the "Archived" toggle on) and its own page. The client sends the
+// desired state in the `archived` field ("true"/"false"); absent, it toggles.
+// It mutates a fresh copy loaded from disk — never the shared snapshot note — so
+// a concurrent reader of the current snapshot can't observe a torn write.
+func (s *Server) apiNoteArchive(w http.ResponseWriter, r *http.Request) {
+	if !s.allowEdit {
+		http.Error(w, "editing is disabled — start with `nt web --edit`", http.StatusForbidden)
+		return
+	}
+	if r.Header.Get("X-CSRF") != s.csrf {
+		http.Error(w, "bad or missing CSRF token", http.StatusForbidden)
+		return
+	}
+	n := s.current().findHandle(r.PathValue("handle"))
+	if n == nil {
+		http.NotFound(w, r)
+		return
+	}
+	want := !n.Archived // default: toggle the current state
+	switch r.FormValue("archived") {
+	case "true":
+		want = true
+	case "false":
+		want = false
+	}
+	fresh, err := note.Load(n.Path)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	fresh.Archived = want
+	fresh.Updated = time.Now().Format(time.RFC3339)
+	if err := fresh.Save(); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	s.writes.mark(fresh.Path) // suppress our own fsnotify event
+	s.rebuild()
+	s.hub.broadcast("reload") // sidebar/grid/graph drop or restore the note
+	writeJSON(w, apitypes.ArchivedNote{Handle: noteHandle(fresh), Archived: want})
 }
 
 // apiNoteCreate creates a new note (--edit + CSRF gated) and returns its handle
@@ -503,6 +555,9 @@ func (s *Server) apiOrphans(w http.ResponseWriter, r *http.Request) {
 	snap := s.current()
 	notes := make([]apitypes.NoteLink, 0)
 	for _, n := range snap.notes {
+		if n.Archived {
+			continue // archived notes are out of the graph, so never "orphans"
+		}
 		if !snap.linked[n.Path] {
 			notes = append(notes, apitypes.NoteLink{URL: "/n/" + url.PathEscape(noteHandle(n)), Title: n.Title, Path: n.Rel})
 		}
@@ -519,7 +574,7 @@ func (s *Server) apiSearch(w http.ResponseWriter, r *http.Request) {
 	seen := map[string]bool{}
 	results := make([]apitypes.SearchResult, 0)
 	add := func(n *note.Note, snippet string) {
-		if n == nil || seen[noteHandle(n)] || (tag != "" && !contains(n.Tags, tag)) {
+		if n == nil || n.Archived || seen[noteHandle(n)] || (tag != "" && !contains(n.Tags, tag)) {
 			return
 		}
 		seen[noteHandle(n)] = true

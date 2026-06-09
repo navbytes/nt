@@ -58,6 +58,23 @@
     }
   }
 
+  // ---- archive / unarchive (a soft, reversible retire) ----
+  let archiveBusy = $state(false);
+  async function doArchive() {
+    const want = !($noteQ.data?.archived ?? false);
+    archiveBusy = true;
+    try {
+      await api.noteArchive(handle, want);
+      // Refresh the surfaces the flag touches: this note (button label), the
+      // sidebar/grid (it appears/disappears), and the orphan/graph/state counts.
+      for (const k of [["note", handle], ["notes"], ["notesGrid"], ["orphans"], ["graph"], ["state"]]) {
+        await qc.invalidateQueries({ queryKey: k });
+      }
+    } finally {
+      archiveBusy = false;
+    }
+  }
+
   // ---- new task linked to this note (closes the note→task loop) ----
   let addingTask = $state(false);
   let taskText = $state("");
@@ -186,6 +203,9 @@
         {#if canEdit}
           <button class="btn btn--ghost btn--sm" onclick={() => (addingTask = !addingTask)}>＋ Task</button>
           <button class="btn btn--ghost btn--sm" onclick={openMove}>Move</button>
+          <button class="btn btn--ghost btn--sm" onclick={doArchive} disabled={archiveBusy}>
+            {n.archived ? "Unarchive" : "Archive"}
+          </button>
           <button class="btn btn--ghost btn--sm" onclick={() => (editing = true)}>Edit</button>
         {/if}
       </div>
@@ -219,6 +239,11 @@
           <button class="btn btn--sm" onclick={doMove} disabled={moveBusy}>{moveBusy ? "Moving…" : "Move"}</button>
           <button class="btn btn--ghost btn--sm" onclick={() => (moving = false)}>Cancel</button>
           {#if moveErr}<span class="error small">{moveErr}</span>{/if}
+        </div>
+      {/if}
+      {#if n.archived}
+        <div class="archived-banner" role="note">
+          <span>📦 Archived — hidden from the sidebar, search, orphans, and the graph. Still on disk.</span>
         </div>
       {/if}
       <h1>{n.title}</h1>
