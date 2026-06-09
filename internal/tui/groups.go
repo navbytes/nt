@@ -17,7 +17,11 @@ func buildGroups(tasks []*task.Task, grp groupMode, filter string, showDone, sho
 		if !task.VisibleInList(t, blocked[t.ID()], showDone, showBlocked) {
 			continue
 		}
-		if !fuzzyMatch(t.Line(), filter) {
+		// Match the visible description (incl. inline @tag/+project/[[link]]), not
+		// t.Line(): the full line carries the id: ULID, whose Crockford base32 runs
+		// (A–Z incl. Z) let a filter like "zzz" or "fab" hit a random id as a
+		// subsequence — a surprising match, and a flaky test.
+		if !fuzzyMatch(t.Text, filter) {
 			continue
 		}
 		visible = append(visible, t)
@@ -50,7 +54,7 @@ func buildLogbook(tasks []*task.Task, filter string) ([]group, []*task.Task) {
 	var order []string
 	buckets := map[string][]*task.Task{}
 	for _, t := range task.CompletedSince(tasks, "") {
-		if !fuzzyMatch(t.Line(), filter) {
+		if !fuzzyMatch(t.Text, filter) {
 			continue
 		}
 		k := t.Completed
