@@ -58,6 +58,7 @@ What's left is a **short polish/scale tail** — no remaining item is load-beari
 - **U6** vim count prefixes (`5j`/`12G`) with tabs moved to `[`/`]`
 - **U8** light theme via adaptive palette ([#29](https://github.com/navbytes/nt/pull/29))
 - **U9** explicit redo key + undo affordance
+- **F4** TUI self-write suppression — a content signature skips the watcher's ~80ms echo of our own writes, so mutating no longer flickers/re-sorts the view
 
 **Infrastructure**
 - **E1** incremental read-model — mtime parse cache; a 2000-note rebuild dropped 37.9ms → 6.7ms ([#34](https://github.com/navbytes/nt/pull/34))
@@ -74,13 +75,12 @@ What's left is a **short polish/scale tail** — no remaining item is load-beari
 |---|------|---------|--------|--------|
 | W8 | frontmatter/properties **editing** in the web editor (backlinks-while-editing done) | web | M | partial |
 | F2 | broaden concurrency tests — concurrent add/done/archive/undo (lock + store tests done) | core | M | partial |
-| F4 | TUI self-write suppression (watcher reloads its own writes → flicker) | tui | M | not started |
 | E2 | **persisted** on-disk index (cold start still re-reads all; in-memory shipped) | infra | L | deferred — only matters >10k notes |
 
 ## Suggested sequencing for what's left
 
 1. **Editor polish** — W8 (frontmatter/properties editing in the web editor). Small, high-visibility.
-2. **Robustness** — F2 (concurrency stress) and F4 (TUI de-flicker).
+2. **Robustness** — F2 (concurrency stress: concurrent add/done/archive/undo).
 3. **Surface the saved views** — T4 ships on the CLI with a surface-agnostic `internal/view` store; the TUI and web can now expose the same saved views (a view picker / palette entries). Optional follow-up.
 4. **Scale, only when needed** — E2 persisted index. Defer until a real >10k-note store shows a cold-start cost.
 
