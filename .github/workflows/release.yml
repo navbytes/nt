@@ -140,20 +140,20 @@ jobs:
       - name: Package (macOS)
         if: matrix.os == 'macos-latest'
         shell: bash
-        run: ditto -c -k --keepParent build/bin/nt.app "nt_${VER}_${{ matrix.label }}.zip"
+        run: ditto -c -k --keepParent build/bin/nt.app "nt-desktop_${VER}_${{ matrix.label }}.zip"
 
       - name: Package (Linux)
         if: matrix.os == 'ubuntu-latest'
         shell: bash
-        run: tar -C build/bin -czf "nt_${VER}_${{ matrix.label }}.tar.gz" nt
+        run: tar -C build/bin -czf "nt-desktop_${VER}_${{ matrix.label }}.tar.gz" nt
 
       - name: Package (Windows)
         if: matrix.os == 'windows-latest'
         shell: bash
-        run: cd build/bin && 7z a "../../nt_${VER}_${{ matrix.label }}.zip" nt.exe
+        run: cd build/bin && 7z a "../../nt-desktop_${VER}_${{ matrix.label }}.zip" nt.exe
 
       - name: Upload to Release
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release upload "$GITHUB_REF_NAME" nt_${VER}_${{ matrix.label }}.* --clobber
+        run: gh release upload "$GITHUB_REF_NAME" nt-desktop_${VER}_${{ matrix.label }}.* --clobber

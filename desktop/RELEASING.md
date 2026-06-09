@@ -10,9 +10,12 @@ Per tag it attaches:
 
 | File | Platform |
 |---|---|
-| `nt_<ver>_macos_universal.zip` | macOS (Apple Silicon + Intel, universal) |
-| `nt_<ver>_linux_amd64.tar.gz` | Linux x86-64 (needs `libgtk-3` + `libwebkit2gtk-4.1` at runtime) |
-| `nt_<ver>_windows_amd64.zip` | Windows x86-64 (uses the Edge WebView2 runtime) |
+| `nt-desktop_<ver>_macos_universal.zip` | macOS (Apple Silicon + Intel, universal) |
+| `nt-desktop_<ver>_linux_amd64.tar.gz` | Linux x86-64 (needs `libgtk-3` + `libwebkit2gtk-4.1` at runtime) |
+| `nt-desktop_<ver>_windows_amd64.zip` | Windows x86-64 (uses the Edge WebView2 runtime) |
+
+The `nt-desktop_` prefix distinguishes the GUI bundles from the CLI's
+`nt_<ver>_<os>_<arch>` archives so they never collide on the same Release.
 
 ## macOS signing + notarization
 
