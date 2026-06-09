@@ -14,11 +14,9 @@ func buildGroups(tasks []*task.Task, grp groupMode, filter string, showDone, sho
 	needle := strings.ToLower(strings.TrimSpace(filter))
 	var visible []*task.Task
 	for _, t := range tasks {
-		if t.Done && !showDone {
+		// Shared done/blocked visibility rule (SPEC §9) — same as the CLI/web.
+		if !task.VisibleInList(t, blocked[t.ID()], showDone, showBlocked) {
 			continue
-		}
-		if blocked[t.ID()] && !t.Done && !showBlocked {
-			continue // dependency-blocked tasks hide by default (SPEC §9)
 		}
 		if needle != "" && !strings.Contains(strings.ToLower(t.Line()), needle) {
 			continue
