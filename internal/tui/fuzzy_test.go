@@ -3,6 +3,8 @@ package tui
 import (
 	"strings"
 	"testing"
+
+	"github.com/navbytes/nt/internal/task"
 )
 
 func TestFuzzyMatch(t *testing.T) {
@@ -47,5 +49,27 @@ func TestFuzzyFilterFindsTasks(t *testing.T) {
 	m.rebuild()
 	if len(m.flat) != 0 {
 		t.Errorf("no task should match 'zzz', got %d", len(m.flat))
+	}
+}
+
+// TestFuzzyFilterIgnoresTaskID guards the filter against matching the hidden id:
+// the ULID is Crockford base32 (A–Z incl. Z), so a full line lets a short filter
+// like "zzz" alias a random id as a subsequence — a surprising match, and the
+// source of a flaky test. The live filter must see only the visible description.
+func TestFuzzyFilterIgnoresTaskID(t *testing.T) {
+	tk := task.New("plain task text") // no 'z' in the visible text…
+	tk.SetKey("id", "ZZZZZZZZZZZZZZZZZZZZZZZZZZ")
+	count := func(filter string) int {
+		n := 0
+		for _, g := range buildGroups([]*task.Task{tk}, groupDate, filter, false, false, map[string]bool{}) {
+			n += len(g.tasks)
+		}
+		return n
+	}
+	if n := count("zzz"); n != 0 {
+		t.Errorf("filter 'zzz' must not match a task via its id, got %d", n)
+	}
+	if n := count("plain"); n != 1 {
+		t.Errorf("filter 'plain' should still match the visible text, got %d", n)
 	}
 }
