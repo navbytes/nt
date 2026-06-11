@@ -252,6 +252,12 @@ type ArchivedNote struct {
 	Archived bool   `json:"archived"`
 }
 
+// NoteTags is POST /api/notes/{handle}/tags — the note's tags after the edit.
+type NoteTags struct {
+	Handle string   `json:"handle"`
+	Tags   []string `json:"tags"`
+}
+
 // JournalDay is one existing daily note (date + the note's stable handle).
 type JournalDay struct {
 	Date   string `json:"date"`   // YYYY-MM-DD

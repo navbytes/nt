@@ -779,3 +779,42 @@ func TestAPITaskBulk(t *testing.T) {
 func timeNowPlusISO(days int) string {
 	return time.Now().AddDate(0, 0, days).Format("2006-01-02")
 }
+
+// TestAPINoteTags: add/remove tags edits frontmatter only — the body and
+// unmodeled frontmatter keys survive (note.Save preserves Extra).
+func TestAPINoteTags(t *testing.T) {
+	s := newTestServer(t)
+	s.allowEdit = true
+	n, _ := note.Create(s.eng.S, "Doc", "# Doc\n\nbody text", []string{"alpha"}, "cli", "")
+
+	// gated
+	if code, _ := postForm(s, "/api/notes/"+n.ID+"/tags", "", mustValues("add", "beta")); code != 403 {
+		t.Errorf("tags without CSRF should 403, got %d", code)
+	}
+	// neither add nor remove → 400
+	if code, _ := postForm(s, "/api/notes/"+n.ID+"/tags", s.csrf, nil); code != 400 {
+		t.Errorf("empty tag edit should 400, got %d", code)
+	}
+
+	// add two (one with a @, deduped against existing), remove the original
+	code, body := postForm(s, "/api/notes/"+n.ID+"/tags", s.csrf, mustValues("add", "@beta, gamma", "remove", "alpha"))
+	if code != 200 {
+		t.Fatalf("tags: %d %s", code, body)
+	}
+	res := decode[apitypes.NoteTags](t, body)
+	if contains(res.Tags, "alpha") || !contains(res.Tags, "beta") || !contains(res.Tags, "gamma") {
+		t.Errorf("tags after edit = %v, want [beta gamma]", res.Tags)
+	}
+
+	// reload from disk: body intact, tags persisted
+	fresh, err := note.Load(n.Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(fresh.Body, "body text") {
+		t.Errorf("body should be untouched, got %q", fresh.Body)
+	}
+	if contains(fresh.Tags, "alpha") || !contains(fresh.Tags, "beta") {
+		t.Errorf("persisted tags = %v", fresh.Tags)
+	}
+}

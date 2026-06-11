@@ -73,12 +73,14 @@
 
   const wikilinkSource = makeWikilinkSource(() => latest.getNotes());
 
+  let view: EditorView | undefined;
+
   // Mount once: this effect tracks only `host` (set once via bind:this); `value`
   // is read untracked as the initial doc, and callbacks go through `latest`.
   $effect(() => {
     if (!host) return;
     const el = host;
-    const view = new EditorView({
+    view = new EditorView({
       parent: el,
       state: EditorState.create({
         doc: untrack(() => value),
@@ -108,7 +110,20 @@
     view.focus();
     // Expose the view for e2e/integration checks (harmless in prod).
     (el as unknown as { cmView?: EditorView }).cmView = view;
-    return () => view.destroy();
+    return () => {
+      view?.destroy();
+      view = undefined;
+    };
+  });
+
+  // Reflect an EXTERNAL `value` change (e.g. a frontmatter tag edit reseeds the
+  // buffer) into the view. Guarded by an equality check so the user's own typing
+  // — which already flows out via onChange — never triggers a self-replace.
+  $effect(() => {
+    const v = value;
+    if (view && v !== view.state.doc.toString()) {
+      view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: v } });
+    }
   });
 </script>
 

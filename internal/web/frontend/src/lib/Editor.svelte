@@ -21,11 +21,17 @@
   let saving = $state(false);
   let error = $state("");
 
+  // The last text we seeded the buffer with (on load or after a tag edit), so we
+  // can tell whether the body has unsaved edits.
+  let seededText = $state("");
+  const dirty = $derived(loaded && buffer !== seededText);
+
   // Seed the buffer once the raw note loads (don't clobber later edits).
   $effect(() => {
     if ($rawQ.data && !loaded) {
       buffer = $rawQ.data.text;
       etag = $rawQ.data.etag;
+      seededText = $rawQ.data.text;
       loaded = true;
     }
   });
@@ -61,6 +67,42 @@
     return observeTheme(() => void renderMermaidIn(el));
   });
 
+  // ---- frontmatter tags (W9) ----------------------------------------------
+  // Structured tag editing in the context bar so you don't hand-edit YAML. Edits
+  // the frontmatter only (body untouched) via its own endpoint; on success the
+  // ["note"]/["raw"] caches refresh so the buffer's YAML reflects the change.
+  let newTag = $state("");
+  let tagBusy = $state(false);
+  const tags = $derived($noteQ.data?.tags ?? []);
+  async function editTags(add: string, remove = "") {
+    if (tagBusy) return;
+    tagBusy = true;
+    try {
+      await api.noteTags(handle, add, remove);
+      await qc.invalidateQueries({ queryKey: ["note", handle] });
+      await qc.invalidateQueries({ queryKey: ["raw", handle] });
+      await qc.invalidateQueries({ queryKey: ["notes"] });
+      // The on-disk frontmatter changed; reseed the buffer so a later save
+      // doesn't clobber the new tags with the stale YAML we opened with.
+      const r = await api.raw(handle);
+      buffer = r.text;
+      etag = r.etag;
+      seededText = r.text;
+    } catch (e) {
+      error = String(e);
+    } finally {
+      tagBusy = false;
+    }
+  }
+  function addTag(e: SubmitEvent) {
+    e.preventDefault();
+    const t = newTag.trim().replace(/^@/, "");
+    if (t) {
+      newTag = "";
+      void editTags(t);
+    }
+  }
+
   async function save() {
     saving = true;
     error = "";
@@ -91,6 +133,34 @@
     <span class="kbd">⌘/Ctrl+S</span>
     {#if error}<span class="error">{error}</span>{/if}
   </div>
+
+  {#if $noteQ.data}
+    <div class="editor__context editor__tags">
+      <span class="editor__context-label">Tags</span>
+      {#each tags as tag (tag)}
+        <span class="tagchip">
+          #{tag}
+          <button
+            class="tagchip__x"
+            disabled={tagBusy || dirty}
+            title={dirty ? "Save your edits first" : `Remove @${tag}`}
+            aria-label={`Remove tag ${tag}`}
+            onclick={() => editTags("", tag)}>×</button
+          >
+        </span>
+      {/each}
+      <form class="tagadd" onsubmit={addTag}>
+        <input
+          bind:value={newTag}
+          placeholder={dirty ? "save first…" : "add tag…"}
+          aria-label="Add a tag"
+          title={dirty ? "Save your buffer edits before editing tags" : "Add a tag"}
+          disabled={tagBusy || dirty}
+          autocomplete="off"
+        />
+      </form>
+    </div>
+  {/if}
 
   {#if $noteQ.data && ($noteQ.data.backlinks.length > 0 || $noteQ.data.taskRefs.length > 0)}
     <div class="editor__context">

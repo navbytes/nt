@@ -19,6 +19,7 @@ import type {
   CreatedNote,
   MovedNote,
   ArchivedNote,
+  NoteTags,
   JournalResponse,
 } from "./api-types";
 
@@ -110,6 +111,11 @@ export const api = {
     postForm<ArchivedNote>(`/api/notes/${encodeURIComponent(handle)}/archive`, {
       archived: String(archived),
     }),
+
+  /** Edit a note's frontmatter tags only (body untouched). add/remove are
+   *  comma/space-separated; returns the tags after the edit. */
+  noteTags: (handle: string, add: string, remove = "") =>
+    postForm<NoteTags>(`/api/notes/${encodeURIComponent(handle)}/tags`, { add, remove }),
 
   // ---- editor ----
   raw: (handle: string) => getJSON<RawNote>(`/api/notes/${encodeURIComponent(handle)}/raw`),
