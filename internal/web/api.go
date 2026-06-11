@@ -743,15 +743,42 @@ func (s *Server) apiTaskStatus(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// apiTaskEdit replaces a task's description text, preserving its id, due,
-// priority, status, source, and creation time (SetText only touches the
-// description — inline +project/@tag in the new text are re-parsed on the next
-// read, the metadata is not). This is the web face of `nt edit` for a task.
+// apiTaskEdit updates a task's description text and/or its due date and
+// priority, preserving everything it doesn't touch (id, status, source,
+// creation time). text replaces the description only (inline +project/@tag in
+// the new text are re-parsed on the next read); due/pri accept the same
+// natural-language values as quick-add ("today", "fri 5pm", "high") and resolve
+// through dateparse server-side — "none" (or empty) clears the field. At least
+// one of the three must be supplied. This is the web face of `nt edit`/`nt
+// update` for a task.
 func (s *Server) apiTaskEdit(w http.ResponseWriter, r *http.Request) {
-	text := strings.TrimSpace(r.FormValue("text"))
-	if text == "" {
-		http.Error(w, "task text is required", http.StatusBadRequest)
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "bad form", http.StatusBadRequest)
 		return
+	}
+	text := strings.TrimSpace(r.FormValue("text"))
+	hasDue, hasPri := r.Form.Has("due"), r.Form.Has("pri")
+	if text == "" && !hasDue && !hasPri {
+		http.Error(w, "nothing to update: provide text, due, or pri", http.StatusBadRequest)
+		return
+	}
+	dueVal := ""
+	if hasDue {
+		v, ok := dateparse.Date(r.FormValue("due"))
+		if !ok {
+			http.Error(w, "invalid due date", http.StatusBadRequest)
+			return
+		}
+		dueVal = v // "" clears (SetKey deletes empty values)
+	}
+	priByte := byte(0)
+	if hasPri {
+		p, ok := dateparse.Priority(r.FormValue("pri"))
+		if !ok {
+			http.Error(w, "invalid priority", http.StatusBadRequest)
+			return
+		}
+		priByte = p // 0 clears
 	}
 	if s.doTaskWrite(w, r, "edit", func(d *task.Doc, rec *mutate.Recorder) error {
 		t, err := resolveTask(d, r)
@@ -759,7 +786,15 @@ func (s *Server) apiTaskEdit(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 		rec.Before(t)
-		t.SetText(text)
+		if text != "" {
+			t.SetText(text)
+		}
+		if hasDue {
+			t.SetKey("due", dueVal)
+		}
+		if hasPri {
+			t.SetPriority(priByte)
+		}
 		return nil
 	}) {
 		s.respondTasks(w)

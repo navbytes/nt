@@ -76,6 +76,9 @@ export const api = {
   journal: () => getJSON<JournalResponse>("/api/journal"),
   taskNew: (text: string) => postForm<TasksResponse>("/api/tasks", { text }),
   taskEdit: (id: string, text: string) => postForm<TasksResponse>(`/api/tasks/${id}`, { text }),
+  /** Reschedule only: due accepts the quick-add NL forms ("today", "fri 5pm",
+   *  "+7d"); "none" clears. Resolved by the server's dateparse — no client drift. */
+  taskDue: (id: string, due: string) => postForm<TasksResponse>(`/api/tasks/${id}`, { due }),
   taskDone: (id: string) => postForm<TasksResponse>(`/api/tasks/${id}/done`),
   taskReopen: (id: string) => postForm<TasksResponse>(`/api/tasks/${id}/reopen`),
   taskStatus: (id: string, status: string) =>

@@ -478,6 +478,55 @@ func TestAPITaskEdit(t *testing.T) {
 	}
 }
 
+// TestAPITaskReschedule: the edit endpoint also takes due/pri on their own —
+// natural-language values resolved server-side, "none" clearing the field, and
+// the description left untouched (the quick-reschedule wire contract).
+func TestAPITaskReschedule(t *testing.T) {
+	s := newTestServer(t)
+	s.allowEdit = true
+	id := addTask(t, s, "renew cert @ops")
+
+	// A due-only update must not require text.
+	code, body := postForm(s, "/api/tasks/"+id, s.csrf, mustValues("due", "tomorrow"))
+	if code != 200 {
+		t.Fatalf("due-only edit: %d %s", code, body)
+	}
+	tk := mustDoc(t, s).FindByID(id)
+	wantDue := time.Now().AddDate(0, 0, 1).Format("2006-01-02")
+	if tk.Due() != wantDue {
+		t.Errorf("due = %q, want %q (NL 'tomorrow' resolved server-side)", tk.Due(), wantDue)
+	}
+	if tk.Text != "renew cert @ops" {
+		t.Errorf("description must be untouched by a reschedule, got %q", tk.Text)
+	}
+
+	// "none" clears; priority sets and clears the same way.
+	if code, body := postForm(s, "/api/tasks/"+id, s.csrf, mustValues("due", "none", "pri", "high")); code != 200 {
+		t.Fatalf("clear-due+set-pri: %d %s", code, body)
+	}
+	tk = mustDoc(t, s).FindByID(id)
+	if tk.Due() != "" {
+		t.Errorf("due should be cleared, got %q", tk.Due())
+	}
+	if tk.Priority != 'A' {
+		t.Errorf("priority = %q, want A", tk.Priority)
+	}
+	if code, _ := postForm(s, "/api/tasks/"+id, s.csrf, mustValues("pri", "none")); code != 200 {
+		t.Fatal("clear-pri failed")
+	}
+	if tk = mustDoc(t, s).FindByID(id); tk.Priority != 0 {
+		t.Errorf("priority should be cleared, got %q", tk.Priority)
+	}
+
+	// Garbage is rejected before any write; nothing-at-all is a 400 too.
+	if code, _ := postForm(s, "/api/tasks/"+id, s.csrf, mustValues("due", "notaday")); code != 400 {
+		t.Errorf("bad due should 400, got %d", code)
+	}
+	if code, _ := postForm(s, "/api/tasks/"+id, s.csrf, nil); code != 400 {
+		t.Errorf("no fields should 400, got %d", code)
+	}
+}
+
 func TestAPINoteMove(t *testing.T) {
 	s := newTestServer(t)
 	target, _ := note.Create(s.eng.S, "Target", "body", nil, "cli", "")
