@@ -5,6 +5,7 @@
   import { palette, openPalette, closePalette } from "./palette.svelte";
   import { requestMoveNote, requestNewNote } from "./noteUI.svelte";
   import { captureTask } from "./keys.svelte";
+  import { openAbout } from "./about.svelte";
 
   let q = $state("");
   let active = $state(0);
@@ -62,6 +63,7 @@
         ]
       : []),
     { label: "Toggle theme", kind: "action", run: toggleTheme },
+    { label: "About nt", kind: "action", run: openAbout },
   ]);
 
   const items = $derived(build(q, $notesQ.data?.index ?? [], actionItems));

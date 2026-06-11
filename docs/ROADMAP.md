@@ -23,8 +23,8 @@ surface, sized S/M/L, and sequenced so each lands as its own green-CI PR.
 | D2 | Webview-safe dialogs — replace every `prompt()`/`alert()`/`confirm()` (webviews don't implement them): inline sidebar note creation, palette "New task" → quick-add focus, Board delete → undo toast | M | ✅ |
 | D3 | macOS App + Edit menus (⌘C/⌘V are dead keys in WKWebView without one), system light/dark appearance, standard title bar (no traffic-light overlap) | S | ✅ |
 | D4 | External links from notes open in the system browser, not inside the webview (no back button there); web gets `target=_blank rel=noopener` on external links too | M | ✅ |
-| D5 | Window-state persistence (size/position across launches) — needs Wails bindings | M | ⬜ |
-| D6 | About panel + version, app-icon polish | S | ⬜ |
+| D5 | Window-state persistence (size/position across launches) — needs Wails Go↔JS bindings + a native WebKit build to verify; deferred to a desktop-toolchain machine | M | ⬜ deferred (native) |
+| D6 | About panel — in-app **About nt** (version + store stats + links) in the command palette, working identically in the web and the Wails shell; native macOS About item ships via the App menu (D3). App-icon polish deferred to a native build. | S | ✅ |
 
 ### Group W — Web polish
 
