@@ -31,7 +31,7 @@ surface, sized S/M/L, and sequenced so each lands as its own green-CI PR.
 | # | Item | Effort | Status |
 |---|------|--------|--------|
 | W9 | Frontmatter/properties editing in the web editor (the roadmap's long-standing W8 partial) | M | ⬜ |
-| W10 | Today "plan my day": capacity bar summing `est:` against a configurable daily budget | M | ⬜ |
+| W10 | Today "plan my day": capacity bar summing `est:` against a configurable daily budget | M | ✅ |
 | W11 | Bulk actions — `x` multi-select on task rows, then one keystroke completes/reschedules/deletes the set | M | ⬜ |
 | W12 | Quick filter box on /tasks (`@tag +project text`, client-side, same grammar as quick-add chips) | S | ⬜ |
 

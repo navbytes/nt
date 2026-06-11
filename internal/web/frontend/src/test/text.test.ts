@@ -6,6 +6,7 @@ import {
   fmtTime,
   relativeDue,
   meaningfulSource,
+  fmtDuration,
 } from "../lib/text";
 
 describe("displayTitle", () => {
@@ -108,5 +109,16 @@ describe("meaningfulSource", () => {
   it("surfaces agent and other origins", () => {
     expect(meaningfulSource("claude")).toBe("claude");
     expect(meaningfulSource("cursor")).toBe("cursor");
+  });
+});
+
+describe("fmtDuration", () => {
+  it("renders compact h/m", () => {
+    expect(fmtDuration(45)).toBe("45m");
+    expect(fmtDuration(60)).toBe("1h");
+    expect(fmtDuration(90)).toBe("1h 30m");
+    expect(fmtDuration(120)).toBe("2h");
+    expect(fmtDuration(0)).toBe("0m");
+    expect(fmtDuration(-5)).toBe("0m");
   });
 });

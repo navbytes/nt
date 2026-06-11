@@ -40,6 +40,7 @@ type Config struct {
 	WebPort         int    // [web] port
 	WebHost         string // [web] host
 	WebEdit         bool   // [web] edit — start `nt web` in edit mode by default
+	WebDayBudget    int    // [web] day_budget_minutes — Today capacity bar budget (0 = default 360)
 	TUITheme        string // [tui] theme (auto|light|dark)
 }
 
@@ -93,6 +94,8 @@ func (c *Config) set(section, key, val string) {
 		c.WebHost = unquote(val)
 	case "web.edit":
 		c.WebEdit = boolVal(val)
+	case "web.day_budget_minutes":
+		c.WebDayBudget = atoi(val)
 	case "tui.theme":
 		c.TUITheme = unquote(val)
 	}
