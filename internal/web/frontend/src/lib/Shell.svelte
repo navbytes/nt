@@ -5,6 +5,7 @@
   import Sidebar from "./Sidebar.svelte";
   import CommandPalette from "./CommandPalette.svelte";
   import Shortcuts from "./Shortcuts.svelte";
+  import Toast from "./Toast.svelte";
   import { openPalette } from "./palette.svelte";
   import { shortcuts } from "./keys.svelte";
   import Home from "../routes/Home.svelte";
@@ -130,4 +131,5 @@
 
   <CommandPalette />
   <Shortcuts canEdit={$stateQ.data?.canEdit ?? false} />
+  <Toast />
 </div>

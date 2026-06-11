@@ -527,6 +527,44 @@ func TestAPITaskReschedule(t *testing.T) {
 	}
 }
 
+// TestAPIUndo: POST /api/undo reverts the latest write through the
+// transactional engine (the toast's "Undo" wire), is gated like every write,
+// and 409s when there's nothing to undo.
+func TestAPIUndo(t *testing.T) {
+	s := newTestServer(t)
+	s.allowEdit = true
+
+	// Nothing journaled yet → 409, not a silent no-op.
+	if code, _ := postForm(s, "/api/undo", s.csrf, nil); code != 409 {
+		t.Errorf("undo on empty journal should 409, got %d", code)
+	}
+
+	id := addTask(t, s, "ship the thing")
+	if code, _ := postForm(s, "/api/tasks/"+id+"/done", s.csrf, nil); code != 200 {
+		t.Fatal("done failed")
+	}
+	if st := mustDoc(t, s).FindByID(id).Status(); st != "done" {
+		t.Fatalf("precondition: status = %q, want done", st)
+	}
+
+	// Gate: no CSRF → 403.
+	if code, _ := postForm(s, "/api/undo", "", nil); code != 403 {
+		t.Errorf("undo without CSRF should 403, got %d", code)
+	}
+
+	// Undo the completion; the response carries the fresh groups.
+	code, body := postForm(s, "/api/undo", s.csrf, nil)
+	if code != 200 {
+		t.Fatalf("undo: %d %s", code, body)
+	}
+	if st := mustDoc(t, s).FindByID(id).Status(); st == "done" {
+		t.Errorf("undo should reopen the task, still %q", st)
+	}
+	if !strings.Contains(body, `"groups"`) {
+		t.Errorf("undo should respond with the task groups, got %s", body)
+	}
+}
+
 func TestAPINoteMove(t *testing.T) {
 	s := newTestServer(t)
 	target, _ := note.Create(s.eng.S, "Target", "body", nil, "cli", "")

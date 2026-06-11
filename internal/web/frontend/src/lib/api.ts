@@ -83,6 +83,9 @@ export const api = {
   taskReopen: (id: string) => postForm<TasksResponse>(`/api/tasks/${id}/reopen`),
   taskStatus: (id: string, status: string) =>
     postForm<TasksResponse>(`/api/tasks/${id}/status`, { status }),
+  /** Revert the latest task write (the toast's Undo). 409 = nothing to undo or
+   *  another writer changed the touched tasks (the engine refuses, never corrupts). */
+  undo: () => postForm<TasksResponse>("/api/undo"),
   taskDelete: async (id: string): Promise<TasksResponse> => {
     const r = await fetch(`/api/tasks/${id}`, { method: "DELETE", headers: { "X-CSRF": csrf } });
     if (!r.ok) throw new Error(`${(await r.text()) || r.status}`);

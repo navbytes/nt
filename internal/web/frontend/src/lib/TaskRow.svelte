@@ -6,7 +6,8 @@
   // activity) so every surface stays consistent from a single click.
   import { createMutation, useQueryClient } from "@tanstack/svelte-query";
   import { api, type Task, type TaskGroup } from "./api";
-  import { priorityClass, relativeDue, meaningfulSource } from "./text";
+  import { priorityClass, relativeDue, meaningfulSource, displayTitle } from "./text";
+  import { showToast } from "./toast.svelte";
 
   let { t, canEdit = false }: { t: Task; canEdit?: boolean } = $props();
 
@@ -17,13 +18,38 @@
       qc.invalidateQueries({ queryKey: k });
     }
   };
-  const doneMut = createMutation({ mutationFn: api.taskDone, onSuccess: synced });
+  // Undo the latest write via the transactional engine; the response is the
+  // fresh task groups, so the list snaps back in place. A 409 means the store
+  // moved underneath (another writer) — surface that instead of guessing.
+  async function undoLast() {
+    try {
+      synced(await api.undo());
+      showToast("Undone");
+    } catch (e) {
+      showToast(`Couldn't undo: ${String(e)}`);
+    }
+  }
+  const short = () => `“${displayTitle(t.text, 32)}”`;
+
+  const doneMut = createMutation({
+    mutationFn: api.taskDone,
+    onSuccess: (d) => {
+      synced(d);
+      showToast(`Completed ${short()}`, undoLast);
+    },
+  });
   const reopenMut = createMutation({ mutationFn: api.taskReopen, onSuccess: synced });
   const statusMut = createMutation({
     mutationFn: (a: { id: string; status: string }) => api.taskStatus(a.id, a.status),
     onSuccess: synced,
   });
-  const deleteMut = createMutation({ mutationFn: api.taskDelete, onSuccess: synced });
+  const deleteMut = createMutation({
+    mutationFn: api.taskDelete,
+    onSuccess: (d) => {
+      synced(d);
+      showToast(`Deleted ${short()}`, undoLast);
+    },
+  });
   const editMut = createMutation({
     mutationFn: (a: { id: string; text: string }) => api.taskEdit(a.id, a.text),
     onSuccess: synced,
@@ -79,8 +105,10 @@
   function toggleDoing() {
     $statusMut.mutate({ id: t.id, status: t.status === "doing" ? "open" : "doing" });
   }
+  // No confirm() interrogation: delete acts immediately and the toast offers
+  // Undo — reversibility beats a blocking dialog (and nt undo still works).
   function del() {
-    if (confirm(`Delete task "${t.text}"? (undoable with nt undo)`)) $deleteMut.mutate(t.id);
+    $deleteMut.mutate(t.id);
   }
 
   // ---- quick reschedule -----------------------------------------------------

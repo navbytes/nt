@@ -47,6 +47,7 @@ func (s *Server) apiRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/tasks/{id}/reopen", s.apiTaskReopen)
 	mux.HandleFunc("POST /api/tasks/{id}/status", s.apiTaskStatus)
 	mux.HandleFunc("DELETE /api/tasks/{id}", s.apiTaskDelete)
+	mux.HandleFunc("POST /api/undo", s.apiUndo)
 	mux.HandleFunc("GET /api/activity", s.apiActivity)
 	mux.HandleFunc("GET /api/search", s.apiSearch)
 	mux.HandleFunc("GET /api/tags", s.apiTags)
@@ -799,6 +800,35 @@ func (s *Server) apiTaskEdit(w http.ResponseWriter, r *http.Request) {
 	}) {
 		s.respondTasks(w)
 	}
+}
+
+// apiUndo reverts the most recent task write through the same transactional
+// engine as `nt undo` — gated like every other write. Under the lock the engine
+// validates the recorded post-image and refuses rather than corrupting state if
+// another writer (a CLI call, an AI session) changed the touched tasks in the
+// meantime; that refusal surfaces as 409 so the UI can say "store changed".
+func (s *Server) apiUndo(w http.ResponseWriter, r *http.Request) {
+	if !s.allowEdit {
+		http.Error(w, "editing is disabled — start with `nt web --edit`", http.StatusForbidden)
+		return
+	}
+	if r.Header.Get("X-CSRF") != s.csrf {
+		http.Error(w, "bad or missing CSRF token", http.StatusForbidden)
+		return
+	}
+	s.writes.mark(s.eng.S.TasksFile())
+	_, did, err := s.eng.Undo()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusConflict)
+		return
+	}
+	if !did {
+		http.Error(w, "nothing to undo", http.StatusConflict)
+		return
+	}
+	s.rebuild()
+	s.hub.broadcast("tasks")
+	s.respondTasks(w)
 }
 
 func (s *Server) apiTaskDelete(w http.ResponseWriter, r *http.Request) {
