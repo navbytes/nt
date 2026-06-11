@@ -2,6 +2,22 @@
   import { createQuery, createMutation, useQueryClient } from "@tanstack/svelte-query";
   import { api, type TaskGroup, type Task } from "./api";
   import TaskRow from "./TaskRow.svelte";
+  import { priorityRank } from "./text";
+
+  // Within a bucket, float the most important work up: priority first (A→Z, then
+  // unprioritised), then the earliest due date. Done stays in store order (most
+  // recently completed already trails). Stable + non-mutating (operates on a copy).
+  function byUrgency(a: Task, b: Task): number {
+    const pr = priorityRank(a.priority) - priorityRank(b.priority);
+    if (pr !== 0) return pr;
+    const ad = a.due ?? "￿"; // no due date sorts last
+    const bd = b.due ?? "￿";
+    return ad < bd ? -1 : ad > bd ? 1 : 0;
+  }
+  function sorted(g: TaskGroup): TaskGroup {
+    if (g.status === "done" || g.status === "Done") return g;
+    return { status: g.status, tasks: [...g.tasks].sort(byUrgency) };
+  }
 
   let {
     canEdit = false,
@@ -78,7 +94,7 @@
       .map(([status, tasks]) => ({ status, tasks }));
   });
 
-  const groups = $derived(view === "agenda" ? agendaGroups : statusGroups);
+  const groups = $derived((view === "agenda" ? agendaGroups : statusGroups).map(sorted));
 
   function add(e: SubmitEvent) {
     e.preventDefault();

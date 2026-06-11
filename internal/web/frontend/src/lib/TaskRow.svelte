@@ -6,6 +6,7 @@
   // activity) so every surface stays consistent from a single click.
   import { createMutation, useQueryClient } from "@tanstack/svelte-query";
   import { api, type Task, type TaskGroup } from "./api";
+  import { priorityClass, relativeDue, meaningfulSource } from "./text";
 
   let { t, canEdit = false }: { t: Task; canEdit?: boolean } = $props();
 
@@ -63,14 +64,13 @@
     return { destroy: () => node.removeEventListener("input", grow) };
   }
 
-  function todayISO(): string {
-    const d = new Date();
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-  }
-  // A due value may carry a time-of-day ("2026-06-08T17:00"); dateOf gives the
-  // date part for the overdue test, fmtDue renders it readably.
-  const dateOf = (due?: string) => (due ? due.slice(0, 10) : "");
-  const fmtDue = (due: string) => (due.includes("T") ? due.replace("T", " ") : due);
+  // Priority colour cue (A/B/C/rest → "") and a human-friendly due label that
+  // also tells us whether the task is overdue or due soon, all from one place so
+  // every surface renders a task identically.
+  const pri = $derived(priorityClass(t.priority));
+  const due = $derived(t.due ? relativeDue(t.due) : null);
+  // Only surface a source badge for non-default origins (chiefly an AI agent).
+  const src = $derived(meaningfulSource(t.source));
 
   function toggleDoing() {
     $statusMut.mutate({ id: t.id, status: t.status === "doing" ? "open" : "doing" });
@@ -80,7 +80,16 @@
   }
 </script>
 
-<li class="row" class:row--doing={t.status === "doing"} class:row--editing={editing}>
+<li
+  class="row {pri ? `row--pri-${pri}` : ''}"
+  class:row--doing={t.status === "doing"}
+  class:row--editing={editing}
+>
+  {#if pri && t.status !== "done"}
+    <span class="pri pri--{pri}" title={`Priority ${t.priority}`} aria-label={`Priority ${t.priority}`}
+      >{t.priority}</span
+    >
+  {/if}
   {#if canEdit}
     {#if t.status === "done"}
       <button class="check check--done" title="Reopen" aria-label="Reopen task" onclick={() => $reopenMut.mutate(t.id)}>●</button>
@@ -108,8 +117,13 @@
     {#if t.status === "blocked"}<span class="status-pill status-pill--blocked" title={t.blocker ? `blocked by: ${t.blocker}` : "blocked"}>⊘ blocked</span>{/if}
     {#if t.project}<a class="chip" href={`/search?tag=${encodeURIComponent(t.project)}`}>+{t.project}</a>{/if}
     {#each t.tags ?? [] as tag (tag)}<a class="chip chip--tag" href={`/search?tag=${encodeURIComponent(tag)}`}>@{tag}</a>{/each}
-    {#if t.due}<span class="row__due" class:row__due--over={dateOf(t.due) < todayISO() && t.status !== "done"}>{fmtDue(t.due)}</span>{/if}
-    {#if t.source}<span class="src">{t.source}</span>{/if}
+    {#if due}<span
+        class="row__due"
+        class:row__due--over={due.overdue && t.status !== "done"}
+        class:row__due--soon={due.soon && t.status !== "done"}
+        title={t.due}>{due.label}</span
+      >{/if}
+    {#if src}<span class="src src--agent" title={`Captured by ${src}`}>{src}</span>{/if}
     {#if canEdit && t.status !== "done"}
       <span class="row__actions">
         <button class="rowbtn" title="Edit text" aria-label="Edit task text" onclick={startEdit}>✎</button>
@@ -126,11 +140,6 @@
   .row {
     align-items: center;
     gap: 8px;
-  }
-  .row--doing {
-    border-left: 2px solid var(--accent);
-    padding-left: 6px;
-    margin-left: -8px;
   }
   .row__actions {
     margin-left: auto;
@@ -199,8 +208,73 @@
   .chip--tag {
     color: var(--accent-2);
   }
+  /* Priority: a letter chip plus a left accent bar so urgency reads at a glance
+     and never relies on colour alone (shape + letter carry it too). Red is
+     reserved for A and for overdue, so it stays meaningful. */
+  .pri {
+    flex: none;
+    width: 18px;
+    height: 18px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.66rem;
+    font-weight: 700;
+    border-radius: var(--radius-sm);
+    color: var(--pri-fg);
+  }
+  .pri--a {
+    background: var(--pri-a);
+  }
+  .pri--b {
+    background: var(--pri-b);
+  }
+  .pri--c {
+    background: var(--pri-c);
+  }
+  .pri--rest {
+    background: var(--muted);
+  }
+  .row--pri-a {
+    box-shadow: inset 2px 0 0 var(--pri-a);
+  }
+  .row--pri-b {
+    box-shadow: inset 2px 0 0 var(--pri-b);
+  }
+  .row--pri-c {
+    box-shadow: inset 2px 0 0 var(--pri-c);
+  }
+  .row--pri-a,
+  .row--pri-b,
+  .row--pri-c,
+  .row--doing {
+    padding-left: 8px;
+    margin-left: -8px;
+  }
+  /* The "doing" accent wins over the priority bar when both apply. */
+  .row--doing {
+    box-shadow: inset 2px 0 0 var(--accent);
+  }
+  .row__due {
+    color: var(--muted);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+  .row__due--soon {
+    color: var(--fg-soft);
+    font-weight: 600;
+  }
   .row__due--over {
     color: var(--red);
     font-weight: 600;
+  }
+  /* Agent-captured tasks (e.g. src:claude) — nt's reason to exist; quiet, but
+     legible, so you can tell what your AI session added. */
+  .src--agent {
+    color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 12%, transparent);
+    padding: 0 5px;
+    border-radius: 999px;
+    font-size: 0.7rem;
   }
 </style>
