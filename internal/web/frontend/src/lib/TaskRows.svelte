@@ -4,6 +4,7 @@
   import TaskRow from "./TaskRow.svelte";
   import { priorityRank, priorityClass } from "./text";
   import { parseQuickAdd } from "./quickparse";
+  import { taskMatcher } from "./taskfilter";
   import { stepId } from "./listnav";
   import { palette } from "./palette.svelte";
   import { shortcuts, isTextEntry } from "./keys.svelte";
@@ -31,6 +32,7 @@
     buckets: scopeBuckets = null,
     emptyText = "",
     viewName = "",
+    filter = "",
   }: {
     canEdit?: boolean;
     statuses?: string[] | null;
@@ -41,6 +43,8 @@
     buckets?: string[] | null;
     /** Replaces the default "No tasks yet" lead when the (scoped) list is empty. */
     emptyText?: string;
+    /** Client-side quick filter (@tag +project !pri words); "" = show all. */
+    filter?: string;
     /** A saved smart view to recall — the server filters/sorts (view.Apply) and
      *  returns one pre-ordered group, rendered as-is (no client re-bucketing). */
     viewName?: string;
@@ -74,7 +78,17 @@
         preview.links.length > 0),
   );
 
-  const allGroups = $derived(($tasksQ.data?.groups ?? []) as TaskGroup[]);
+  // The live quick-filter (W12): client-side, same shorthand as quick-add
+  // (@tag +project !pri words). Applied to every group before bucketing/sorting
+  // so it works in agenda, status, and saved-view layouts alike.
+  const matcher = $derived(taskMatcher(filter));
+  const allGroups = $derived.by((): TaskGroup[] => {
+    const raw = ($tasksQ.data?.groups ?? []) as TaskGroup[];
+    if (matcher.empty) return raw;
+    return raw
+      .map((g) => ({ status: g.status, tasks: g.tasks.filter(matcher.match) }))
+      .filter((g) => g.tasks.length > 0);
+  });
 
   // Status view: the raw groups, optionally filtered to a status set.
   const statusGroups = $derived(allGroups.filter((g) => !statuses || statuses.includes(g.status)));
