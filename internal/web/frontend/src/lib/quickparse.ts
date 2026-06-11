@@ -49,10 +49,12 @@ export function parseQuickAdd(text: string): QuickAdd {
   const out: QuickAdd = { title: "", tags: [], links: [] };
   let s = text.trim();
 
-  // A leading (A) is a literal todo.txt priority (task.ParseLine handles it).
-  const lead = /^\(([A-Za-z])\)\s+/.exec(s);
+  // A leading (A)–(Z) is a literal todo.txt priority. Only UPPERCASE counts —
+  // task.go's isPriority rejects "(a)", leaving it as text — so the preview must
+  // too, or it would show a priority the server won't apply.
+  const lead = /^\(([A-Z])\)\s+/.exec(s);
   if (lead) {
-    out.priority = lead[1]!.toUpperCase();
+    out.priority = lead[1]!;
     s = s.slice(lead[0].length);
   }
 
@@ -81,8 +83,10 @@ export function parseQuickAdd(text: string): QuickAdd {
       if (!out.tags.includes(tag)) out.tags.push(tag);
       continue;
     }
+    // Mirror task.go's splitKV: a value starting with "/" (URL-ish) is NOT a
+    // key:value — the server keeps the whole token as text, so we do too.
     const kv = /^([a-zA-Z][\w-]*):(.+)$/.exec(w);
-    if (kv) {
+    if (kv && !kv[2]!.startsWith("/")) {
       const k = kv[1]!.toLowerCase();
       const v = kv[2]!;
       if (k === "due") {

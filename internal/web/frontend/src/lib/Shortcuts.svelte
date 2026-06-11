@@ -24,7 +24,7 @@
   // `c` capture: focus an on-page quick-add if there is one, else go to Tasks
   // (where the add box lives) so the keystroke always lands somewhere useful.
   function capture() {
-    const box = document.querySelector<HTMLInputElement>(".taskadd input, .dash__main .taskadd input");
+    const box = document.querySelector<HTMLInputElement>(".taskadd input");
     if (box) box.focus();
     else navigate("/tasks");
   }

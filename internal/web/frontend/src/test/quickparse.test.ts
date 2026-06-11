@@ -25,6 +25,18 @@ describe("parseQuickAdd", () => {
     expect(r.title).toBe("ship it !high"); // the marker stays since priority was set
   });
 
+  it("does NOT treat a lowercase (a) as a priority (matches server isPriority)", () => {
+    const r = parseQuickAdd("(a) ship it");
+    expect(r.priority).toBeUndefined();
+    expect(r.title).toBe("(a) ship it"); // left as text, like the server
+  });
+
+  it("ignores a key:value whose value starts with '/' (matches server splitKV)", () => {
+    const r = parseQuickAdd("read due://notnow docs");
+    expect(r.due).toBeUndefined();
+    expect(r.title).toContain("due://notnow"); // kept as text, not a chip
+  });
+
   it("captures start, recurrence and estimate keys", () => {
     const r = parseQuickAdd("standup t:tomorrow rec:weekly est:30m");
     expect(r.start).toBe("tomorrow");
