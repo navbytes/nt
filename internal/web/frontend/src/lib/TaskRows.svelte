@@ -30,6 +30,7 @@
     view = "status",
     buckets: scopeBuckets = null,
     emptyText = "",
+    viewName = "",
   }: {
     canEdit?: boolean;
     statuses?: string[] | null;
@@ -40,10 +41,17 @@
     buckets?: string[] | null;
     /** Replaces the default "No tasks yet" lead when the (scoped) list is empty. */
     emptyText?: string;
+    /** A saved smart view to recall — the server filters/sorts (view.Apply) and
+     *  returns one pre-ordered group, rendered as-is (no client re-bucketing). */
+    viewName?: string;
   } = $props();
 
   const qc = useQueryClient();
-  const tasksQ = createQuery({ queryKey: ["tasks"], queryFn: api.tasks });
+  const tasksQ = createQuery(
+    viewName
+      ? { queryKey: ["tasks-view", viewName], queryFn: () => api.tasksView(viewName) }
+      : { queryKey: ["tasks"], queryFn: api.tasks },
+  );
 
   // Per-row writes (done/reopen/status/delete) live in TaskRow; this component
   // owns only the add form. They share the ["tasks"] cache, so both stay in sync.
@@ -112,7 +120,11 @@
       .map(([status, tasks]) => ({ status, tasks }));
   });
 
-  const groups = $derived((view === "agenda" ? agendaGroups : statusGroups).map(sorted));
+  // A saved view's group arrives pre-filtered and pre-ordered from the server —
+  // render it untouched (re-sorting here would override the view's own sort).
+  const groups = $derived(
+    viewName ? allGroups : (view === "agenda" ? agendaGroups : statusGroups).map(sorted),
+  );
 
   // ---- j/k row navigation -------------------------------------------------
   // Roving focus over every rendered row, in visual order. The cursor lives in

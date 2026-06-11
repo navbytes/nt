@@ -103,7 +103,9 @@
           <NoteView handle={noteHandle} canEdit={$stateQ.data?.canEdit ?? false} />
         {/key}
       {:else if path === "/tasks"}
-        <Tasks canEdit={$stateQ.data?.canEdit ?? false} />
+        {#key loc.query.get("view") ?? ""}
+          <Tasks canEdit={$stateQ.data?.canEdit ?? false} viewName={loc.query.get("view") ?? ""} />
+        {/key}
       {:else if path === "/review"}
         <Tasks canEdit={$stateQ.data?.canEdit ?? false} initialView="review" />
       {:else if path === "/notes" || path === "/journal"}

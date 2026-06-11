@@ -14,8 +14,8 @@
   const qc = useQueryClient();
   const synced = (d: { groups: TaskGroup[] }) => {
     qc.setQueryData(["tasks"], d); // instant in any view subscribed to the task list
-    for (const k of [["review"], ["state"], ["activity"]]) {
-      qc.invalidateQueries({ queryKey: k });
+    for (const k of [["review"], ["state"], ["activity"], ["tasks-view"]]) {
+      qc.invalidateQueries({ queryKey: k }); // tasks-view: recalled saved views re-filter server-side
     }
   };
   // Undo the latest write via the transactional engine; the response is the

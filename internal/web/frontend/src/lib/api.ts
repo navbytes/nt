@@ -9,6 +9,7 @@ import type {
   NoteView,
   RawNote,
   TasksResponse,
+  ViewsResponse,
   ReviewResponse,
   ActivityResponse,
   SearchResponse,
@@ -61,6 +62,9 @@ export const api = {
   notesGrid: () => getJSON<NotesGrid>("/api/notes/grid"),
   note: (handle: string) => getJSON<NoteView>(`/api/notes/${encodeURIComponent(handle)}`),
   tasks: () => getJSON<TasksResponse>("/api/tasks"),
+  /** Apply a saved smart view (nt view) server-side; one group, in view order. */
+  tasksView: (name: string) => getJSON<TasksResponse>(`/api/tasks?view=${encodeURIComponent(name)}`),
+  views: () => getJSON<ViewsResponse>("/api/views"),
   review: () => getJSON<ReviewResponse>("/api/review"),
   activity: (source = "") =>
     getJSON<ActivityResponse>(
