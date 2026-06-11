@@ -11,6 +11,7 @@ import (
 
 	"github.com/navbytes/nt/internal/note"
 	"github.com/navbytes/nt/internal/store"
+	"github.com/navbytes/nt/internal/view"
 	"github.com/navbytes/nt/internal/web/apitypes"
 )
 
@@ -524,6 +525,58 @@ func TestAPITaskReschedule(t *testing.T) {
 	}
 	if code, _ := postForm(s, "/api/tasks/"+id, s.csrf, nil); code != 400 {
 		t.Errorf("no fields should 400, got %d", code)
+	}
+}
+
+// TestAPIViews: GET /api/views lists the saved smart views, and GET
+// /api/tasks?view=<name> applies one through view.Apply — the same code path
+// as `nt view recall` — returning a single ordered group.
+func TestAPIViews(t *testing.T) {
+	s := newTestServer(t)
+	s.allowEdit = true
+	addTask(t, s, "fix auth bug @backend")
+	addTask(t, s, "write docs @docs")
+	id := addTask(t, s, "old backend chore @backend")
+	if code, _ := postForm(s, "/api/tasks/"+id+"/done", s.csrf, nil); code != 200 {
+		t.Fatal("done failed")
+	}
+
+	// No views.json yet → empty list, not an error.
+	resp, body := get(t, s, "/api/views")
+	if resp.StatusCode != 200 || !strings.Contains(body, `"views":[]`) {
+		t.Errorf("empty views: %d %s", resp.StatusCode, body)
+	}
+
+	if err := view.Save(s.eng.S.Dir, map[string]view.Spec{
+		"backend": {Tag: "backend", Sort: "urgency"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	resp, body = get(t, s, "/api/views")
+	if resp.StatusCode != 200 || !strings.Contains(body, `"name":"backend"`) {
+		t.Fatalf("views list: %d %s", resp.StatusCode, body)
+	}
+	if !strings.Contains(body, "--tag backend") {
+		t.Errorf("view summary should describe the filter, got %s", body)
+	}
+
+	// Apply it: one group named after the view, done + other-tag rows excluded.
+	resp, body = get(t, s, "/api/tasks?view=backend")
+	if resp.StatusCode != 200 {
+		t.Fatalf("tasks?view: %d %s", resp.StatusCode, body)
+	}
+	if !strings.Contains(body, `"status":"backend"`) {
+		t.Errorf("view results should come back as one group named for the view: %s", body)
+	}
+	if !strings.Contains(body, "fix auth bug") || strings.Contains(body, "write docs") {
+		t.Errorf("view should keep @backend and drop @docs: %s", body)
+	}
+	if strings.Contains(body, "old backend chore") {
+		t.Errorf("default visibility hides done tasks: %s", body)
+	}
+
+	if r, _ := get(t, s, "/api/tasks?view=nope"); r.StatusCode != 404 {
+		t.Errorf("unknown view should 404, got %d", r.StatusCode)
 	}
 }
 

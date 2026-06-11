@@ -362,6 +362,19 @@ func siblings(notes []*note.Note, n *note.Note, folder string) (prev, next *link
 	return prev, next
 }
 
+// toTaskRow builds the wire row for one task — shared by the status grouping
+// and the saved-view listing so a task serializes identically everywhere.
+func toTaskRow(t *task.Task) taskRow {
+	row := taskRow{ID: t.ID(), Text: cleanTaskText(t.Text), Status: t.Status(), Due: t.Due(), Source: t.Source(), Tags: t.Tags(), Recur: t.Recur() != ""}
+	if t.Priority != 0 {
+		row.Priority = string(t.Priority)
+	}
+	if p := t.Projects(); len(p) > 0 {
+		row.Project = p[0]
+	}
+	return row
+}
+
 // buildTaskGroups groups tasks by status (urgency-sorted within each), in the
 // display order doing → open → blocked → done.
 func buildTaskGroups(doc *task.Doc) []taskGroup {
@@ -372,14 +385,7 @@ func buildTaskGroups(doc *task.Doc) []taskGroup {
 	task.SortByUrgency(tasks)
 	byStatus := map[string][]taskRow{}
 	for _, t := range tasks {
-		row := taskRow{ID: t.ID(), Text: cleanTaskText(t.Text), Status: t.Status(), Due: t.Due(), Source: t.Source(), Tags: t.Tags(), Recur: t.Recur() != ""}
-		if t.Priority != 0 {
-			row.Priority = string(t.Priority)
-		}
-		if p := t.Projects(); len(p) > 0 {
-			row.Project = p[0]
-		}
-		byStatus[t.Status()] = append(byStatus[t.Status()], row)
+		byStatus[t.Status()] = append(byStatus[t.Status()], toTaskRow(t))
 	}
 	var groups []taskGroup
 	for _, st := range []string{"doing", "open", "blocked", "done"} {

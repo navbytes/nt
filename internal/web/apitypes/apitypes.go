@@ -63,6 +63,19 @@ type TasksResponse struct {
 	Groups []TaskGroup `json:"groups"`
 }
 
+// ViewInfo is one saved smart view (`nt view save`) — its name plus a short
+// human summary of the filter it captures (e.g. "--status doing --sort due").
+type ViewInfo struct {
+	Name    string `json:"name"`
+	Summary string `json:"summary"`
+}
+
+// ViewsResponse is GET /api/views — the saved views from $NT_DIR/views.json,
+// sorted by name, so the web recalls the same named queries as the CLI/TUI.
+type ViewsResponse struct {
+	Views []ViewInfo `json:"views"`
+}
+
 // ReviewResponse is GET /api/review — the weekly-triage buckets (what needs a
 // decision), mirroring `nt review`.
 type ReviewResponse struct {

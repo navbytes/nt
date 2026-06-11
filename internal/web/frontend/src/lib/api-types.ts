@@ -78,6 +78,21 @@ export interface TasksResponse {
   groups: TaskGroup[];
 }
 /**
+ * ViewInfo is one saved smart view (`nt view save`) — its name plus a short
+ * human summary of the filter it captures (e.g. "--status doing --sort due").
+ */
+export interface ViewInfo {
+  name: string;
+  summary: string;
+}
+/**
+ * ViewsResponse is GET /api/views — the saved views from $NT_DIR/views.json,
+ * sorted by name, so the web recalls the same named queries as the CLI/TUI.
+ */
+export interface ViewsResponse {
+  views: ViewInfo[];
+}
+/**
  * ReviewResponse is GET /api/review — the weekly-triage buckets (what needs a
  * decision), mirroring `nt review`.
  */

@@ -62,15 +62,7 @@ func runList(spec view.Spec, asJSON bool) int {
 	all3 := d.Tasks()
 	idx := indexMap(all3)
 	blocked := task.BlockedIDs(all3)
-
-	var rows []*task.Task
-	for _, t := range all3 {
-		if !keep(t, spec.Status, spec.Tag, spec.Project, spec.All, spec.ShowBlocked, blocked) {
-			continue
-		}
-		rows = append(rows, t)
-	}
-	sortTasks(rows, spec.Sort)
+	rows := view.Apply(all3, spec, blocked)
 
 	if asJSON {
 		return printJSON(tasksToJSON(rows, idx))
@@ -161,7 +153,7 @@ func cmdReady(args []string) int {
 	var rows []*task.Task
 	for _, t := range all {
 		// keep with all=false, showBlocked=false drops done + dependency-blocked.
-		if !keep(t, "", *tag, *project, false, false, blocked) {
+		if !view.Keep(t, view.Spec{Tag: *tag, Project: *project}, blocked) {
 			continue
 		}
 		if *source != "" && t.Source() != *source {
@@ -172,7 +164,7 @@ func cmdReady(args []string) int {
 		}
 		rows = append(rows, t)
 	}
-	sortTasks(rows, "urgency")
+	view.SortTasks(rows, "urgency")
 
 	if *asJSON {
 		return printJSON(tasksToJSON(rows, idx))
@@ -251,7 +243,7 @@ func runAgenda(args []string, defDays int) int {
 			rows = append(rows, t)
 		}
 	}
-	sortTasks(rows, "urgency")
+	view.SortTasks(rows, "urgency")
 
 	if *asJSON {
 		return printJSON(tasksToJSON(rows, idx))
@@ -703,7 +695,7 @@ func cmdReview(args []string) int {
 		if len(ts) == 0 {
 			return
 		}
-		sortTasks(ts, "urgency")
+		view.SortTasks(ts, "urgency")
 		fmt.Printf("\n%s (%d)\n", title, len(ts))
 		for _, t := range ts {
 			fmt.Println("  " + formatRow(t, idx[t], blocked[t.ID()] && !t.Done))

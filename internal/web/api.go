@@ -17,6 +17,7 @@ import (
 	"github.com/navbytes/nt/internal/quickadd"
 	"github.com/navbytes/nt/internal/store"
 	"github.com/navbytes/nt/internal/task"
+	"github.com/navbytes/nt/internal/view"
 	"github.com/navbytes/nt/internal/web/apitypes"
 )
 
@@ -40,6 +41,7 @@ func (s *Server) apiRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/notes/{handle}/archive", s.apiNoteArchive)
 	mux.HandleFunc("POST /api/preview", s.handlePreview) // returns rendered HTML
 	mux.HandleFunc("GET /api/tasks", s.apiTasks)
+	mux.HandleFunc("GET /api/views", s.apiViews)
 	mux.HandleFunc("GET /api/review", s.apiReview)
 	mux.HandleFunc("POST /api/tasks", s.apiTaskNew)
 	mux.HandleFunc("POST /api/tasks/{id}", s.apiTaskEdit)
@@ -492,8 +494,56 @@ func (s *Server) apiNoteCreate(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, apitypes.CreatedNote{Handle: noteHandle(n), URL: "/n/" + url.PathEscape(noteHandle(n))})
 }
 
+// apiTasks returns the status-grouped task list; with ?view=<name> it instead
+// applies that saved smart view through view.Apply — the same code path as
+// `nt view recall`, so a named view can never filter differently here — and
+// returns a single group, in the view's own order.
 func (s *Server) apiTasks(w http.ResponseWriter, r *http.Request) {
+	if name := r.URL.Query().Get("view"); name != "" {
+		views, err := view.Load(s.eng.S.Dir)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		spec, ok := views[name]
+		if !ok {
+			http.Error(w, "no such view "+name, http.StatusNotFound)
+			return
+		}
+		doc := s.current().doc
+		if doc == nil {
+			writeJSON(w, apitypes.TasksResponse{Groups: []apitypes.TaskGroup{}})
+			return
+		}
+		all := doc.Tasks()
+		rows := make([]taskRow, 0)
+		for _, t := range view.Apply(all, spec, task.BlockedIDs(all)) {
+			rows = append(rows, toTaskRow(t))
+		}
+		writeJSON(w, apitypes.TasksResponse{Groups: toGroups([]taskGroup{{Status: name, Tasks: rows}})})
+		return
+	}
 	writeJSON(w, apitypes.TasksResponse{Groups: toGroups(buildTaskGroups(s.current().doc))})
+}
+
+// apiViews lists the saved smart views (`nt view save`) so the sidebar can
+// offer them; names are sorted for a stable UI.
+func (s *Server) apiViews(w http.ResponseWriter, _ *http.Request) {
+	views, err := view.Load(s.eng.S.Dir)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	names := make([]string, 0, len(views))
+	for n := range views {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	out := make([]apitypes.ViewInfo, 0, len(names))
+	for _, n := range names {
+		out = append(out, apitypes.ViewInfo{Name: n, Summary: views[n].Summary()})
+	}
+	writeJSON(w, apitypes.ViewsResponse{Views: out})
 }
 
 func (s *Server) apiActivity(w http.ResponseWriter, r *http.Request) {

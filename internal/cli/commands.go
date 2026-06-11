@@ -7,7 +7,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -599,43 +598,8 @@ func onboard(e *mutate.Engine) {
 
 // --- shared helpers ------------------------------------------------------
 
-func keep(t *task.Task, status, tag, project string, all, showBlocked bool, blocked map[string]bool) bool {
-	blockedByDep := blocked[t.ID()]
-	if status != "" {
-		if task.EffectiveStatus(t, blockedByDep && !t.Done) != status {
-			return false
-		}
-	} else if !task.VisibleInList(t, blockedByDep, all, all || showBlocked) {
-		// default list: done hides unless --all; dependency-blocked hides unless
-		// --all / --show-blocked (the rule shared with the TUI/web via task).
-		return false
-	}
-	if tag != "" && !contains(t.Tags(), tag) {
-		return false
-	}
-	if project != "" && !contains(t.Projects(), project) {
-		return false
-	}
-	return true
-}
-
-func sortTasks(rows []*task.Task, by string) {
-	switch by {
-	case "urgency":
-		task.SortByUrgency(rows)
-	case "due":
-		sort.SliceStable(rows, func(i, j int) bool { return dueKey(rows[i]) < dueKey(rows[j]) })
-	case "created":
-		sort.SliceStable(rows, func(i, j int) bool { return rows[i].Created < rows[j].Created })
-	}
-}
-
-func dueKey(t *task.Task) string {
-	if d := t.Due(); d != "" {
-		return d
-	}
-	return "9999-99-99" // no due date sorts last
-}
+// keep/sortTasks moved to internal/view (Apply/Keep/SortTasks) so the CLI, TUI,
+// and web share one filter/sort implementation for lists and saved views.
 
 func formatRow(t *task.Task, idx int, isBlocked bool) string {
 	icon := "○"
