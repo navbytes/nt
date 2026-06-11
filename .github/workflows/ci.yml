@@ -30,3 +30,26 @@ jobs:
             git diff -- internal/web/frontend/src/lib/api-types.ts
             exit 1
           fi
+      # The desktop shell is a nested module — invisible to the parent's ./... —
+      # so without this only release tags would catch a break. The no-tags stub
+      # path type-checks main.go without needing WebKit/GTK on the runner.
+      - name: Compile the desktop module
+        run: cd desktop && go build ./...
+
+  web:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: internal/web/frontend
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: internal/web/frontend/package-lock.json
+      - run: npm ci
+      - name: svelte-check (type errors fail; warnings don't)
+        run: npm run check
+      - name: vitest
+        run: npm test

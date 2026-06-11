@@ -22,7 +22,7 @@ surface, sized S/M/L, and sequenced so each lands as its own green-CI PR.
 | D1 | Enable editing in the desktop shell (`SetEdit(true)`) — full web UX (quick-add, complete/reschedule/undo, editor) with a stronger trust model (no TCP port at all) | S | ✅ |
 | D2 | Webview-safe dialogs — replace every `prompt()`/`alert()`/`confirm()` (webviews don't implement them): inline sidebar note creation, palette "New task" → quick-add focus, Board delete → undo toast | M | ✅ |
 | D3 | macOS App + Edit menus (⌘C/⌘V are dead keys in WKWebView without one), system light/dark appearance, standard title bar (no traffic-light overlap) | S | ✅ |
-| D4 | External links from notes open in the system browser, not inside the webview (no back button there); web gets `target=_blank rel=noopener` on external links too | M | ⬜ |
+| D4 | External links from notes open in the system browser, not inside the webview (no back button there); web gets `target=_blank rel=noopener` on external links too | M | ✅ |
 | D5 | Window-state persistence (size/position across launches) — needs Wails bindings | M | ⬜ |
 | D6 | About panel + version, app-icon polish | S | ⬜ |
 
@@ -46,8 +46,8 @@ surface, sized S/M/L, and sequenced so each lands as its own green-CI PR.
 
 | # | Item | Effort | Status |
 |---|------|--------|--------|
-| R1 | CI compile check for the desktop module on PRs (it's a nested module, invisible to `./...` — only release tags exercise it today) | S | ⬜ |
-| R2 | README: desktop app install section (bundles exist per release but the README never mentions them) | S | ⬜ |
+| R1 | CI compile check for the desktop module on PRs + a `web` CI job (svelte-check + vitest — the frontend had no CI at all) | S | ✅ |
+| R2 | README: desktop app install section (bundles exist per release but the README never mentions them) | S | ✅ |
 | R3 | Refresh docs/screenshots (pre-date the priority chips / relative dates / views sidebar) | S | ⬜ |
 
 Sequencing: D1–D3 (one PR, done) → D4+R1+R2 (one PR) → T10(+T11) → W10 → W11 → W12 → W9 → D5/D6/R3 as time allows. Each PR merges only on green CI.
