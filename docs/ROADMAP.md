@@ -39,8 +39,8 @@ surface, sized S/M/L, and sequenced so each lands as its own green-CI PR.
 
 | # | Item | Effort | Status |
 |---|------|--------|--------|
-| T10 | Saved views in the TUI — a view picker in the `:` palette running the shared `view.Apply` | M | ⬜ |
-| T11 | One-key reschedule in the TUI (`d` → today/tomorrow/next week via `dateparse`) | S | ⬜ |
+| T10 | Saved views in the TUI — a view picker in the `:` palette running the shared `view.Apply` | M | ✅ |
+| T11 | One-key reschedule in the TUI — covered: `D` already opens a due prompt with NL dates (today/fri/+3d); a `d` menu would clash with the `dd` done-chord | S | ✖ dropped |
 
 ### Group R — Release & docs
 

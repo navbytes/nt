@@ -104,6 +104,9 @@ func (m *Model) headerView() string {
 	if m.filter != "" {
 		state += sp + chip(fmt.Sprintf("⊃ filter: %s · %d", m.filter, m.selectableLen()), cOrange)
 	}
+	if m.viewName != "" {
+		state += sp + chip("⊞ "+m.viewName, cCyan)
+	}
 	if m.scopeTag != "" {
 		state += sp + chip("@"+m.scopeTag, cMagenta)
 	}

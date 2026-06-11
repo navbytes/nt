@@ -54,11 +54,34 @@ func paletteCommands() []paletteCmd {
 	}
 }
 
+// viewPaletteCommands lists the saved smart views as palette actions —
+// "view: <name>" applies one through the shared view.Apply scope, and a
+// "clear view" entry appears while one is active.
+func (m *Model) viewPaletteCommands() []paletteCmd {
+	var out []paletteCmd
+	for _, v := range m.loadViews() {
+		name, spec := v.Name, v.Spec
+		out = append(out, paletteCmd{
+			name:  "view: " + name,
+			desc:  "saved view — " + spec.Summary(),
+			write: false,
+			run:   func(m *Model) tea.Cmd { m.applyView(name, spec); return nil },
+		})
+	}
+	if m.viewName != "" {
+		out = append(out, paletteCmd{
+			name: "clear view", desc: "leave the saved view scope", write: false,
+			run: func(m *Model) tea.Cmd { m.clearView(); return nil },
+		})
+	}
+	return out
+}
+
 // filteredPalette returns the commands matching the current query (case-
 // insensitive substring on name or description), preserving registry order.
 func (m *Model) filteredPalette() []paletteCmd {
 	q := strings.ToLower(strings.TrimSpace(m.input.Value()))
-	all := paletteCommands()
+	all := append(paletteCommands(), m.viewPaletteCommands()...)
 	if q == "" {
 		return all
 	}

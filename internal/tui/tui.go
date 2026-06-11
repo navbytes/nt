@@ -21,6 +21,7 @@ import (
 	"github.com/navbytes/nt/internal/note"
 	"github.com/navbytes/nt/internal/store"
 	"github.com/navbytes/nt/internal/task"
+	"github.com/navbytes/nt/internal/view"
 )
 
 // Layout breakpoints (terminal columns), per SPEC §12.
@@ -111,6 +112,8 @@ type Model struct {
 	filterBefore  string // filter value before opening the filter prompt, for Esc-to-cancel
 	scopeTag      string // active @tag scope (filters the list); "" = none
 	scopeProject  string // active +project scope; "" = none
+	viewName      string // active saved smart view (nt view); "" = none
+	viewSpec      view.Spec
 	detailFocus   bool   // detail pane is focused: j/k scroll the body, not the list
 	detailScroll  int    // scroll offset within the focused detail pane
 	splitPct      int    // wide-mode list width as a % of the terminal (resizable)
@@ -343,14 +346,20 @@ func (m *Model) halfPage() int {
 	return h
 }
 
-// scopedTasks applies the active @tag / +project scope to the task list, before
-// grouping/filtering. An empty scope returns all tasks.
+// scopedTasks applies the active saved view, then the @tag / +project scope, to
+// the task list before grouping/filtering. An empty scope returns all tasks.
 func (m *Model) scopedTasks() []*task.Task {
-	if m.scopeTag == "" && m.scopeProject == "" {
-		return m.tasks
+	base := m.tasks
+	if m.viewName != "" {
+		// The same view.Apply the CLI/web/MCP run — a named view can never
+		// filter differently here.
+		base = view.Apply(base, m.viewSpec, m.blocked)
 	}
-	out := make([]*task.Task, 0, len(m.tasks))
-	for _, t := range m.tasks {
+	if m.scopeTag == "" && m.scopeProject == "" {
+		return base
+	}
+	out := make([]*task.Task, 0, len(base))
+	for _, t := range base {
 		if m.scopeTag != "" && !contains(t.Tags(), m.scopeTag) {
 			continue
 		}
