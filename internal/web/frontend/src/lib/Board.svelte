@@ -1,18 +1,35 @@
 <script lang="ts">
   import { createQuery, createMutation, useQueryClient } from "@tanstack/svelte-query";
   import { api, type TaskGroup, type Task } from "./api";
+  import { showToast } from "./toast.svelte";
+  import { displayTitle } from "./text";
 
   let { canEdit = false }: { canEdit?: boolean } = $props();
 
   const qc = useQueryClient();
   const tasksQ = createQuery({ queryKey: ["tasks"], queryFn: api.tasks });
   const set = (d: { groups: TaskGroup[] }) => qc.setQueryData(["tasks"], d);
+  async function undoLast() {
+    try {
+      set(await api.undo());
+      showToast("Undone");
+    } catch (e) {
+      showToast(`Couldn't undo: ${String(e)}`);
+    }
+  }
   const doneMut = createMutation({ mutationFn: api.taskDone, onSuccess: set });
   const deleteMut = createMutation({ mutationFn: api.taskDelete, onSuccess: set });
   const statusMut = createMutation({
     mutationFn: (a: { id: string; status: string }) => api.taskStatus(a.id, a.status),
     onSuccess: set,
   });
+  // No confirm() interrogation (and webviews don't implement it anyway): delete
+  // acts immediately and the toast offers Undo — same contract as the list rows.
+  function del(t: Task) {
+    $deleteMut.mutate(t.id, {
+      onSuccess: () => showToast(`Deleted “${displayTitle(t.text, 32)}”`, undoLast),
+    });
+  }
 
   // Columns left→right. The column IS the task's status — a drop is just a
   // status write, so nothing positional needs storing (the whole point).
@@ -110,7 +127,7 @@
                   class="rowbtn rowbtn--danger"
                   title="Delete (undoable)"
                   aria-label="Delete task"
-                  onclick={() => confirm(`Delete task "${t.text}"? (undoable with nt undo)`) && $deleteMut.mutate(t.id)}>×</button>
+                  onclick={() => del(t)}>×</button>
               </div>
             {/if}
           </article>

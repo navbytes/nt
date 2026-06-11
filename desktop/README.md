@@ -91,7 +91,26 @@ instead bind Go methods to a client-rendered frontend (Wails' native model),
 but that is an *additive* evolution, not a prerequisite. See
 [`../docs/adr/0001-web-frontend-and-desktop.md`](../docs/adr/0001-web-frontend-and-desktop.md).
 
-## Limitations (it's a spike)
+## Desktop UX parity
+
+The shell ships the **full web UX, editing included** — `main.go` enables
+`SetEdit(true)`, so quick-add (with the live parse preview), complete /
+reschedule / undo, saved views, and the CodeMirror editor all work in the
+native window. The trust model is *stronger* than `nt web --edit`: no TCP port
+is opened at all (the webview talks to the Go handler in-process) and the CSRF
+guard still applies.
+
+Webview specifics the app accounts for:
+
+- **No JS dialogs.** WKWebView/WebKitGTK don't implement `prompt()`/`alert()`/
+  `confirm()`; the SPA uses inline inputs and the undo toast instead of any of
+  them, so every flow works identically in a browser and in this shell.
+- **macOS menus.** The app registers App + Edit menus — without an Edit menu,
+  ⌘C/⌘V/⌘X/⌘A are dead keys in a WKWebView.
+- **System appearance.** The window follows the OS light/dark setting (no
+  forced DarkAqua), matching the SPA's own adaptive theme.
+
+## Limitations
 
 - No Go↔JS bindings yet — the window is the web UI verbatim; it doesn't call
   native methods.
@@ -99,5 +118,3 @@ but that is an *additive* evolution, not a prerequisite. See
   once the Apple secrets ([RELEASING.md](RELEASING.md)) are configured.
 - Built/tested on macOS; the Linux/Windows matrix legs are wired but need a real
   tagged run (and their WebView runtimes) to exercise end-to-end.
-- SSE live-reload works in the webview; the editor (`SetEdit(true)`) is left
-  off by default.

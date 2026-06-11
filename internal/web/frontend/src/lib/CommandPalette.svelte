@@ -1,15 +1,15 @@
 <script lang="ts">
-  import { createQuery, useQueryClient } from "@tanstack/svelte-query";
+  import { createQuery } from "@tanstack/svelte-query";
   import { api, type NoteLink } from "./api";
   import { navigate, loc } from "./router.svelte";
   import { palette, openPalette, closePalette } from "./palette.svelte";
-  import { requestMoveNote } from "./noteUI.svelte";
+  import { requestMoveNote, requestNewNote } from "./noteUI.svelte";
+  import { captureTask } from "./keys.svelte";
 
   let q = $state("");
   let active = $state(0);
   let inputEl: HTMLInputElement | undefined = $state();
 
-  const qc = useQueryClient();
   const notesQ = createQuery({ queryKey: ["notes"], queryFn: api.notes });
   const stateQ = createQuery({ queryKey: ["state"], queryFn: api.state });
   const canEdit = $derived($stateQ.data?.canEdit ?? false);
@@ -41,19 +41,15 @@
     }
   }
 
-  async function newNote() {
-    const title = prompt("New note title (use folder/Title for a subfolder):");
-    if (!title?.trim()) return;
-    const res = await api.noteCreate(title.trim());
-    await qc.invalidateQueries({ queryKey: ["notes"] });
-    navigate(res.url);
+  // No prompt() dialogs — webviews (the desktop app) don't implement them, and
+  // inline inputs are better UX anyway. "New note" opens the Sidebar's inline
+  // input; "New task" drops the cursor in a quick-add box.
+  function newNote() {
+    requestNewNote();
   }
 
-  async function newTask() {
-    const text = prompt("New task (try: pay rent due:fri !high @home):");
-    if (!text?.trim()) return;
-    qc.setQueryData(["tasks"], await api.taskNew(text.trim()));
-    navigate("/tasks");
+  function newTask() {
+    captureTask();
   }
 
   const onNotePage = $derived(loc.path.startsWith("/n/"));

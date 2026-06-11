@@ -4,7 +4,7 @@
   // simple; both are mounted once in Shell.
   import { navigate } from "./router.svelte";
   import { openPalette, palette } from "./palette.svelte";
-  import { shortcuts, goTarget, isTextEntry, GO_CHORDS } from "./keys.svelte";
+  import { shortcuts, goTarget, isTextEntry, captureTask, GO_CHORDS } from "./keys.svelte";
 
   let { canEdit = false }: { canEdit?: boolean } = $props();
 
@@ -19,14 +19,6 @@
   function disarmGo() {
     pendingGo = false;
     clearTimeout(goTimer);
-  }
-
-  // `c` capture: focus an on-page quick-add if there is one, else go to Tasks
-  // (where the add box lives) so the keystroke always lands somewhere useful.
-  function capture() {
-    const box = document.querySelector<HTMLInputElement>(".taskadd input");
-    if (box) box.focus();
-    else navigate("/tasks");
   }
 
   // `/` search: focus the top-bar search field instead of typing a literal slash.
@@ -71,7 +63,7 @@
         break;
       case "c":
         e.preventDefault();
-        if (canEdit) capture();
+        if (canEdit) captureTask();
         else openPalette();
         break;
     }

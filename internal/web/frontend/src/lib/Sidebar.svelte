@@ -2,6 +2,8 @@
   import { createQuery, useQueryClient } from "@tanstack/svelte-query";
   import { api } from "./api";
   import { navigate, loc } from "./router.svelte";
+  import { noteUI } from "./noteUI.svelte";
+  import { showToast } from "./toast.svelte";
   import TreeItem from "./TreeItem.svelte";
 
   let {
@@ -17,19 +19,48 @@
   const viewsQ = createQuery({ queryKey: ["views"], queryFn: api.views });
   const activeView = $derived(path === "/tasks" ? (loc.query.get("view") ?? "") : "");
 
+  // Inline new-note input (no prompt() — webviews don't implement it, and an
+  // in-place field is better UX anyway). Opens from the + button or the
+  // palette's "New note" (via the noteUI request counter).
+  let newOpen = $state(false);
+  let newTitle = $state("");
+  let newInput: HTMLInputElement | undefined = $state();
   let creating = $state(false);
-  async function newNote() {
-    const title = prompt("New note title (use folder/Title to file it in a subfolder):");
-    if (!title || !title.trim() || creating) return;
+
+  function openNewNote() {
+    newOpen = true;
+    queueMicrotask(() => newInput?.focus());
+  }
+  let seenNewReq = noteUI.newNoteRequest;
+  $effect(() => {
+    if (canEdit && noteUI.newNoteRequest !== seenNewReq) {
+      seenNewReq = noteUI.newNoteRequest;
+      openNewNote();
+    }
+  });
+
+  async function createNote(e: SubmitEvent) {
+    e.preventDefault();
+    const title = newTitle.trim();
+    if (!title || creating) return;
     creating = true;
     try {
-      const res = await api.noteCreate(title.trim());
+      const res = await api.noteCreate(title);
       await qc.invalidateQueries({ queryKey: ["notes"] });
+      newTitle = "";
+      newOpen = false;
       navigate(res.url);
-    } catch (e) {
-      alert("Couldn't create the note: " + String(e));
+    } catch (err) {
+      showToast(`Couldn't create the note: ${String(err)}`);
     } finally {
       creating = false;
+    }
+  }
+  function onNewKey(e: KeyboardEvent) {
+    if (e.key === "Escape") {
+      e.preventDefault();
+      newOpen = false;
+      newTitle = "";
     }
   }
 
@@ -85,9 +116,22 @@
     <div class="tree__head">
       <span>Notes</span>
       {#if canEdit}
-        <button class="tree__new" title="New note" aria-label="New note" disabled={creating} onclick={newNote}>+</button>
+        <button class="tree__new" title="New note" aria-label="New note" disabled={creating} onclick={openNewNote}>+</button>
       {/if}
     </div>
+    {#if newOpen}
+      <form class="tree__newform" onsubmit={createNote}>
+        <input
+          bind:this={newInput}
+          bind:value={newTitle}
+          onkeydown={onNewKey}
+          placeholder="Title — or folder/Title  (esc to cancel)"
+          aria-label="New note title"
+          autocomplete="off"
+          disabled={creating}
+        />
+      </form>
+    {/if}
     {#if $notesQ.isPending}
       <p class="muted small">Loading…</p>
     {:else if $notesQ.data}
@@ -122,5 +166,18 @@
   .tree__new:hover {
     border-color: var(--accent);
     color: var(--accent);
+  }
+  .tree__newform input {
+    width: 100%;
+    margin: 6px 0 4px;
+    padding: 4px 8px;
+    font-size: 0.82rem;
+    background: var(--bg-elev);
+    border: 1px solid var(--accent);
+    border-radius: var(--radius-sm);
+    color: var(--fg);
+  }
+  .tree__newform input:focus {
+    outline: none;
   }
 </style>
