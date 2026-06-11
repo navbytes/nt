@@ -7,6 +7,7 @@ import {
   relativeDue,
   meaningfulSource,
   fmtDuration,
+  highlightParts,
 } from "../lib/text";
 
 describe("displayTitle", () => {
@@ -120,5 +121,27 @@ describe("fmtDuration", () => {
     expect(fmtDuration(120)).toBe("2h");
     expect(fmtDuration(0)).toBe("0m");
     expect(fmtDuration(-5)).toBe("0m");
+  });
+});
+
+describe("highlightParts", () => {
+  it("splits around case-insensitive matches", () => {
+    const p = highlightParts("Fix the Token race", "token");
+    expect(p).toEqual([
+      { text: "Fix the ", hit: false },
+      { text: "Token", hit: true },
+      { text: " race", hit: false },
+    ]);
+  });
+  it("handles multiple hits and a trailing match", () => {
+    const p = highlightParts("aXaXa", "x");
+    expect(p.filter((x) => x.hit).length).toBe(2);
+    expect(p.map((x) => x.text).join("")).toBe("aXaXa");
+  });
+  it("empty query → one plain part", () => {
+    expect(highlightParts("hello", "  ")).toEqual([{ text: "hello", hit: false }]);
+  });
+  it("no match → one plain part", () => {
+    expect(highlightParts("hello", "zzz")).toEqual([{ text: "hello", hit: false }]);
   });
 });
