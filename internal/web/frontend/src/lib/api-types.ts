@@ -65,6 +65,8 @@ export interface Task {
   blocker?: string;
   recur?: boolean; // true when the task repeats (todo.txt rec:)
   est?: number /* int */; // time estimate in whole minutes (todo.txt est:), 0 = none
+  noteUrl?: string; // the task's linked detail note ("body"), if any
+  noteTitle?: string;
 }
 /**
  * TaskGroup is tasks bucketed by status (open/doing/blocked/done).

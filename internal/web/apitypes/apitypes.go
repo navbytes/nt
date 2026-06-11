@@ -41,17 +41,19 @@ type NotesIndex struct {
 
 // Task is one todo.txt task projected for the UI.
 type Task struct {
-	ID       string   `json:"id"`
-	Text     string   `json:"text"`
-	Status   string   `json:"status"`
-	Priority string   `json:"priority,omitempty"` // "A".."Z" or "" (drives the board's color cue)
-	Due      string   `json:"due,omitempty"`
-	Source   string   `json:"source,omitempty"`
-	Project  string   `json:"project,omitempty"`
-	Tags     []string `json:"tags,omitempty"`
-	Blocker  string   `json:"blocker,omitempty"`
-	Recur    bool     `json:"recur,omitempty"` // true when the task repeats (todo.txt rec:)
-	Est      int      `json:"est,omitempty"`   // time estimate in whole minutes (todo.txt est:), 0 = none
+	ID        string   `json:"id"`
+	Text      string   `json:"text"`
+	Status    string   `json:"status"`
+	Priority  string   `json:"priority,omitempty"` // "A".."Z" or "" (drives the board's color cue)
+	Due       string   `json:"due,omitempty"`
+	Source    string   `json:"source,omitempty"`
+	Project   string   `json:"project,omitempty"`
+	Tags      []string `json:"tags,omitempty"`
+	Blocker   string   `json:"blocker,omitempty"`
+	Recur     bool     `json:"recur,omitempty"`   // true when the task repeats (todo.txt rec:)
+	Est       int      `json:"est,omitempty"`     // time estimate in whole minutes (todo.txt est:), 0 = none
+	NoteURL   string   `json:"noteUrl,omitempty"` // the task's linked detail note ("body"), if any
+	NoteTitle string   `json:"noteTitle,omitempty"`
 }
 
 // TaskGroup is tasks bucketed by status (open/doing/blocked/done).

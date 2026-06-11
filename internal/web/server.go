@@ -16,6 +16,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"regexp"
 	"sort"
 	"strings"
 	"sync"
@@ -204,17 +205,19 @@ type taskGroup struct {
 	Tasks  []taskRow `json:"tasks"`
 }
 type taskRow struct {
-	ID       string   `json:"id"`
-	Text     string   `json:"text"`
-	Status   string   `json:"status"`
-	Due      string   `json:"due,omitempty"`
-	Source   string   `json:"source,omitempty"`
-	Project  string   `json:"project,omitempty"`
-	Tags     []string `json:"tags,omitempty"`
-	Blocker  string   `json:"blocker,omitempty"`
-	Recur    bool     `json:"recur,omitempty"`
-	Priority string   `json:"priority,omitempty"`
-	Est      int      `json:"est,omitempty"`
+	ID        string   `json:"id"`
+	Text      string   `json:"text"`
+	Status    string   `json:"status"`
+	Due       string   `json:"due,omitempty"`
+	Source    string   `json:"source,omitempty"`
+	Project   string   `json:"project,omitempty"`
+	Tags      []string `json:"tags,omitempty"`
+	Blocker   string   `json:"blocker,omitempty"`
+	Recur     bool     `json:"recur,omitempty"`
+	Priority  string   `json:"priority,omitempty"`
+	Est       int      `json:"est,omitempty"`
+	NoteURL   string   `json:"noteUrl,omitempty"`
+	NoteTitle string   `json:"noteTitle,omitempty"`
 }
 
 // ---- handlers -------------------------------------------------------------
@@ -369,10 +372,39 @@ func siblings(notes []*note.Note, n *note.Note, folder string) (prev, next *link
 	return prev, next
 }
 
-// toTaskRow builds the wire row for one task — shared by the status grouping
-// and the saved-view listing so a task serializes identically everywhere.
-func toTaskRow(t *task.Task) taskRow {
-	row := taskRow{ID: t.ID(), Text: cleanTaskText(t.Text), Status: t.Status(), Due: t.Due(), Source: t.Source(), Tags: t.Tags(), Recur: t.Recur() != ""}
+// wikiLinkRe matches a [[wikilink]] in a task's text — the task's "body" lives in
+// the note it links to (todo.txt is one line, so detail goes in a linked note).
+var wikiLinkRe = regexp.MustCompile(`\[\[([^\]]+)\]\]`)
+
+// taskTagProjRe matches inline @tag / +project tokens (for deriving a clean note
+// title from a task's text — the tags belong to the task, not the note's title).
+var taskTagProjRe = regexp.MustCompile(`\s+[@+][^\s]+`)
+
+// taskNoteTitle derives a clean note title from a task's text: the description
+// with [[links]], @tags, +projects, and key:values stripped.
+func taskNoteTitle(text string) string {
+	s := wikiLinkRe.ReplaceAllString(cleanTaskText(text), "")
+	s = taskTagProjRe.ReplaceAllString(" "+s, "")
+	return strings.TrimSpace(strings.Join(strings.Fields(s), " "))
+}
+
+// toTaskRow builds the wire row for one task — shared by the status grouping and
+// the saved-view listing so a task serializes identically everywhere. doc+notes
+// let it resolve the task's first linked note (its "body") to a URL, and strip
+// the raw [[link]] out of the displayed title (it becomes a details chip).
+func toTaskRow(t *task.Task, doc *task.Doc, notes []*note.Note) taskRow {
+	text := cleanTaskText(t.Text)
+	taskLinks := t.Links()
+	if len(taskLinks) > 0 {
+		// Pull [[links]] out of the shown title; if that empties it, the link IS
+		// the title (a long-capture task), so fall back to the link target.
+		stripped := strings.TrimSpace(strings.Join(strings.Fields(wikiLinkRe.ReplaceAllString(text, "")), " "))
+		if stripped == "" {
+			stripped = taskLinks[0]
+		}
+		text = stripped
+	}
+	row := taskRow{ID: t.ID(), Text: text, Status: t.Status(), Due: t.Due(), Source: t.Source(), Tags: t.Tags(), Recur: t.Recur() != ""}
 	if t.Priority != 0 {
 		row.Priority = string(t.Priority)
 	}
@@ -382,12 +414,27 @@ func toTaskRow(t *task.Task) taskRow {
 	if mins, ok := dateparse.Duration(t.Key("est")); ok {
 		row.Est = mins
 	}
+	// Resolve the first linked note → a clickable "details" target.
+	for _, raw := range taskLinks {
+		if it, ok := links.Resolve(raw, doc, notes); ok && it.Kind == "note" {
+			for _, n := range notes {
+				if n.Path == it.Path {
+					row.NoteURL = "/n/" + url.PathEscape(noteHandle(n))
+					row.NoteTitle = n.Title
+					break
+				}
+			}
+			if row.NoteURL != "" {
+				break
+			}
+		}
+	}
 	return row
 }
 
 // buildTaskGroups groups tasks by status (urgency-sorted within each), in the
 // display order doing → open → blocked → done.
-func buildTaskGroups(doc *task.Doc) []taskGroup {
+func buildTaskGroups(doc *task.Doc, notes []*note.Note) []taskGroup {
 	if doc == nil {
 		return nil
 	}
@@ -395,7 +442,7 @@ func buildTaskGroups(doc *task.Doc) []taskGroup {
 	task.SortByUrgency(tasks)
 	byStatus := map[string][]taskRow{}
 	for _, t := range tasks {
-		byStatus[t.Status()] = append(byStatus[t.Status()], toTaskRow(t))
+		byStatus[t.Status()] = append(byStatus[t.Status()], toTaskRow(t, doc, notes))
 	}
 	var groups []taskGroup
 	for _, st := range []string{"doing", "open", "blocked", "done"} {

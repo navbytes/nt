@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/navbytes/nt/internal/dateparse"
+	"github.com/navbytes/nt/internal/links"
 	"github.com/navbytes/nt/internal/mutate"
 	"github.com/navbytes/nt/internal/note"
 	"github.com/navbytes/nt/internal/quickadd"
@@ -51,6 +52,7 @@ func (s *Server) apiRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/tasks/{id}/status", s.apiTaskStatus)
 	mux.HandleFunc("DELETE /api/tasks/{id}", s.apiTaskDelete)
 	mux.HandleFunc("POST /api/tasks/bulk", s.apiTaskBulk)
+	mux.HandleFunc("POST /api/tasks/{id}/note", s.apiTaskNote)
 	mux.HandleFunc("POST /api/undo", s.apiUndo)
 	mux.HandleFunc("GET /api/activity", s.apiActivity)
 	mux.HandleFunc("GET /api/search", s.apiSearch)
@@ -83,6 +85,7 @@ func toTask(t taskRow) apitypes.Task {
 	return apitypes.Task{
 		ID: t.ID, Text: t.Text, Status: t.Status, Priority: t.Priority, Due: t.Due,
 		Source: t.Source, Project: t.Project, Tags: t.Tags, Blocker: t.Blocker, Recur: t.Recur, Est: t.Est,
+		NoteURL: t.NoteURL, NoteTitle: t.NoteTitle,
 	}
 }
 
@@ -584,20 +587,20 @@ func (s *Server) apiTasks(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "no such view "+name, http.StatusNotFound)
 			return
 		}
-		doc := s.current().doc
-		if doc == nil {
+		snap := s.current()
+		if snap.doc == nil {
 			writeJSON(w, apitypes.TasksResponse{Groups: []apitypes.TaskGroup{}})
 			return
 		}
-		all := doc.Tasks()
+		all := snap.doc.Tasks()
 		rows := make([]taskRow, 0)
 		for _, t := range view.Apply(all, spec, task.BlockedIDs(all)) {
-			rows = append(rows, toTaskRow(t))
+			rows = append(rows, toTaskRow(t, snap.doc, snap.notes))
 		}
 		writeJSON(w, apitypes.TasksResponse{Groups: toGroups([]taskGroup{{Status: name, Tasks: rows}})})
 		return
 	}
-	writeJSON(w, apitypes.TasksResponse{Groups: toGroups(buildTaskGroups(s.current().doc))})
+	s.respondTasks(w)
 }
 
 // apiViews lists the saved smart views (`nt view save`) so the sidebar can
@@ -811,7 +814,8 @@ func snippetAround(line, q string) string {
 
 // respondTasks returns the refreshed task groups after a successful write.
 func (s *Server) respondTasks(w http.ResponseWriter) {
-	writeJSON(w, apitypes.TasksResponse{Groups: toGroups(buildTaskGroups(s.current().doc))})
+	snap := s.current()
+	writeJSON(w, apitypes.TasksResponse{Groups: toGroups(buildTaskGroups(snap.doc, snap.notes))})
 }
 
 func (s *Server) apiTaskDone(w http.ResponseWriter, r *http.Request) {
@@ -970,6 +974,66 @@ func (s *Server) apiTaskDelete(w http.ResponseWriter, r *http.Request) {
 	}) {
 		s.respondTasks(w)
 	}
+}
+
+// apiTaskNote gives a task a "body": it creates a detail note titled from the
+// task's text and appends a [[link]] to the task so the two are connected (the
+// link the graph, nt links, and the row's details chip all follow). No-ops to
+// the existing note if the task already links one. The note create and the task
+// edit are two writes (a note file + tasks.txt), like noteCreate+taskEdit — the
+// task edit is the undoable one; an orphaned note on a mid-failure is harmless.
+func (s *Server) apiTaskNote(w http.ResponseWriter, r *http.Request) {
+	if !s.allowEdit {
+		http.Error(w, "editing is disabled — start with `nt web --edit`", http.StatusForbidden)
+		return
+	}
+	if r.Header.Get("X-CSRF") != s.csrf {
+		http.Error(w, "bad or missing CSRF token", http.StatusForbidden)
+		return
+	}
+	snap := s.current()
+	t, amb := snap.doc.Resolve(r.PathValue("id"))
+	if t == nil || amb {
+		http.Error(w, "no such task", http.StatusNotFound)
+		return
+	}
+	// Already has a linked note → return it (idempotent; opens the existing body).
+	for _, raw := range t.Links() {
+		if it, ok := links.Resolve(raw, snap.doc, snap.notes); ok && it.Kind == "note" {
+			for _, n := range snap.notes {
+				if n.Path == it.Path {
+					writeJSON(w, apitypes.CreatedNote{Handle: noteHandle(n), URL: "/n/" + url.PathEscape(noteHandle(n))})
+					return
+				}
+			}
+		}
+	}
+
+	title := taskNoteTitle(t.Text)
+	if title == "" {
+		title = "Task note"
+	}
+	n, err := note.Create(s.eng.S, title, "", nil, "web", "")
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	s.writes.mark(n.Path)
+
+	id := t.ID()
+	if !s.doTaskWrite(w, r, "edit", func(d *task.Doc, rec *mutate.Recorder) error {
+		tk := d.FindByID(id)
+		if tk == nil {
+			return errNoTask
+		}
+		rec.Before(tk)
+		tk.AddLink(n.Title)
+		return nil
+	}) {
+		return // doTaskWrite already wrote the error
+	}
+	s.hub.broadcast("reload")
+	writeJSON(w, apitypes.CreatedNote{Handle: noteHandle(n), URL: "/n/" + url.PathEscape(noteHandle(n))})
 }
 
 // apiTaskBulk applies one action — done | delete | due — to many tasks in a

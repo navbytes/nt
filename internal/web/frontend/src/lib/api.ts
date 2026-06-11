@@ -92,6 +92,9 @@ export const api = {
    *  the whole batch). action: "done" | "delete" | "due"; due takes NL forms. */
   taskBulk: (action: "done" | "delete" | "due", ids: string[], due = "") =>
     postForm<TasksResponse>("/api/tasks/bulk", { action, ids: ids.join(","), ...(action === "due" ? { due } : {}) }),
+  /** Give a task a "body": create (or return its existing) linked detail note.
+   *  Returns the note's handle + URL to open in the editor. */
+  taskNote: (id: string) => postForm<CreatedNote>(`/api/tasks/${id}/note`),
   /** Revert the latest task write (the toast's Undo). 409 = nothing to undo or
    *  another writer changed the touched tasks (the engine refuses, never corrupts). */
   undo: () => postForm<TasksResponse>("/api/undo"),
