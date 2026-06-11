@@ -48,7 +48,7 @@ surface, sized S/M/L, and sequenced so each lands as its own green-CI PR.
 |---|------|--------|--------|
 | R1 | CI compile check for the desktop module on PRs + a `web` CI job (svelte-check + vitest — the frontend had no CI at all) | S | ✅ |
 | R2 | README: desktop app install section (bundles exist per release but the README never mentions them) | S | ✅ |
-| R3 | Refresh docs/screenshots (pre-date the priority chips / relative dates / views sidebar) | S | ⬜ |
+| R3 | Refresh docs/screenshots — new Tasks hero (priority chips, relative dates, agent badge, quick filter, saved views) + updated note-viewer shots (tags row) | S | ✅ |
 
 Sequencing: D1–D3 (one PR, done) → D4+R1+R2 (one PR) → T10(+T11) → W10 → W11 → W12 → W9 → D5/D6/R3 as time allows. Each PR merges only on green CI.
 

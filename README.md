@@ -93,9 +93,18 @@ It's built for moving fast: a **⌘K command palette** to jump anywhere, **keybo
 
 <div align="center">
 <picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/web-tasks-dark.png">
+  <source media="(prefers-color-scheme: light)" srcset="docs/screenshots/web-tasks-light.png">
+  <img alt="nt web — the Tasks agenda: colour-coded priorities, relative due dates, an AI-agent badge, a quick filter, and saved views" src="docs/screenshots/web-tasks-light.png" width="850">
+</picture>
+<br><em>The Tasks agenda — priority chips, relative due dates, the <code>claude</code> badge on agent-captured work, a quick filter, and your saved views in the sidebar.</em>
+</div>
+
+<div align="center">
+<picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/screenshots/web-dark.png">
   <source media="(prefers-color-scheme: light)" srcset="docs/screenshots/web-light.png">
-  <img alt="nt web — note viewer with TOC, backlinks, and a Mermaid diagram" src="docs/screenshots/web-light.png" width="850">
+  <img alt="nt web — note viewer with tags, TOC, backlinks, syntax highlighting, and a Mermaid diagram" src="docs/screenshots/web-light.png" width="850">
 </picture>
 </div>
 
