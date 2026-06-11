@@ -356,13 +356,22 @@ func (s *server) add(a map[string]any) (string, error) {
 		source = "claude"
 	}
 
-	// Paragraph-length capture → keep the task one actionable line and move the
-	// full text into a linked note (where the reasoning belongs). Agents tend to
-	// dump multi-sentence reasoning into the task text; this keeps the list clean.
+	// A task's detail belongs in a linked note ("body"). Three ways here, all
+	// filing the note under notes/tasks/ so these machine-made notes don't clutter
+	// a human's folders:
+	//   1. an explicit `body` → keep the short title on the task, body in the note;
+	//   2. else a paragraph-length title → split a short clause title off, full
+	//      text into the note (the task becomes just the link);
+	//   3. else a plain one-line task, no note.
 	text := title
 	splitNote := ""
-	if short, full, split := quickadd.SplitLong(title); split {
-		if n, nerr := note.Create(s.eng.S, short, full, nil, source, ""); nerr == nil {
+	if body := strings.TrimSpace(str(a, "body")); body != "" {
+		if n, nerr := note.Create(s.eng.S, title, body, nil, source, note.TaskNoteFolder); nerr == nil {
+			text = title + " [[" + n.Title + "]]" // keep the title, link the body
+			splitNote = n.Title
+		}
+	} else if short, full, split := quickadd.SplitLong(title); split {
+		if n, nerr := note.Create(s.eng.S, short, full, nil, source, note.TaskNoteFolder); nerr == nil {
 			// The task is just a link to the detail note — its short title shows
 			// (no duplication), and following it opens the full reasoning.
 			text = "[[" + n.Title + "]]"
@@ -400,10 +409,14 @@ func (s *server) add(a map[string]any) (string, error) {
 		return "", err
 	}
 	if splitNote != "" {
+		hint := "detail saved as the task's linked note under notes/tasks/ — following the task opens it."
+		if strings.TrimSpace(str(a, "body")) == "" {
+			hint = "text was long, so it was split: a short title on the task, the full text in a linked note (notes/tasks/). Prefer a short text + a separate body next time."
+		}
 		return jsonText(map[string]any{
 			"task": taskToOut(created),
 			"note": splitNote,
-			"hint": "text was long, so the detail was moved to a linked note. Keep task text to one actionable line; put reasoning in nt_note.",
+			"hint": hint,
 		}), nil
 	}
 	return jsonText(taskToOut(created)), nil

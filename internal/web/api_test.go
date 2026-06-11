@@ -852,6 +852,9 @@ func TestAPITaskNote(t *testing.T) {
 	if made == nil {
 		t.Fatalf("detail note not created with the task's title; have %d notes", len(notes))
 	}
+	if !strings.HasPrefix(made.Rel, note.TaskNoteFolder+"/") {
+		t.Errorf("task note should be filed under %s/, got rel %q", note.TaskNoteFolder, made.Rel)
+	}
 
 	// The task now links it, and the row resolves it + hides the raw [[link]].
 	tk := mustDoc(t, s).FindByID(id)

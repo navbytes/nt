@@ -61,9 +61,10 @@ var toolDefs = []toolDef{
 	},
 	{
 		Name:        "nt_add",
-		Description: "Capture a task. Keep text to one actionable line; put reasoning/detail in nt_note (paragraph-length text is auto-moved to a linked note). discovered_from chains work surfaced while doing another task.",
+		Description: "Capture a task. text is the title — one short, scannable, actionable line, verb-first, ~10 words / 60 chars (it's for skimming a list). Detail, reasoning, or steps go in body: when set, it's saved as the task's linked note (filed under notes/tasks/) so the title stays clean and the rest is one click away. Good: text=\"Fix token refresh race condition\", body=\"Two requests refresh at once; the second invalidates the first's token. Add a single-flight guard keyed on the refresh-token id.\". Don't stuff that detail into text. (A paragraph-length text with no body is auto-split the same way.) discovered_from chains work surfaced while doing another task.",
 		InputSchema: obj(map[string]any{
-			"text":            st(),
+			"text":            sp("the task title — one actionable line, ~10 words / 60 chars, verb-first"),
+			"body":            sp("optional detail/reasoning/steps — saved as the task's linked note (markdown)"),
 			"priority":        enum("high", "med", "low"),
 			"due":             sp("today|tomorrow|fri|+3d|YYYY-MM-DD"),
 			"project":         st(),

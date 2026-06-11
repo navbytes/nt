@@ -57,6 +57,12 @@ func Slug(title string) string {
 	return slug
 }
 
+// TaskNoteFolder is the subfolder under notes/ where a task's "body" notes live
+// (auto-split paragraph captures and explicit task detail). Grouping them keeps
+// these machine-created notes out of a human's hand-curated folders — like the
+// "journal" folder does for daily notes.
+const TaskNoteFolder = "tasks"
+
 // Create builds and writes a new note, returning it. The body is prefixed with
 // an H1 title when it doesn't already start with one.
 // Create writes a new note. folder, when non-empty, is a slash-separated

@@ -12,14 +12,29 @@ func TestSplitLong(t *testing.T) {
 		t.Error("a short task should not split")
 	}
 
+	// A merely verbose single sentence (~130 chars) is NOT split: the UX/PKM
+	// research says tidy these via the agent guidance + display clamp, not by
+	// minting a near-duplicate note (collector's fallacy / orphan notes). Only
+	// genuine paragraph dumps cross the threshold.
+	verbose := "Investigate why the token refresh occasionally fails under high concurrency " +
+		"and add a single-flight guard around the refresh path"
+	if _, _, ok := SplitLong(verbose); ok {
+		t.Errorf("a verbose one-liner (%d chars) should NOT split", utf8.RuneCountInString(verbose))
+	}
+
+	// A multi-sentence paragraph (the "agent pasted its reasoning" case) splits.
 	long := "Investigate and resolve the intermittent 500 errors occurring during peak " +
 		"traffic by correlating traces across the gateway and token service, validating " +
-		"the connection-pool-exhaustion hypothesis, and coordinating with the infra team."
+		"the connection-pool-exhaustion hypothesis, reproducing it in staging, and " +
+		"coordinating a fix with the infra team before the next release."
+	if utf8.RuneCountInString(long) <= LongCaptureThreshold {
+		t.Fatalf("test fixture should exceed the threshold (%d), got %d", LongCaptureThreshold, utf8.RuneCountInString(long))
+	}
 	title, body, ok := SplitLong(long)
 	if !ok {
 		t.Fatal("a paragraph-length task should split")
 	}
-	if n := utf8.RuneCountInString(title); n > 73 {
+	if n := utf8.RuneCountInString(title); n > 64 {
 		t.Errorf("title should be short, got %d runes: %q", n, title)
 	}
 	if strings.Contains(title, "…") {
