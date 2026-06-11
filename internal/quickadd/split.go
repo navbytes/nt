@@ -6,9 +6,15 @@ import (
 )
 
 // LongCaptureThreshold is the rune count past which a captured task is treated
-// as paragraph-length — the "agent dumped its reasoning into one line" case the
-// UX audit flagged. Normal tasks are well under this.
-const LongCaptureThreshold = 180
+// as paragraph-length and split into a short clause title on the task plus a
+// linked note holding the full text. It is deliberately HIGH: the UX/PKM
+// evidence (see the title-length research) says verbose single sentences should
+// be tidied by the agent guidance + display clamp, not by silently minting a
+// near-duplicate note per task (the collector's-fallacy / orphan-note risk).
+// So this gates only genuine multi-sentence "the agent pasted a paragraph"
+// dumps; a normal title — even a wordy one — sits well under it. Gates only the
+// MCP nt_add path.
+const LongCaptureThreshold = 240
 
 // SplitLong decides whether a captured task's text is paragraph-length and
 // should be split into a short, actionable task title plus a note body holding
@@ -20,7 +26,7 @@ func SplitLong(text string) (title, body string, ok bool) {
 	if utf8.RuneCountInString(text) <= LongCaptureThreshold {
 		return "", "", false
 	}
-	return clauseTitle(text, 72), text, true
+	return clauseTitle(text, 64), text, true
 }
 
 // clauseTitle reduces long prose to a clean one-line title: it prefers the first

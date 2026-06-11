@@ -125,6 +125,13 @@ Tools exposed — **capture:** `nt_add`, `nt_note` (with `folder`), `nt_done`,
 journaled engine as the CLI, default `source` to `claude`, and require **stable
 task ids** (positional `task:N` is refused — the index isn't safe for an agent).
 
+`nt_add` titles are meant to be **short and scannable** — one actionable line,
+verb-first, ~10 words / 60 chars; detail and reasoning belong in `nt_note`, not
+the title. The tool description nudges this directly; only genuine
+paragraph-length text (≥240 chars) is auto-moved into a linked note. Verbose but
+ordinary one-liners are left intact and simply clamp to a few lines in the UI
+(full text on hover / on edit) rather than being silently rewritten.
+
 Hook, skill, and MCP compose: the hook mirrors the todo list automatically, the
 skill/MCP capture notes and recall context. Use the MCP server if your client
 supports it; the CLI + skill work everywhere.

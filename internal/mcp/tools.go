@@ -61,9 +61,9 @@ var toolDefs = []toolDef{
 	},
 	{
 		Name:        "nt_add",
-		Description: "Capture a task. Keep text to one actionable line; put reasoning/detail in nt_note (paragraph-length text is auto-moved to a linked note). discovered_from chains work surfaced while doing another task.",
+		Description: "Capture a task as one short, scannable line: start with a verb and keep it to about 10 words / 60 characters — the title is for skimming a list. Put reasoning, steps, and detail in a note (nt_note), not the title. Good: \"Fix token refresh race condition\". Too long: \"Investigate why the token refresh occasionally fails under high concurrency and add a single-flight guard around the refresh path\" — keep the title (\"Fix token refresh race under load\") and move the rest into nt_note. Paragraph-length text is auto-moved to a linked note. discovered_from chains work surfaced while doing another task.",
 		InputSchema: obj(map[string]any{
-			"text":            st(),
+			"text":            sp("the task title — one actionable line, ~10 words / 60 chars, verb-first"),
 			"priority":        enum("high", "med", "low"),
 			"due":             sp("today|tomorrow|fri|+3d|YYYY-MM-DD"),
 			"project":         st(),
