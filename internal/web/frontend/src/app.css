@@ -423,6 +423,33 @@ code {
 .chip--more {
   color: var(--muted); /* the "+N" overflow chip on capped tag lists */
 }
+/* Priority letter chip — a shared primitive (task rows + the quick-add preview).
+   Shape + letter carry urgency so it never relies on colour alone; the band
+   colours and chip text are theme-tuned in :root for WCAG AA. */
+.pri {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.66rem;
+  font-weight: 700;
+  border-radius: var(--radius-sm);
+  color: var(--pri-fg);
+}
+.pri--a {
+  background: var(--pri-a);
+}
+.pri--b {
+  background: var(--pri-b);
+}
+.pri--c {
+  background: var(--pri-c);
+}
+.pri--rest {
+  background: var(--muted);
+}
 .empty {
   max-width: 46ch;
   margin: 28px 0;

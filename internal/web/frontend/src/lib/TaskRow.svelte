@@ -208,33 +208,8 @@
   .chip--tag {
     color: var(--accent-2);
   }
-  /* Priority: a letter chip plus a left accent bar so urgency reads at a glance
-     and never relies on colour alone (shape + letter carry it too). Red is
-     reserved for A and for overdue, so it stays meaningful. */
-  .pri {
-    flex: none;
-    width: 18px;
-    height: 18px;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 0.66rem;
-    font-weight: 700;
-    border-radius: var(--radius-sm);
-    color: var(--pri-fg);
-  }
-  .pri--a {
-    background: var(--pri-a);
-  }
-  .pri--b {
-    background: var(--pri-b);
-  }
-  .pri--c {
-    background: var(--pri-c);
-  }
-  .pri--rest {
-    background: var(--muted);
-  }
+  /* Priority left accent bar (the .pri letter chip itself is a global primitive
+     in app.css). Red is reserved for A and overdue, so it stays meaningful. */
   .row--pri-a {
     box-shadow: inset 2px 0 0 var(--pri-a);
   }
