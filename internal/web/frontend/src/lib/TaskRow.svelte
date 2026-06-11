@@ -78,12 +78,34 @@
   function del() {
     if (confirm(`Delete task "${t.text}"? (undoable with nt undo)`)) $deleteMut.mutate(t.id);
   }
+
+  // Keyboard actions on the focused row (j/k focus is driven by TaskRows). Space
+  // or Enter toggles done/reopen; `e` opens the inline editor. j/k are left to
+  // bubble up to the list navigator.
+  function onRowKey(e: KeyboardEvent) {
+    if (editing || !canEdit) return;
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      if (t.status === "done") $reopenMut.mutate(t.id);
+      else $doneMut.mutate(t.id);
+    } else if (e.key === "e") {
+      if (t.status === "done") return;
+      e.preventDefault();
+      startEdit();
+    }
+  }
 </script>
 
+<!-- A row is a roving-focus target for j/k list nav: focusable (tabindex -1, not in
+     the Tab order) with Space/e shortcuts; the real controls stay separate buttons. -->
+<!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions -->
 <li
+  id={`trow-${t.id}`}
   class="row {pri ? `row--pri-${pri}` : ''}"
   class:row--doing={t.status === "doing"}
   class:row--editing={editing}
+  tabindex="-1"
+  onkeydown={onRowKey}
 >
   {#if pri && t.status !== "done"}
     <span class="pri pri--{pri}" title={`Priority ${t.priority}`} aria-label={`Priority ${t.priority}`}
@@ -140,6 +162,13 @@
   .row {
     align-items: center;
     gap: 8px;
+  }
+  /* Roving keyboard focus (j/k). Programmatic focus, so we style :focus directly
+     rather than :focus-visible (which can skip scripted focus). */
+  .row:focus {
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
+    border-radius: var(--radius-sm);
   }
   .row__actions {
     margin-left: auto;

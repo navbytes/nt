@@ -4,6 +4,9 @@
   import TaskRow from "./TaskRow.svelte";
   import { priorityRank, priorityClass } from "./text";
   import { parseQuickAdd } from "./quickparse";
+  import { stepId } from "./listnav";
+  import { palette } from "./palette.svelte";
+  import { shortcuts, isTextEntry } from "./keys.svelte";
 
   // Within a bucket, float the most important work up: priority first (A→Z, then
   // unprioritised), then the earliest due date. Done stays in store order (most
@@ -110,6 +113,41 @@
   });
 
   const groups = $derived((view === "agenda" ? agendaGroups : statusGroups).map(sorted));
+
+  // ---- j/k row navigation -------------------------------------------------
+  // Roving focus over every rendered row, in visual order. The cursor lives in
+  // the DOM (document.activeElement), so it survives re-renders and never goes
+  // stale; stepId() just maps "which row id is focused" → "the next one".
+  const flatIds = $derived(groups.flatMap((g) => g.tasks.map((t) => t.id)));
+
+  function focusedRowId(): string | null {
+    const el = document.activeElement;
+    const id = el instanceof HTMLElement ? el.id : "";
+    return id.startsWith("trow-") ? id.slice(5) : null;
+  }
+  function moveFocus(dir: 1 | -1) {
+    const next = stepId(flatIds, focusedRowId(), dir);
+    if (!next) return;
+    const el = document.getElementById(`trow-${next}`);
+    el?.focus();
+    el?.scrollIntoView({ block: "nearest" });
+  }
+  function onListKey(e: KeyboardEvent) {
+    // Don't steal j/k while typing or when a modal owns the keyboard.
+    if (e.metaKey || e.ctrlKey || e.altKey || isTextEntry(e.target) || palette.open || shortcuts.open)
+      return;
+    if (e.key === "j") {
+      e.preventDefault();
+      moveFocus(1);
+    } else if (e.key === "k") {
+      e.preventDefault();
+      moveFocus(-1);
+    }
+  }
+  $effect(() => {
+    window.addEventListener("keydown", onListKey);
+    return () => window.removeEventListener("keydown", onListKey);
+  });
 
   function add(e: SubmitEvent) {
     e.preventDefault();
