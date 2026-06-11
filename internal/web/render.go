@@ -52,6 +52,10 @@ func renderBody(body string, doc *task.Doc, notes []*note.Note) (template.HTML, 
 	// Tag resolved wikilinks (query-less /n/ hrefs) so CSS can style them;
 	// ?missing=1 links are skipped here and styled via the attribute selector.
 	out = wikiClassRe.ReplaceAllString(out, `<a class="wikilink" href="$1">`)
+	// External links open outside the app: a new tab in the browser, the system
+	// browser in the desktop webview (which has no back button to recover with).
+	// Internal links (/n/…, #heading) keep in-app SPA navigation.
+	out = externalLinkRe.ReplaceAllString(out, `<a href="$1" target="_blank" rel="noopener noreferrer"`)
 	// Syntax-highlight fenced code with a known language (Chroma — already in the
 	// module graph via Glamour). Emits classed spans; colors come from the
 	// theme-scoped CSS at /static/highlight.css.
@@ -62,6 +66,7 @@ func renderBody(body string, doc *task.Doc, notes []*note.Note) (template.HTML, 
 var (
 	mermaidBlockRe = regexp.MustCompile(`(?s)<pre><code class="language-mermaid">(.*?)</code></pre>`)
 	wikiClassRe    = regexp.MustCompile(`<a href="(/n/[^"?]+)">`)
+	externalLinkRe = regexp.MustCompile(`<a href="(https?://[^"]+)"`)
 	codeBlockRe    = regexp.MustCompile(`(?s)<pre><code class="language-([\w+#.-]+)">(.*?)</code></pre>`)
 	bgColorRe      = regexp.MustCompile(`background-color:[^;}]*;?`)
 )

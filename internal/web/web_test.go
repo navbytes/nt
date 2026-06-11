@@ -84,6 +84,34 @@ func TestRenderBodyWikilinksAndMermaid(t *testing.T) {
 	}
 }
 
+// TestRenderExternalLinksOpenOutside: absolute http(s) links get
+// target=_blank + noopener so they leave the app (a new tab in the browser, the
+// system browser in the desktop webview, which has no back button); internal
+// links (/n/…, #anchors) keep SPA navigation.
+func TestRenderExternalLinksOpenOutside(t *testing.T) {
+	s := newTestServer(t)
+	if _, err := note.Create(s.eng.S, "Other Note", "", nil, "cli", ""); err != nil {
+		t.Fatal(err)
+	}
+	doc, notes := s.load()
+	body := "[ext](https://example.com/x) and [[other-note]] and [anchor](#here)\n"
+	html, err := renderBody(body, doc, notes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := string(html)
+	if !strings.Contains(h, `<a href="https://example.com/x" target="_blank" rel="noopener noreferrer">`) {
+		t.Errorf("external link should open outside the app:\n%s", h)
+	}
+	// The wikilink keeps its exact form — no target/rel injected.
+	if !strings.Contains(h, `<a class="wikilink" href="/n/`) {
+		t.Errorf("wikilink should render untouched:\n%s", h)
+	}
+	if strings.Contains(h, `href="#here" target=`) {
+		t.Errorf("anchor link must NOT get target=_blank:\n%s", h)
+	}
+}
+
 func TestMermaidNotLinkifiedInFence(t *testing.T) {
 	s := newTestServer(t)
 	doc, notes := s.load()

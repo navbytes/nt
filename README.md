@@ -213,6 +213,8 @@ git clone https://github.com/navbytes/nt && cd nt && make install
 
 Single static binary for Linux & macOS (amd64/arm64). Releases are automated by GoReleaser on a `vX.Y.Z` tag ([RELEASING.md](RELEASING.md)). Homebrew is planned (`brew install navbytes/tap/nt`).
 
+**Desktop app** — each release also attaches native **`nt-desktop`** bundles (macOS / Linux / Windows): the same web UI in a native window over your local store, editing included, with **no port opened at all** (the webview talks to the Go server in-process). See [desktop/README.md](desktop/README.md).
+
 <details>
 <summary><b>Build from source / develop</b></summary>
 
