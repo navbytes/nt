@@ -6,26 +6,56 @@
   // activity) so every surface stays consistent from a single click.
   import { createMutation, useQueryClient } from "@tanstack/svelte-query";
   import { api, type Task, type TaskGroup } from "./api";
-  import { priorityClass, relativeDue, meaningfulSource } from "./text";
+  import { priorityClass, relativeDue, meaningfulSource, displayTitle } from "./text";
+  import { showToast } from "./toast.svelte";
 
   let { t, canEdit = false }: { t: Task; canEdit?: boolean } = $props();
 
   const qc = useQueryClient();
   const synced = (d: { groups: TaskGroup[] }) => {
     qc.setQueryData(["tasks"], d); // instant in any view subscribed to the task list
-    for (const k of [["review"], ["state"], ["activity"]]) {
-      qc.invalidateQueries({ queryKey: k });
+    for (const k of [["review"], ["state"], ["activity"], ["tasks-view"]]) {
+      qc.invalidateQueries({ queryKey: k }); // tasks-view: recalled saved views re-filter server-side
     }
   };
-  const doneMut = createMutation({ mutationFn: api.taskDone, onSuccess: synced });
+  // Undo the latest write via the transactional engine; the response is the
+  // fresh task groups, so the list snaps back in place. A 409 means the store
+  // moved underneath (another writer) — surface that instead of guessing.
+  async function undoLast() {
+    try {
+      synced(await api.undo());
+      showToast("Undone");
+    } catch (e) {
+      showToast(`Couldn't undo: ${String(e)}`);
+    }
+  }
+  const short = () => `“${displayTitle(t.text, 32)}”`;
+
+  const doneMut = createMutation({
+    mutationFn: api.taskDone,
+    onSuccess: (d) => {
+      synced(d);
+      showToast(`Completed ${short()}`, undoLast);
+    },
+  });
   const reopenMut = createMutation({ mutationFn: api.taskReopen, onSuccess: synced });
   const statusMut = createMutation({
     mutationFn: (a: { id: string; status: string }) => api.taskStatus(a.id, a.status),
     onSuccess: synced,
   });
-  const deleteMut = createMutation({ mutationFn: api.taskDelete, onSuccess: synced });
+  const deleteMut = createMutation({
+    mutationFn: api.taskDelete,
+    onSuccess: (d) => {
+      synced(d);
+      showToast(`Deleted ${short()}`, undoLast);
+    },
+  });
   const editMut = createMutation({
     mutationFn: (a: { id: string; text: string }) => api.taskEdit(a.id, a.text),
+    onSuccess: synced,
+  });
+  const dueMut = createMutation({
+    mutationFn: (a: { id: string; due: string }) => api.taskDue(a.id, a.due),
     onSuccess: synced,
   });
 
@@ -75,15 +105,59 @@
   function toggleDoing() {
     $statusMut.mutate({ id: t.id, status: t.status === "doing" ? "open" : "doing" });
   }
+  // No confirm() interrogation: delete acts immediately and the toast offers
+  // Undo — reversibility beats a blocking dialog (and nt undo still works).
   function del() {
-    if (confirm(`Delete task "${t.text}"? (undoable with nt undo)`)) $deleteMut.mutate(t.id);
+    $deleteMut.mutate(t.id);
+  }
+
+  // ---- quick reschedule -----------------------------------------------------
+  // A tiny preset menu (d on the focused row, or the hover button). Values are
+  // the same natural-language tokens quick-add takes; the server's dateparse
+  // resolves them, so the menu can never disagree with the store.
+  const DUE_PRESETS = [
+    { label: "Today", value: "today" },
+    { label: "Tomorrow", value: "tomorrow" },
+    { label: "Next week", value: "+7d" },
+    { label: "No date", value: "none" },
+  ];
+  let scheduling = $state(false);
+  let menuEl: HTMLElement | undefined = $state();
+  let schedRestore: HTMLElement | null = null;
+
+  function openSchedule() {
+    schedRestore = document.activeElement as HTMLElement;
+    scheduling = true;
+    queueMicrotask(() => menuEl?.querySelector("button")?.focus());
+  }
+  function closeSchedule() {
+    scheduling = false;
+    schedRestore?.focus?.();
+    schedRestore = null;
+  }
+  function pickDue(v: string) {
+    $dueMut.mutate({ id: t.id, due: v });
+    closeSchedule();
+  }
+  function onMenuKey(e: KeyboardEvent) {
+    e.stopPropagation(); // the row/list handlers must never see menu keys
+    if (e.key === "Escape") {
+      e.preventDefault();
+      closeSchedule();
+    } else if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault();
+      const items = [...(menuEl?.querySelectorAll("button") ?? [])];
+      const i = items.indexOf(document.activeElement as HTMLButtonElement);
+      const n = e.key === "ArrowDown" ? (i + 1) % items.length : (i - 1 + items.length) % items.length;
+      items[n]?.focus();
+    }
   }
 
   // Keyboard actions on the focused row (j/k focus is driven by TaskRows). Space
-  // or Enter toggles done/reopen; `e` opens the inline editor. j/k are left to
-  // bubble up to the list navigator.
+  // or Enter toggles done/reopen; `e` opens the inline editor; `d` opens the
+  // reschedule menu. j/k are left to bubble up to the list navigator.
   function onRowKey(e: KeyboardEvent) {
-    if (editing || !canEdit) return;
+    if (editing || scheduling || !canEdit) return;
     if (e.key === "Enter" || e.key === " ") {
       e.preventDefault();
       if (t.status === "done") $reopenMut.mutate(t.id);
@@ -92,6 +166,10 @@
       if (t.status === "done") return;
       e.preventDefault();
       startEdit();
+    } else if (e.key === "d") {
+      if (t.status === "done") return;
+      e.preventDefault();
+      openSchedule();
     }
   }
 </script>
@@ -148,10 +226,27 @@
     {#if src}<span class="src src--agent" title={`Captured by ${src}`}>{src}</span>{/if}
     {#if canEdit && t.status !== "done"}
       <span class="row__actions">
+        <button class="rowbtn" title="Reschedule (d)" aria-label="Reschedule task" onclick={openSchedule}>⏱</button>
         <button class="rowbtn" title="Edit text" aria-label="Edit task text" onclick={startEdit}>✎</button>
         <button class="rowbtn" title={t.status === "doing" ? "Stop (set open)" : "Start (set doing)"} onclick={toggleDoing}>◐</button>
         <button class="rowbtn rowbtn--danger" title="Delete (undoable)" onclick={del}>×</button>
       </span>
+    {/if}
+    {#if scheduling}
+      <div class="sched__backdrop" role="presentation" onclick={closeSchedule}></div>
+      <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+      <div
+        class="sched"
+        role="menu"
+        aria-label="Reschedule task"
+        tabindex="-1"
+        bind:this={menuEl}
+        onkeydown={onMenuKey}
+      >
+        {#each DUE_PRESETS as p (p.value)}
+          <button role="menuitem" class="sched__item" onclick={() => pickDue(p.value)}>{p.label}</button>
+        {/each}
+      </div>
     {/if}
   {/if}
 </li>
@@ -162,6 +257,7 @@
   .row {
     align-items: center;
     gap: 8px;
+    position: relative; /* anchors the reschedule popover */
   }
   /* Roving keyboard focus (j/k). Programmatic focus, so we style :focus directly
      rather than :focus-visible (which can skip scripted focus). */
@@ -272,6 +368,50 @@
     color: var(--red);
     font-weight: 600;
   }
+  /* Quick-reschedule popover: a small anchored menu of due presets. The fixed
+     transparent backdrop makes any outside click dismiss it. */
+  .sched__backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 19;
+  }
+  .sched {
+    position: absolute;
+    right: 8px;
+    top: calc(100% - 2px);
+    z-index: 20;
+    display: flex;
+    flex-direction: column;
+    min-width: 132px;
+    padding: 4px;
+    background: var(--bg-elev);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+  }
+  .sched:focus {
+    outline: none;
+  }
+  .sched__item {
+    text-align: left;
+    background: none;
+    border: none;
+    color: var(--fg);
+    padding: 5px 9px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 0.85rem;
+  }
+  .sched__item:hover,
+  .sched__item:focus {
+    background: var(--bg-inset);
+    outline: none;
+  }
+  .sched__item:focus-visible {
+    outline: 1px solid var(--accent);
+    outline-offset: -1px;
+  }
+
   /* Agent-captured tasks (e.g. src:claude) — nt's reason to exist; quiet, but
      legible, so you can tell what your AI session added. */
   .src--agent {

@@ -5,6 +5,7 @@
   import Sidebar from "./Sidebar.svelte";
   import CommandPalette from "./CommandPalette.svelte";
   import Shortcuts from "./Shortcuts.svelte";
+  import Toast from "./Toast.svelte";
   import { openPalette } from "./palette.svelte";
   import { shortcuts } from "./keys.svelte";
   import Home from "../routes/Home.svelte";
@@ -102,7 +103,9 @@
           <NoteView handle={noteHandle} canEdit={$stateQ.data?.canEdit ?? false} />
         {/key}
       {:else if path === "/tasks"}
-        <Tasks canEdit={$stateQ.data?.canEdit ?? false} />
+        {#key loc.query.get("view") ?? ""}
+          <Tasks canEdit={$stateQ.data?.canEdit ?? false} viewName={loc.query.get("view") ?? ""} />
+        {/key}
       {:else if path === "/review"}
         <Tasks canEdit={$stateQ.data?.canEdit ?? false} initialView="review" />
       {:else if path === "/notes" || path === "/journal"}
@@ -130,4 +133,5 @@
 
   <CommandPalette />
   <Shortcuts canEdit={$stateQ.data?.canEdit ?? false} />
+  <Toast />
 </div>

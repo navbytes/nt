@@ -50,6 +50,10 @@ What's left is a **short polish/scale tail** — no remaining item is load-beari
 - task legibility — colour-coded A/B/C priority (chip + accent bar, WCAG-AA in both themes), relative due dates (“Today”/“Tomorrow”/“3d ago”, ISO on hover), within-bucket urgency sort, and an agent-source badge that surfaces AI-captured tasks while hiding noisy `cli`/`web` origins
 - keyboard fluency — `g`-prefixed go-to chords (`g t/a/r/n/d/g/v`), `/` search, `c` capture, and a `?` shortcut cheat-sheet (modal, focus-managed); fixed the last command-palette `tabindex` a11y gap
 - quick-add live parse preview — the todo.txt shorthand resolves to priority/due/project/tag/link chips as you type, mirroring the server grammar (`internal/quickadd` + `task.ParseLine`) so the preview never drifts from what gets saved
+- one-keystroke rescheduling — `d` (or the row's ⏱ button) opens Today/Tomorrow/Next week/Clear; `POST /api/tasks/{id}` accepts NL `due`/`pri` resolved by `dateparse` server-side
+- undo toast — complete/delete act instantly with a 6s "— Undo" toast wired to `POST /api/undo` (the same transactional engine as `nt undo`; refuses with 409 rather than corrupting if the store moved); the delete `confirm()` is gone
+- **saved views surfaced in the web** — `nt view` specs appear in a sidebar Views section; `/tasks?view=<name>` applies them server-side via the new shared `view.Apply` (the CLI's `keep`/`sortTasks` moved into `internal/view`, so a named view can never filter differently across surfaces)
+- editor live preview renders Mermaid (shared `lib/mermaid` runner with the note page; theme-aware, including OS-dark with no saved toggle)
 - PWA + app icon; stable default port
 
 **TUI**
@@ -84,7 +88,7 @@ What's left is a **short polish/scale tail** — no remaining item is load-beari
 
 1. **Editor polish** — W8 (frontmatter/properties editing in the web editor). Small, high-visibility.
 2. **Robustness** — F2 (concurrency stress: concurrent add/done/archive/undo).
-3. **Surface the saved views** — T4 ships on the CLI with a surface-agnostic `internal/view` store; the TUI and web can now expose the same saved views (a view picker / palette entries). Optional follow-up.
+3. **Surface the saved views** — ✅ web shipped (sidebar Views section + server-side `view.Apply`); the TUI can adopt the same shared filter next. Optional follow-up.
 4. **Scale, only when needed** — E2 persisted index. Defer until a real >10k-note store shows a cold-start cost.
 
 Each surface change should be mirrored across CLI, TUI, web, and MCP (or explicitly deferred) — ideally via the shared query/DTO layer (E3) — to avoid the drift the core audit flagged.

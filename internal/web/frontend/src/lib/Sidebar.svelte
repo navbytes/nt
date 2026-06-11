@@ -1,7 +1,7 @@
 <script lang="ts">
   import { createQuery, useQueryClient } from "@tanstack/svelte-query";
   import { api } from "./api";
-  import { navigate } from "./router.svelte";
+  import { navigate, loc } from "./router.svelte";
   import TreeItem from "./TreeItem.svelte";
 
   let {
@@ -12,6 +12,10 @@
 
   const qc = useQueryClient();
   const notesQ = createQuery({ queryKey: ["notes"], queryFn: api.notes });
+  // Saved smart views (`nt view save …`) — the same named queries the CLI/TUI
+  // recall. The section only appears once the user has saved one.
+  const viewsQ = createQuery({ queryKey: ["views"], queryFn: api.views });
+  const activeView = $derived(path === "/tasks" ? (loc.query.get("view") ?? "") : "");
 
   let creating = $state(false);
   async function newNote() {
@@ -64,6 +68,17 @@
     {#each explore as item (item.href)}
       <a class="nav__link" class:active={isActive(item.href)} href={item.href}>{item.label}</a>
     {/each}
+    {#if ($viewsQ.data?.views ?? []).length > 0}
+      <div class="nav__label">Views</div>
+      {#each $viewsQ.data?.views ?? [] as v (v.name)}
+        <a
+          class="nav__link nav__link--view"
+          class:active={activeView === v.name}
+          href={`/tasks?view=${encodeURIComponent(v.name)}`}
+          title={v.summary}>{v.name}</a
+        >
+      {/each}
+    {/if}
   </nav>
 
   <div class="tree">

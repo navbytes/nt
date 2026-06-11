@@ -118,7 +118,8 @@ emits the snippet to paste.
 
 Tools exposed — **capture:** `nt_add`, `nt_note` (with `folder`), `nt_done`,
 `nt_update`, `nt_tag`, `nt_mv`, `nt_archive` (retire stale notes, reversible);
-**retrieve:** `nt_ready` (start here),
+**retrieve:** `nt_ready` (start here), `nt_status` (one-call project/area state),
+`nt_view` (recall the user's saved smart views — list them by calling it bare),
 `nt_recall` (incl. note bodies), `nt_log`, `nt_search` (text and/or tag),
 `nt_links` (forward links + backlinks). They go through the same locked,
 journaled engine as the CLI, default `source` to `claude`, and require **stable

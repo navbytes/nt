@@ -3,6 +3,7 @@
   import { api } from "../lib/api";
   import { noteUI } from "../lib/noteUI.svelte";
   import Editor from "../lib/Editor.svelte";
+  import { renderMermaidIn, observeTheme } from "../lib/mermaid";
 
   let { handle, canEdit = false }: { handle: string; canEdit?: boolean } = $props();
 
@@ -148,39 +149,22 @@
   }
 
   // Run Mermaid on the rendered note body — after mount / on body change, and
-  // again on theme toggle so diagrams re-render in the matching light/dark theme.
+  // again on theme toggle so diagrams re-render in the matching light/dark
+  // theme (shared with the editor's live preview via lib/mermaid).
   $effect(() => {
     const html = $noteQ.data?.bodyHTML;
     if (!html) return;
     let cancelled = false;
-
-    async function render() {
-      const el = document.querySelector(".prose");
-      if (!el) return;
-      const divs = Array.from(el.querySelectorAll<HTMLElement>(".mermaid"));
-      if (!divs.length) return;
-      const mermaid = (await import("mermaid")).default;
-      if (cancelled) return;
-      const dark = document.documentElement.getAttribute("data-theme") === "dark";
-      mermaid.initialize({ startOnLoad: false, theme: dark ? "dark" : "default" });
-      // Cache each diagram's source on first run (mermaid replaces the div's
-      // text with SVG), then restore it so a re-run picks up the new theme.
-      for (const d of divs) {
-        const src = d.getAttribute("data-src") ?? d.textContent ?? "";
-        d.setAttribute("data-src", src);
-        d.removeAttribute("data-processed");
-        d.innerHTML = src;
-      }
-      await mermaid.run({ nodes: divs });
-    }
-
+    const render = () => {
+      const el = document.querySelector<HTMLElement>(".prose");
+      if (el && !cancelled) void renderMermaidIn(el);
+    };
     const id = setTimeout(render, 0); // defer so the DOM is updated first
-    const obs = new MutationObserver(() => render());
-    obs.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme", "class"] });
+    const disconnect = observeTheme(render);
     return () => {
       cancelled = true;
       clearTimeout(id);
-      obs.disconnect();
+      disconnect();
     };
   });
 </script>

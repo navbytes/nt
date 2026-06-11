@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sort"
 	"strings"
 	"time"
 
@@ -22,6 +23,7 @@ import (
 	"github.com/navbytes/nt/internal/quickadd"
 	"github.com/navbytes/nt/internal/search"
 	"github.com/navbytes/nt/internal/task"
+	"github.com/navbytes/nt/internal/view"
 )
 
 const protocolVersion = "2024-11-05"
@@ -140,6 +142,8 @@ func (s *server) dispatch(name string, a map[string]any) (string, error) {
 		return s.ready(a)
 	case "nt_status":
 		return s.status(a)
+	case "nt_view":
+		return s.view(a)
 	case "nt_add":
 		return s.add(a)
 	case "nt_done":
@@ -194,6 +198,39 @@ func (s *server) ready(a map[string]any) (string, error) {
 	}
 	task.SortByUrgency(rows)
 	return jsonText(tasksOut(rows)), nil
+}
+
+// view recalls a saved smart view by name through the same view.Apply the CLI
+// and web use — the user's own named queries, never re-derived. Without a name
+// it lists what's saved, so an agent can discover the views before recalling.
+func (s *server) view(a map[string]any) (string, error) {
+	views, err := view.Load(s.eng.S.Dir)
+	if err != nil {
+		return "", err
+	}
+	name := str(a, "name")
+	if name == "" {
+		names := make([]string, 0, len(views))
+		for n := range views {
+			names = append(names, n)
+		}
+		sort.Strings(names)
+		out := make([]map[string]string, 0, len(names))
+		for _, n := range names {
+			out = append(out, map[string]string{"name": n, "filter": views[n].Summary()})
+		}
+		return jsonText(map[string]any{"views": out}), nil
+	}
+	spec, ok := views[name]
+	if !ok {
+		return "", fmt.Errorf("no saved view %q — call nt_view without a name to list them", name)
+	}
+	d, err := s.eng.Read()
+	if err != nil {
+		return "", err
+	}
+	all := d.Tasks()
+	return jsonText(tasksOut(view.Apply(all, spec, task.BlockedIDs(all)))), nil
 }
 
 // status synthesizes the state of a project/area in one call, so a resuming

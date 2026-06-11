@@ -2,6 +2,7 @@
   import { createQuery, useQueryClient } from "@tanstack/svelte-query";
   import { api, SaveConflict } from "./api";
   import CodeMirror from "./CodeMirror.svelte";
+  import { renderMermaidIn, observeTheme } from "./mermaid";
 
   let { handle, onClose }: { handle: string; onClose: () => void } = $props();
 
@@ -41,6 +42,23 @@
       }
     }, 250);
     return () => clearTimeout(id);
+  });
+
+  // The preview is server-rendered HTML, so ```mermaid``` fences arrive as
+  // unrendered <div class="mermaid"> blocks — run Mermaid over the pane after
+  // each preview update (and on theme toggle), exactly like the note page.
+  let previewEl: HTMLElement | undefined = $state();
+  $effect(() => {
+    void previewHTML; // re-run after {@html} patches the pane
+    const el = previewEl;
+    if (!el) return;
+    const id = setTimeout(() => void renderMermaidIn(el), 0);
+    return () => clearTimeout(id);
+  });
+  $effect(() => {
+    const el = previewEl;
+    if (!el) return;
+    return observeTheme(() => void renderMermaidIn(el));
   });
 
   async function save() {
@@ -105,7 +123,7 @@
           />
         </div>
       {/if}
-      <div class="editor__preview prose">{@html previewHTML}</div>
+      <div class="editor__preview prose" bind:this={previewEl}>{@html previewHTML}</div>
     </div>
   {/if}
 </div>

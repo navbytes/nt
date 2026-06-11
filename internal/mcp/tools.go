@@ -53,6 +53,13 @@ var toolDefs = []toolDef{
 		}),
 	},
 	{
+		Name:        "nt_view",
+		Description: "Recall one of the user's saved smart views (nt view save) — their own named task queries, filtered/sorted exactly as the CLI and web apply them. Omit name to list the saved views first.",
+		InputSchema: obj(map[string]any{
+			"name": sp("saved view name; omit to list available views"),
+		}),
+	},
+	{
 		Name:        "nt_add",
 		Description: "Capture a task. Keep text to one actionable line; put reasoning/detail in nt_note (paragraph-length text is auto-moved to a linked note). discovered_from chains work surfaced while doing another task.",
 		InputSchema: obj(map[string]any{

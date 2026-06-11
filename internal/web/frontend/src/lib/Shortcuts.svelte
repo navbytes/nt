@@ -111,6 +111,7 @@
       ? [
           { keys: ["Space"], label: "Complete / reopen" },
           { keys: ["e"], label: "Edit task" },
+          { keys: ["d"], label: "Reschedule" },
         ]
       : []),
   ]);

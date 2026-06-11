@@ -9,6 +9,7 @@ import type {
   NoteView,
   RawNote,
   TasksResponse,
+  ViewsResponse,
   ReviewResponse,
   ActivityResponse,
   SearchResponse,
@@ -61,6 +62,9 @@ export const api = {
   notesGrid: () => getJSON<NotesGrid>("/api/notes/grid"),
   note: (handle: string) => getJSON<NoteView>(`/api/notes/${encodeURIComponent(handle)}`),
   tasks: () => getJSON<TasksResponse>("/api/tasks"),
+  /** Apply a saved smart view (nt view) server-side; one group, in view order. */
+  tasksView: (name: string) => getJSON<TasksResponse>(`/api/tasks?view=${encodeURIComponent(name)}`),
+  views: () => getJSON<ViewsResponse>("/api/views"),
   review: () => getJSON<ReviewResponse>("/api/review"),
   activity: (source = "") =>
     getJSON<ActivityResponse>(
@@ -76,10 +80,16 @@ export const api = {
   journal: () => getJSON<JournalResponse>("/api/journal"),
   taskNew: (text: string) => postForm<TasksResponse>("/api/tasks", { text }),
   taskEdit: (id: string, text: string) => postForm<TasksResponse>(`/api/tasks/${id}`, { text }),
+  /** Reschedule only: due accepts the quick-add NL forms ("today", "fri 5pm",
+   *  "+7d"); "none" clears. Resolved by the server's dateparse — no client drift. */
+  taskDue: (id: string, due: string) => postForm<TasksResponse>(`/api/tasks/${id}`, { due }),
   taskDone: (id: string) => postForm<TasksResponse>(`/api/tasks/${id}/done`),
   taskReopen: (id: string) => postForm<TasksResponse>(`/api/tasks/${id}/reopen`),
   taskStatus: (id: string, status: string) =>
     postForm<TasksResponse>(`/api/tasks/${id}/status`, { status }),
+  /** Revert the latest task write (the toast's Undo). 409 = nothing to undo or
+   *  another writer changed the touched tasks (the engine refuses, never corrupts). */
+  undo: () => postForm<TasksResponse>("/api/undo"),
   taskDelete: async (id: string): Promise<TasksResponse> => {
     const r = await fetch(`/api/tasks/${id}`, { method: "DELETE", headers: { "X-CSRF": csrf } });
     if (!r.ok) throw new Error(`${(await r.text()) || r.status}`);

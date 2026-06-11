@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/navbytes/nt/internal/mutate"
+	"github.com/navbytes/nt/internal/view"
 )
 
 func newServer(t *testing.T) *server {
@@ -304,5 +305,47 @@ func TestMCPArchive(t *testing.T) {
 	}
 	if _, err := s.dispatch("nt_archive", map[string]any{"handle": "nope"}); err == nil {
 		t.Error("nt_archive should error on an unknown note")
+	}
+}
+
+// TestMCPView: nt_view lists the saved smart views and recalls one through the
+// same view.Apply as the CLI/web — so an agent sees exactly the user's query.
+func TestMCPView(t *testing.T) {
+	s := newServer(t)
+
+	// Empty store: listing works and is empty.
+	out, err := s.dispatch("nt_view", map[string]any{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, `"views": []`) {
+		t.Fatalf("empty views list, got %s", out)
+	}
+
+	// Seed tasks and a saved view.
+	s.dispatch("nt_add", map[string]any{"text": "fix auth", "tags": []any{"backend"}})
+	s.dispatch("nt_add", map[string]any{"text": "write docs", "tags": []any{"docs"}})
+	if err := view.Save(s.eng.S.Dir, map[string]view.Spec{"backend": {Tag: "backend"}}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Listing names it with its filter summary.
+	out, _ = s.dispatch("nt_view", map[string]any{})
+	if !strings.Contains(out, `"name": "backend"`) || !strings.Contains(out, "--tag backend") {
+		t.Fatalf("views list should name the view + filter, got %s", out)
+	}
+
+	// Recalling applies the filter.
+	out, err = s.dispatch("nt_view", map[string]any{"name": "backend"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "fix auth") || strings.Contains(out, "write docs") {
+		t.Fatalf("view should keep @backend and drop @docs, got %s", out)
+	}
+
+	// Unknown names error helpfully.
+	if _, err := s.dispatch("nt_view", map[string]any{"name": "nope"}); err == nil {
+		t.Fatal("unknown view should error")
 	}
 }

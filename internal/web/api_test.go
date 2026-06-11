@@ -11,6 +11,7 @@ import (
 
 	"github.com/navbytes/nt/internal/note"
 	"github.com/navbytes/nt/internal/store"
+	"github.com/navbytes/nt/internal/view"
 	"github.com/navbytes/nt/internal/web/apitypes"
 )
 
@@ -475,6 +476,145 @@ func TestAPITaskEdit(t *testing.T) {
 	}
 	if !contains(tk.Tags(), "security") || contains(tk.Tags(), "backend") {
 		t.Errorf("inline tags should re-parse (security in, backend out), got %v", tk.Tags())
+	}
+}
+
+// TestAPITaskReschedule: the edit endpoint also takes due/pri on their own —
+// natural-language values resolved server-side, "none" clearing the field, and
+// the description left untouched (the quick-reschedule wire contract).
+func TestAPITaskReschedule(t *testing.T) {
+	s := newTestServer(t)
+	s.allowEdit = true
+	id := addTask(t, s, "renew cert @ops")
+
+	// A due-only update must not require text.
+	code, body := postForm(s, "/api/tasks/"+id, s.csrf, mustValues("due", "tomorrow"))
+	if code != 200 {
+		t.Fatalf("due-only edit: %d %s", code, body)
+	}
+	tk := mustDoc(t, s).FindByID(id)
+	wantDue := time.Now().AddDate(0, 0, 1).Format("2006-01-02")
+	if tk.Due() != wantDue {
+		t.Errorf("due = %q, want %q (NL 'tomorrow' resolved server-side)", tk.Due(), wantDue)
+	}
+	if tk.Text != "renew cert @ops" {
+		t.Errorf("description must be untouched by a reschedule, got %q", tk.Text)
+	}
+
+	// "none" clears; priority sets and clears the same way.
+	if code, body := postForm(s, "/api/tasks/"+id, s.csrf, mustValues("due", "none", "pri", "high")); code != 200 {
+		t.Fatalf("clear-due+set-pri: %d %s", code, body)
+	}
+	tk = mustDoc(t, s).FindByID(id)
+	if tk.Due() != "" {
+		t.Errorf("due should be cleared, got %q", tk.Due())
+	}
+	if tk.Priority != 'A' {
+		t.Errorf("priority = %q, want A", tk.Priority)
+	}
+	if code, _ := postForm(s, "/api/tasks/"+id, s.csrf, mustValues("pri", "none")); code != 200 {
+		t.Fatal("clear-pri failed")
+	}
+	if tk = mustDoc(t, s).FindByID(id); tk.Priority != 0 {
+		t.Errorf("priority should be cleared, got %q", tk.Priority)
+	}
+
+	// Garbage is rejected before any write; nothing-at-all is a 400 too.
+	if code, _ := postForm(s, "/api/tasks/"+id, s.csrf, mustValues("due", "notaday")); code != 400 {
+		t.Errorf("bad due should 400, got %d", code)
+	}
+	if code, _ := postForm(s, "/api/tasks/"+id, s.csrf, nil); code != 400 {
+		t.Errorf("no fields should 400, got %d", code)
+	}
+}
+
+// TestAPIViews: GET /api/views lists the saved smart views, and GET
+// /api/tasks?view=<name> applies one through view.Apply — the same code path
+// as `nt view recall` — returning a single ordered group.
+func TestAPIViews(t *testing.T) {
+	s := newTestServer(t)
+	s.allowEdit = true
+	addTask(t, s, "fix auth bug @backend")
+	addTask(t, s, "write docs @docs")
+	id := addTask(t, s, "old backend chore @backend")
+	if code, _ := postForm(s, "/api/tasks/"+id+"/done", s.csrf, nil); code != 200 {
+		t.Fatal("done failed")
+	}
+
+	// No views.json yet → empty list, not an error.
+	resp, body := get(t, s, "/api/views")
+	if resp.StatusCode != 200 || !strings.Contains(body, `"views":[]`) {
+		t.Errorf("empty views: %d %s", resp.StatusCode, body)
+	}
+
+	if err := view.Save(s.eng.S.Dir, map[string]view.Spec{
+		"backend": {Tag: "backend", Sort: "urgency"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	resp, body = get(t, s, "/api/views")
+	if resp.StatusCode != 200 || !strings.Contains(body, `"name":"backend"`) {
+		t.Fatalf("views list: %d %s", resp.StatusCode, body)
+	}
+	if !strings.Contains(body, "--tag backend") {
+		t.Errorf("view summary should describe the filter, got %s", body)
+	}
+
+	// Apply it: one group named after the view, done + other-tag rows excluded.
+	resp, body = get(t, s, "/api/tasks?view=backend")
+	if resp.StatusCode != 200 {
+		t.Fatalf("tasks?view: %d %s", resp.StatusCode, body)
+	}
+	if !strings.Contains(body, `"status":"backend"`) {
+		t.Errorf("view results should come back as one group named for the view: %s", body)
+	}
+	if !strings.Contains(body, "fix auth bug") || strings.Contains(body, "write docs") {
+		t.Errorf("view should keep @backend and drop @docs: %s", body)
+	}
+	if strings.Contains(body, "old backend chore") {
+		t.Errorf("default visibility hides done tasks: %s", body)
+	}
+
+	if r, _ := get(t, s, "/api/tasks?view=nope"); r.StatusCode != 404 {
+		t.Errorf("unknown view should 404, got %d", r.StatusCode)
+	}
+}
+
+// TestAPIUndo: POST /api/undo reverts the latest write through the
+// transactional engine (the toast's "Undo" wire), is gated like every write,
+// and 409s when there's nothing to undo.
+func TestAPIUndo(t *testing.T) {
+	s := newTestServer(t)
+	s.allowEdit = true
+
+	// Nothing journaled yet → 409, not a silent no-op.
+	if code, _ := postForm(s, "/api/undo", s.csrf, nil); code != 409 {
+		t.Errorf("undo on empty journal should 409, got %d", code)
+	}
+
+	id := addTask(t, s, "ship the thing")
+	if code, _ := postForm(s, "/api/tasks/"+id+"/done", s.csrf, nil); code != 200 {
+		t.Fatal("done failed")
+	}
+	if st := mustDoc(t, s).FindByID(id).Status(); st != "done" {
+		t.Fatalf("precondition: status = %q, want done", st)
+	}
+
+	// Gate: no CSRF → 403.
+	if code, _ := postForm(s, "/api/undo", "", nil); code != 403 {
+		t.Errorf("undo without CSRF should 403, got %d", code)
+	}
+
+	// Undo the completion; the response carries the fresh groups.
+	code, body := postForm(s, "/api/undo", s.csrf, nil)
+	if code != 200 {
+		t.Fatalf("undo: %d %s", code, body)
+	}
+	if st := mustDoc(t, s).FindByID(id).Status(); st == "done" {
+		t.Errorf("undo should reopen the task, still %q", st)
+	}
+	if !strings.Contains(body, `"groups"`) {
+		t.Errorf("undo should respond with the task groups, got %s", body)
 	}
 }
 

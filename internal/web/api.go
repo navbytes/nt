@@ -17,6 +17,7 @@ import (
 	"github.com/navbytes/nt/internal/quickadd"
 	"github.com/navbytes/nt/internal/store"
 	"github.com/navbytes/nt/internal/task"
+	"github.com/navbytes/nt/internal/view"
 	"github.com/navbytes/nt/internal/web/apitypes"
 )
 
@@ -40,6 +41,7 @@ func (s *Server) apiRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/notes/{handle}/archive", s.apiNoteArchive)
 	mux.HandleFunc("POST /api/preview", s.handlePreview) // returns rendered HTML
 	mux.HandleFunc("GET /api/tasks", s.apiTasks)
+	mux.HandleFunc("GET /api/views", s.apiViews)
 	mux.HandleFunc("GET /api/review", s.apiReview)
 	mux.HandleFunc("POST /api/tasks", s.apiTaskNew)
 	mux.HandleFunc("POST /api/tasks/{id}", s.apiTaskEdit)
@@ -47,6 +49,7 @@ func (s *Server) apiRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/tasks/{id}/reopen", s.apiTaskReopen)
 	mux.HandleFunc("POST /api/tasks/{id}/status", s.apiTaskStatus)
 	mux.HandleFunc("DELETE /api/tasks/{id}", s.apiTaskDelete)
+	mux.HandleFunc("POST /api/undo", s.apiUndo)
 	mux.HandleFunc("GET /api/activity", s.apiActivity)
 	mux.HandleFunc("GET /api/search", s.apiSearch)
 	mux.HandleFunc("GET /api/tags", s.apiTags)
@@ -491,8 +494,56 @@ func (s *Server) apiNoteCreate(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, apitypes.CreatedNote{Handle: noteHandle(n), URL: "/n/" + url.PathEscape(noteHandle(n))})
 }
 
+// apiTasks returns the status-grouped task list; with ?view=<name> it instead
+// applies that saved smart view through view.Apply — the same code path as
+// `nt view recall`, so a named view can never filter differently here — and
+// returns a single group, in the view's own order.
 func (s *Server) apiTasks(w http.ResponseWriter, r *http.Request) {
+	if name := r.URL.Query().Get("view"); name != "" {
+		views, err := view.Load(s.eng.S.Dir)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		spec, ok := views[name]
+		if !ok {
+			http.Error(w, "no such view "+name, http.StatusNotFound)
+			return
+		}
+		doc := s.current().doc
+		if doc == nil {
+			writeJSON(w, apitypes.TasksResponse{Groups: []apitypes.TaskGroup{}})
+			return
+		}
+		all := doc.Tasks()
+		rows := make([]taskRow, 0)
+		for _, t := range view.Apply(all, spec, task.BlockedIDs(all)) {
+			rows = append(rows, toTaskRow(t))
+		}
+		writeJSON(w, apitypes.TasksResponse{Groups: toGroups([]taskGroup{{Status: name, Tasks: rows}})})
+		return
+	}
 	writeJSON(w, apitypes.TasksResponse{Groups: toGroups(buildTaskGroups(s.current().doc))})
+}
+
+// apiViews lists the saved smart views (`nt view save`) so the sidebar can
+// offer them; names are sorted for a stable UI.
+func (s *Server) apiViews(w http.ResponseWriter, _ *http.Request) {
+	views, err := view.Load(s.eng.S.Dir)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	names := make([]string, 0, len(views))
+	for n := range views {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	out := make([]apitypes.ViewInfo, 0, len(names))
+	for _, n := range names {
+		out = append(out, apitypes.ViewInfo{Name: n, Summary: views[n].Summary()})
+	}
+	writeJSON(w, apitypes.ViewsResponse{Views: out})
 }
 
 func (s *Server) apiActivity(w http.ResponseWriter, r *http.Request) {
@@ -743,15 +794,42 @@ func (s *Server) apiTaskStatus(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// apiTaskEdit replaces a task's description text, preserving its id, due,
-// priority, status, source, and creation time (SetText only touches the
-// description — inline +project/@tag in the new text are re-parsed on the next
-// read, the metadata is not). This is the web face of `nt edit` for a task.
+// apiTaskEdit updates a task's description text and/or its due date and
+// priority, preserving everything it doesn't touch (id, status, source,
+// creation time). text replaces the description only (inline +project/@tag in
+// the new text are re-parsed on the next read); due/pri accept the same
+// natural-language values as quick-add ("today", "fri 5pm", "high") and resolve
+// through dateparse server-side — "none" (or empty) clears the field. At least
+// one of the three must be supplied. This is the web face of `nt edit`/`nt
+// update` for a task.
 func (s *Server) apiTaskEdit(w http.ResponseWriter, r *http.Request) {
-	text := strings.TrimSpace(r.FormValue("text"))
-	if text == "" {
-		http.Error(w, "task text is required", http.StatusBadRequest)
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "bad form", http.StatusBadRequest)
 		return
+	}
+	text := strings.TrimSpace(r.FormValue("text"))
+	hasDue, hasPri := r.Form.Has("due"), r.Form.Has("pri")
+	if text == "" && !hasDue && !hasPri {
+		http.Error(w, "nothing to update: provide text, due, or pri", http.StatusBadRequest)
+		return
+	}
+	dueVal := ""
+	if hasDue {
+		v, ok := dateparse.Date(r.FormValue("due"))
+		if !ok {
+			http.Error(w, "invalid due date", http.StatusBadRequest)
+			return
+		}
+		dueVal = v // "" clears (SetKey deletes empty values)
+	}
+	priByte := byte(0)
+	if hasPri {
+		p, ok := dateparse.Priority(r.FormValue("pri"))
+		if !ok {
+			http.Error(w, "invalid priority", http.StatusBadRequest)
+			return
+		}
+		priByte = p // 0 clears
 	}
 	if s.doTaskWrite(w, r, "edit", func(d *task.Doc, rec *mutate.Recorder) error {
 		t, err := resolveTask(d, r)
@@ -759,11 +837,48 @@ func (s *Server) apiTaskEdit(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 		rec.Before(t)
-		t.SetText(text)
+		if text != "" {
+			t.SetText(text)
+		}
+		if hasDue {
+			t.SetKey("due", dueVal)
+		}
+		if hasPri {
+			t.SetPriority(priByte)
+		}
 		return nil
 	}) {
 		s.respondTasks(w)
 	}
+}
+
+// apiUndo reverts the most recent task write through the same transactional
+// engine as `nt undo` — gated like every other write. Under the lock the engine
+// validates the recorded post-image and refuses rather than corrupting state if
+// another writer (a CLI call, an AI session) changed the touched tasks in the
+// meantime; that refusal surfaces as 409 so the UI can say "store changed".
+func (s *Server) apiUndo(w http.ResponseWriter, r *http.Request) {
+	if !s.allowEdit {
+		http.Error(w, "editing is disabled — start with `nt web --edit`", http.StatusForbidden)
+		return
+	}
+	if r.Header.Get("X-CSRF") != s.csrf {
+		http.Error(w, "bad or missing CSRF token", http.StatusForbidden)
+		return
+	}
+	s.writes.mark(s.eng.S.TasksFile())
+	_, did, err := s.eng.Undo()
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusConflict)
+		return
+	}
+	if !did {
+		http.Error(w, "nothing to undo", http.StatusConflict)
+		return
+	}
+	s.rebuild()
+	s.hub.broadcast("tasks")
+	s.respondTasks(w)
 }
 
 func (s *Server) apiTaskDelete(w http.ResponseWriter, r *http.Request) {
