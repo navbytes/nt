@@ -87,6 +87,10 @@ export const api = {
   taskReopen: (id: string) => postForm<TasksResponse>(`/api/tasks/${id}/reopen`),
   taskStatus: (id: string, status: string) =>
     postForm<TasksResponse>(`/api/tasks/${id}/status`, { status }),
+  /** Apply one action to many tasks in a SINGLE transaction (so one undo reverts
+   *  the whole batch). action: "done" | "delete" | "due"; due takes NL forms. */
+  taskBulk: (action: "done" | "delete" | "due", ids: string[], due = "") =>
+    postForm<TasksResponse>("/api/tasks/bulk", { action, ids: ids.join(","), ...(action === "due" ? { due } : {}) }),
   /** Revert the latest task write (the toast's Undo). 409 = nothing to undo or
    *  another writer changed the touched tasks (the engine refuses, never corrupts). */
   undo: () => postForm<TasksResponse>("/api/undo"),
