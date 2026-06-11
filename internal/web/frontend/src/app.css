@@ -783,6 +783,36 @@ code {
   font-size: 11px;
   color: var(--muted);
 }
+/* the × to remove a tag in the note editor's frontmatter tag chips (W9) */
+.tagchip__x {
+  background: none;
+  border: none;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  padding: 0;
+}
+.tagchip__x:hover {
+  color: var(--red);
+}
+.tagchip__x:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.tagadd input {
+  width: 96px;
+  padding: 3px 8px;
+  font-size: 13px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  color: var(--fg);
+}
+.tagadd input:focus {
+  outline: none;
+  border-color: var(--accent);
+}
 
 /* ---- command palette ---- */
 .palette-btn {

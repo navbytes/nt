@@ -30,7 +30,7 @@ surface, sized S/M/L, and sequenced so each lands as its own green-CI PR.
 
 | # | Item | Effort | Status |
 |---|------|--------|--------|
-| W9 | Frontmatter/properties editing in the web editor (the roadmap's long-standing W8 partial) | M | ⬜ |
+| W9 | Frontmatter tag editing in the web editor — chip add/remove via POST /api/notes/{handle}/tags (body + unmodeled keys preserved); CodeMirror now reflects external buffer changes | M | ✅ |
 | W10 | Today "plan my day": capacity bar summing `est:` against a configurable daily budget | M | ✅ |
 | W11 | Bulk actions — `x` multi-select on task rows, then one action completes/reschedules/deletes the set in a single undoable transaction | M | ✅ |
 | W12 | Quick filter box on /tasks (`@tag +project text`, client-side, same grammar as quick-add chips) | S | ✅ |

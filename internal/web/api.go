@@ -39,6 +39,7 @@ func (s *Server) apiRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/notes/{handle}", s.apiNoteSave)
 	mux.HandleFunc("POST /api/notes/{handle}/move", s.apiNoteMove)
 	mux.HandleFunc("POST /api/notes/{handle}/archive", s.apiNoteArchive)
+	mux.HandleFunc("POST /api/notes/{handle}/tags", s.apiNoteTags)
 	mux.HandleFunc("POST /api/preview", s.handlePreview) // returns rendered HTML
 	mux.HandleFunc("GET /api/tasks", s.apiTasks)
 	mux.HandleFunc("GET /api/views", s.apiViews)
@@ -455,6 +456,73 @@ func (s *Server) apiNoteArchive(w http.ResponseWriter, r *http.Request) {
 	s.rebuild()
 	s.hub.broadcast("reload") // sidebar/grid/graph drop or restore the note
 	writeJSON(w, apitypes.ArchivedNote{Handle: noteHandle(fresh), Archived: want})
+}
+
+// apiNoteTags adds and/or removes @tags on a note's frontmatter without touching
+// the body (the structured alternative to hand-editing YAML — W9). It loads the
+// note fresh, applies add/remove, and re-saves; note.Save preserves the body and
+// every frontmatter key nt doesn't model (Extra). Mirrors `nt tag` / nt_tag, so
+// the same edit lands identically across surfaces.
+func (s *Server) apiNoteTags(w http.ResponseWriter, r *http.Request) {
+	if !s.allowEdit {
+		http.Error(w, "editing is disabled — start with `nt web --edit`", http.StatusForbidden)
+		return
+	}
+	if r.Header.Get("X-CSRF") != s.csrf {
+		http.Error(w, "bad or missing CSRF token", http.StatusForbidden)
+		return
+	}
+	n := s.current().findHandle(r.PathValue("handle"))
+	if n == nil {
+		http.NotFound(w, r)
+		return
+	}
+	add := splitTags(r.FormValue("add"))
+	remove := splitTags(r.FormValue("remove"))
+	if len(add) == 0 && len(remove) == 0 {
+		http.Error(w, "provide add and/or remove", http.StatusBadRequest)
+		return
+	}
+	fresh, err := note.Load(n.Path)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	for _, tg := range add {
+		if !contains(fresh.Tags, tg) {
+			fresh.Tags = append(fresh.Tags, tg)
+		}
+	}
+	if len(remove) > 0 {
+		kept := fresh.Tags[:0:0]
+		for _, tg := range fresh.Tags {
+			if !contains(remove, tg) {
+				kept = append(kept, tg)
+			}
+		}
+		fresh.Tags = kept
+	}
+	fresh.Updated = time.Now().Format(time.RFC3339)
+	if err := fresh.Save(); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	s.writes.mark(fresh.Path)
+	s.rebuild()
+	s.hub.broadcast("reload")
+	writeJSON(w, apitypes.NoteTags{Handle: noteHandle(fresh), Tags: fresh.Tags})
+}
+
+// splitTags parses a comma/space-separated tag list, dropping a leading @ and
+// any blanks: "@auth, security  web" → ["auth","security","web"].
+func splitTags(s string) []string {
+	out := []string{}
+	for _, f := range strings.FieldsFunc(s, func(r rune) bool { return r == ',' || r == ' ' || r == '\t' }) {
+		if tg := strings.TrimPrefix(strings.TrimSpace(f), "@"); tg != "" {
+			out = append(out, tg)
+		}
+	}
+	return out
 }
 
 // apiNoteCreate creates a new note (--edit + CSRF gated) and returns its handle

@@ -290,6 +290,13 @@ export interface ArchivedNote {
   archived: boolean;
 }
 /**
+ * NoteTags is POST /api/notes/{handle}/tags — the note's tags after the edit.
+ */
+export interface NoteTags {
+  handle: string;
+  tags: string[];
+}
+/**
  * JournalDay is one existing daily note (date + the note's stable handle).
  */
 export interface JournalDay {
