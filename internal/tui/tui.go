@@ -114,11 +114,11 @@ type Model struct {
 	scopeProject  string // active +project scope; "" = none
 	viewName      string // active saved smart view (nt view); "" = none
 	viewSpec      view.Spec
-	detailFocus   bool   // detail pane is focused: j/k scroll the body, not the list
-	detailScroll  int    // scroll offset within the focused detail pane
-	splitPct      int    // wide-mode list width as a % of the terminal (resizable)
-	draggingSplit bool   // a mouse drag on the divider is in progress
-	locked        bool   // read-only lock: mutating keys are swallowed (ctrl+l)
+	detailFocus   bool // detail pane is focused: j/k scroll the body, not the list
+	detailScroll  int  // scroll offset within the focused detail pane
+	splitPct      int  // wide-mode list width as a % of the terminal (resizable)
+	draggingSplit bool // a mouse drag on the divider is in progress
+	locked        bool // read-only lock: mutating keys are swallowed (ctrl+l)
 	help          bool
 	helpScroll    int  // scroll offset within the help overlay
 	ready         bool // gates key input until startup terminal-query noise settles

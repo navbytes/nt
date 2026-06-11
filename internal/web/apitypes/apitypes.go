@@ -7,14 +7,14 @@ package apitypes
 
 // State is GET /api/state — capabilities + headline counts for the shell.
 type State struct {
-	CanEdit   bool     `json:"canEdit"`
-	CSRF      string   `json:"csrf"` // echo as X-CSRF on writes; "" when read-only
-	Version   string   `json:"version"`
-	OpenCount int      `json:"openCount"`
-	NoteCount int      `json:"noteCount"`
-	Sources   []string `json:"sources"`
-	Warning   string   `json:"warning,omitempty"` // non-empty when the store couldn't be fully read
-	DayBudgetMin int   `json:"dayBudgetMin"` // Today capacity-bar budget in minutes ([web] day_budget_minutes; default 360)
+	CanEdit      bool     `json:"canEdit"`
+	CSRF         string   `json:"csrf"` // echo as X-CSRF on writes; "" when read-only
+	Version      string   `json:"version"`
+	OpenCount    int      `json:"openCount"`
+	NoteCount    int      `json:"noteCount"`
+	Sources      []string `json:"sources"`
+	Warning      string   `json:"warning,omitempty"` // non-empty when the store couldn't be fully read
+	DayBudgetMin int      `json:"dayBudgetMin"`      // Today capacity-bar budget in minutes ([web] day_budget_minutes; default 360)
 }
 
 // NoteLink is a link to a note (sidebar index, search results, prev/next).
