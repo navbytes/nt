@@ -6,6 +6,8 @@
 // The pure pieces (goTarget, isTextEntry) are exported so they can be unit-tested
 // without a DOM event loop; the wiring lives in Shortcuts.svelte.
 
+import { navigate } from "./router.svelte";
+
 // Reactive flag for the `?` cheat-sheet overlay.
 export const shortcuts = $state({ open: false });
 
@@ -36,4 +38,18 @@ export function isTextEntry(el: EventTarget | null): boolean {
   if (el.isContentEditable) return true;
   const tag = el.tagName;
   return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT";
+}
+
+// captureTask puts the cursor in a task quick-add box: the on-page one if the
+// current view has one, else Tasks' (navigating there first and focusing once
+// it mounts). Shared by the `c` shortcut and the palette's "New task" — no
+// prompt() involved, so it works in webviews (the desktop app) too.
+export function captureTask(): void {
+  const focus = () => document.querySelector<HTMLInputElement>(".taskadd input")?.focus();
+  if (document.querySelector(".taskadd input")) {
+    focus();
+    return;
+  }
+  navigate("/tasks");
+  setTimeout(focus, 120); // give the route a beat to mount its add box
 }

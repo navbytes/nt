@@ -10,6 +10,48 @@ The original gap — "nt is a task *list*, not a task *manager*" — is **closed
 
 What's left is a **short polish/scale tail** — no remaining item is load-bearing for the core thesis: partial refinements (tasks in web search, web property editing, fuzzy filter ranking, more concurrency tests, TUI self-write de-flicker) and one deliberately-deferred scale item (**E2** persisted index, which only pays off past ~10k notes). With **T4** (saved smart views) now shipped, there is no net-new *feature* left on the backlog.
 
+## 🧭 Next up — grouped roadmap (2026-06-11)
+
+The audit backlog is closed; this is the forward plan. Items are grouped by
+surface, sized S/M/L, and sequenced so each lands as its own green-CI PR.
+
+### Group D — Desktop parity (goal: at least as rich as the web)
+
+| # | Item | Effort | Status |
+|---|------|--------|--------|
+| D1 | Enable editing in the desktop shell (`SetEdit(true)`) — full web UX (quick-add, complete/reschedule/undo, editor) with a stronger trust model (no TCP port at all) | S | ✅ |
+| D2 | Webview-safe dialogs — replace every `prompt()`/`alert()`/`confirm()` (webviews don't implement them): inline sidebar note creation, palette "New task" → quick-add focus, Board delete → undo toast | M | ✅ |
+| D3 | macOS App + Edit menus (⌘C/⌘V are dead keys in WKWebView without one), system light/dark appearance, standard title bar (no traffic-light overlap) | S | ✅ |
+| D4 | External links from notes open in the system browser, not inside the webview (no back button there); web gets `target=_blank rel=noopener` on external links too | M | ⬜ |
+| D5 | Window-state persistence (size/position across launches) — needs Wails bindings | M | ⬜ |
+| D6 | About panel + version, app-icon polish | S | ⬜ |
+
+### Group W — Web polish
+
+| # | Item | Effort | Status |
+|---|------|--------|--------|
+| W9 | Frontmatter/properties editing in the web editor (the roadmap's long-standing W8 partial) | M | ⬜ |
+| W10 | Today "plan my day": capacity bar summing `est:` against a configurable daily budget | M | ⬜ |
+| W11 | Bulk actions — `x` multi-select on task rows, then one keystroke completes/reschedules/deletes the set | M | ⬜ |
+| W12 | Quick filter box on /tasks (`@tag +project text`, client-side, same grammar as quick-add chips) | S | ⬜ |
+
+### Group T — TUI parity
+
+| # | Item | Effort | Status |
+|---|------|--------|--------|
+| T10 | Saved views in the TUI — a view picker in the `:` palette running the shared `view.Apply` | M | ⬜ |
+| T11 | One-key reschedule in the TUI (`d` → today/tomorrow/next week via `dateparse`) | S | ⬜ |
+
+### Group R — Release & docs
+
+| # | Item | Effort | Status |
+|---|------|--------|--------|
+| R1 | CI compile check for the desktop module on PRs (it's a nested module, invisible to `./...` — only release tags exercise it today) | S | ⬜ |
+| R2 | README: desktop app install section (bundles exist per release but the README never mentions them) | S | ⬜ |
+| R3 | Refresh docs/screenshots (pre-date the priority chips / relative dates / views sidebar) | S | ⬜ |
+
+Sequencing: D1–D3 (one PR, done) → D4+R1+R2 (one PR) → T10(+T11) → W10 → W11 → W12 → W9 → D5/D6/R3 as time allows. Each PR merges only on green CI.
+
 ## ✅ Shipped
 
 **Foundation / correctness**
