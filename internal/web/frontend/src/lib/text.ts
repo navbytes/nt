@@ -112,3 +112,16 @@ export function meaningfulSource(s?: string): string {
   if (!s) return "";
   return QUIET_SOURCES.has(s.toLowerCase()) ? "" : s;
 }
+
+// ---- durations -----------------------------------------------------------
+
+// fmtDuration renders whole minutes as a compact "1h 30m" / "2h" / "45m" — the
+// client mirror of Go's dateparse.FmtDuration (with a thin space for the web).
+export function fmtDuration(mins: number): string {
+  if (mins <= 0) return "0m";
+  const h = Math.floor(mins / 60);
+  const m = mins % 60;
+  if (h === 0) return `${m}m`;
+  if (m === 0) return `${h}h`;
+  return `${h}h ${m}m`;
+}

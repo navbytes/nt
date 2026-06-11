@@ -613,6 +613,8 @@ func (m *Model) backOut() bool {
 		m.setStatus("filter cleared")
 	case m.scopeTag != "" || m.scopeProject != "":
 		m.clearScope()
+	case m.viewName != "":
+		m.clearView()
 	default:
 		return false
 	}

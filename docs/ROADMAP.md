@@ -31,7 +31,7 @@ surface, sized S/M/L, and sequenced so each lands as its own green-CI PR.
 | # | Item | Effort | Status |
 |---|------|--------|--------|
 | W9 | Frontmatter/properties editing in the web editor (the roadmap's long-standing W8 partial) | M | ⬜ |
-| W10 | Today "plan my day": capacity bar summing `est:` against a configurable daily budget | M | ⬜ |
+| W10 | Today "plan my day": capacity bar summing `est:` against a configurable daily budget | M | ✅ |
 | W11 | Bulk actions — `x` multi-select on task rows, then one keystroke completes/reschedules/deletes the set | M | ⬜ |
 | W12 | Quick filter box on /tasks (`@tag +project text`, client-side, same grammar as quick-add chips) | S | ⬜ |
 
@@ -39,8 +39,8 @@ surface, sized S/M/L, and sequenced so each lands as its own green-CI PR.
 
 | # | Item | Effort | Status |
 |---|------|--------|--------|
-| T10 | Saved views in the TUI — a view picker in the `:` palette running the shared `view.Apply` | M | ⬜ |
-| T11 | One-key reschedule in the TUI (`d` → today/tomorrow/next week via `dateparse`) | S | ⬜ |
+| T10 | Saved views in the TUI — a view picker in the `:` palette running the shared `view.Apply` | M | ✅ |
+| T11 | One-key reschedule in the TUI — covered: `D` already opens a due prompt with NL dates (today/fri/+3d); a `d` menu would clash with the `dd` done-chord | S | ✖ dropped |
 
 ### Group R — Release & docs
 

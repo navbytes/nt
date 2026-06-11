@@ -21,6 +21,8 @@ import (
 	"sync"
 	"syscall"
 
+	"github.com/navbytes/nt/internal/config"
+	"github.com/navbytes/nt/internal/dateparse"
 	"github.com/navbytes/nt/internal/links"
 	"github.com/navbytes/nt/internal/mutate"
 	"github.com/navbytes/nt/internal/note"
@@ -38,6 +40,7 @@ type Server struct {
 	hlETag    string // content-hash ETag for highlight.css (for 304s)
 	allowEdit bool   // writes enabled (nt web --edit); read-only by default
 	csrf      string // per-process token required on save (blocks cross-site POSTs)
+	dayBudget int    // Today capacity-bar budget in minutes ([web] day_budget_minutes; 0 ⇒ default 360)
 
 	notes *note.Cache // mtime-keyed parse cache: rebuilds re-read only changed notes
 
@@ -55,6 +58,9 @@ func NewServer(eng *mutate.Engine, version string) (*Server, error) {
 		hlCSS: css, hlETag: etag([]byte(css)),
 		csrf: randToken(), writes: newWriteTracker(),
 		notes: note.NewCache(),
+	}
+	if cfg, err := config.Load(eng.S.Dir); err == nil {
+		s.dayBudget = cfg.WebDayBudget
 	}
 	s.snap = buildSnapshot(eng, s.notes) // warm the read-model so the first request is fast
 	return s, nil
@@ -208,6 +214,7 @@ type taskRow struct {
 	Blocker  string   `json:"blocker,omitempty"`
 	Recur    bool     `json:"recur,omitempty"`
 	Priority string   `json:"priority,omitempty"`
+	Est      int      `json:"est,omitempty"`
 }
 
 // ---- handlers -------------------------------------------------------------
@@ -371,6 +378,9 @@ func toTaskRow(t *task.Task) taskRow {
 	}
 	if p := t.Projects(); len(p) > 0 {
 		row.Project = p[0]
+	}
+	if mins, ok := dateparse.Duration(t.Key("est")); ok {
+		row.Est = mins
 	}
 	return row
 }

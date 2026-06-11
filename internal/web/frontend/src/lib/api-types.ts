@@ -23,6 +23,7 @@ export interface State {
   noteCount: number /* int */;
   sources: string[];
   warning?: string; // non-empty when the store couldn't be fully read
+  dayBudgetMin: number /* int */; // Today capacity-bar budget in minutes ([web] day_budget_minutes; default 360)
 }
 /**
  * NoteLink is a link to a note (sidebar index, search results, prev/next).
@@ -63,6 +64,7 @@ export interface Task {
   tags?: string[];
   blocker?: string;
   recur?: boolean; // true when the task repeats (todo.txt rec:)
+  est?: number /* int */; // time estimate in whole minutes (todo.txt est:), 0 = none
 }
 /**
  * TaskGroup is tasks bucketed by status (open/doing/blocked/done).

@@ -80,7 +80,7 @@ const maxSearchResults = 50
 func toTask(t taskRow) apitypes.Task {
 	return apitypes.Task{
 		ID: t.ID, Text: t.Text, Status: t.Status, Priority: t.Priority, Due: t.Due,
-		Source: t.Source, Project: t.Project, Tags: t.Tags, Blocker: t.Blocker, Recur: t.Recur,
+		Source: t.Source, Project: t.Project, Tags: t.Tags, Blocker: t.Blocker, Recur: t.Recur, Est: t.Est,
 	}
 }
 
@@ -174,14 +174,19 @@ func (s *Server) apiState(w http.ResponseWriter, r *http.Request) {
 	if s.allowEdit {
 		csrf = s.csrf
 	}
+	budget := s.dayBudget
+	if budget <= 0 {
+		budget = 360 // 6h default working day
+	}
 	writeJSON(w, apitypes.State{
-		CanEdit:   s.allowEdit,
-		CSRF:      csrf,
-		Version:   s.version,
-		OpenCount: open,
-		NoteCount: len(snap.active),
-		Sources:   snap.sources,
-		Warning:   snap.readErr,
+		CanEdit:      s.allowEdit,
+		CSRF:         csrf,
+		Version:      s.version,
+		OpenCount:    open,
+		NoteCount:    len(snap.active),
+		Sources:      snap.sources,
+		Warning:      snap.readErr,
+		DayBudgetMin: budget,
 	})
 }
 
