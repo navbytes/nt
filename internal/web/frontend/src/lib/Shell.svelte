@@ -4,7 +4,9 @@
   import { loc, navigate } from "./router.svelte";
   import Sidebar from "./Sidebar.svelte";
   import CommandPalette from "./CommandPalette.svelte";
+  import Shortcuts from "./Shortcuts.svelte";
   import { openPalette } from "./palette.svelte";
+  import { shortcuts } from "./keys.svelte";
   import Home from "../routes/Home.svelte";
   import NoteView from "../routes/NoteView.svelte";
   import Tasks from "../routes/Tasks.svelte";
@@ -79,6 +81,12 @@
         <span class="stat"><strong>{$stateQ.data.noteCount}</strong> notes</span>
         {#if $stateQ.data.canEdit}<span class="badge">edit</span>{/if}
       {/if}
+      <button
+        class="icon-btn"
+        onclick={() => (shortcuts.open = true)}
+        title="Keyboard shortcuts (?)"
+        aria-label="Keyboard shortcuts">?</button
+      >
       <button class="icon-btn" onclick={toggleTheme} title="Toggle theme" aria-label="Toggle light/dark theme">◐</button>
     </header>
 
@@ -121,4 +129,5 @@
   <button class="fab" aria-label="New task" title="New task" onclick={() => navigate("/tasks")}>＋</button>
 
   <CommandPalette />
+  <Shortcuts canEdit={$stateQ.data?.canEdit ?? false} />
 </div>

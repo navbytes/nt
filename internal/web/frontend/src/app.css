@@ -13,6 +13,12 @@
   --accent-2: #1f7a8c;
   --green: #4a7c3a;
   --red: #b3472f;
+  /* task priority bands — deep enough that white chip text clears WCAG AA;
+     A reuses the warning red so red stays reserved for "most urgent". */
+  --pri-a: #b3472f;
+  --pri-b: #a8620a;
+  --pri-c: #3b6fb0;
+  --pri-fg: #fff;
   --radius: 8px;
   --radius-sm: 5px;
   --sidebar-w: 260px;
@@ -37,6 +43,11 @@
     --accent-2: #7dcfff;
     --green: #9ece6a;
     --red: #f7768e;
+    /* on dark, Tokyo Night brights carry the band and dark chip text clears AA */
+    --pri-a: #f7768e;
+    --pri-b: #e0af68;
+    --pri-c: #7aa2f7;
+    --pri-fg: #16161e;
     --graph-bg-edge: rgba(0, 0, 0, 0.5); /* deeper vignette for "cosmos" depth */
     --graph-glow-alpha: 0.6; /* additive glow reads brighter on dark */
     --graph-glow-blur: 10;
@@ -55,6 +66,10 @@
   --accent-2: #7dcfff;
   --green: #9ece6a;
   --red: #f7768e;
+  --pri-a: #f7768e;
+  --pri-b: #e0af68;
+  --pri-c: #7aa2f7;
+  --pri-fg: #16161e;
   --graph-bg-edge: rgba(0, 0, 0, 0.5);
   --graph-glow-alpha: 0.6;
   --graph-glow-blur: 10;
@@ -407,6 +422,33 @@ code {
 }
 .chip--more {
   color: var(--muted); /* the "+N" overflow chip on capped tag lists */
+}
+/* Priority letter chip — a shared primitive (task rows + the quick-add preview).
+   Shape + letter carry urgency so it never relies on colour alone; the band
+   colours and chip text are theme-tuned in :root for WCAG AA. */
+.pri {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.66rem;
+  font-weight: 700;
+  border-radius: var(--radius-sm);
+  color: var(--pri-fg);
+}
+.pri--a {
+  background: var(--pri-a);
+}
+.pri--b {
+  background: var(--pri-b);
+}
+.pri--c {
+  background: var(--pri-c);
+}
+.pri--rest {
+  background: var(--muted);
 }
 .empty {
   max-width: 46ch;

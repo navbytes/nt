@@ -1,5 +1,12 @@
 import { describe, it, expect } from "vitest";
-import { displayTitle } from "../lib/text";
+import {
+  displayTitle,
+  priorityClass,
+  priorityRank,
+  fmtTime,
+  relativeDue,
+  meaningfulSource,
+} from "../lib/text";
 
 describe("displayTitle", () => {
   it("returns short text unchanged", () => {
@@ -22,5 +29,84 @@ describe("displayTitle", () => {
 
   it("collapses whitespace", () => {
     expect(displayTitle("a   b\n c", 60)).toBe("a b c");
+  });
+});
+
+describe("priorityClass / priorityRank", () => {
+  it("maps the first three letters to distinct classes", () => {
+    expect(priorityClass("A")).toBe("a");
+    expect(priorityClass("b")).toBe("b"); // case-insensitive
+    expect(priorityClass("C")).toBe("c");
+  });
+  it("folds D–Z into one muted class and ignores junk", () => {
+    expect(priorityClass("D")).toBe("rest");
+    expect(priorityClass("Z")).toBe("rest");
+    expect(priorityClass("")).toBe("");
+    expect(priorityClass(undefined)).toBe("");
+    expect(priorityClass("1")).toBe("");
+  });
+  it("ranks A highest and no-priority last", () => {
+    expect(priorityRank("A")).toBe(0);
+    expect(priorityRank("C")).toBe(2);
+    expect(priorityRank(undefined)).toBe(99);
+    expect(priorityRank("A")).toBeLessThan(priorityRank("B"));
+    expect(priorityRank("Z")).toBeLessThan(priorityRank(undefined));
+  });
+});
+
+describe("fmtTime", () => {
+  it("renders terse 12h times", () => {
+    expect(fmtTime("17:00")).toBe("5pm");
+    expect(fmtTime("17:30")).toBe("5:30pm");
+    expect(fmtTime("09:05")).toBe("9:05am");
+    expect(fmtTime("00:00")).toBe("12am");
+    expect(fmtTime("12:00")).toBe("12pm");
+  });
+  it("rejects nonsense", () => {
+    expect(fmtTime("")).toBe("");
+    expect(fmtTime("25:00")).toBe("");
+    expect(fmtTime("nope")).toBe("");
+  });
+});
+
+describe("relativeDue", () => {
+  const now = new Date(2026, 5, 11); // Thu Jun 11 2026 (month is 0-based)
+
+  it("names today, tomorrow, and yesterday", () => {
+    expect(relativeDue("2026-06-11", now).label).toBe("Today");
+    expect(relativeDue("2026-06-12", now).label).toBe("Tomorrow");
+    expect(relativeDue("2026-06-10", now).label).toBe("Yesterday");
+  });
+  it("appends a time only for today/tomorrow", () => {
+    expect(relativeDue("2026-06-11T17:00", now).label).toBe("Today 5pm");
+    expect(relativeDue("2026-06-12T09:30", now).label).toBe("Tomorrow 9:30am");
+    expect(relativeDue("2026-06-13T09:30", now).label).toBe("Sat"); // time dropped further out
+  });
+  it("uses the weekday for the coming week and Nd ago for the recent past", () => {
+    expect(relativeDue("2026-06-13", now).label).toBe("Sat");
+    expect(relativeDue("2026-06-08", now).label).toBe("3d ago");
+  });
+  it("falls back to an absolute date further out, with year only when it differs", () => {
+    expect(relativeDue("2026-06-20", now).label).toBe("Jun 20");
+    expect(relativeDue("2027-01-02", now).label).toBe("Jan 2 2027");
+  });
+  it("flags overdue (date-only) and soon", () => {
+    expect(relativeDue("2026-06-10", now).overdue).toBe(true);
+    expect(relativeDue("2026-06-11", now).overdue).toBe(false); // due today isn't overdue yet
+    expect(relativeDue("2026-06-11", now).soon).toBe(true);
+    expect(relativeDue("2026-06-12", now).soon).toBe(true);
+    expect(relativeDue("2026-06-15", now).soon).toBe(false);
+  });
+});
+
+describe("meaningfulSource", () => {
+  it("hides default human/CLI origins", () => {
+    for (const s of ["", "cli", "web", "tui", "user", "CLI"]) {
+      expect(meaningfulSource(s)).toBe("");
+    }
+  });
+  it("surfaces agent and other origins", () => {
+    expect(meaningfulSource("claude")).toBe("claude");
+    expect(meaningfulSource("cursor")).toBe("cursor");
   });
 });

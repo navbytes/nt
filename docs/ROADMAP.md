@@ -47,6 +47,9 @@ What's left is a **short polish/scale tail** — no remaining item is load-beari
 - move a note between folders — picker on the note page + `Move note…` palette action; `[[links]]` rewritten ([#59](https://github.com/navbytes/nt/pull/59))
 - notes grid view (`/notes`) — folder filter, sort, Cards/Compact density toggle ([#60](https://github.com/navbytes/nt/pull/60))
 - display-only truncation of long task text in the graph + lists ([#58](https://github.com/navbytes/nt/pull/58))
+- task legibility — colour-coded A/B/C priority (chip + accent bar, WCAG-AA in both themes), relative due dates (“Today”/“Tomorrow”/“3d ago”, ISO on hover), within-bucket urgency sort, and an agent-source badge that surfaces AI-captured tasks while hiding noisy `cli`/`web` origins
+- keyboard fluency — `g`-prefixed go-to chords (`g t/a/r/n/d/g/v`), `/` search, `c` capture, and a `?` shortcut cheat-sheet (modal, focus-managed); fixed the last command-palette `tabindex` a11y gap
+- quick-add live parse preview — the todo.txt shorthand resolves to priority/due/project/tag/link chips as you type, mirroring the server grammar (`internal/quickadd` + `task.ParseLine`) so the preview never drifts from what gets saved
 - PWA + app icon; stable default port
 
 **TUI**

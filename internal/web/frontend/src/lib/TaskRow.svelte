@@ -6,6 +6,7 @@
   // activity) so every surface stays consistent from a single click.
   import { createMutation, useQueryClient } from "@tanstack/svelte-query";
   import { api, type Task, type TaskGroup } from "./api";
+  import { priorityClass, relativeDue, meaningfulSource } from "./text";
 
   let { t, canEdit = false }: { t: Task; canEdit?: boolean } = $props();
 
@@ -63,14 +64,13 @@
     return { destroy: () => node.removeEventListener("input", grow) };
   }
 
-  function todayISO(): string {
-    const d = new Date();
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-  }
-  // A due value may carry a time-of-day ("2026-06-08T17:00"); dateOf gives the
-  // date part for the overdue test, fmtDue renders it readably.
-  const dateOf = (due?: string) => (due ? due.slice(0, 10) : "");
-  const fmtDue = (due: string) => (due.includes("T") ? due.replace("T", " ") : due);
+  // Priority colour cue (A/B/C/rest → "") and a human-friendly due label that
+  // also tells us whether the task is overdue or due soon, all from one place so
+  // every surface renders a task identically.
+  const pri = $derived(priorityClass(t.priority));
+  const due = $derived(t.due ? relativeDue(t.due) : null);
+  // Only surface a source badge for non-default origins (chiefly an AI agent).
+  const src = $derived(meaningfulSource(t.source));
 
   function toggleDoing() {
     $statusMut.mutate({ id: t.id, status: t.status === "doing" ? "open" : "doing" });
@@ -78,9 +78,40 @@
   function del() {
     if (confirm(`Delete task "${t.text}"? (undoable with nt undo)`)) $deleteMut.mutate(t.id);
   }
+
+  // Keyboard actions on the focused row (j/k focus is driven by TaskRows). Space
+  // or Enter toggles done/reopen; `e` opens the inline editor. j/k are left to
+  // bubble up to the list navigator.
+  function onRowKey(e: KeyboardEvent) {
+    if (editing || !canEdit) return;
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      if (t.status === "done") $reopenMut.mutate(t.id);
+      else $doneMut.mutate(t.id);
+    } else if (e.key === "e") {
+      if (t.status === "done") return;
+      e.preventDefault();
+      startEdit();
+    }
+  }
 </script>
 
-<li class="row" class:row--doing={t.status === "doing"} class:row--editing={editing}>
+<!-- A row is a roving-focus target for j/k list nav: focusable (tabindex -1, not in
+     the Tab order) with Space/e shortcuts; the real controls stay separate buttons. -->
+<!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_no_noninteractive_element_interactions -->
+<li
+  id={`trow-${t.id}`}
+  class="row {pri ? `row--pri-${pri}` : ''}"
+  class:row--doing={t.status === "doing"}
+  class:row--editing={editing}
+  tabindex="-1"
+  onkeydown={onRowKey}
+>
+  {#if pri && t.status !== "done"}
+    <span class="pri pri--{pri}" title={`Priority ${t.priority}`} aria-label={`Priority ${t.priority}`}
+      >{t.priority}</span
+    >
+  {/if}
   {#if canEdit}
     {#if t.status === "done"}
       <button class="check check--done" title="Reopen" aria-label="Reopen task" onclick={() => $reopenMut.mutate(t.id)}>●</button>
@@ -108,8 +139,13 @@
     {#if t.status === "blocked"}<span class="status-pill status-pill--blocked" title={t.blocker ? `blocked by: ${t.blocker}` : "blocked"}>⊘ blocked</span>{/if}
     {#if t.project}<a class="chip" href={`/search?tag=${encodeURIComponent(t.project)}`}>+{t.project}</a>{/if}
     {#each t.tags ?? [] as tag (tag)}<a class="chip chip--tag" href={`/search?tag=${encodeURIComponent(tag)}`}>@{tag}</a>{/each}
-    {#if t.due}<span class="row__due" class:row__due--over={dateOf(t.due) < todayISO() && t.status !== "done"}>{fmtDue(t.due)}</span>{/if}
-    {#if t.source}<span class="src">{t.source}</span>{/if}
+    {#if due}<span
+        class="row__due"
+        class:row__due--over={due.overdue && t.status !== "done"}
+        class:row__due--soon={due.soon && t.status !== "done"}
+        title={t.due}>{due.label}</span
+      >{/if}
+    {#if src}<span class="src src--agent" title={`Captured by ${src}`}>{src}</span>{/if}
     {#if canEdit && t.status !== "done"}
       <span class="row__actions">
         <button class="rowbtn" title="Edit text" aria-label="Edit task text" onclick={startEdit}>✎</button>
@@ -127,10 +163,12 @@
     align-items: center;
     gap: 8px;
   }
-  .row--doing {
-    border-left: 2px solid var(--accent);
-    padding-left: 6px;
-    margin-left: -8px;
+  /* Roving keyboard focus (j/k). Programmatic focus, so we style :focus directly
+     rather than :focus-visible (which can skip scripted focus). */
+  .row:focus {
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
+    border-radius: var(--radius-sm);
   }
   .row__actions {
     margin-left: auto;
@@ -199,8 +237,48 @@
   .chip--tag {
     color: var(--accent-2);
   }
+  /* Priority left accent bar (the .pri letter chip itself is a global primitive
+     in app.css). Red is reserved for A and overdue, so it stays meaningful. */
+  .row--pri-a {
+    box-shadow: inset 2px 0 0 var(--pri-a);
+  }
+  .row--pri-b {
+    box-shadow: inset 2px 0 0 var(--pri-b);
+  }
+  .row--pri-c {
+    box-shadow: inset 2px 0 0 var(--pri-c);
+  }
+  .row--pri-a,
+  .row--pri-b,
+  .row--pri-c,
+  .row--doing {
+    padding-left: 8px;
+    margin-left: -8px;
+  }
+  /* The "doing" accent wins over the priority bar when both apply. */
+  .row--doing {
+    box-shadow: inset 2px 0 0 var(--accent);
+  }
+  .row__due {
+    color: var(--muted);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+  .row__due--soon {
+    color: var(--fg-soft);
+    font-weight: 600;
+  }
   .row__due--over {
     color: var(--red);
     font-weight: 600;
+  }
+  /* Agent-captured tasks (e.g. src:claude) — nt's reason to exist; quiet, but
+     legible, so you can tell what your AI session added. */
+  .src--agent {
+    color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 12%, transparent);
+    padding: 0 5px;
+    border-radius: 999px;
+    font-size: 0.7rem;
   }
 </style>
