@@ -102,6 +102,18 @@
     { keys: ["?"], label: "This cheat-sheet" },
     { keys: ["Esc"], label: "Close / cancel" },
   ]);
+
+  // Row-level keys. j/k navigate in any mode; Space/e act, so only show them when
+  // editing is enabled (they no-op in read-only).
+  const taskKeys = $derived([
+    { keys: ["j", "k"], label: "Move between tasks" },
+    ...(canEdit
+      ? [
+          { keys: ["Space"], label: "Complete / reopen" },
+          { keys: ["e"], label: "Edit task" },
+        ]
+      : []),
+  ]);
 </script>
 
 {#if shortcuts.open}
@@ -130,6 +142,15 @@
           <h3 class="sc__head">General</h3>
           <ul class="sc__list">
             {#each general as g (g.label)}
+              <li>
+                {#each g.keys as k (k)}<kbd class="kbd">{k}</kbd>{/each}
+                <span>{g.label}</span>
+              </li>
+            {/each}
+          </ul>
+          <h3 class="sc__head sc__head--mt">Task list</h3>
+          <ul class="sc__list">
+            {#each taskKeys as g (g.label)}
               <li>
                 {#each g.keys as k (k)}<kbd class="kbd">{k}</kbd>{/each}
                 <span>{g.label}</span>
@@ -185,6 +206,9 @@
     text-transform: uppercase;
     letter-spacing: 0.05em;
     color: var(--muted);
+  }
+  .sc__head--mt {
+    margin-top: 16px;
   }
   .sc__prefix {
     color: var(--fg-soft);
