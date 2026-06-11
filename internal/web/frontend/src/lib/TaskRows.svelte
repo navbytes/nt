@@ -8,6 +8,7 @@
   import { stepId } from "./listnav";
   import { palette } from "./palette.svelte";
   import { shortcuts, isTextEntry } from "./keys.svelte";
+  import { showToast } from "./toast.svelte";
 
   // Within a bucket, float the most important work up: priority first (A→Z, then
   // unprioritised), then the earliest due date. Done stays in store order (most
@@ -168,12 +169,73 @@
     } else if (e.key === "k") {
       e.preventDefault();
       moveFocus(-1);
+    } else if (e.key === "Escape" && selected.length > 0) {
+      e.preventDefault();
+      selected = [];
     }
   }
   $effect(() => {
     window.addEventListener("keydown", onListKey);
     return () => window.removeEventListener("keydown", onListKey);
   });
+
+  // ---- bulk selection (W11) ----------------------------------------------
+  // x selects the focused row (handled in TaskRow); once a selection exists, a
+  // bar offers complete / reschedule / delete across the whole set. Selection is
+  // a plain id array (reactive in runes) and is pruned to what's still visible
+  // so an action never touches a row that scrolled out of the current filter.
+  let selected = $state<string[]>([]);
+  function toggleSel(id: string) {
+    selected = selected.includes(id) ? selected.filter((x) => x !== id) : [...selected, id];
+  }
+  const visibleIds = $derived(new Set(flatIds));
+  const selCount = $derived(selected.filter((id) => visibleIds.has(id)).length);
+  let bulkBusy = $state(false);
+  let rescheduling = $state(false);
+
+  const BULK_DUE = [
+    { label: "Today", value: "today" },
+    { label: "Tomorrow", value: "tomorrow" },
+    { label: "Next week", value: "+7d" },
+    { label: "No date", value: "none" },
+  ];
+
+  const refreshAll = () => {
+    for (const k of [["tasks"], ["tasks-view"], ["review"], ["state"], ["activity"]]) {
+      qc.invalidateQueries({ queryKey: k });
+    }
+  };
+  // One server call applies the action to the whole set in a SINGLE transaction,
+  // so the toast's Undo reverts the entire batch with one api.undo() (the engine
+  // is single-level — N separate writes couldn't be unwound as a group).
+  async function runBulk(action: "done" | "delete" | "due", verb: string, due = "") {
+    const ids = selected.filter((id) => visibleIds.has(id));
+    if (!ids.length || bulkBusy) return;
+    bulkBusy = true;
+    const n = ids.length;
+    try {
+      await api.taskBulk(action, ids, due);
+      showToast(`${verb} ${n} task${n > 1 ? "s" : ""}`, async () => {
+        try {
+          await api.undo();
+          refreshAll();
+          showToast("Undone");
+        } catch (e) {
+          showToast(`Couldn't undo: ${String(e)}`);
+        }
+      });
+    } catch (e) {
+      showToast(`Couldn't ${verb.toLowerCase()}: ${String(e)}`);
+    } finally {
+      refreshAll();
+      selected = [];
+      rescheduling = false;
+      bulkBusy = false;
+    }
+  }
+  const bulkDone = () => runBulk("done", "Completed");
+  const bulkDelete = () => runBulk("delete", "Deleted");
+  const bulkDue = (v: string) => runBulk("due", "Rescheduled", v);
 
   function add(e: SubmitEvent) {
     e.preventDefault();
@@ -222,7 +284,12 @@
       <h2 class="group__title">{group.status} · {group.tasks.length}</h2>
       <ul class="rows">
         {#each group.tasks as t (t.id)}
-          <TaskRow {t} {canEdit} />
+          <TaskRow
+            {t}
+            {canEdit}
+            selected={selected.includes(t.id)}
+            onToggleSelect={canEdit ? () => toggleSel(t.id) : undefined}
+          />
         {/each}
       </ul>
       {#if group.tasks.length === 0}<p class="muted small">none</p>{/if}
@@ -240,7 +307,101 @@
   {/each}
 {/if}
 
+{#if selCount > 0}
+  <div class="bulk" role="region" aria-label="Bulk actions">
+    <span class="bulk__count">{selCount} selected</span>
+    <button class="bulk__btn" disabled={bulkBusy} onclick={bulkDone}>Complete</button>
+    <div class="bulk__resched">
+      <button class="bulk__btn" disabled={bulkBusy} onclick={() => (rescheduling = !rescheduling)}>Reschedule ▾</button>
+      {#if rescheduling}
+        <div class="bulk__menu" role="menu">
+          {#each BULK_DUE as p (p.value)}
+            <button role="menuitem" class="bulk__item" onclick={() => bulkDue(p.value)}>{p.label}</button>
+          {/each}
+        </div>
+      {/if}
+    </div>
+    <button class="bulk__btn bulk__btn--danger" disabled={bulkBusy} onclick={bulkDelete}>Delete</button>
+    <button class="bulk__btn bulk__btn--ghost" onclick={() => (selected = [])}>Clear (esc)</button>
+  </div>
+{/if}
+
 <style>
+  /* Bulk action bar (W11): a sticky footer that appears once rows are selected. */
+  .bulk {
+    position: sticky;
+    bottom: 12px;
+    z-index: 30;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 16px;
+    padding: 8px 12px;
+    background: var(--bg-elev);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    box-shadow: 0 8px 28px rgba(0, 0, 0, 0.22);
+  }
+  .bulk__count {
+    font-size: 0.85rem;
+    font-weight: 600;
+    margin-right: 4px;
+  }
+  .bulk__btn {
+    background: var(--bg-inset);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    color: var(--fg);
+    cursor: pointer;
+    padding: 4px 12px;
+    font-size: 0.85rem;
+  }
+  .bulk__btn:hover:not(:disabled) {
+    border-color: var(--accent);
+  }
+  .bulk__btn:disabled {
+    opacity: 0.5;
+    cursor: default;
+  }
+  .bulk__btn--danger:hover:not(:disabled) {
+    border-color: var(--red);
+    color: var(--red);
+  }
+  .bulk__btn--ghost {
+    background: none;
+    border-color: transparent;
+    color: var(--muted);
+    margin-left: auto;
+  }
+  .bulk__resched {
+    position: relative;
+  }
+  .bulk__menu {
+    position: absolute;
+    left: 0;
+    bottom: calc(100% + 6px);
+    display: flex;
+    flex-direction: column;
+    min-width: 130px;
+    padding: 4px;
+    background: var(--bg-elev);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
+  }
+  .bulk__item {
+    text-align: left;
+    background: none;
+    border: none;
+    color: var(--fg);
+    padding: 5px 9px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 0.85rem;
+  }
+  .bulk__item:hover {
+    background: var(--bg-inset);
+  }
   /* Live parse preview under the quick-add box: a calm strip that mirrors how the
      task will look once added, so the todo.txt shorthand is discoverable. */
   .qa {

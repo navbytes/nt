@@ -49,6 +49,7 @@ func (s *Server) apiRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/tasks/{id}/reopen", s.apiTaskReopen)
 	mux.HandleFunc("POST /api/tasks/{id}/status", s.apiTaskStatus)
 	mux.HandleFunc("DELETE /api/tasks/{id}", s.apiTaskDelete)
+	mux.HandleFunc("POST /api/tasks/bulk", s.apiTaskBulk)
 	mux.HandleFunc("POST /api/undo", s.apiUndo)
 	mux.HandleFunc("GET /api/activity", s.apiActivity)
 	mux.HandleFunc("GET /api/search", s.apiSearch)
@@ -897,6 +898,69 @@ func (s *Server) apiTaskDelete(w http.ResponseWriter, r *http.Request) {
 			return errNoTask
 		}
 		rec.Removed(t.ID(), before)
+		return nil
+	}) {
+		s.respondTasks(w)
+	}
+}
+
+// apiTaskBulk applies one action — done | delete | due — to many tasks in a
+// SINGLE transaction, so the whole batch reverts with one Undo (the engine's
+// undo is single-level, so N separate writes can't be unwound as a group). ids
+// is comma-separated; unknown ids are skipped rather than failing the batch (a
+// concurrent delete shouldn't strand the rest). For action=due, `due` takes the
+// quick-add NL forms resolved server-side; "none"/"" clears.
+func (s *Server) apiTaskBulk(w http.ResponseWriter, r *http.Request) {
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "bad form", http.StatusBadRequest)
+		return
+	}
+	action := r.FormValue("action")
+	ids := strings.Split(r.FormValue("ids"), ",")
+	dueVal := ""
+	switch action {
+	case "due":
+		v, ok := dateparse.Date(r.FormValue("due"))
+		if !ok {
+			http.Error(w, "invalid due date", http.StatusBadRequest)
+			return
+		}
+		dueVal = v
+	case "done", "delete":
+		// no extra params
+	default:
+		http.Error(w, "unknown bulk action "+action, http.StatusBadRequest)
+		return
+	}
+
+	today := mutate.Today()
+	if s.doTaskWrite(w, r, "bulk-"+action, func(d *task.Doc, rec *mutate.Recorder) error {
+		applied := 0
+		for _, id := range ids {
+			id = strings.TrimSpace(id)
+			if id == "" {
+				continue
+			}
+			t := d.FindByID(id)
+			if t == nil {
+				continue // skip ids that vanished underneath us
+			}
+			switch action {
+			case "done":
+				mutate.Complete(d, rec, t, today)
+			case "due":
+				rec.Before(t)
+				t.SetKey("due", dueVal)
+			case "delete":
+				if before, ok := d.Remove(id); ok {
+					rec.Removed(id, before)
+				}
+			}
+			applied++
+		}
+		if applied == 0 {
+			return errNoTask
+		}
 		return nil
 	}) {
 		s.respondTasks(w)

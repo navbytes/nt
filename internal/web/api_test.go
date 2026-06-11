@@ -716,3 +716,66 @@ func TestAPINotesGrid(t *testing.T) {
 		t.Errorf("root note folder should be empty, got %q", byTitle["Loose"].Folder)
 	}
 }
+
+// TestAPITaskBulk: bulk done/delete/due apply to many tasks in ONE transaction,
+// so a single undo reverts the whole batch (the engine's undo is single-level).
+func TestAPITaskBulk(t *testing.T) {
+	s := newTestServer(t)
+	s.allowEdit = true
+	a := addTask(t, s, "alpha")
+	b := addTask(t, s, "beta")
+	c := addTask(t, s, "gamma")
+
+	// gated
+	if code, _ := postForm(s, "/api/tasks/bulk", "", mustValues("action", "done", "ids", a)); code != 403 {
+		t.Errorf("bulk without CSRF should 403, got %d", code)
+	}
+
+	// bulk done a+b in one transaction
+	code, body := postForm(s, "/api/tasks/bulk", s.csrf, mustValues("action", "done", "ids", a+","+b))
+	if code != 200 {
+		t.Fatalf("bulk done: %d %s", code, body)
+	}
+	if !mustDoc(t, s).FindByID(a).Done || !mustDoc(t, s).FindByID(b).Done {
+		t.Fatal("both a and b should be done")
+	}
+	if mustDoc(t, s).FindByID(c).Done {
+		t.Fatal("c should be untouched")
+	}
+
+	// ONE undo reverts the whole batch
+	if code, _ := postForm(s, "/api/undo", s.csrf, nil); code != 200 {
+		t.Fatal("undo failed")
+	}
+	if mustDoc(t, s).FindByID(a).Done || mustDoc(t, s).FindByID(b).Done {
+		t.Errorf("one undo should reopen the whole bulk batch")
+	}
+
+	// bulk due, NL resolved server-side, on a+b+c
+	code, body = postForm(s, "/api/tasks/bulk", s.csrf, mustValues("action", "due", "ids", a+","+b+","+c, "due", "tomorrow"))
+	if code != 200 {
+		t.Fatalf("bulk due: %d %s", code, body)
+	}
+	want := timeNowPlusISO(1)
+	for _, id := range []string{a, b, c} {
+		if got := mustDoc(t, s).FindByID(id).Due(); got != want {
+			t.Errorf("bulk due: %s due=%q want %q", id, got, want)
+		}
+	}
+
+	// unknown ids are skipped, not fatal; an all-unknown batch 400s (errNoTask)
+	if code, _ := postForm(s, "/api/tasks/bulk", s.csrf, mustValues("action", "done", "ids", "nope,"+c)); code != 200 {
+		t.Errorf("a batch with one good id should apply, got %d", code)
+	}
+	if code, _ := postForm(s, "/api/tasks/bulk", s.csrf, mustValues("action", "done", "ids", "nope1,nope2")); code != 400 {
+		t.Errorf("all-unknown batch should 400, got %d", code)
+	}
+	// bad action / bad due
+	if code, _ := postForm(s, "/api/tasks/bulk", s.csrf, mustValues("action", "frobnicate", "ids", a)); code != 400 {
+		t.Errorf("unknown action should 400, got %d", code)
+	}
+}
+
+func timeNowPlusISO(days int) string {
+	return time.Now().AddDate(0, 0, days).Format("2006-01-02")
+}

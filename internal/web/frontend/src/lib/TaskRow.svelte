@@ -9,7 +9,19 @@
   import { priorityClass, relativeDue, meaningfulSource, displayTitle } from "./text";
   import { showToast } from "./toast.svelte";
 
-  let { t, canEdit = false }: { t: Task; canEdit?: boolean } = $props();
+  let {
+    t,
+    canEdit = false,
+    selected = false,
+    onToggleSelect,
+  }: {
+    t: Task;
+    canEdit?: boolean;
+    /** True when this row is part of a bulk selection (W11). */
+    selected?: boolean;
+    /** Toggle this row's bulk selection (x key / the select checkbox). */
+    onToggleSelect?: () => void;
+  } = $props();
 
   const qc = useQueryClient();
   const synced = (d: { groups: TaskGroup[] }) => {
@@ -170,6 +182,9 @@
       if (t.status === "done") return;
       e.preventDefault();
       openSchedule();
+    } else if (e.key === "x") {
+      e.preventDefault();
+      onToggleSelect?.();
     }
   }
 </script>
@@ -182,9 +197,21 @@
   class="row {pri ? `row--pri-${pri}` : ''}"
   class:row--doing={t.status === "doing"}
   class:row--editing={editing}
+  class:row--selected={selected}
   tabindex="-1"
   onkeydown={onRowKey}
 >
+  {#if canEdit && onToggleSelect}
+    <button
+      class="selbox"
+      class:selbox--on={selected}
+      role="checkbox"
+      aria-checked={selected}
+      aria-label="Select task"
+      title="Select (x)"
+      onclick={onToggleSelect}>{selected ? "☑" : "☐"}</button
+    >
+  {/if}
   {#if pri && t.status !== "done"}
     <span class="pri pri--{pri}" title={`Priority ${t.priority}`} aria-label={`Priority ${t.priority}`}
       >{t.priority}</span
@@ -265,6 +292,32 @@
     outline: 2px solid var(--accent);
     outline-offset: -2px;
     border-radius: var(--radius-sm);
+  }
+  /* Bulk selection (W11): a calm tinted row + a checkbox that stays hidden until
+     hover/selection so unselected rows keep their clean look. */
+  .row--selected {
+    background: color-mix(in srgb, var(--accent) 12%, transparent);
+    border-radius: var(--radius-sm);
+  }
+  .selbox {
+    flex: none;
+    background: none;
+    border: none;
+    color: var(--muted);
+    cursor: pointer;
+    font-size: 0.95rem;
+    line-height: 1;
+    padding: 0 2px;
+    opacity: 0;
+    transition: opacity 0.1s;
+  }
+  .row:hover .selbox,
+  .row:focus .selbox,
+  .selbox--on {
+    opacity: 1;
+  }
+  .selbox--on {
+    color: var(--accent);
   }
   .row__actions {
     margin-left: auto;
