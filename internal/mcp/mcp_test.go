@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/navbytes/nt/internal/mutate"
+	"github.com/navbytes/nt/internal/note"
 	"github.com/navbytes/nt/internal/view"
 )
 
@@ -348,4 +349,61 @@ func TestMCPView(t *testing.T) {
 	if _, err := s.dispatch("nt_view", map[string]any{"name": "nope"}); err == nil {
 		t.Fatal("unknown view should error")
 	}
+}
+
+// TestMCPAddWithBody: nt_add with a body keeps the short title on the task and
+// saves the detail as a linked note filed under notes/tasks/ (so machine-made
+// task notes don't clutter a human's folders).
+func TestMCPAddWithBody(t *testing.T) {
+	s := newServer(t)
+
+	out, err := s.dispatch("nt_add", map[string]any{
+		"text": "Fix token refresh race",
+		"body": "Two requests refresh at once; add a single-flight guard keyed on the refresh-token id.",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// A task with a body comes back wrapped: {task, note, hint}.
+	var wrapped struct {
+		Task taskOut `json:"task"`
+		Note string  `json:"note"`
+		Hint string  `json:"hint"`
+	}
+	if err := json.Unmarshal([]byte(out), &wrapped); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(wrapped.Task.Text, "Fix token refresh race") || !strings.Contains(wrapped.Task.Text, "[[") {
+		t.Errorf("task should keep its title and link the body note, got %q", wrapped.Task.Text)
+	}
+
+	// The note exists, under notes/tasks/, with the body.
+	notes, _ := note.List(s.eng.S)
+	var body *note.Note
+	for _, n := range notes {
+		if strings.HasPrefix(n.Rel, note.TaskNoteFolder+"/") {
+			body = n
+		}
+	}
+	if body == nil {
+		t.Fatalf("body note should be filed under %s/; rels=%v", note.TaskNoteFolder, relsOf(notes))
+	}
+	if !strings.Contains(body.Body, "single-flight guard") {
+		t.Errorf("note should hold the body text, got %q", body.Body)
+	}
+
+	// A plain add (no body, short title) makes no note.
+	s.dispatch("nt_add", map[string]any{"text": "buy milk"})
+	notes2, _ := note.List(s.eng.S)
+	if len(notes2) != len(notes) {
+		t.Errorf("a short task with no body should not create a note: %d → %d", len(notes), len(notes2))
+	}
+}
+
+func relsOf(ns []*note.Note) []string {
+	out := make([]string, len(ns))
+	for i, n := range ns {
+		out[i] = n.Rel
+	}
+	return out
 }

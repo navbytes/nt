@@ -126,11 +126,16 @@ journaled engine as the CLI, default `source` to `claude`, and require **stable
 task ids** (positional `task:N` is refused — the index isn't safe for an agent).
 
 `nt_add` titles are meant to be **short and scannable** — one actionable line,
-verb-first, ~10 words / 60 chars; detail and reasoning belong in `nt_note`, not
-the title. The tool description nudges this directly; only genuine
-paragraph-length text (≥240 chars) is auto-moved into a linked note. Verbose but
-ordinary one-liners are left intact and simply clamp to a few lines in the UI
-(full text on hover / on edit) rather than being silently rewritten.
+verb-first, ~10 words / 60 chars. Put detail in the task's **body**: `nt_add`
+takes a `body` arg, saved as the task's linked note so the title stays clean and
+the detail is one click away (the web shows a 📄 details chip; following the task
+opens it). Only genuine paragraph-length `text` with no `body` (≥240 chars) is
+auto-split the same way; ordinary verbose one-liners are left intact and just
+clamp to a few lines in the UI (full text on hover / on edit).
+
+These machine-created task notes are filed under **`notes/tasks/`** (like daily
+notes go under `notes/journal/`), so they stay grouped and don't clutter a
+human's hand-curated folders.
 
 Hook, skill, and MCP compose: the hook mirrors the todo list automatically, the
 skill/MCP capture notes and recall context. Use the MCP server if your client
