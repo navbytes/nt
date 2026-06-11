@@ -3,6 +3,7 @@
   import { api, setCsrf } from "./api";
   import { loc, navigate } from "./router.svelte";
   import Sidebar from "./Sidebar.svelte";
+  import SearchBox from "./SearchBox.svelte";
   import CommandPalette from "./CommandPalette.svelte";
   import Shortcuts from "./Shortcuts.svelte";
   import Toast from "./Toast.svelte";
@@ -49,11 +50,6 @@
     localStorage.setItem("nt-theme", next);
   }
 
-  function onSearch(e: SubmitEvent) {
-    e.preventDefault();
-    const q = new FormData(e.target as HTMLFormElement).get("q") as string;
-    navigate(`/search?q=${encodeURIComponent(q ?? "")}`);
-  }
 </script>
 
 <a href="#main-content" class="skip-link">Skip to content</a>
@@ -71,9 +67,7 @@
         aria-label="Toggle navigation menu"
         aria-expanded={drawerOpen}>☰</button
       >
-      <form class="topbar__search" onsubmit={onSearch}>
-        <input name="q" placeholder="Search notes…" autocomplete="off" />
-      </form>
+      <div class="topbar__search"><SearchBox /></div>
       <button class="palette-btn" onclick={openPalette} title="Command palette (⌘K)" aria-label="Open command palette">
         <span class="kbd">⌘K</span>
       </button>

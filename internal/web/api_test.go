@@ -818,3 +818,76 @@ func TestAPINoteTags(t *testing.T) {
 		t.Errorf("persisted tags = %v", fresh.Tags)
 	}
 }
+
+// TestAPITaskNote: a task's "body" is a linked note. POST .../note creates a
+// detail note titled from the task and links it; the task row then exposes the
+// note URL and drops the raw [[link]] from its displayed text. Idempotent.
+func TestAPITaskNote(t *testing.T) {
+	s := newTestServer(t)
+	s.allowEdit = true
+	id := addTask(t, s, "design the auth flow @security")
+
+	// gated
+	if code, _ := postForm(s, "/api/tasks/"+id+"/note", "", nil); code != 403 {
+		t.Errorf("note without CSRF should 403, got %d", code)
+	}
+
+	code, body := postForm(s, "/api/tasks/"+id+"/note", s.csrf, nil)
+	if code != 200 {
+		t.Fatalf("add note: %d %s", code, body)
+	}
+	res := decode[apitypes.CreatedNote](t, body)
+	if res.URL == "" {
+		t.Fatal("expected a note URL")
+	}
+
+	// The note exists, titled from the task's clean text.
+	notes, _ := note.List(s.eng.S)
+	var made *note.Note
+	for _, n := range notes {
+		if n.Title == "design the auth flow" {
+			made = n
+		}
+	}
+	if made == nil {
+		t.Fatalf("detail note not created with the task's title; have %d notes", len(notes))
+	}
+
+	// The task now links it, and the row resolves it + hides the raw [[link]].
+	tk := mustDoc(t, s).FindByID(id)
+	if !strings.Contains(tk.Text, "[[design the auth flow]]") {
+		t.Errorf("task should link the note, text=%q", tk.Text)
+	}
+	_, tbody := get(t, s, "/api/tasks")
+	tr := decode[apitypes.TasksResponse](t, tbody)
+	var row *apitypes.Task
+	for gi := range tr.Groups {
+		for ri := range tr.Groups[gi].Tasks {
+			if tr.Groups[gi].Tasks[ri].ID == id {
+				row = &tr.Groups[gi].Tasks[ri]
+			}
+		}
+	}
+	if row == nil {
+		t.Fatal("task row missing")
+	}
+	if row.NoteURL == "" || row.NoteTitle != "design the auth flow" {
+		t.Errorf("row should expose the linked note: url=%q title=%q", row.NoteURL, row.NoteTitle)
+	}
+	if strings.Contains(row.Text, "[[") {
+		t.Errorf("the raw [[link]] should be stripped from the displayed text, got %q", row.Text)
+	}
+
+	// Idempotent: a second call returns the same note, no duplicate.
+	code, body2 := postForm(s, "/api/tasks/"+id+"/note", s.csrf, nil)
+	if code != 200 {
+		t.Fatalf("second add: %d", code)
+	}
+	if decode[apitypes.CreatedNote](t, body2).URL != res.URL {
+		t.Error("a second add-note should return the existing note, not create another")
+	}
+	notes2, _ := note.List(s.eng.S)
+	if len(notes2) != len(notes) {
+		t.Errorf("no new note should be created on the second call: %d → %d", len(notes), len(notes2))
+	}
+}

@@ -125,3 +125,35 @@ export function fmtDuration(mins: number): string {
   if (m === 0) return `${h}h`;
   return `${h}h ${m}m`;
 }
+
+// ---- search highlighting -------------------------------------------------
+
+export interface HiPart {
+  text: string;
+  /** True for the segments that matched the query (wrap in <mark>). */
+  hit: boolean;
+}
+
+// highlightParts splits text around case-insensitive matches of query into
+// alternating plain/hit segments — built as data (not innerHTML) so the caller
+// renders them safely without injecting markup. An empty query yields one plain
+// part (the whole string).
+export function highlightParts(text: string, query: string): HiPart[] {
+  const q = query.trim();
+  if (!q) return [{ text, hit: false }];
+  const lower = text.toLowerCase();
+  const ql = q.toLowerCase();
+  const out: HiPart[] = [];
+  let i = 0;
+  while (i < text.length) {
+    const idx = lower.indexOf(ql, i);
+    if (idx < 0) {
+      out.push({ text: text.slice(i), hit: false });
+      break;
+    }
+    if (idx > i) out.push({ text: text.slice(i, idx), hit: false });
+    out.push({ text: text.slice(idx, idx + q.length), hit: true });
+    i = idx + q.length;
+  }
+  return out;
+}

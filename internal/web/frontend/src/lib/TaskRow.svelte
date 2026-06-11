@@ -8,6 +8,7 @@
   import { api, type Task, type TaskGroup } from "./api";
   import { priorityClass, relativeDue, meaningfulSource, displayTitle } from "./text";
   import { showToast } from "./toast.svelte";
+  import { navigate } from "./router.svelte";
 
   let {
     t,
@@ -121,6 +122,23 @@
   // Undo — reversibility beats a blocking dialog (and nt undo still works).
   function del() {
     $deleteMut.mutate(t.id);
+  }
+
+  // Give the task a "body": create (or reuse) a linked detail note, then open it
+  // in the editor. The note is the task's body — todo.txt itself stays one line.
+  let noteBusy = $state(false);
+  async function addNote() {
+    if (noteBusy) return;
+    noteBusy = true;
+    try {
+      const r = await api.taskNote(t.id);
+      synced(await api.tasks()); // refresh so the row shows its new details chip
+      navigate(r.url);
+    } catch (e) {
+      showToast(`Couldn't add a note: ${String(e)}`);
+    } finally {
+      noteBusy = false;
+    }
   }
 
   // ---- quick reschedule -----------------------------------------------------
@@ -242,6 +260,7 @@
     {#if t.recur}<span class="row__recur" title="Recurring task">↻</span>{/if}
     {#if t.status === "doing"}<span class="status-pill status-pill--doing">doing</span>{/if}
     {#if t.status === "blocked"}<span class="status-pill status-pill--blocked" title={t.blocker ? `blocked by: ${t.blocker}` : "blocked"}>⊘ blocked</span>{/if}
+    {#if t.noteUrl}<a class="chip chip--note" href={t.noteUrl} title={`Details: ${t.noteTitle ?? ""}`}>📄 details</a>{/if}
     {#if t.project}<a class="chip" href={`/search?tag=${encodeURIComponent(t.project)}`}>+{t.project}</a>{/if}
     {#each t.tags ?? [] as tag (tag)}<a class="chip chip--tag" href={`/search?tag=${encodeURIComponent(tag)}`}>@{tag}</a>{/each}
     {#if due}<span
@@ -253,6 +272,9 @@
     {#if src}<span class="src src--agent" title={`Captured by ${src}`}>{src}</span>{/if}
     {#if canEdit && t.status !== "done"}
       <span class="row__actions">
+        {#if !t.noteUrl}
+          <button class="rowbtn" title="Add a details note (body)" aria-label="Add details note" disabled={noteBusy} onclick={addNote}>＋📄</button>
+        {/if}
         <button class="rowbtn" title="Reschedule (d)" aria-label="Reschedule task" onclick={openSchedule}>⏱</button>
         <button class="rowbtn" title="Edit text" aria-label="Edit task text" onclick={startEdit}>✎</button>
         <button class="rowbtn" title={t.status === "doing" ? "Stop (set open)" : "Start (set doing)"} onclick={toggleDoing}>◐</button>
@@ -385,6 +407,14 @@
   }
   .chip--tag {
     color: var(--accent-2);
+  }
+  /* The "details" chip linking to a task's body note. */
+  .chip--note {
+    color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 10%, transparent);
+  }
+  .chip--note:hover {
+    text-decoration: underline;
   }
   /* Priority left accent bar (the .pri letter chip itself is a global primitive
      in app.css). Red is reserved for A and overdue, so it stays meaningful. */

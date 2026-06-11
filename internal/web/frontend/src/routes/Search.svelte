@@ -1,6 +1,7 @@
 <script lang="ts">
   import { createQuery } from "@tanstack/svelte-query";
   import { api } from "../lib/api";
+  import { highlightParts as parts } from "../lib/text";
 
   let { q, tag = "" }: { q: string; tag?: string } = $props();
 
@@ -9,28 +10,6 @@
     queryFn: () => api.search(q, tag),
     enabled: q.trim().length > 0 || tag.length > 0,
   });
-
-  // Split text around case-insensitive matches of the query so they can be
-  // wrapped in <mark> — built as parts (not innerHTML) to stay XSS-safe.
-  function parts(text: string, query: string): { text: string; hit: boolean }[] {
-    const qq = query.trim();
-    if (!qq) return [{ text, hit: false }];
-    const lower = text.toLowerCase();
-    const ql = qq.toLowerCase();
-    const out: { text: string; hit: boolean }[] = [];
-    let i = 0;
-    while (i < text.length) {
-      const idx = lower.indexOf(ql, i);
-      if (idx < 0) {
-        out.push({ text: text.slice(i), hit: false });
-        break;
-      }
-      if (idx > i) out.push({ text: text.slice(i, idx), hit: false });
-      out.push({ text: text.slice(idx, idx + qq.length), hit: true });
-      i = idx + qq.length;
-    }
-    return out;
-  }
 </script>
 
 <h1>Search</h1>
