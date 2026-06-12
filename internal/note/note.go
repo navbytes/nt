@@ -28,6 +28,7 @@ type Note struct {
 	Created  string
 	Updated  string // stamped when nt rewrites the note (retag, --field)
 	Archived bool   // frontmatter archived: true — retired from active views, still on disk
+	Favorite bool   // frontmatter favorite: true — starred/pinned for quick access
 	Body     string
 	Extra    []string // raw frontmatter lines for keys nt doesn't model (preserved verbatim)
 }
@@ -168,6 +169,9 @@ func (n *Note) Save() error {
 	if n.Archived {
 		b.WriteString("archived: true\n")
 	}
+	if n.Favorite {
+		b.WriteString("favorite: true\n")
+	}
 	for _, line := range n.Extra { // unknown keys (Obsidian properties), verbatim
 		b.WriteString(line)
 		b.WriteByte('\n')
@@ -245,6 +249,8 @@ func parseFrontmatter(fm string, n *Note) {
 			n.Updated = unquote(val)
 		case "archived":
 			n.Archived = unquote(val) == "true"
+		case "favorite":
+			n.Favorite = unquote(val) == "true"
 		case "title":
 			if v := unquote(val); v != "" {
 				n.Title = v

@@ -112,6 +112,27 @@ func TestRenderExternalLinksOpenOutside(t *testing.T) {
 	}
 }
 
+func TestStripTitleH1(t *testing.T) {
+	cases := []struct {
+		name, body, title, want string
+	}{
+		{"nt-prepended", "# JWT expiry handling\n\nBody text.\n", "JWT expiry handling", "Body text.\n"},
+		{"leading-blanks", "\n\n# Title\n\nBody.\n", "Title", "Body.\n"},
+		{"extra-hash-spaces", "#   Title\n\nBody.\n", "Title", "Body.\n"},
+		{"case-insensitive", "# title\n\nBody.\n", "Title", "Body.\n"},
+		{"different-heading", "# Intro\n\nBody.\n", "Title", "# Intro\n\nBody.\n"},
+		{"h2-untouched", "## Title\n\nBody.\n", "Title", "## Title\n\nBody.\n"},
+		{"no-heading", "Body.\n", "Title", "Body.\n"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := stripTitleH1(c.body, c.title); got != c.want {
+				t.Errorf("stripTitleH1(%q, %q) = %q, want %q", c.body, c.title, got, c.want)
+			}
+		})
+	}
+}
+
 func TestMermaidNotLinkifiedInFence(t *testing.T) {
 	s := newTestServer(t)
 	doc, notes := s.load()

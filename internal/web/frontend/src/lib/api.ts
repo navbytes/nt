@@ -19,6 +19,7 @@ import type {
   CreatedNote,
   MovedNote,
   ArchivedNote,
+  FavoritedNote,
   NoteTags,
   JournalResponse,
 } from "./api-types";
@@ -113,6 +114,11 @@ export const api = {
   noteArchive: (handle: string, archived: boolean) =>
     postForm<ArchivedNote>(`/api/notes/${encodeURIComponent(handle)}/archive`, {
       archived: String(archived),
+    }),
+
+  noteFavorite: (handle: string, favorite: boolean) =>
+    postForm<FavoritedNote>(`/api/notes/${encodeURIComponent(handle)}/favorite`, {
+      favorite: String(favorite),
     }),
 
   /** Edit a note's frontmatter tags only (body untouched). add/remove are

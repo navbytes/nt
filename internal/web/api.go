@@ -40,6 +40,7 @@ func (s *Server) apiRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/notes/{handle}", s.apiNoteSave)
 	mux.HandleFunc("POST /api/notes/{handle}/move", s.apiNoteMove)
 	mux.HandleFunc("POST /api/notes/{handle}/archive", s.apiNoteArchive)
+	mux.HandleFunc("POST /api/notes/{handle}/favorite", s.apiNoteFavorite)
 	mux.HandleFunc("POST /api/notes/{handle}/tags", s.apiNoteTags)
 	mux.HandleFunc("POST /api/preview", s.handlePreview) // returns rendered HTML
 	mux.HandleFunc("GET /api/tasks", s.apiTasks)
@@ -228,6 +229,7 @@ func (s *Server) apiNotesGrid(w http.ResponseWriter, r *http.Request) {
 			Preview:  notePreview(n.Body),
 			Updated:  dateOnly(updated),
 			Archived: n.Archived,
+			Favorite: n.Favorite,
 		})
 	}
 	folderList := make([]string, 0, len(folders))
@@ -320,7 +322,11 @@ func (s *Server) apiNote(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	html, err := renderBody(n.Body, snap.doc, snap.notes)
+	// The page renders the note's title as its own <h1>, so drop a leading
+	// "# <title>" from the body when it duplicates that title — otherwise the
+	// title shows twice. nt's note.Save prepends the title as an H1 for bodies
+	// authored without one, so nt-created notes always need this.
+	html, err := renderBody(stripTitleH1(n.Body, n.Title), snap.doc, snap.notes)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -342,6 +348,7 @@ func (s *Server) apiNote(w http.ResponseWriter, r *http.Request) {
 		Created:   dateOnly(n.Created),
 		Tags:      n.Tags,
 		Archived:  n.Archived,
+		Favorite:  n.Favorite,
 		BodyHTML:  string(html),
 		Backlinks: toBacklinks(snap.backlinks[n.Path]),
 		TaskRefs:  toTaskRefs(snap.taskRefs[n.Path]),
@@ -459,6 +466,51 @@ func (s *Server) apiNoteArchive(w http.ResponseWriter, r *http.Request) {
 	s.rebuild()
 	s.hub.broadcast("reload") // sidebar/grid/graph drop or restore the note
 	writeJSON(w, apitypes.ArchivedNote{Handle: noteHandle(fresh), Archived: want})
+}
+
+// apiNoteFavorite flips a note's favorite frontmatter flag (--edit + CSRF gated):
+// a lightweight star/pin that surfaces the note in the grid's "Favorites" filter
+// and marks it across views, without changing whether it's part of the working
+// set (favorites are orthogonal to archiving — a note can be either, both, or
+// neither). The client sends the desired state in the `favorite` field
+// ("true"/"false"); absent, it toggles. Like archive, it mutates a fresh copy
+// loaded from disk so a concurrent snapshot reader can't observe a torn write.
+func (s *Server) apiNoteFavorite(w http.ResponseWriter, r *http.Request) {
+	if !s.allowEdit {
+		http.Error(w, "editing is disabled — start with `nt web --edit`", http.StatusForbidden)
+		return
+	}
+	if r.Header.Get("X-CSRF") != s.csrf {
+		http.Error(w, "bad or missing CSRF token", http.StatusForbidden)
+		return
+	}
+	n := s.current().findHandle(r.PathValue("handle"))
+	if n == nil {
+		http.NotFound(w, r)
+		return
+	}
+	want := !n.Favorite // default: toggle the current state
+	switch r.FormValue("favorite") {
+	case "true":
+		want = true
+	case "false":
+		want = false
+	}
+	fresh, err := note.Load(n.Path)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	fresh.Favorite = want
+	fresh.Updated = time.Now().Format(time.RFC3339)
+	if err := fresh.Save(); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	s.writes.mark(fresh.Path) // suppress our own fsnotify event
+	s.rebuild()
+	s.hub.broadcast("reload") // grid star/filter reflect the change
+	writeJSON(w, apitypes.FavoritedNote{Handle: noteHandle(fresh), Favorite: want})
 }
 
 // apiNoteTags adds and/or removes @tags on a note's frontmatter without touching

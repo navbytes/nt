@@ -898,6 +898,55 @@ func TestAPITaskNote(t *testing.T) {
 // TestArchivedHiddenFromTagsAndGraph: an archived note must stay out of the
 // discovery surfaces — the tag cloud and the graph — like it already is for the
 // sidebar, search, and orphans (and as the note page's banner promises).
+func TestAPINoteFavorite(t *testing.T) {
+	s := newTestServer(t)
+	n, _ := note.Create(s.eng.S, "Cheat Sheet", "commands", nil, "cli", "")
+
+	// Gated off when read-only (mirrors archive/move).
+	if code, _ := postForm(s, "/api/notes/"+n.ID+"/favorite", "", mustValues("favorite", "true")); code != 403 {
+		t.Errorf("favorite should 403 read-only, got %d", code)
+	}
+	s.allowEdit = true
+
+	// Star it.
+	code, body := postForm(s, "/api/notes/"+n.ID+"/favorite", s.csrf, mustValues("favorite", "true"))
+	if code != 200 {
+		t.Fatalf("favorite: %d %s", code, body)
+	}
+	res := decode[apitypes.FavoritedNote](t, body)
+	if !res.Favorite || res.Handle != n.ID {
+		t.Errorf("favorite result = %+v, want favorite=true handle=%q", res, n.ID)
+	}
+
+	// It persists to disk and surfaces on the note view + grid card.
+	if reloaded, _ := note.Load(n.Path); reloaded == nil || !reloaded.Favorite {
+		t.Errorf("favorite: true should persist to the note file")
+	}
+	_, body = get(t, s, "/api/notes/"+n.ID)
+	if !decode[apitypes.NoteView](t, body).Favorite {
+		t.Error("note view should report favorite=true")
+	}
+	_, body = get(t, s, "/api/notes/grid")
+	grid := decode[apitypes.NotesGrid](t, body)
+	var starred bool
+	for _, c := range grid.Notes {
+		if c.Handle == n.ID {
+			starred = c.Favorite
+		}
+	}
+	if !starred {
+		t.Error("grid card should report favorite=true")
+	}
+
+	// Unstar (explicit false) clears it.
+	if code, _ := postForm(s, "/api/notes/"+n.ID+"/favorite", s.csrf, mustValues("favorite", "false")); code != 200 {
+		t.Fatalf("unfavorite should 200, got %d", code)
+	}
+	if reloaded, _ := note.Load(n.Path); reloaded.Favorite {
+		t.Error("unfavorite should clear the flag")
+	}
+}
+
 func TestArchivedHiddenFromTagsAndGraph(t *testing.T) {
 	s := newTestServer(t)
 	s.allowEdit = true

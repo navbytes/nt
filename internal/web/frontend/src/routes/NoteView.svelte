@@ -76,6 +76,22 @@
     }
   }
 
+  // ---- favorite / unfavorite (a lightweight star, orthogonal to archive) ----
+  let favBusy = $state(false);
+  async function doFavorite() {
+    const want = !($noteQ.data?.favorite ?? false);
+    favBusy = true;
+    try {
+      await api.noteFavorite(handle, want);
+      // The star shows here and on the grid (where the Favorites filter lives).
+      for (const k of [["note", handle], ["notesGrid"]]) {
+        await qc.invalidateQueries({ queryKey: k });
+      }
+    } finally {
+      favBusy = false;
+    }
+  }
+
   // ---- new task linked to this note (closes the note→task loop) ----
   let addingTask = $state(false);
   let taskText = $state("");
@@ -185,6 +201,14 @@
         <span class="spacer"></span>
         <a class="btn btn--ghost btn--sm" href={`/graph?focus=${encodeURIComponent(handle)}`}>Graph ⌖</a>
         {#if canEdit}
+          <button
+            class="btn btn--ghost btn--sm star"
+            class:star--on={n.favorite}
+            onclick={doFavorite}
+            disabled={favBusy}
+            aria-pressed={n.favorite}
+            title={n.favorite ? "Remove from favorites" : "Add to favorites"}
+          >{n.favorite ? "★" : "☆"}</button>
           <button class="btn btn--ghost btn--sm" onclick={() => (addingTask = !addingTask)}>＋ Task</button>
           <button class="btn btn--ghost btn--sm" onclick={openMove}>Move</button>
           <button class="btn btn--ghost btn--sm" onclick={doArchive} disabled={archiveBusy}>
@@ -286,3 +310,15 @@
     {/if}
   </div>
 {/if}
+
+<style>
+  /* The favorite star: gold when on, inheriting the ghost-button frame so it
+     sits flush with Move/Edit. A touch larger so the glyph reads as a star. */
+  .star {
+    font-size: 1rem;
+    line-height: 1;
+  }
+  .star--on {
+    color: #f5b301;
+  }
+</style>
