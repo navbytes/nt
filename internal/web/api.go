@@ -656,6 +656,9 @@ func (s *Server) apiTags(w http.ResponseWriter, r *http.Request) {
 	doc, notes := s.load()
 	counts := map[string]int{}
 	for _, n := range notes {
+		if n.Archived {
+			continue // archived notes are out of the tag cloud, like search/graph
+		}
 		for _, t := range n.Tags {
 			counts[t]++
 		}

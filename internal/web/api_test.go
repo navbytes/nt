@@ -894,3 +894,47 @@ func TestAPITaskNote(t *testing.T) {
 		t.Errorf("no new note should be created on the second call: %d → %d", len(notes), len(notes2))
 	}
 }
+
+// TestArchivedHiddenFromTagsAndGraph: an archived note must stay out of the
+// discovery surfaces — the tag cloud and the graph — like it already is for the
+// sidebar, search, and orphans (and as the note page's banner promises).
+func TestArchivedHiddenFromTagsAndGraph(t *testing.T) {
+	s := newTestServer(t)
+	s.allowEdit = true
+	note.Create(s.eng.S, "Live", "active", []string{"shared"}, "cli", "")
+	old, _ := note.Create(s.eng.S, "Retired", "old", []string{"shared", "stale"}, "cli", "")
+	addTask(t, s, "follow up on [[Retired]]") // a task linking the archived note
+
+	// Archive "Retired" (frontmatter flag, the same write apiNoteArchive does).
+	fresh, err := note.Load(old.Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fresh.Archived = true
+	if err := fresh.Save(); err != nil {
+		t.Fatal(err)
+	}
+
+	// Tags: only the live note counts; "stale" (archived-only) is gone, "shared" = 1.
+	_, body := get(t, s, "/api/tags")
+	for _, tg := range decode[apitypes.TagsResponse](t, body).Tags {
+		if tg.Name == "stale" {
+			t.Errorf("archived-only tag %q should not appear in the cloud", tg.Name)
+		}
+		if tg.Name == "shared" && tg.Count != 1 {
+			t.Errorf("shared count should drop archived: got %d, want 1", tg.Count)
+		}
+	}
+
+	// Graph: no node for the archived note (and the task linking only it is omitted).
+	_, body = get(t, s, "/api/graph")
+	g := decode[apitypes.GraphData](t, body)
+	for _, n := range g.Nodes {
+		if n.Title == "Retired" {
+			t.Errorf("archived note should not be a graph node: %+v", g.Nodes)
+		}
+		if n.Kind == "task" {
+			t.Errorf("a task linking only an archived note should not appear: %+v", n)
+		}
+	}
+}
