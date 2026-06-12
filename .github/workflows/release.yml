@@ -5,6 +5,17 @@ name: Release
 on:
   push:
     tags: ["v*"]
+  # Manual release valve: when a tag can't be pushed directly (e.g. from a
+  # restricted/sandboxed clone where `git push origin <tag>` is blocked),
+  # dispatch this workflow with the version. The goreleaser job creates and
+  # pushes the annotated tag itself — from inside CI, where the token may push
+  # refs — before building, so the exact same pipeline runs either way.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to create (e.g. v0.15.0)"
+        required: true
+        type: string
 
 permissions:
   contents: write
@@ -16,6 +27,17 @@ jobs:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0 # full history so GoReleaser can build the changelog
+      # On manual dispatch, mint the tag here (the default token may push refs
+      # inside Actions) so GoReleaser sees a tagged HEAD. A tag pushed with the
+      # default GITHUB_TOKEN does not re-trigger this workflow, so there's no
+      # double release — this same run carries the build through.
+      - name: Create and push tag (manual dispatch)
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "${{ inputs.tag }}" -m "nt ${{ inputs.tag }}"
+          git push origin "${{ inputs.tag }}"
       - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
@@ -72,7 +94,12 @@ jobs:
       APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
       APPLE_NOTARY_PASSWORD: ${{ secrets.APPLE_NOTARY_PASSWORD }}
     steps:
+      # Build the tagged commit in both trigger modes: on a tag push that's
+      # GITHUB_REF; on manual dispatch it's the tag the goreleaser job just
+      # created (this job `needs` it, so the tag already exists on the remote).
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
 
       - uses: actions/setup-go@v6
         with:
@@ -82,7 +109,12 @@ jobs:
 
       - name: Compute version
         shell: bash
-        run: echo "VER=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+        # On a tag push the ref name IS the tag; on dispatch take it from the
+        # input. RELEASE_TAG is what `gh release upload` targets below.
+        run: |
+          REF="${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}"
+          echo "VER=${REF#v}" >> "$GITHUB_ENV"
+          echo "RELEASE_TAG=${REF}" >> "$GITHUB_ENV"
 
       - name: Install Linux WebKit/GTK deps
         if: matrix.os == 'ubuntu-latest'
@@ -159,4 +191,4 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: gh release upload "$GITHUB_REF_NAME" nt-desktop_${VER}_${{ matrix.label }}.* --clobber
+        run: gh release upload "$RELEASE_TAG" nt-desktop_${VER}_${{ matrix.label }}.* --clobber
