@@ -547,7 +547,11 @@ func buildGraphData(snap *snapshot) *graphData {
 	}
 
 	// Note nodes (keyed by path so the index can't collide with task ids).
-	for _, n := range snap.notes {
+	// Iterate `active`, not `notes`: archived notes are retired from the graph
+	// (matching the sidebar/search/orphans and the note page's own banner). A
+	// task that links an archived note then finds no node and is simply not
+	// connected to it (see the task loop's idx lookup below).
+	for _, n := range snap.active {
 		folder, _ := splitRel(n.Rel)
 		if j := strings.IndexByte(folder, '/'); j >= 0 {
 			folder = folder[:j] // top-level folder only
