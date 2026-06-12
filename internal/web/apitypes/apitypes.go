@@ -116,6 +116,7 @@ type NoteView struct {
 	Created   string     `json:"created"`
 	Tags      []string   `json:"tags"`
 	Archived  bool       `json:"archived,omitempty"` // retired from active views (still on disk)
+	Favorite  bool       `json:"favorite,omitempty"` // starred/pinned for quick access
 	BodyHTML  string     `json:"bodyHTML"`
 	Backlinks []Backlink `json:"backlinks"`
 	TaskRefs  []TaskRef  `json:"taskRefs"`
@@ -227,6 +228,7 @@ type NoteCard struct {
 	Preview  string   `json:"preview,omitempty"`  // first lines of the body, plain text
 	Updated  string   `json:"updated,omitempty"`  // YYYY-MM-DD (updated, else created)
 	Archived bool     `json:"archived,omitempty"` // retired; hidden unless the grid's "Archived" toggle is on
+	Favorite bool     `json:"favorite,omitempty"` // starred; surfaced by the grid's "Favorites" filter
 }
 
 // NotesGrid is GET /api/notes/grid — every note as a card, plus the folder
@@ -252,6 +254,14 @@ type MovedNote struct {
 type ArchivedNote struct {
 	Handle   string `json:"handle"`
 	Archived bool   `json:"archived"`
+}
+
+// FavoritedNote is the result of POST /api/notes/{handle}/favorite — the note's
+// (unchanged) handle and its new favorite state, so the client can flip its UI
+// without a full refetch.
+type FavoritedNote struct {
+	Handle   string `json:"handle"`
+	Favorite bool   `json:"favorite"`
 }
 
 // NoteTags is POST /api/notes/{handle}/tags — the note's tags after the edit.

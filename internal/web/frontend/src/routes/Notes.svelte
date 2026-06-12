@@ -21,11 +21,18 @@
   // the Archived toggle reveals them — a dedicated view of the retired set.
   const archivedCount = $derived(($gridQ.data?.notes ?? []).filter((n) => n.archived).length);
 
+  // Favorites are the starred working-set notes; the Favorites filter narrows
+  // the grid to them. (Star/unstar happens on a note's own page.)
+  const favoriteCount = $derived(
+    ($gridQ.data?.notes ?? []).filter((n) => n.favorite && !n.archived).length,
+  );
+
   // Persisted view controls.
   let dense = $state(localStorage.getItem("nt-notes-dense") === "1");
   let folder = $state("");
   let orphansOnly = $state(false);
   let archivedOnly = $state(false);
+  let favoritesOnly = $state(false);
   let sort = $state<"updated" | "title" | "folder">(
     (localStorage.getItem("nt-notes-sort") as "updated" | "title" | "folder") ?? "updated",
   );
@@ -38,6 +45,7 @@
     ns = ns.filter((n) => (archivedOnly ? n.archived : !n.archived));
     if (folder) ns = ns.filter((n) => n.folder === folder || n.folder.startsWith(folder + "/"));
     if (orphansOnly) ns = ns.filter((n) => orphanUrls.has(n.url));
+    if (favoritesOnly) ns = ns.filter((n) => n.favorite);
     ns.sort((a, b) => {
       if (sort === "title") return a.title.localeCompare(b.title);
       if (sort === "folder") return a.folder.localeCompare(b.folder) || a.title.localeCompare(b.title);
@@ -71,6 +79,15 @@
         <button class:seg--on={!dense} onclick={() => (dense = false)}>Cards</button>
         <button class:seg--on={dense} onclick={() => (dense = true)}>Compact</button>
       </div>
+      {#if favoriteCount > 0 || favoritesOnly}
+        <button
+          class="notes-toggle"
+          class:notes-toggle--on={favoritesOnly}
+          aria-pressed={favoritesOnly}
+          title="Show only starred notes"
+          onclick={() => (favoritesOnly = !favoritesOnly)}
+        >★ Favorites{#if favoriteCount}<span class="notes-toggle__count"> {favoriteCount}</span>{/if}</button>
+      {/if}
       <button
         class="notes-toggle"
         class:notes-toggle--on={orphansOnly}
@@ -120,7 +137,7 @@
     {#each cards as n (n.handle)}
       <a class="notecard" href={n.url}>
         <div class="notecard__top">
-          <span class="notecard__title">{n.title}</span>
+          <span class="notecard__title">{#if n.favorite}<span class="notecard__star" title="Favorite">★</span>{/if}{n.title}</span>
           {#if n.updated}<span class="notecard__date">{n.updated}</span>{/if}
         </div>
         {#if n.folder}<span class="notecard__folder">{n.folder}/</span>{/if}
@@ -224,6 +241,10 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+  .notecard__star {
+    color: #f5b301;
+    margin-right: 4px;
   }
   .notecard__date {
     flex: 0 0 auto;

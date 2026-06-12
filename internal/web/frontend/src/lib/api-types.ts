@@ -137,6 +137,7 @@ export interface NoteView {
   created: string;
   tags: string[];
   archived?: boolean; // retired from active views (still on disk)
+  favorite?: boolean; // starred/pinned for quick access
   bodyHTML: string;
   backlinks: Backlink[];
   taskRefs: TaskRef[];
@@ -262,6 +263,7 @@ export interface NoteCard {
   preview?: string; // first lines of the body, plain text
   updated?: string; // YYYY-MM-DD (updated, else created)
   archived?: boolean; // retired; hidden unless the grid's "Archived" toggle is on
+  favorite?: boolean; // starred; surfaced by the grid's "Favorites" filter
 }
 /**
  * NotesGrid is GET /api/notes/grid — every note as a card, plus the folder
@@ -290,6 +292,15 @@ export interface MovedNote {
 export interface ArchivedNote {
   handle: string;
   archived: boolean;
+}
+/**
+ * FavoritedNote is the result of POST /api/notes/{handle}/favorite — the note's
+ * (unchanged) handle and its new favorite state, so the client can flip its UI
+ * without a full refetch.
+ */
+export interface FavoritedNote {
+  handle: string;
+  favorite: boolean;
 }
 /**
  * NoteTags is POST /api/notes/{handle}/tags — the note's tags after the edit.
