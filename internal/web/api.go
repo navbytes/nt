@@ -320,7 +320,11 @@ func (s *Server) apiNote(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	html, err := renderBody(n.Body, snap.doc, snap.notes)
+	// The page renders the note's title as its own <h1>, so drop a leading
+	// "# <title>" from the body when it duplicates that title — otherwise the
+	// title shows twice. nt's note.Save prepends the title as an H1 for bodies
+	// authored without one, so nt-created notes always need this.
+	html, err := renderBody(stripTitleH1(n.Body, n.Title), snap.doc, snap.notes)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return

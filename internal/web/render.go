@@ -32,6 +32,27 @@ var md = goldmark.New(
 
 var wikilinkRe = regexp.MustCompile(`\[\[([^\]]+)\]\]`)
 
+// stripTitleH1 drops a leading "# <title>" heading from a note body when it
+// duplicates the note's own title. nt's note.Save prepends the title as an H1
+// for bodies authored without one, and many hand-written notes repeat the
+// frontmatter title as the first heading. Either way the note page already
+// renders the title as its <h1>, so rendering the body's copy too shows it
+// twice. We only strip when the first heading is an H1 whose text matches the
+// title (case- and whitespace-insensitively), leaving a genuinely different
+// first heading untouched.
+func stripTitleH1(body, title string) string {
+	rest := strings.TrimLeft(body, "\n")
+	first, after, _ := strings.Cut(rest, "\n")
+	h := strings.TrimSpace(first)
+	if !strings.HasPrefix(h, "# ") { // ATX H1 only ("## " etc. won't match)
+		return body
+	}
+	if !strings.EqualFold(strings.TrimSpace(strings.TrimPrefix(h, "#")), strings.TrimSpace(title)) {
+		return body
+	}
+	return strings.TrimLeft(after, "\n")
+}
+
 // renderBody converts a note's Markdown to HTML. It first rewrites [[wikilinks]]
 // into real links — resolved targets point at /n/<id> (a stable handle, so the
 // link survives renames/moves), unresolved or ambiguous ones become dim
