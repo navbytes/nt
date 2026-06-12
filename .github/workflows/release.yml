@@ -99,7 +99,10 @@ jobs:
 
       - name: Build app
         shell: bash
-        run: wails build -tags "${{ matrix.tags }}" -platform ${{ matrix.platform }} -s
+        # -ldflags injects the release version into the Go binary (main.version)
+        # so the in-app About panel matches `nt --version`; the wails.json stamp
+        # above covers the bundle/Finder version.
+        run: wails build -tags "${{ matrix.tags }}" -platform ${{ matrix.platform }} -s -ldflags "-X main.version=${VER}"
 
       # --- macOS: sign + notarize (only when signing secrets are configured) ---
       - name: Import signing certificate

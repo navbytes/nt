@@ -27,6 +27,12 @@ import (
 	"github.com/navbytes/nt/internal/web"
 )
 
+// version is the app version shown in the in-app About panel. The release's
+// `wails build` injects the release tag via -ldflags "-X main.version=<ver>"
+// (the same way GoReleaser stamps the CLI), so a tagged desktop build reports
+// the same version as `nt --version`. A local `go run` build stays "dev".
+var version = "dev"
+
 func main() {
 	// Open the same store + mutation engine the CLI/TUI/MCP use.
 	eng, err := mutate.Open()
@@ -35,7 +41,7 @@ func main() {
 	}
 
 	// Build the exact server `nt web` builds.
-	srv, err := web.NewServer(eng, "desktop")
+	srv, err := web.NewServer(eng, version)
 	if err != nil {
 		log.Fatalf("nt-desktop: build server: %v", err)
 	}
