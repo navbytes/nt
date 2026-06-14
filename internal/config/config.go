@@ -15,7 +15,6 @@
 //	[web]
 //	port = 4321                 # default `nt web` port
 //	host = "127.0.0.1"          # default bind address
-//	edit = true                 # start `nt web` in edit mode (default: read-only)
 //
 //	[tui]
 //	theme = "auto"              # auto | light | dark
@@ -39,7 +38,6 @@ type Config struct {
 	Editor          string // [defaults] editor
 	WebPort         int    // [web] port
 	WebHost         string // [web] host
-	WebEdit         bool   // [web] edit — start `nt web` in edit mode by default
 	WebDayBudget    int    // [web] day_budget_minutes — Today capacity bar budget (0 = default 360)
 	TUITheme        string // [tui] theme (auto|light|dark)
 }
@@ -92,8 +90,6 @@ func (c *Config) set(section, key, val string) {
 		c.WebPort = atoi(val)
 	case "web.host":
 		c.WebHost = unquote(val)
-	case "web.edit":
-		c.WebEdit = boolVal(val)
 	case "web.day_budget_minutes":
 		c.WebDayBudget = atoi(val)
 	case "tui.theme":
@@ -125,10 +121,4 @@ func unquote(s string) string {
 func atoi(s string) int {
 	n, _ := strconv.Atoi(strings.TrimSpace(s))
 	return n
-}
-
-// boolVal parses a TOML-ish boolean: bare true/false (case-insensitive), or a
-// quoted "true"/"false". Anything else is false (the safe default for web.edit).
-func boolVal(s string) bool {
-	return strings.EqualFold(unquote(strings.TrimSpace(s)), "true")
 }

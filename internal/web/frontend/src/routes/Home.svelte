@@ -4,8 +4,6 @@
   import TaskRows from "../lib/TaskRows.svelte";
   import { dayCapacity } from "../lib/capacity";
 
-  let { canEdit }: { canEdit: boolean } = $props();
-
   const activityQ = createQuery({ queryKey: ["activity", ""], queryFn: () => api.activity() });
   const recent = $derived(($activityQ.data?.days ?? []).slice(0, 1));
 
@@ -45,7 +43,6 @@
     <!-- The daily cockpit: what needs attention now (overdue + due today) plus a
          capture box. The full backlog and other views live under Tasks. -->
     <TaskRows
-      {canEdit}
       view="agenda"
       buckets={["Overdue", "Today"]}
       showAdd={true}

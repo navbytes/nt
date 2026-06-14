@@ -26,7 +26,6 @@
   }
 
   let {
-    canEdit = false,
     statuses = null,
     showAdd = false,
     view = "status",
@@ -35,7 +34,6 @@
     viewName = "",
     filter = "",
   }: {
-    canEdit?: boolean;
     statuses?: string[] | null;
     showAdd?: boolean;
     /** "status" groups by doing/open/blocked/done; "agenda" groups by due date. */
@@ -247,7 +245,7 @@
   }
 </script>
 
-{#if showAdd && canEdit}
+{#if showAdd}
   <form class="taskadd" onsubmit={add}>
     <input
       placeholder="Add a task…  (try: pay rent due:fri !high @home)"
@@ -286,9 +284,8 @@
         {#each group.tasks as t (t.id)}
           <TaskRow
             {t}
-            {canEdit}
             selected={selected.includes(t.id)}
-            onToggleSelect={canEdit ? () => toggleSel(t.id) : undefined}
+            onToggleSelect={() => toggleSel(t.id)}
           />
         {/each}
       </ul>

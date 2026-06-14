@@ -25,7 +25,6 @@ const (
 type webProc struct {
 	PID     int    `json:"pid"`
 	URL     string `json:"url"`
-	Edit    bool   `json:"edit"`
 	Started string `json:"started"` // RFC3339
 }
 
@@ -82,23 +81,15 @@ func runningWebProc() *webProc {
 	return p
 }
 
-// detachChildArgs builds the argv for the re-exec'd detached child. It passes
-// the parent's *resolved* edit decision explicitly — --edit or --read-only — so
-// the child can't re-derive a different default from [web] edit in config (which
-// it re-reads). Without forcing --read-only, `--detach --read-only` over an
-// edit-config store would wrongly come up editable.
-func detachChildArgs(host string, port int, edit bool) []string {
-	args := []string{"web", "--host", host, "--port", strconv.Itoa(port), "--" + detachedFlag}
-	if edit {
-		return append(args, "--edit")
-	}
-	return append(args, "--read-only")
+// detachChildArgs builds the argv for the re-exec'd detached child.
+func detachChildArgs(host string, port int) []string {
+	return []string{"web", "--host", host, "--port", strconv.Itoa(port), "--" + detachedFlag}
 }
 
 // webDetach re-execs nt as a background server detached from this terminal,
 // redirecting its output to $NT_DIR/web.log. The child writes the PID file with
 // its real URL once bound (see cmdWeb's onReady).
-func webDetach(host string, port int, edit bool) int {
+func webDetach(host string, port int) int {
 	if p := runningWebProc(); p != nil {
 		fmt.Printf("nt web is already running at %s (pid %d) — `nt web --stop` first\n", p.URL, p.PID)
 		return 1
@@ -117,7 +108,7 @@ func webDetach(host string, port int, edit bool) int {
 	if err != nil {
 		return fail(err)
 	}
-	cmd := exec.Command(exe, detachChildArgs(host, port, edit)...)
+	cmd := exec.Command(exe, detachChildArgs(host, port)...)
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = nil, logf, logf
 	cmd.SysProcAttr = detachAttr()
 	if err := cmd.Start(); err != nil {
@@ -165,10 +156,6 @@ func webStatus() int {
 		fmt.Println("nt web: not running")
 		return 1
 	}
-	mode := "read-only"
-	if p.Edit {
-		mode = "editing"
-	}
-	fmt.Printf("nt web: running (pid %d) at %s [%s]\n", p.PID, p.URL, mode)
+	fmt.Printf("nt web: running (pid %d) at %s\n", p.PID, p.URL)
 	return 0
 }

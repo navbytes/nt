@@ -6,7 +6,7 @@
   import Editor from "../lib/Editor.svelte";
   import { renderMermaidIn, observeTheme } from "../lib/mermaid";
 
-  let { handle, canEdit = false }: { handle: string; canEdit?: boolean } = $props();
+  let { handle }: { handle: string } = $props();
 
   const qc = useQueryClient();
   const noteQ = createQuery({ queryKey: ["note", handle], queryFn: () => api.note(handle) });
@@ -37,10 +37,10 @@
     moving = true;
   }
 
-  // Open the move picker when the command palette requests it (canEdit only).
+  // Open the move picker when the command palette requests it.
   let seenMoveReq = noteUI.moveRequest;
   $effect(() => {
-    if (canEdit && noteUI.moveRequest !== seenMoveReq) {
+    if (noteUI.moveRequest !== seenMoveReq) {
       seenMoveReq = noteUI.moveRequest;
       openMove();
     }
@@ -224,23 +224,21 @@
         <span class="crumbs__file">{n.file}</span>
         <span class="spacer"></span>
         <a class="btn btn--ghost btn--sm" href={`/graph?focus=${encodeURIComponent(handle)}`}>Graph ⌖</a>
-        {#if canEdit}
-          <button
-            class="btn btn--ghost btn--sm star"
-            class:star--on={n.favorite}
-            onclick={doFavorite}
-            disabled={favBusy}
-            aria-pressed={n.favorite}
-            title={n.favorite ? "Remove from favorites" : "Add to favorites"}
-          >{n.favorite ? "★" : "☆"}</button>
-          <button class="btn btn--ghost btn--sm" onclick={() => (addingTask = !addingTask)}>＋ Task</button>
-          <button class="btn btn--ghost btn--sm" onclick={openMove}>Move</button>
-          <button class="btn btn--ghost btn--sm" onclick={doArchive} disabled={archiveBusy}>
-            {n.archived ? "Unarchive" : "Archive"}
-          </button>
-          <button class="btn btn--ghost btn--sm" onclick={() => (editing = true)}>Edit</button>
-          <button class="btn btn--ghost btn--sm btn--danger" onclick={() => { deleteErr = ""; confirmingDelete = true; }}>Delete</button>
-        {/if}
+        <button
+          class="btn btn--ghost btn--sm star"
+          class:star--on={n.favorite}
+          onclick={doFavorite}
+          disabled={favBusy}
+          aria-pressed={n.favorite}
+          title={n.favorite ? "Remove from favorites" : "Add to favorites"}
+        >{n.favorite ? "★" : "☆"}</button>
+        <button class="btn btn--ghost btn--sm" onclick={() => (addingTask = !addingTask)}>＋ Task</button>
+        <button class="btn btn--ghost btn--sm" onclick={openMove}>Move</button>
+        <button class="btn btn--ghost btn--sm" onclick={doArchive} disabled={archiveBusy}>
+          {n.archived ? "Unarchive" : "Archive"}
+        </button>
+        <button class="btn btn--ghost btn--sm" onclick={() => (editing = true)}>Edit</button>
+        <button class="btn btn--ghost btn--sm btn--danger" onclick={() => { deleteErr = ""; confirmingDelete = true; }}>Delete</button>
       </div>
       {#if confirmingDelete}
         <div class="movebar movebar--danger">

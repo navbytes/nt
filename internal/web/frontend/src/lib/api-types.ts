@@ -16,8 +16,7 @@ can't drift. It is a pure data package (no imports) so codegen stays trivial.
  * State is GET /api/state — capabilities + headline counts for the shell.
  */
 export interface State {
-  canEdit: boolean;
-  csrf: string; // echo as X-CSRF on writes; "" when read-only
+  csrf: string; // echo as X-CSRF on every write
   version: string;
   openCount: number /* int */;
   noteCount: number /* int */;

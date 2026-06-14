@@ -5,8 +5,6 @@
   import { loc, navigate } from "../lib/router.svelte";
   import Journal from "./Journal.svelte";
 
-  let { canEdit = false }: { canEdit?: boolean } = $props();
-
   // Daily (journal) is a view of Notes, selected by the /journal path. The grid
   // is the default; the header toggle switches between them.
   const daily = $derived(loc.path === "/journal");
@@ -110,7 +108,7 @@
 </div>
 
 {#if daily}
-  <Journal {canEdit} />
+  <Journal />
 {:else if $gridQ.isPending}
   <p class="muted">Loading…</p>
 {:else if $gridQ.error}

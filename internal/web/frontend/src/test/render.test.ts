@@ -23,7 +23,6 @@ vi.mock("../lib/api", () => {
       preview: vi.fn().mockResolvedValue("<p>preview</p>"),
       save: vi.fn().mockResolvedValue(undefined),
       state: vi.fn().mockResolvedValue({
-        canEdit: true,
         csrf: "x",
         version: "v",
         openCount: 1,
@@ -87,7 +86,7 @@ beforeEach(() => vi.clearAllMocks());
 
 describe("TaskRows", () => {
   it("renders tasks from the query and completes one via the mutation", async () => {
-    render(Harness, { props: { comp: TaskRows, props: { canEdit: true } } });
+    render(Harness, { props: { comp: TaskRows, props: {} } });
 
     expect(await screen.findByText("write tests")).toBeInTheDocument();
     await fireEvent.click(screen.getByTitle("Mark done"));
@@ -97,7 +96,7 @@ describe("TaskRows", () => {
   });
 
   it("filters groups by status", async () => {
-    render(Harness, { props: { comp: TaskRows, props: { canEdit: false, statuses: ["open"] } } });
+    render(Harness, { props: { comp: TaskRows, props: { statuses: ["open"] } } });
     expect(await screen.findByText("write tests")).toBeInTheDocument();
     expect(screen.queryByText("old thing")).not.toBeInTheDocument();
   });

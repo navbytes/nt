@@ -8,10 +8,9 @@
   // resolves to the Tasks "Review" tab). viewName (/tasks?view=…) recalls a
   // saved smart view instead — the server applies it, we just render the rows.
   let {
-    canEdit,
     initialView,
     viewName = "",
-  }: { canEdit: boolean; initialView?: TaskView; viewName?: string } = $props();
+  }: { initialView?: TaskView; viewName?: string } = $props();
 
   // Persist the chosen view so it sticks across visits; an explicit initialView
   // (from /review) wins on landing.
@@ -77,13 +76,13 @@
 {/if}
 
 {#if viewName}
-  <TaskRows {canEdit} {viewName} {filter} />
+  <TaskRows {viewName} {filter} />
 {:else if view === "board" && !narrow}
-  <Board {canEdit} />
+  <Board />
 {:else if view === "review"}
-  <Review {canEdit} embedded />
+  <Review embedded />
 {:else}
-  <TaskRows {canEdit} showAdd={true} view={view === "board" ? "status" : view} {filter} />
+  <TaskRows showAdd={true} view={view === "board" ? "status" : view} {filter} />
 {/if}
 
 <style>

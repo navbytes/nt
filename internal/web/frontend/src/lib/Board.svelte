@@ -4,8 +4,6 @@
   import { showToast } from "./toast.svelte";
   import { displayTitle } from "./text";
 
-  let { canEdit = false }: { canEdit?: boolean } = $props();
-
   const qc = useQueryClient();
   const tasksQ = createQuery({ queryKey: ["tasks"], queryFn: api.tasks });
   const set = (d: { groups: TaskGroup[] }) => qc.setQueryData(["tasks"], d);
@@ -78,7 +76,7 @@
       class:bcol--done={col.key === "done"}
       role="list"
       ondragover={(e) => {
-        if (canEdit && dragId) {
+        if (dragId) {
           e.preventDefault();
           overCol = col.key;
         }
@@ -97,7 +95,7 @@
           <article
             class="bcard pri-{t.priority || 'none'}"
             class:bcard--dragging={dragId === t.id}
-            draggable={canEdit}
+            draggable={true}
             role="listitem"
             title={t.blocker ? `${t.text}\nblocked by: ${t.blocker}` : t.text}
             ondragstart={(e) => {
@@ -120,23 +118,21 @@
               {#if (t.tags?.length ?? 0) > 3}<span class="chip chip--more">+{(t.tags?.length ?? 0) - 3}</span>{/if}
               {#if t.due}<span class="row__due" class:row__due--over={dateOf(t.due) < todayISO() && col.key !== "done"}>{fmtDue(t.due)}</span>{/if}
             </div>
-            {#if canEdit}
-              <div class="bcard__actions">
-                {#if col.key !== "done"}<button class="rowbtn" title="Mark done" aria-label="Mark done" onclick={() => $doneMut.mutate(t.id)}>✓</button>{/if}
-                <button
-                  class="rowbtn rowbtn--danger"
-                  title="Delete (undoable)"
-                  aria-label="Delete task"
-                  onclick={() => del(t)}>×</button>
-              </div>
-            {/if}
+            <div class="bcard__actions">
+              {#if col.key !== "done"}<button class="rowbtn" title="Mark done" aria-label="Mark done" onclick={() => $doneMut.mutate(t.id)}>✓</button>{/if}
+              <button
+                class="rowbtn rowbtn--danger"
+                title="Delete (undoable)"
+                aria-label="Delete task"
+                onclick={() => del(t)}>×</button>
+            </div>
           </article>
         {/each}
         {#if col.key === "done" && colTasks("done").length > DONE_CAP}
           <p class="muted small">+{colTasks("done").length - DONE_CAP} more done</p>
         {/if}
         {#if colTasks(col.key).length === 0}
-          <p class="bcol__empty">{canEdit ? "drop here" : "—"}</p>
+          <p class="bcol__empty">drop here</p>
         {/if}
       </div>
     </section>

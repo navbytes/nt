@@ -6,14 +6,13 @@
   import { requestMoveNote, requestNewNote } from "./noteUI.svelte";
   import { captureTask } from "./keys.svelte";
   import { openAbout } from "./about.svelte";
+  import { toggleCollapsed } from "./sidebarState.svelte";
 
   let q = $state("");
   let active = $state(0);
   let inputEl: HTMLInputElement | undefined = $state();
 
   const notesQ = createQuery({ queryKey: ["notes"], queryFn: api.notes });
-  const stateQ = createQuery({ queryKey: ["state"], queryFn: api.state });
-  const canEdit = $derived($stateQ.data?.canEdit ?? false);
 
   type Item = { label: string; sub?: string; kind: string; url?: string; run?: () => void };
 
@@ -55,13 +54,10 @@
 
   const onNotePage = $derived(loc.path.startsWith("/n/"));
   const actionItems = $derived<Item[]>([
-    ...(canEdit
-      ? [
-          { label: "New note", kind: "action", run: newNote },
-          { label: "New task", kind: "action", run: newTask },
-          ...(onNotePage ? [{ label: "Move note…", kind: "action", run: requestMoveNote }] : []),
-        ]
-      : []),
+    { label: "New note", kind: "action", run: newNote },
+    { label: "New task", kind: "action", run: newTask },
+    ...(onNotePage ? [{ label: "Move note…", kind: "action", run: requestMoveNote }] : []),
+    { label: "Toggle sidebar", kind: "action", run: toggleCollapsed },
     { label: "Toggle theme", kind: "action", run: toggleTheme },
     { label: "About nt", kind: "action", run: openAbout },
   ]);

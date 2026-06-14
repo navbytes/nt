@@ -205,11 +205,7 @@ func TestPreviewEndpoint(t *testing.T) {
 	s := newTestServer(t)
 	note.Create(s.eng.S, "Target", "x", nil, "cli", "")
 
-	// gated off when read-only
-	if code, _ := postBody(s, "/api/preview", "", "# hi"); code != 404 {
-		t.Errorf("preview should 404 when read-only, got %d", code)
-	}
-	s.allowEdit = true
+	// writes (preview included) require the CSRF token
 	if code, _ := postBody(s, "/api/preview", "", "# hi"); code != 403 {
 		t.Errorf("preview without CSRF should 403, got %d", code)
 	}
@@ -229,7 +225,6 @@ func TestPreviewEndpoint(t *testing.T) {
 
 func TestEditingSave(t *testing.T) {
 	s := newTestServer(t)
-	s.allowEdit = true
 	n, _ := note.Create(s.eng.S, "X", "old body here", nil, "cli", "")
 
 	if code := postNote(s, n.ID, "", "x"); code != 403 {
@@ -251,7 +246,6 @@ func TestEditingSave(t *testing.T) {
 // opened it, a save carrying the stale ETag as If-Match is refused with 409.
 func TestEditingLostUpdateGuard(t *testing.T) {
 	s := newTestServer(t)
-	s.allowEdit = true
 	n, _ := note.Create(s.eng.S, "X", "v1 body", nil, "cli", "")
 
 	// Capture the current ETag by reading the file bytes directly.

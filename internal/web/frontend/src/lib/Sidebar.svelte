@@ -8,9 +8,8 @@
 
   let {
     path,
-    canEdit = false,
     open = false,
-  }: { path: string; canEdit?: boolean; open?: boolean } = $props();
+  }: { path: string; open?: boolean } = $props();
 
   const qc = useQueryClient();
   const notesQ = createQuery({ queryKey: ["notes"], queryFn: api.notes });
@@ -33,7 +32,7 @@
   }
   let seenNewReq = noteUI.newNoteRequest;
   $effect(() => {
-    if (canEdit && noteUI.newNoteRequest !== seenNewReq) {
+    if (noteUI.newNoteRequest !== seenNewReq) {
       seenNewReq = noteUI.newNoteRequest;
       openNewNote();
     }
@@ -115,9 +114,7 @@
   <div class="tree">
     <div class="tree__head">
       <span>Notes</span>
-      {#if canEdit}
-        <button class="tree__new" title="New note" aria-label="New note" disabled={creating} onclick={openNewNote}>+</button>
-      {/if}
+      <button class="tree__new" title="New note" aria-label="New note" disabled={creating} onclick={openNewNote}>+</button>
     </div>
     {#if newOpen}
       <form class="tree__newform" onsubmit={createNote}>

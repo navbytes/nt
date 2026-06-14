@@ -40,7 +40,7 @@ func TestAPIStateAndNotes(t *testing.T) {
 
 	_, body := get(t, s, "/api/state")
 	st := decode[apitypes.State](t, body)
-	if st.NoteCount != 2 || st.OpenCount != 1 || st.CanEdit {
+	if st.NoteCount != 2 || st.OpenCount != 1 || st.CSRF == "" {
 		t.Fatalf("state wrong: %+v", st)
 	}
 
@@ -59,7 +59,6 @@ func TestAPIStateAndNotes(t *testing.T) {
 
 func TestAPITasksReadAndWrite(t *testing.T) {
 	s := newTestServer(t)
-	s.allowEdit = true
 	id := addTask(t, s, "ship it")
 
 	_, body := get(t, s, "/api/tasks")
@@ -96,7 +95,6 @@ func TestAPITasksReadAndWrite(t *testing.T) {
 // un-dones it (the API can't leave a task both done and in-progress).
 func TestAPITaskBoardTransitions(t *testing.T) {
 	s := newTestServer(t)
-	s.allowEdit = true
 	code, body := postForm(s, "/api/tasks", s.csrf, mustValues("text", "fix it", "pri", "high"))
 	if code != 200 {
 		t.Fatalf("new: %d", code)
@@ -140,7 +138,6 @@ func TestAPITaskBoardTransitions(t *testing.T) {
 // quickadd package fixes). Regression guard for the cross-surface add path.
 func TestAPIQuickAddNormalizesInlineTokens(t *testing.T) {
 	s := newTestServer(t)
-	s.allowEdit = true
 
 	code, _ := postForm(s, "/api/tasks", s.csrf, mustValues("text", "pay rent due:fri !high @home"))
 	if code != 200 {
@@ -168,11 +165,7 @@ func timeParseISO(s string) (any, error) { return time.Parse("2006-01-02", s) }
 func TestAPINoteCreate(t *testing.T) {
 	s := newTestServer(t)
 
-	// gated off when read-only
-	if code, _ := postForm(s, "/api/notes", "", mustValues("title", "Nope")); code != 403 {
-		t.Errorf("create should 403 when read-only, got %d", code)
-	}
-	s.allowEdit = true
+	// writes require the CSRF token
 	if code, _ := postForm(s, "/api/notes", "", mustValues("title", "Nope")); code != 403 {
 		t.Errorf("create without CSRF should 403, got %d", code)
 	}
@@ -217,11 +210,6 @@ func TestAPINoteRawSaveGuard(t *testing.T) {
 	s := newTestServer(t)
 	n, _ := note.Create(s.eng.S, "Edit Me", "v1", nil, "cli", "")
 
-	// read-only → raw 404
-	if resp, _ := get(t, s, "/api/notes/"+n.ID+"/raw"); resp.StatusCode != 404 {
-		t.Errorf("raw should 404 read-only, got %d", resp.StatusCode)
-	}
-	s.allowEdit = true
 	_, body := get(t, s, "/api/notes/"+n.ID+"/raw")
 	raw := decode[apitypes.RawNote](t, body)
 	if !strings.Contains(raw.Text, "v1") || raw.ETag == "" {
@@ -276,7 +264,6 @@ func TestAPITagsAndOrphans(t *testing.T) {
 // "task" node with an edge to that note; tasks with no note links are omitted.
 func TestAPIGraphTaskNodes(t *testing.T) {
 	s := newTestServer(t)
-	s.allowEdit = true
 	note.Create(s.eng.S, "Hub", "hub note", nil, "cli", "")
 	addTask(t, s, "wire [[Hub]] up")
 	addTask(t, s, "unconnected chore") // no note link → should NOT appear
@@ -451,7 +438,6 @@ func TestCapGraph(t *testing.T) {
 // unchanged), edit+CSRF gated, and rejects traversal folders.
 func TestAPITaskEdit(t *testing.T) {
 	s := newTestServer(t)
-	s.allowEdit = true
 	id := addTask(t, s, "fix the bug @backend +api")
 
 	// gated: no CSRF → 403; empty text → 400.
@@ -484,7 +470,6 @@ func TestAPITaskEdit(t *testing.T) {
 // the description left untouched (the quick-reschedule wire contract).
 func TestAPITaskReschedule(t *testing.T) {
 	s := newTestServer(t)
-	s.allowEdit = true
 	id := addTask(t, s, "renew cert @ops")
 
 	// A due-only update must not require text.
@@ -533,7 +518,6 @@ func TestAPITaskReschedule(t *testing.T) {
 // as `nt view recall` — returning a single ordered group.
 func TestAPIViews(t *testing.T) {
 	s := newTestServer(t)
-	s.allowEdit = true
 	addTask(t, s, "fix auth bug @backend")
 	addTask(t, s, "write docs @docs")
 	id := addTask(t, s, "old backend chore @backend")
@@ -585,7 +569,6 @@ func TestAPIViews(t *testing.T) {
 // and 409s when there's nothing to undo.
 func TestAPIUndo(t *testing.T) {
 	s := newTestServer(t)
-	s.allowEdit = true
 
 	// Nothing journaled yet → 409, not a silent no-op.
 	if code, _ := postForm(s, "/api/undo", s.csrf, nil); code != 409 {
@@ -622,12 +605,6 @@ func TestAPINoteMove(t *testing.T) {
 	s := newTestServer(t)
 	target, _ := note.Create(s.eng.S, "Target", "body", nil, "cli", "")
 	note.Create(s.eng.S, "Linker", "see [[Target]]", nil, "cli", "")
-
-	// gated off read-only
-	if code, _ := postForm(s, "/api/notes/"+target.ID+"/move", "", mustValues("folder", "work")); code != 403 {
-		t.Errorf("move should 403 read-only, got %d", code)
-	}
-	s.allowEdit = true
 
 	code, body := postForm(s, "/api/notes/"+target.ID+"/move", s.csrf, mustValues("folder", "work/auth"))
 	if code != 200 {
@@ -721,7 +698,6 @@ func TestAPINotesGrid(t *testing.T) {
 // so a single undo reverts the whole batch (the engine's undo is single-level).
 func TestAPITaskBulk(t *testing.T) {
 	s := newTestServer(t)
-	s.allowEdit = true
 	a := addTask(t, s, "alpha")
 	b := addTask(t, s, "beta")
 	c := addTask(t, s, "gamma")
@@ -784,7 +760,6 @@ func timeNowPlusISO(days int) string {
 // unmodeled frontmatter keys survive (note.Save preserves Extra).
 func TestAPINoteTags(t *testing.T) {
 	s := newTestServer(t)
-	s.allowEdit = true
 	n, _ := note.Create(s.eng.S, "Doc", "# Doc\n\nbody text", []string{"alpha"}, "cli", "")
 
 	// gated
@@ -824,7 +799,6 @@ func TestAPINoteTags(t *testing.T) {
 // note URL and drops the raw [[link]] from its displayed text. Idempotent.
 func TestAPITaskNote(t *testing.T) {
 	s := newTestServer(t)
-	s.allowEdit = true
 	id := addTask(t, s, "design the auth flow @security")
 
 	// gated
@@ -902,12 +876,6 @@ func TestAPINoteFavorite(t *testing.T) {
 	s := newTestServer(t)
 	n, _ := note.Create(s.eng.S, "Cheat Sheet", "commands", nil, "cli", "")
 
-	// Gated off when read-only (mirrors archive/move).
-	if code, _ := postForm(s, "/api/notes/"+n.ID+"/favorite", "", mustValues("favorite", "true")); code != 403 {
-		t.Errorf("favorite should 403 read-only, got %d", code)
-	}
-	s.allowEdit = true
-
 	// Star it.
 	code, body := postForm(s, "/api/notes/"+n.ID+"/favorite", s.csrf, mustValues("favorite", "true"))
 	if code != 200 {
@@ -949,7 +917,6 @@ func TestAPINoteFavorite(t *testing.T) {
 
 func TestArchivedHiddenFromTagsAndGraph(t *testing.T) {
 	s := newTestServer(t)
-	s.allowEdit = true
 	note.Create(s.eng.S, "Live", "active", []string{"shared"}, "cli", "")
 	old, _ := note.Create(s.eng.S, "Retired", "old", []string{"shared", "stale"}, "cli", "")
 	addTask(t, s, "follow up on [[Retired]]") // a task linking the archived note

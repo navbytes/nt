@@ -3,6 +3,8 @@
   import { api, setCsrf } from "./api";
   import { loc, navigate } from "./router.svelte";
   import Sidebar from "./Sidebar.svelte";
+  import SidebarResizer from "./SidebarResizer.svelte";
+  import { sidebar, toggleCollapsed } from "./sidebarState.svelte";
   import SearchBox from "./SearchBox.svelte";
   import CommandPalette from "./CommandPalette.svelte";
   import Shortcuts from "./Shortcuts.svelte";
@@ -53,8 +55,9 @@
 </script>
 
 <a href="#main-content" class="skip-link">Skip to content</a>
-<div class="layout">
-  <Sidebar {path} canEdit={$stateQ.data?.canEdit ?? false} open={drawerOpen} />
+<div class="layout" class:sidebar-collapsed={sidebar.collapsed} style="--sidebar-w: {sidebar.width}px">
+  <Sidebar {path} open={drawerOpen} />
+  <SidebarResizer />
   {#if drawerOpen}
     <div class="scrim" role="presentation" onclick={() => (drawerOpen = false)}></div>
   {/if}
@@ -67,6 +70,13 @@
         aria-label="Toggle navigation menu"
         aria-expanded={drawerOpen}>☰</button
       >
+      <button
+        class="collapse-btn"
+        onclick={toggleCollapsed}
+        title="Toggle sidebar ([)"
+        aria-label="Toggle sidebar"
+        aria-expanded={!sidebar.collapsed}>⇤</button
+      >
       <div class="topbar__search"><SearchBox /></div>
       <button class="palette-btn" onclick={openPalette} title="Command palette (⌘K)" aria-label="Open command palette">
         <span class="kbd">⌘K</span>
@@ -75,7 +85,6 @@
       {#if $stateQ.data}
         <a class="stat" href="/tasks"><strong>{$stateQ.data.openCount}</strong> open</a>
         <span class="stat"><strong>{$stateQ.data.noteCount}</strong> notes</span>
-        {#if $stateQ.data.canEdit}<span class="badge">edit</span>{/if}
       {/if}
       <button
         class="icon-btn"
@@ -92,19 +101,19 @@
 
     <main class="main" id="main-content" tabindex="-1">
       {#if path === "/"}
-        <Home canEdit={$stateQ.data?.canEdit ?? false} />
+        <Home />
       {:else if noteHandle}
         {#key noteHandle}
-          <NoteView handle={noteHandle} canEdit={$stateQ.data?.canEdit ?? false} />
+          <NoteView handle={noteHandle} />
         {/key}
       {:else if path === "/tasks"}
         {#key loc.query.get("view") ?? ""}
-          <Tasks canEdit={$stateQ.data?.canEdit ?? false} viewName={loc.query.get("view") ?? ""} />
+          <Tasks viewName={loc.query.get("view") ?? ""} />
         {/key}
       {:else if path === "/review"}
-        <Tasks canEdit={$stateQ.data?.canEdit ?? false} initialView="review" />
+        <Tasks initialView="review" />
       {:else if path === "/notes" || path === "/journal"}
-        <Notes canEdit={$stateQ.data?.canEdit ?? false} />
+        <Notes />
       {:else if path === "/activity"}
         <Activity />
       {:else if path === "/search"}
@@ -127,7 +136,7 @@
   <button class="fab" aria-label="New task" title="New task" onclick={() => navigate("/tasks")}>＋</button>
 
   <CommandPalette />
-  <Shortcuts canEdit={$stateQ.data?.canEdit ?? false} />
+  <Shortcuts />
   <Toast />
   <About />
 </div>

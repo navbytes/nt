@@ -4,8 +4,6 @@
   import { loc, navigate } from "../lib/router.svelte";
   import NoteView from "./NoteView.svelte";
 
-  let { canEdit = false }: { canEdit?: boolean } = $props();
-
   const qc = useQueryClient();
   const journalQ = createQuery({ queryKey: ["journal"], queryFn: api.journal });
 
@@ -77,18 +75,14 @@
     <p class="muted">Loading…</p>
   {:else if handle}
     {#key handle}
-      <NoteView {handle} {canEdit} />
+      <NoteView {handle} />
     {/key}
   {:else}
     <div class="jrnl__empty">
       <p class="muted">No journal entry for {pretty(active)}.</p>
-      {#if canEdit}
-        <button class="btn" disabled={creating} onclick={startEntry}>
-          {creating ? "Creating…" : "Start this entry"}
-        </button>
-      {:else}
-        <p class="small muted">Start nt with <code>--edit</code> to write daily notes.</p>
-      {/if}
+      <button class="btn" disabled={creating} onclick={startEntry}>
+        {creating ? "Creating…" : "Start this entry"}
+      </button>
     </div>
   {/if}
 
