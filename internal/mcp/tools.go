@@ -101,12 +101,13 @@ var toolDefs = []toolDef{
 	},
 	{
 		Name:        "nt_recall",
-		Description: "Read back earlier tasks and notes (bodies included) to restore prior-session context. To save context: brief=true returns note pointers without bodies (nt_view one to read it); limit=N keeps the most recent N.",
+		Description: "Read back earlier open tasks and notes (bodies included) to restore prior-session context. Completed tasks are omitted (see nt_log). To save context: brief=true returns note pointers without bodies (nt_view one to read it); limit=N keeps the most recent N.",
 		InputSchema: obj(map[string]any{
-			"source": st(),
-			"since":  sp("on/after YYYY-MM-DD"),
-			"brief":  map[string]any{"type": "boolean", "description": "omit note bodies — pointers only"},
-			"limit":  it(),
+			"source":       st(),
+			"since":        sp("on/after YYYY-MM-DD"),
+			"brief":        map[string]any{"type": "boolean", "description": "omit note bodies — pointers only"},
+			"limit":        it(),
+			"include_done": map[string]any{"type": "boolean", "description": "also include completed tasks"},
 		}),
 	},
 	{

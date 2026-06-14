@@ -516,8 +516,12 @@ func (s *server) recall(a map[string]any) (string, error) {
 		return "", err
 	}
 	source, since := str(a, "source"), str(a, "since")
+	includeDone := boolArg(a, "include_done")
 	var tasks []*task.Task
 	for _, t := range d.Tasks() {
+		if !includeDone && t.Done {
+			continue // recall restores ACTIVE context; finished work lives in nt_log
+		}
 		if source != "" && t.Source() != source {
 			continue
 		}

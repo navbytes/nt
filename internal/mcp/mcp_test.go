@@ -453,4 +453,22 @@ func TestMCPRecallContextControls(t *testing.T) {
 	if len(limited.Notes) != 1 {
 		t.Fatalf("limit=1 should return 1 note, got %d", len(limited.Notes))
 	}
+
+	// Completed tasks are omitted from recall by default (active context only),
+	// but include_done brings them back.
+	var added taskOut
+	json.Unmarshal([]byte(must("nt_add", map[string]any{"text": "ship it"})), &added)
+	must("nt_done", map[string]any{"id": added.ID})
+	var afterDone recallOut
+	json.Unmarshal([]byte(must("nt_recall", map[string]any{})), &afterDone)
+	for _, tk := range afterDone.Tasks {
+		if tk.Status == "done" {
+			t.Fatalf("default recall must omit completed tasks, got %+v", tk)
+		}
+	}
+	var withDone recallOut
+	json.Unmarshal([]byte(must("nt_recall", map[string]any{"include_done": true})), &withDone)
+	if len(withDone.Tasks) <= len(afterDone.Tasks) {
+		t.Fatalf("include_done should add the completed task back (%d vs %d)", len(withDone.Tasks), len(afterDone.Tasks))
+	}
 }
