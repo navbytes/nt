@@ -744,7 +744,7 @@ func toGraph(g *graphData) apitypes.GraphData {
 	}
 	links := make([]apitypes.GraphLink, len(g.Links))
 	for i, l := range g.Links {
-		links[i] = apitypes.GraphLink{S: l.S, T: l.T}
+		links[i] = apitypes.GraphLink{S: l.S, T: l.T, Kind: l.Kind}
 	}
 	return apitypes.GraphData{Nodes: nodes, Links: links, Truncated: g.Truncated}
 }

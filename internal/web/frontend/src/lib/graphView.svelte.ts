@@ -16,6 +16,13 @@ export type LinkStyle = "curved" | "straight";
 // Renderer: 2D canvas (force-graph) or 3D WebGL constellation with bloom
 // (3d-force-graph, lazy-loaded only when selected).
 export type Dim = "2d" | "3d";
+// Layout: "force" = organic force-directed; "radial" = concentric rings by hop
+// distance from the rooted node (ego view). Radial needs a root, so it only
+// takes effect in local mode (2D); elsewhere it falls back to force.
+export type Layout = "force" | "radial";
+// Node size encoding: raw link "degree" or "centrality" (PageRank) so structural
+// hubs stand out by their position in the graph, not just their edge count.
+export type SizeBy = "degree" | "centrality";
 
 const KEY = "nt-graph-view";
 
@@ -36,7 +43,10 @@ const PERSIST_KEYS = [
   "effects",
   "linkStyle",
   "colorLinks",
+  "colorLinksByType",
   "dim",
+  "layout",
+  "sizeBy",
 ] as const;
 
 interface ViewState {
@@ -63,7 +73,10 @@ interface ViewState {
   effects: Effects;
   linkStyle: LinkStyle;
   colorLinks: boolean;
+  colorLinksByType: boolean;
   dim: Dim;
+  layout: Layout;
+  sizeBy: SizeBy;
 }
 
 const defaults: ViewState = {
@@ -90,7 +103,10 @@ const defaults: ViewState = {
   effects: "full",
   linkStyle: "curved",
   colorLinks: true,
+  colorLinksByType: false,
   dim: "2d",
+  layout: "force",
+  sizeBy: "degree",
 };
 
 function loadPersisted(): Partial<ViewState> {

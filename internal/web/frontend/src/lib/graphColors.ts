@@ -61,6 +61,42 @@ export function withAlpha(hex: string, a: number): string {
   return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`;
 }
 
+// ---- edge (relationship) colors -------------------------------------------
+// The graph's edges carry a `kind` (server: GraphLink.Kind) naming the predicate
+// family. Coloring by it lets you trace how memory connects: knowledge↔knowledge
+// vs. work→knowledge vs. task dependencies. Fixed (not palette-cycled) so the
+// meaning is stable across stores.
+const LINK_KIND_COLOR: Record<string, string> = {
+  wikilink: "#7aa2f7", // note ↔ note (blue)
+  task: "#9ece6a", // task → note reference (green)
+  parent: "#bb9af7", // sub-task → parent (purple)
+  blocks: "#f7768e", // blocker → blocked (red)
+  discovered: "#e0af68", // discovered-from (amber)
+};
+const LINK_KIND_LABEL: Record<string, string> = {
+  wikilink: "Wikilink",
+  task: "Task ref",
+  parent: "Parent",
+  blocks: "Blocks",
+  discovered: "Discovered",
+};
+
+export function linkKindColor(kind?: string): string {
+  return LINK_KIND_COLOR[kind || "wikilink"] ?? UNCATEGORIZED;
+}
+
+// linkKindLegend lists the distinct edge kinds present, in a stable order, for
+// the edge legend (only shown when "color edges by type" is on).
+export function linkKindLegend(
+  kinds: (string | undefined)[],
+): { value: string; label: string; color: string }[] {
+  const order = ["wikilink", "task", "parent", "blocks", "discovered"];
+  const present = new Set(kinds.map((k) => k || "wikilink"));
+  return order
+    .filter((k) => present.has(k))
+    .map((k) => ({ value: k, label: LINK_KIND_LABEL[k] ?? k, color: LINK_KIND_COLOR[k]! }));
+}
+
 export function legendEntries(
   nodes: FGNode[],
   colorBy: ColorBy,

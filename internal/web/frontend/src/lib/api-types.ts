@@ -229,11 +229,15 @@ export interface GraphNode {
   deg: number /* int */;
 }
 /**
- * GraphLink is one wikilink edge as a pair of indices into GraphData.Nodes.
+ * GraphLink is one edge as a pair of indices into GraphData.Nodes. Kind names
+ * the relationship so the viewer can color/style edges by predicate family:
+ * "wikilink" (note↔note), "task" (task→note reference), or a task dependency
+ * ("parent" | "blocks" | "discovered").
  */
 export interface GraphLink {
   s: number /* int */;
   t: number /* int */;
+  kind?: string;
 }
 /**
  * GraphData is GET /api/graph — the note↔note wikilink graph.

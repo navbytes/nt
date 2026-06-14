@@ -6,16 +6,20 @@
   let {
     node,
     pinned,
+    expanded,
     onOpen,
     onFocusLocal,
     onTogglePin,
+    onToggleExpand,
     onClose,
   }: {
     node: FGNode;
     pinned: boolean;
+    expanded: boolean;
     onOpen: () => void;
     onFocusLocal: () => void;
     onTogglePin: () => void;
+    onToggleExpand: () => void;
     onClose: () => void;
   } = $props();
 
@@ -65,6 +69,11 @@
   <div class="gdetails__actions">
     <button class="btn btn--sm" onclick={onOpen}>Open note</button>
     <button class="btn btn--ghost btn--sm" onclick={onFocusLocal}>Focus local ⌖</button>
+    <button
+      class="btn btn--ghost btn--sm"
+      title="Reveal this node's neighbors (shift-click a node does this too)"
+      onclick={onToggleExpand}>{expanded ? "Collapse" : "Expand"} neighbors</button
+    >
     <button class="btn btn--ghost btn--sm" onclick={onTogglePin}>{pinned ? "Unpin" : "Pin"}</button>
   </div>
 </aside>
