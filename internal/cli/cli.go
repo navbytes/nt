@@ -4,6 +4,7 @@
 package cli
 
 import (
+	"bufio"
 	"fmt"
 	"os"
 	"strings"
@@ -30,6 +31,10 @@ func Run(args []string) int {
 		return cmdAdd(rest)
 	case "note":
 		return cmdNote(rest)
+	case "notes":
+		return cmdNotes(rest)
+	case "show", "cat":
+		return cmdShow(rest)
 	case "journal", "j":
 		return cmdJournal(rest)
 	case "list", "ls":
@@ -133,6 +138,29 @@ func isCharDevice(f *os.File) bool {
 	return err == nil && fi.Mode()&os.ModeCharDevice != 0
 }
 
+// confirm prompts on the terminal for a yes/no answer, defaulting to no. Only
+// meaningful interactively — callers gate on interactive() (and a --yes flag)
+// before calling, so scripts and agents are never blocked on stdin.
+func confirm(prompt string) bool {
+	fmt.Fprintf(os.Stderr, "%s [y/N] ", prompt)
+	r := bufio.NewReader(os.Stdin)
+	line, _ := r.ReadString('\n')
+	switch strings.ToLower(strings.TrimSpace(line)) {
+	case "y", "yes":
+		return true
+	}
+	return false
+}
+
+// prompt reads a single lowercased line from the terminal (for multi-choice
+// prompts like the delete-with-backlinks flow).
+func prompt(msg string) string {
+	fmt.Fprint(os.Stderr, msg)
+	r := bufio.NewReader(os.Stdin)
+	line, _ := r.ReadString('\n')
+	return strings.ToLower(strings.TrimSpace(line))
+}
+
 // resolveHandle maps a user-supplied task handle to a task, refusing a positional
 // "task:N" / bare "N" from non-interactive callers: the index is recomputed each
 // run, so an agent that read the list a moment ago may act on the wrong task
@@ -230,6 +258,8 @@ USAGE
   nt                          open the interactive TUI
   nt add "title" [flags]      add a task
   nt note "title" [flags]     capture a note (--folder work files it in notes/work/)
+  nt notes [--folder|--tag]   list notes (one row each)  (--json)
+  nt show <note>              print a note in the terminal (alias: cat)
   nt journal [--date D]       open today's daily note in $EDITOR  (alias: j)
   nt list [flags]             list tasks            (alias: ls)
   nt view <name>              run a saved view; save/list/rm to manage them
@@ -244,13 +274,15 @@ USAGE
   nt start <id…> / stop <id…> time-track a task (logs elapsed into spent:)
   nt update <id…> [flags]     change one or more tasks (bulk)  (alias: up)
   nt list --tree              show sub-tasks indented under their parent
-  nt search "query" [--tag T]  full-text + tag search  (alias: q)
+  nt search "query" [--tag T]  full-text + tag search (AND terms; "phrase"; --json) (alias: q)
   nt tags                     list the tag vocabulary with counts
-  nt tag <note…> +x -y        retag one or more notes (no $EDITOR; preserves frontmatter)
-  nt links <id|task:N>        forward links + backlinks  (--orphans: notes with none)
-  nt edit <id|task:N>         edit a task/note in $EDITOR
+  nt tag <id|note…> +x -y     retag tasks or notes (no $EDITOR; preserves frontmatter)
+  nt links <id|note>          forward links + backlinks + deps  (--orphans, --json)
+  nt edit <id|note>           edit a task or note in $EDITOR
   nt mv <note> <new|path>     rename/move a note, updating all [[links]] to it
-  nt rm <id|note> [--force]   delete tasks (undoable) or notes (to .trash/)
+  nt rm <id|note> [flags]     delete tasks (undoable) or notes (to .trash/)
+                              notes: --unlink strips inbound links, --force keeps them;
+                              -y/--yes skips the confirm prompt
   nt archive                  move done tasks to done.txt
   nt archive <note> [--undo]  retire a note from the active views (reversible; still on disk)
   nt undo                     revert the last change
@@ -268,6 +300,8 @@ ADD/UPDATE FLAGS
   --tag NAME (repeat)  --project NAME   --source NAME
   --parent <id>        --blocks <id>    --note <slug>   (link to a note)
   --discovered-from <id>   record that this task was surfaced while doing another
+  update-only: --title "new text" (keeps tags/links)  --untag NAME (repeat)
+               --project none (clears)
 
 NOTE FLAGS (nt note)
   --body TEXT   --tag NAME (repeat)   --source NAME

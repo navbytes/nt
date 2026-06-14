@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -11,7 +12,6 @@ import (
 	"github.com/navbytes/nt/internal/links"
 	"github.com/navbytes/nt/internal/mutate"
 	"github.com/navbytes/nt/internal/note"
-	"github.com/navbytes/nt/internal/search"
 	"github.com/navbytes/nt/internal/task"
 	"github.com/navbytes/nt/internal/view"
 )
@@ -369,12 +369,96 @@ func cmdRecall(args []string) int {
 	return 0
 }
 
+// searchTerms tokenizes a query into match terms: whitespace-separated words,
+// each ANDed (order-independent), with "double quotes" grouping a multi-word
+// exact phrase into one term. Returns lowercased terms.
+func searchTerms(query string) []string {
+	var terms []string
+	var cur strings.Builder
+	inQuote := false
+	flush := func() {
+		if cur.Len() > 0 {
+			terms = append(terms, strings.ToLower(cur.String()))
+			cur.Reset()
+		}
+	}
+	for _, r := range query {
+		switch {
+		case r == '"':
+			if inQuote {
+				flush()
+			}
+			inQuote = !inQuote
+		case (r == ' ' || r == '\t') && !inQuote:
+			flush()
+		default:
+			cur.WriteRune(r)
+		}
+	}
+	flush()
+	return terms
+}
+
+// matchesAll reports whether every term appears (case-insensitive substring) in
+// the haystack — the AND semantics so `state management` finds a note containing
+// both words in any order, not only the exact contiguous phrase.
+func matchesAll(haystack string, terms []string) bool {
+	h := strings.ToLower(haystack)
+	for _, t := range terms {
+		if !strings.Contains(h, t) {
+			return false
+		}
+	}
+	return true
+}
+
+// bestSnippet picks the body line covering the most query terms (for a one-row,
+// context-bearing result), falling back to the title when the match is title-only.
+func bestSnippet(n *note.Note, terms []string) string {
+	best, bestScore := "", 0
+	for _, line := range strings.Split(n.Body, "\n") {
+		clean := strings.TrimSpace(strings.TrimLeft(line, "#"))
+		if clean == "" || clean == n.Title {
+			continue // skip the auto-prepended "# Title" H1 — it just echoes the title
+		}
+		l := strings.ToLower(clean)
+		score := 0
+		for _, t := range terms {
+			if strings.Contains(l, t) {
+				score++
+			}
+		}
+		if score > bestScore {
+			best, bestScore = clean, score
+		}
+	}
+	if best == "" {
+		return n.Title
+	}
+	return best
+}
+
+type searchNoteJSON struct {
+	ID      string   `json:"id"`
+	Title   string   `json:"title"`
+	Rel     string   `json:"rel"`
+	Path    string   `json:"path"`
+	Tags    []string `json:"tags,omitempty"`
+	Snippet string   `json:"snippet,omitempty"`
+}
+
+type searchJSON struct {
+	Notes []searchNoteJSON `json:"notes"`
+	Tasks []taskJSON       `json:"tasks"`
+}
+
 func cmdSearch(args []string) int {
 	fs := flag.NewFlagSet("search", flag.ContinueOnError)
 	typ := fs.String("type", "all", "note|task|all")
+	asJSON := fs.Bool("json", false, "machine-readable output")
 	var tags stringSlice
 	fs.Var(&tags, "tag", "only items with this tag (repeatable, AND)")
-	flags, positional := splitArgs(args, nil)
+	flags, positional := splitArgs(args, map[string]bool{"json": true})
 	if err := fs.Parse(flags); err != nil {
 		return 2
 	}
@@ -386,6 +470,7 @@ func cmdSearch(args []string) int {
 	if !ok {
 		return 1
 	}
+	terms := searchTerms(query)
 	hasAll := func(have []string) bool {
 		for _, w := range tags {
 			if !contains(have, w) {
@@ -394,62 +479,81 @@ func cmdSearch(args []string) int {
 		}
 		return true
 	}
-	found := 0
-	if *typ != "task" {
-		notes, _ := note.List(e.S)
-		notes = note.Active(notes)
-		if query != "" {
-			tagsByPath := make(map[string][]string, len(notes))
-			for _, n := range notes {
-				tagsByPath[n.Path] = n.Tags
-			}
-			emitted := map[string]bool{}
-			hits, _ := search.Literal(query, e.S.NotesDir())
-			for _, h := range hits {
-				if _, active := tagsByPath[h.Path]; !active {
-					continue // body scan reads files directly; skip archived notes
-				}
-				if len(tags) > 0 && !hasAll(tagsByPath[h.Path]) {
-					continue
-				}
-				rel, _ := filepath.Rel(e.S.Dir, h.Path)
-				fmt.Printf("note  %s:%d  %s\n", rel, h.Line, strings.TrimSpace(h.Text))
-				emitted[h.Path] = true
-				found++
-			}
-			ql := strings.ToLower(query)
-			for _, n := range notes { // title matches not caught by body search
-				if emitted[n.Path] || (len(tags) > 0 && !hasAll(n.Tags)) {
-					continue
-				}
-				if strings.Contains(strings.ToLower(n.Title), ql) {
-					fmt.Printf("note  %s  %s\n", n.Rel, n.Title)
-					found++
-				}
-			}
-		} else { // tag-only listing
-			for _, n := range notes {
-				if hasAll(n.Tags) {
-					fmt.Printf("note  %s  %s\n", n.Rel, n.Title)
-					found++
-				}
-			}
-		}
+
+	// Notes: one row per note, AND-matching every term across title+body, ranked
+	// title-hits-first (the relevant note shouldn't sit below body-only matches).
+	type noteHit struct {
+		n          *note.Note
+		titleMatch bool
+		snippet    string
 	}
+	var noteHits []noteHit
+	if *typ != "task" {
+		notes := note.Active(mustNotes(e))
+		for _, n := range notes {
+			if len(tags) > 0 && !hasAll(n.Tags) {
+				continue
+			}
+			if len(terms) > 0 && !matchesAll(n.Title+"\n"+n.Body, terms) {
+				continue
+			}
+			h := noteHit{n: n, titleMatch: len(terms) == 0 || matchesAll(n.Title, terms)}
+			if len(terms) > 0 {
+				h.snippet = bestSnippet(n, terms)
+			} else {
+				h.snippet = n.Title
+			}
+			noteHits = append(noteHits, h)
+		}
+		sort.SliceStable(noteHits, func(i, j int) bool {
+			if noteHits[i].titleMatch != noteHits[j].titleMatch {
+				return noteHits[i].titleMatch // title matches first
+			}
+			return noteHits[i].n.Rel < noteHits[j].n.Rel
+		})
+	}
+
+	// Tasks: AND-match the whole task line (text + tags + project).
+	var taskHits []*task.Task
+	var idx map[*task.Task]int
+	var blocked map[string]bool
 	if *typ != "note" {
 		d, _ := e.Read()
-		idx := indexMap(d.Tasks())
-		blocked := task.BlockedIDs(d.Tasks())
-		needle := strings.ToLower(query)
+		idx = indexMap(d.Tasks())
+		blocked = task.BlockedIDs(d.Tasks())
 		for _, t := range d.Tasks() {
 			if len(tags) > 0 && !hasAll(t.Tags()) {
 				continue
 			}
-			if query == "" || strings.Contains(strings.ToLower(t.Line()), needle) {
-				fmt.Println(formatRow(t, idx[t], blocked[t.ID()]))
-				found++
+			if len(terms) == 0 || matchesAll(t.Line(), terms) {
+				taskHits = append(taskHits, t)
 			}
 		}
+	}
+
+	if *asJSON {
+		out := searchJSON{Tasks: tasksToJSON(taskHits, idx)}
+		for _, h := range noteHits {
+			out.Notes = append(out.Notes, searchNoteJSON{
+				ID: h.n.ID, Title: h.n.Title, Rel: h.n.Rel, Path: h.n.Path,
+				Tags: h.n.Tags, Snippet: h.snippet,
+			})
+		}
+		return printJSON(out)
+	}
+
+	found := 0
+	for _, h := range noteHits {
+		if h.snippet != "" && h.snippet != h.n.Title {
+			fmt.Printf("note  %s  %s — %s\n", h.n.Rel, h.n.Title, h.snippet)
+		} else {
+			fmt.Printf("note  %s  %s\n", h.n.Rel, h.n.Title)
+		}
+		found++
+	}
+	for _, t := range taskHits {
+		fmt.Println(formatRow(t, idx[t], blocked[t.ID()]))
+		found++
 	}
 	if found == 0 {
 		fmt.Println("no matches")
@@ -457,10 +561,55 @@ func cmdSearch(args []string) int {
 	return 0
 }
 
+// mustNotes lists notes, tolerating an error as an empty set (read-only paths).
+func mustNotes(e *mutate.Engine) []*note.Note {
+	ns, _ := note.List(e.S)
+	return ns
+}
+
+type taskRef struct {
+	ID      string `json:"id"`
+	ShortID string `json:"shortId"`
+	Title   string `json:"title"`
+}
+
+type linkRef struct {
+	Kind   string `json:"kind"` // task|note|unresolved|ambiguous
+	ID     string `json:"id,omitempty"`
+	Title  string `json:"title,omitempty"`
+	Target string `json:"target,omitempty"`
+}
+
+type backRef struct {
+	Path string `json:"path"`
+	Line int    `json:"line"`
+	Text string `json:"text"`
+}
+
+type linksJSON struct {
+	ID             string    `json:"id"`
+	ShortID        string    `json:"shortId"`
+	Title          string    `json:"title"`
+	Kind           string    `json:"kind"`
+	Forward        []linkRef `json:"forward"`
+	LinkedFrom     []backRef `json:"linkedFrom"`
+	DiscoveredFrom *taskRef  `json:"discoveredFrom,omitempty"`
+	DiscoveredHere []taskRef `json:"discoveredHere,omitempty"`
+	Blocks         []taskRef `json:"blocks,omitempty"`
+	BlockedBy      []taskRef `json:"blockedBy,omitempty"`
+	Parent         *taskRef  `json:"parent,omitempty"`
+	Children       []taskRef `json:"children,omitempty"`
+}
+
+func taskRefOf(t *task.Task) taskRef {
+	return taskRef{ID: t.ID(), ShortID: shortID(t.ID()), Title: t.Text}
+}
+
 func cmdLinks(args []string) int {
 	fs := flag.NewFlagSet("links", flag.ContinueOnError)
 	orphans := fs.Bool("orphans", false, "list notes with no inbound links (no handle needed)")
-	flags, positional := splitArgs(args, nil)
+	asJSON := fs.Bool("json", false, "machine-readable output")
+	flags, positional := splitArgs(args, map[string]bool{"orphans": true, "json": true})
 	if err := fs.Parse(flags); err != nil {
 		return 2
 	}
@@ -530,11 +679,8 @@ func cmdLinks(args []string) int {
 		return fail(fmt.Errorf("links: %w", terr))
 	}
 
-	fmt.Printf("%s  %s\n", shortID(id), title)
-	fmt.Println("forward:")
-	if len(forward) == 0 {
-		fmt.Println("  (none)")
-	}
+	// Resolve forward links into structured refs (shared by JSON and text output).
+	var fwd []linkRef
 	for _, target := range forward {
 		key, alias := links.NormalizeTarget(target)
 		disp := key
@@ -543,42 +689,134 @@ func cmdLinks(args []string) int {
 		}
 		switch it, ok := links.Resolve(target, d, notes); {
 		case ok:
-			fmt.Printf("  → [%s] %s  %s\n", it.Kind, shortID(it.ID), it.Title)
+			fwd = append(fwd, linkRef{Kind: it.Kind, ID: it.ID, Title: it.Title})
 		case it.Kind == "ambiguous":
-			fmt.Printf("  → [[%s]] (ambiguous: %s)\n", disp, it.Title)
+			fwd = append(fwd, linkRef{Kind: "ambiguous", Title: it.Title, Target: disp})
 		default:
-			fmt.Printf("  → [[%s]] (unresolved)\n", disp)
+			fwd = append(fwd, linkRef{Kind: "unresolved", Target: disp})
 		}
 	}
-	fmt.Println("linked from:")
+
 	back := links.Backlinks(e.S, id, noteRel)
-	if len(back) == 0 {
-		fmt.Println("  (none)")
-	}
+	var backs []backRef
 	for _, h := range back {
+		// For a task, parent:/blocks: pointers also match by id; render those as the
+		// semantic subtasks/blocked-by sections below, and keep "linked from" to real
+		// [[wikilink]] references so the raw ULID tokens don't leak into the output.
+		if self != nil && !strings.Contains(h.Text, "[[") {
+			continue
+		}
 		rel, _ := filepath.Rel(e.S.Dir, h.Path)
-		fmt.Printf("  ← %s:%d  %s\n", rel, h.Line, strings.TrimSpace(h.Text))
+		backs = append(backs, backRef{Path: rel, Line: h.Line, Text: strings.TrimSpace(h.Text)})
 	}
 
-	// Typed provenance: discovered-from (this task's origin) and the reverse
-	// (work discovered while this task was being done).
+	// Task structure & dependencies — discovered-from/here, blocks/blocked-by, and
+	// parent/children — so an agent (or human) can reconstruct the full graph, not
+	// just wikilinks. Previously these were invisible or leaked as raw ULID tokens.
+	var discFrom, parentRef *taskRef
+	var discHere, blocksR, blockedBy, children []taskRef
 	if self != nil {
 		if df := self.Discovered(); df != "" {
 			if origin := d.FindByID(df); origin != nil {
-				fmt.Printf("discovered from:\n  ↑ %s  %s\n", shortID(origin.ID()), origin.Text)
+				r := taskRefOf(origin)
+				discFrom = &r
 			}
 		}
-		var spawned []*task.Task
+		if b := self.Blocks(); b != "" {
+			if bt := d.FindByID(b); bt != nil {
+				blocksR = append(blocksR, taskRefOf(bt))
+			}
+		}
+		if p := self.Parent(); p != "" {
+			if pt := d.FindByID(p); pt != nil {
+				r := taskRefOf(pt)
+				parentRef = &r
+			}
+		}
 		for _, o := range d.Tasks() {
 			if o.Discovered() == self.ID() {
-				spawned = append(spawned, o)
+				discHere = append(discHere, taskRefOf(o))
+			}
+			if o.Blocks() == self.ID() {
+				blockedBy = append(blockedBy, taskRefOf(o))
+			}
+			if o.Parent() == self.ID() {
+				children = append(children, taskRefOf(o))
 			}
 		}
-		if len(spawned) > 0 {
-			fmt.Println("discovered here:")
-			for _, o := range spawned {
-				fmt.Printf("  ↳ %s  %s\n", shortID(o.ID()), o.Text)
-			}
+	}
+
+	kind := "note"
+	if self != nil {
+		kind = "task"
+	}
+
+	if *asJSON {
+		out := linksJSON{
+			ID: id, ShortID: shortID(id), Title: title, Kind: kind,
+			Forward: fwd, LinkedFrom: backs,
+			DiscoveredFrom: discFrom, DiscoveredHere: discHere,
+			Blocks: blocksR, BlockedBy: blockedBy, Parent: parentRef, Children: children,
+		}
+		if out.Forward == nil {
+			out.Forward = []linkRef{}
+		}
+		if out.LinkedFrom == nil {
+			out.LinkedFrom = []backRef{}
+		}
+		return printJSON(out)
+	}
+
+	fmt.Printf("%s  %s\n", shortID(id), title)
+	fmt.Println("forward:")
+	if len(fwd) == 0 {
+		fmt.Println("  (none)")
+	}
+	for _, r := range fwd {
+		switch r.Kind {
+		case "ambiguous":
+			fmt.Printf("  → [[%s]] (ambiguous: %s)\n", r.Target, r.Title)
+		case "unresolved":
+			fmt.Printf("  → [[%s]] (unresolved)\n", r.Target)
+		default:
+			fmt.Printf("  → [%s] %s  %s\n", r.Kind, shortID(r.ID), r.Title)
+		}
+	}
+	fmt.Println("linked from:")
+	if len(backs) == 0 {
+		fmt.Println("  (none)")
+	}
+	for _, h := range backs {
+		fmt.Printf("  ← %s:%d  %s\n", h.Path, h.Line, h.Text)
+	}
+	if parentRef != nil {
+		fmt.Printf("subtask of:\n  ⤴ %s  %s\n", parentRef.ShortID, parentRef.Title)
+	}
+	if len(children) > 0 {
+		fmt.Println("subtasks:")
+		for _, c := range children {
+			fmt.Printf("  ⤵ %s  %s\n", c.ShortID, c.Title)
+		}
+	}
+	if len(blocksR) > 0 {
+		fmt.Println("blocks:")
+		for _, b := range blocksR {
+			fmt.Printf("  ⛔ %s  %s\n", b.ShortID, b.Title)
+		}
+	}
+	if len(blockedBy) > 0 {
+		fmt.Println("blocked by:")
+		for _, b := range blockedBy {
+			fmt.Printf("  ⏳ %s  %s\n", b.ShortID, b.Title)
+		}
+	}
+	if discFrom != nil {
+		fmt.Printf("discovered from:\n  ↑ %s  %s\n", discFrom.ShortID, discFrom.Title)
+	}
+	if len(discHere) > 0 {
+		fmt.Println("discovered here:")
+		for _, o := range discHere {
+			fmt.Printf("  ↳ %s  %s\n", o.ShortID, o.Title)
 		}
 	}
 	return 0

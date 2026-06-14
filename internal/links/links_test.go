@@ -75,6 +75,17 @@ func TestReferences(t *testing.T) {
 	if !references("blocks:01A", "01A", "") {
 		t.Error("blocks: should count as a reference")
 	}
+	// Title-form links (spaces, apostrophes, mixed case) must register against the
+	// note nt slugged from that title — the common Obsidian form the skill teaches.
+	if !references("see [[Auth spike findings]]", "", "ref/auth-spike-findings.md") {
+		t.Error("title-form link should reference the slugged note")
+	}
+	if !references("see [[Moore's Law]]", "", "concepts/moore-s-law.md") {
+		t.Error("apostrophe title-form link should reference the slugged note")
+	}
+	if references("see [[Other Topic]]", "", "ref/auth-spike-findings.md") {
+		t.Error("unrelated title-form link must NOT reference the note")
+	}
 }
 
 func TestRewriteLine(t *testing.T) {

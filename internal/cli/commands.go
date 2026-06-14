@@ -411,6 +411,11 @@ func cmdUpdate(args []string) int {
 	parent := fs.String("parent", "", "parent id")
 	blocks := fs.String("blocks", "", "blocks id")
 	est := fs.String("est", "", "time estimate (90m, 2h; 'none' clears)")
+	title := fs.String("title", "", "replace the task's description (keeps tags/project/links)")
+	project := fs.String("project", "", "set the +project ('none' clears)")
+	var addTags, rmTags stringSlice
+	fs.Var(&addTags, "tag", "add an @tag (repeatable)")
+	fs.Var(&rmTags, "untag", "remove an @tag (repeatable)")
 
 	flags, positional := splitArgs(args, nil)
 	if err := fs.Parse(flags); err != nil {
@@ -496,6 +501,22 @@ func cmdUpdate(args []string) int {
 					t.SetKey("blocks", bt.ID())
 				}
 			}
+			if *title != "" {
+				t.SetTitle(*title)
+			}
+			if *project != "" {
+				if *project == "none" || *project == "-" {
+					t.SetProject("")
+				} else {
+					t.SetProject(*project)
+				}
+			}
+			for _, tg := range addTags {
+				t.AddTag(tg)
+			}
+			for _, tg := range rmTags {
+				t.RemoveTag(tg)
+			}
 			count++
 		}
 		return nil
@@ -511,11 +532,17 @@ func cmdUpdate(args []string) int {
 	return 0
 }
 
-// cmdRm permanently removes tasks (journaled, so `nt undo` restores them).
+// cmdRm removes tasks (journaled, so `nt undo` restores them) and notes (to
+// .trash/). Interactive callers are asked to confirm (skip with --yes); a note
+// with inbound [[links]] is guarded — delete anyway (--force, leaves them
+// dangling) or strip the links first (--unlink).
 func cmdRm(args []string) int {
 	fs := flag.NewFlagSet("rm", flag.ContinueOnError)
-	force := fs.Bool("force", false, "delete a note even if other notes link to it")
-	flags, positional := splitArgs(args, nil)
+	force := fs.Bool("force", false, "delete a note even if other notes link to it (leaves dangling links)")
+	unlink := fs.Bool("unlink", false, "strip inbound [[links]] to a note before deleting it")
+	yes := fs.Bool("yes", false, "skip the confirmation prompt")
+	fs.BoolVar(yes, "y", false, "skip the confirmation prompt")
+	flags, positional := splitArgs(args, map[string]bool{"force": true, "unlink": true, "yes": true, "y": true})
 	if err := fs.Parse(flags); err != nil {
 		return 2
 	}
@@ -531,7 +558,7 @@ func cmdRm(args []string) int {
 	var taskHandles []string
 	for _, h := range positional {
 		if n, err := resolveNote(notes, h); err == nil {
-			if code := rmNote(e, n, *force); code != 0 {
+			if code := rmNote(e, n, *force, *unlink, *yes); code != 0 {
 				return code
 			}
 		} else {
@@ -541,6 +568,20 @@ func cmdRm(args []string) int {
 	if len(taskHandles) == 0 {
 		return 0
 	}
+
+	// Confirm task deletion interactively (agents/scripts proceed unprompted, as
+	// before; the delete is undoable regardless).
+	if interactive() && !*yes {
+		label := fmt.Sprintf("Delete %d task(s)?", len(taskHandles))
+		if len(taskHandles) == 1 {
+			label = fmt.Sprintf("Delete task %s?", taskHandles[0])
+		}
+		if !confirm(label) {
+			fmt.Println("cancelled")
+			return 0
+		}
+	}
+
 	count := 0
 	err := e.Apply("delete", func(d *task.Doc, rec *mutate.Recorder) error {
 		for _, h := range taskHandles {

@@ -290,6 +290,76 @@ func (t *Task) SetText(s string) {
 	t.dirty = true
 }
 
+// AddTag adds an @tag to the description if not already present (no leading @).
+func (t *Task) AddTag(tag string) {
+	tag = strings.TrimPrefix(tag, "@")
+	if tag == "" || contains(t.Tags(), tag) {
+		return
+	}
+	if t.Text != "" {
+		t.Text += " "
+	}
+	t.Text += "@" + tag
+	t.dirty = true
+}
+
+// RemoveTag drops an @tag from the description (no-op if absent).
+func (t *Task) RemoveTag(tag string) {
+	tag = strings.TrimPrefix(tag, "@")
+	var keep []string
+	for _, w := range strings.Fields(t.Text) {
+		if w == "@"+tag {
+			t.dirty = true
+			continue
+		}
+		keep = append(keep, w)
+	}
+	t.Text = strings.Join(keep, " ")
+}
+
+// SetProject replaces the task's +project(s) with the given one ("" clears them).
+func (t *Task) SetProject(project string) {
+	project = strings.TrimPrefix(project, "+")
+	var keep []string
+	for _, w := range strings.Fields(t.Text) {
+		if len(w) > 1 && w[0] == '+' {
+			continue // drop existing projects
+		}
+		keep = append(keep, w)
+	}
+	if project != "" {
+		keep = append(keep, "+"+project)
+	}
+	t.Text = strings.Join(keep, " ")
+	t.dirty = true
+}
+
+// SetTitle replaces the prose description while preserving the inline metadata
+// tokens (@tag, +project, [[link]]) — so a typo fix doesn't drop a task's tags.
+func (t *Task) SetTitle(title string) {
+	wikilinks := linkRe.FindAllString(t.Text, -1)
+	stripped := linkRe.ReplaceAllString(t.Text, "")
+	var keep []string
+	for _, w := range strings.Fields(stripped) {
+		if w[0] == '@' || w[0] == '+' {
+			keep = append(keep, w)
+		}
+	}
+	parts := append([]string{strings.TrimSpace(title)}, keep...)
+	parts = append(parts, wikilinks...)
+	t.Text = strings.TrimSpace(strings.Join(parts, " "))
+	t.dirty = true
+}
+
+func contains(ss []string, want string) bool {
+	for _, s := range ss {
+		if s == want {
+			return true
+		}
+	}
+	return false
+}
+
 // AddLink appends a [[target]] link to the description if not already present.
 func (t *Task) AddLink(target string) {
 	for _, l := range t.Links() {

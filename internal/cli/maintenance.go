@@ -106,14 +106,14 @@ func cmdEdit(args []string) int {
 	if !ok {
 		return 1
 	}
-	// Notes are single files — edit in place (safe, atomic save).
+	// Notes are single files — edit in place (safe, atomic save). Accept an
+	// explicit note: prefix or any bare note handle (slug/title/short id), the same
+	// handle every other note verb takes.
+	notes, _ := note.List(e.S)
 	if strings.HasPrefix(handle, "note:") {
 		want := strings.TrimPrefix(handle, "note:")
-		notes, _ := note.List(e.S)
-		for _, n := range notes {
-			if strings.TrimSuffix(filepath.Base(n.Path), ".md") == want || n.ID == want {
-				return runEditor(n.Path)
-			}
+		if n, nerr := resolveNote(notes, want); nerr == nil {
+			return runEditor(n.Path)
 		}
 		return fail(fmt.Errorf("edit: no note %q", want))
 	}
@@ -126,7 +126,12 @@ func cmdEdit(args []string) int {
 	}
 	t, rerr := resolveHandle(d, handle)
 	if rerr != nil {
-		return fail(fmt.Errorf("edit: %w", rerr))
+		// Not a task — fall back to a note handle so `nt edit <slug>` works without
+		// the note: prefix (the bare-handle convention the skill documents).
+		if n, nerr := resolveNote(notes, handle); nerr == nil {
+			return runEditor(n.Path)
+		}
+		return fail(fmt.Errorf("edit: no task or note %q", handle))
 	}
 	id := t.ID()
 	tmp, err := os.CreateTemp("", "nt-edit-*.txt")

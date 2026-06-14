@@ -134,6 +134,34 @@ func segs(p string) []string {
 	return strings.Split(p, "/")
 }
 
+// suffixMatchSlug is suffixMatch after slugging every segment on both sides, so a
+// title-form link (`[[Auth spike findings]]`) matches the note whose filename nt
+// slugged from that title (`ref/auth-spike-findings.md`). Slug is idempotent on an
+// already-slugged segment, so this subsumes the exact suffixMatch for slug-form
+// links. Used for backlink discovery, where the on-disk match (which determines
+// the reverse index, --orphans, and the rm dangling-guard) must agree with the
+// forward resolver's title fallback in Resolve.
+func suffixMatchSlug(noteRel, targetKey string) bool {
+	ns, ts := slugSegs(noteRel), slugSegs(targetKey)
+	if len(ts) == 0 || len(ts) > len(ns) {
+		return false
+	}
+	for i := 1; i <= len(ts); i++ {
+		if ns[len(ns)-i] != ts[len(ts)-i] {
+			return false
+		}
+	}
+	return true
+}
+
+func slugSegs(p string) []string {
+	raw := segs(p)
+	for i := range raw {
+		raw[i] = note.Slug(raw[i])
+	}
+	return raw
+}
+
 var linkRe = regexp.MustCompile(`\[\[([^\]]+)\]\]`)
 
 // Wikilinks returns the raw inner strings of every [[…]] in s (exported for
@@ -164,6 +192,31 @@ func RewriteLine(s, oldRel, newBase string) (string, bool) {
 		seg := strings.Split(path, "/")
 		seg[len(seg)-1] = newBase
 		return "[[" + strings.Join(seg, "/") + frag + alias + "]]"
+	})
+	return out, changed
+}
+
+// StripLine replaces every [[…]] in s that resolves to the note at targetRel
+// with its plain display text (the |alias if present, else the link name), so the
+// referencing line keeps reading naturally after the target is deleted instead of
+// carrying a dangling link. It matches title-form links too (suffixMatchSlug),
+// the same way backlink discovery does. Returns the new string and whether
+// anything changed.
+func StripLine(s, targetRel string) (string, bool) {
+	changed := false
+	out := linkRe.ReplaceAllStringFunc(s, func(m string) string {
+		inner := m[2 : len(m)-2]
+		key, _ := NormalizeTarget(inner)
+		if key == "" || !suffixMatchSlug(targetRel, key) {
+			return m
+		}
+		changed = true
+		path, _, alias := splitInner(inner)
+		if alias != "" {
+			return strings.TrimPrefix(alias, "|")
+		}
+		seg := strings.Split(path, "/")
+		return seg[len(seg)-1]
 	})
 	return out, changed
 }
@@ -227,7 +280,11 @@ func references(line, id, rel string) bool {
 	}
 	if rel != "" {
 		for _, raw := range wikilinks(line) {
-			if key, _ := NormalizeTarget(raw); key != "" && suffixMatch(rel, key) {
+			// suffixMatchSlug, not suffixMatch: a [[Title]] link (the natural,
+			// Obsidian-common form the skill encourages) must register as a backlink
+			// to the note nt slugged from that title — otherwise backlinks, --orphans
+			// and the rm dangling-guard all silently miss title-form links.
+			if key, _ := NormalizeTarget(raw); key != "" && suffixMatchSlug(rel, key) {
 				return true
 			}
 		}

@@ -105,6 +105,45 @@ func (e *Engine) RenameNote(src *note.Note, all []*note.Note, dest string) (newR
 	return newRel, updated, nil
 }
 
+// UnlinkNote strips every inbound [[link]] to the target note across tasks.txt
+// and notes/, replacing each with its plain display text, so deleting the note
+// leaves no dangling links. Returns how many lines/files were rewritten. Like
+// RenameNote it is not a single undo transaction.
+func (e *Engine) UnlinkNote(target *note.Note) (updated int, err error) {
+	rel := target.Rel
+	if rel == "" {
+		if r, e2 := filepath.Rel(e.S.NotesDir(), target.Path); e2 == nil {
+			rel = filepath.ToSlash(r)
+		}
+	}
+	_ = e.Apply("unlink-note", func(d *task.Doc, rec *Recorder) error {
+		for _, t := range d.Tasks() {
+			if nl, ch := links.StripLine(t.Text, rel); ch {
+				rec.Before(t)
+				t.SetText(nl)
+				updated++
+			}
+		}
+		return nil
+	})
+	cur, _ := note.List(e.S)
+	for _, x := range cur {
+		if x.Path == target.Path {
+			continue
+		}
+		data, e2 := store.ReadFile(x.Path)
+		if e2 != nil {
+			continue
+		}
+		if nl, ch := links.StripLine(string(data), rel); ch {
+			if store.WriteAtomic(x.Path, []byte(nl), 0o644) == nil {
+				updated++
+			}
+		}
+	}
+	return updated, nil
+}
+
 func base(rel string) string {
 	return strings.TrimSuffix(filepath.Base(rel), ".md")
 }
