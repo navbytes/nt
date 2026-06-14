@@ -46,7 +46,9 @@
       onclick={(e) => e.stopPropagation()}
     >
       <div class="ab__brand">nt</div>
-      <h2 id="ab-title" class="ab__title">Notes &amp; tasks — durable memory for AI sessions</h2>
+      <h2 id="ab-title" class="ab__title">
+        Tasks &amp; notes as plain text — durable memory your AI agents can&rsquo;t lose.
+      </h2>
       <p class="ab__ver">version <code>{version || "—"}</code></p>
       <p class="ab__stats muted">{openCount} open · {noteCount} notes in your store</p>
       <div class="ab__links">
