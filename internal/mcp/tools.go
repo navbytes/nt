@@ -46,7 +46,7 @@ var toolDefs = []toolDef{
 	},
 	{
 		Name:        "nt_status",
-		Description: "One-call state of a project or area for a resuming session: in-progress + blocked tasks first, then open by urgency, recent completions, and the notes linked to this work. Scope with project and/or tag; omit both for everything.",
+		Description: "Resuming a project/area: in-progress + blocked first, then open by urgency, recent completions, and linked notes. Scope with project and/or tag (omit both for everything).",
 		InputSchema: obj(map[string]any{
 			"project": st(),
 			"tag":     st(),
@@ -54,17 +54,17 @@ var toolDefs = []toolDef{
 	},
 	{
 		Name:        "nt_view",
-		Description: "Recall one of the user's saved smart views (nt view save) — their own named task queries, filtered/sorted exactly as the CLI and web apply them. Omit name to list the saved views first.",
+		Description: "Run one of the user's saved smart views (their named task queries). Omit name to list them first.",
 		InputSchema: obj(map[string]any{
 			"name": sp("saved view name; omit to list available views"),
 		}),
 	},
 	{
 		Name:        "nt_add",
-		Description: "Capture a task. text is the title — one short, scannable, actionable line, verb-first, ~10 words / 60 chars (it's for skimming a list). Detail, reasoning, or steps go in body: when set, it's saved as the task's linked note (filed under notes/tasks/) so the title stays clean and the rest is one click away. Good: text=\"Fix token refresh race condition\", body=\"Two requests refresh at once; the second invalidates the first's token. Add a single-flight guard keyed on the refresh-token id.\". Don't stuff that detail into text. (A paragraph-length text with no body is auto-split the same way.) discovered_from chains work surfaced while doing another task.",
+		Description: "Capture a task. text = a short, verb-first title (~60 chars, for skimming). Put any detail/reasoning/steps in body — it's saved as the task's linked note so the title stays clean. discovered_from chains work surfaced while doing another task.",
 		InputSchema: obj(map[string]any{
-			"text":            sp("the task title — one actionable line, ~10 words / 60 chars, verb-first"),
-			"body":            sp("optional detail/reasoning/steps — saved as the task's linked note (markdown)"),
+			"text":            sp("short actionable title, verb-first, ~60 chars"),
+			"body":            sp("detail/reasoning/steps — saved as a linked note (markdown)"),
 			"priority":        enum("high", "med", "low"),
 			"due":             sp("today|tomorrow|fri|+3d|YYYY-MM-DD"),
 			"project":         st(),
@@ -90,21 +90,23 @@ var toolDefs = []toolDef{
 	},
 	{
 		Name:        "nt_note",
-		Description: "Save a note (finding/decision/dead-end) — capture the WHY. Set folder to file it under notes/<folder>/; recall returns the body.",
+		Description: "Save a note (finding/decision/dead-end) — capture the WHY. recall returns the body.",
 		InputSchema: obj(map[string]any{
 			"title":  st(),
 			"body":   sp("markdown"),
 			"tags":   at(),
-			"folder": sp("subfolder to file under, e.g. ref or decisions/auth (created as needed)"),
+			"folder": sp("subfolder, e.g. ref or decisions/auth"),
 			"source": st(),
 		}, "title"),
 	},
 	{
 		Name:        "nt_recall",
-		Description: "Read back earlier tasks and notes (bodies included) to restore prior-session context.",
+		Description: "Read back earlier tasks and notes (bodies included) to restore prior-session context. To save context: brief=true returns note pointers without bodies (nt_view one to read it); limit=N keeps the most recent N.",
 		InputSchema: obj(map[string]any{
 			"source": st(),
 			"since":  sp("on/after YYYY-MM-DD"),
+			"brief":  map[string]any{"type": "boolean", "description": "omit note bodies — pointers only"},
+			"limit":  it(),
 		}),
 	},
 	{
@@ -149,7 +151,7 @@ var toolDefs = []toolDef{
 	},
 	{
 		Name:        "nt_archive",
-		Description: "Retire a note from recall/search/status when its memory is stale or superseded — reversible, and the file stays on disk with its links intact. Set undo to bring it back.",
+		Description: "Retire a stale/superseded note from recall/search/status — reversible, file stays on disk. Set undo to bring it back.",
 		InputSchema: obj(map[string]any{
 			"handle": sp("the note to archive (slug/title/id)"),
 			"undo":   map[string]any{"type": "boolean", "description": "unarchive instead"},

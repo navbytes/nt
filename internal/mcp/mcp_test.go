@@ -407,3 +407,50 @@ func relsOf(ns []*note.Note) []string {
 	}
 	return out
 }
+
+// TestMCPRecallContextControls: brief drops note bodies (pointers only) and
+// limit caps the result — the opt-in levers for keeping recall's context small.
+func TestMCPRecallContextControls(t *testing.T) {
+	s := newServer(t)
+	must := func(name string, a map[string]any) string {
+		t.Helper()
+		out, err := s.dispatch(name, a)
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		return out
+	}
+	must("nt_note", map[string]any{"title": "Decision A", "folder": "decisions", "body": "long rationale here"})
+	must("nt_note", map[string]any{"title": "Decision B", "folder": "decisions", "body": "more reasoning here"})
+
+	type recallOut struct {
+		Tasks []taskOut `json:"tasks"`
+		Notes []noteOut `json:"notes"`
+	}
+	var full recallOut
+	json.Unmarshal([]byte(must("nt_recall", map[string]any{})), &full)
+	if len(full.Notes) != 2 || full.Notes[0].Body == "" {
+		t.Fatalf("default recall should include 2 notes with bodies, got %+v", full.Notes)
+	}
+
+	var brief recallOut
+	json.Unmarshal([]byte(must("nt_recall", map[string]any{"brief": true})), &brief)
+	if len(brief.Notes) != 2 {
+		t.Fatalf("brief recall should still list 2 notes, got %d", len(brief.Notes))
+	}
+	for _, n := range brief.Notes {
+		if n.Body != "" {
+			t.Fatalf("brief recall must omit bodies, got %q", n.Body)
+		}
+		if n.Title == "" {
+			t.Fatal("brief recall should still carry titles (pointers)")
+		}
+	}
+
+	var limited recallOut
+	// JSON numbers arrive as float64 over the wire — mirror that here.
+	json.Unmarshal([]byte(must("nt_recall", map[string]any{"limit": float64(1)})), &limited)
+	if len(limited.Notes) != 1 {
+		t.Fatalf("limit=1 should return 1 note, got %d", len(limited.Notes))
+	}
+}

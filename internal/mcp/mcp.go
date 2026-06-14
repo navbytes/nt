@@ -526,17 +526,39 @@ func (s *server) recall(a map[string]any) (string, error) {
 		}
 		tasks = append(tasks, t)
 	}
-	notes, _ := note.List(s.eng.S)
-	notes = note.Active(notes) // recall restores active context; archived notes are retired
-	var nout []noteOut
-	for _, n := range notes {
+	allNotes, _ := note.List(s.eng.S)
+	allNotes = note.Active(allNotes) // recall restores active context; archived notes are retired
+	var notes []*note.Note
+	for _, n := range allNotes {
 		if source != "" && n.Source != source {
 			continue
 		}
 		if since != "" && n.Created != "" && shortDate(n.Created) < since {
 			continue
 		}
-		nout = append(nout, noteToOut(n))
+		notes = append(notes, n)
+	}
+
+	// Context-cost controls (opt-in, so the default full reload is unchanged):
+	// limit keeps the most recent N of each (the cheap "what was I doing"); brief
+	// drops note bodies → a pointer index the agent can nt_view/nt_links on demand.
+	if limit := intArg(a, "limit"); limit > 0 {
+		if len(tasks) > limit {
+			tasks = tasks[len(tasks)-limit:]
+		}
+		if len(notes) > limit {
+			sort.SliceStable(notes, func(i, j int) bool { return notes[i].Created > notes[j].Created })
+			notes = notes[:limit]
+		}
+	}
+	brief := boolArg(a, "brief")
+	nout := make([]noteOut, 0, len(notes))
+	for _, n := range notes {
+		o := noteToOut(n)
+		if brief {
+			o.Body = ""
+		}
+		nout = append(nout, o)
 	}
 	return jsonText(map[string]any{"tasks": tasksOut(tasks), "notes": nout}), nil
 }
