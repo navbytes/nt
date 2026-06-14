@@ -166,9 +166,24 @@ jobs:
         shell: bash
         run: |
           ditto -c -k --keepParent build/bin/nt.app "$RUNNER_TEMP/notarize.zip"
-          xcrun notarytool submit "$RUNNER_TEMP/notarize.zip" \
-            --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" \
-            --password "$APPLE_NOTARY_PASSWORD" --wait
+          # `notarytool --wait` does a long HTTP poll against Apple's notary
+          # service; a transient runner network blip (e.g. NSURLError -1009)
+          # mid-poll kills it non-zero and would fail an otherwise-good release.
+          # Retry the submit+wait a few times — notarizing identical bits again
+          # is cheap and idempotent — before giving up.
+          for attempt in 1 2 3; do
+            if xcrun notarytool submit "$RUNNER_TEMP/notarize.zip" \
+                 --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" \
+                 --password "$APPLE_NOTARY_PASSWORD" --wait; then
+              break
+            fi
+            if [ "$attempt" = 3 ]; then
+              echo "::error::notarization failed after $attempt attempts" >&2
+              exit 1
+            fi
+            echo "notarytool attempt $attempt failed (likely transient); retrying in $((attempt * 30))s..." >&2
+            sleep $((attempt * 30))
+          done
           xcrun stapler staple build/bin/nt.app
 
       # --- Package per platform ---
