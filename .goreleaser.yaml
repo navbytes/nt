@@ -38,7 +38,10 @@ checksum:
   name_template: checksums.txt
 
 changelog:
-  use: github
+  # Build the changelog from the local git log, not GitHub's compare API. The
+  # compare endpoint 404s when a prior tag has been deleted from the remote
+  # (as happened with v0.16.1–v0.16.4), failing the whole release.
+  use: git
   sort: asc
   filters:
     exclude:
