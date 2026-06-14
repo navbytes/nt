@@ -251,6 +251,11 @@
             <input type="checkbox" bind:checked={view.colorLinksByType} /> Color edges by type
           </label>
           <label><input type="checkbox" bind:checked={view.frozen} /> Freeze layout</label>
+          {#if view.dim === "3d"}
+            <label title="Slowly orbit the 3D constellation">
+              <input type="checkbox" bind:checked={view.autoRotate} /> Auto-rotate
+            </label>
+          {/if}
           <div class="gctl__slider">
             <label for="g-repel">Repel</label>
             <input id="g-repel" type="range" min="-400" max="-20" step="10" bind:value={view.repel} />
@@ -455,7 +460,7 @@
   }
   .gctl__slider {
     display: flex;
-    flex-direction: column;
+    align-items: center;
     gap: 8px;
   }
   .gctl__slider label {
