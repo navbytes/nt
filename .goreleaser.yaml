@@ -8,8 +8,9 @@ project_name: nt
 before:
   hooks:
     - go mod tidy
-    # Build the SPA so the released binary embeds a fresh bundle (belt-and-
-    # suspenders on top of the committed internal/web/frontend/dist).
+    # Build the SPA so the released binary embeds it via //go:embed. The bundle
+    # (internal/web/frontend/dist) is generated here, not committed, so this hook
+    # is required — without it the release would ship with no web UI.
     - npm --prefix internal/web/frontend ci
     - npm --prefix internal/web/frontend run build
 

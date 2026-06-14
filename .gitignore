@@ -5,6 +5,12 @@
 # goreleaser snapshot/release output (the embedded SPA dist/ lives under internal/)
 /dist/
 
+# Built Svelte SPA — generated at build time (`make web-build`) and embedded via
+# //go:embed; not committed. The .gitkeep placeholder is kept so the embed still
+# compiles on a checkout that hasn't run the build yet.
+/internal/web/frontend/dist/*
+!/internal/web/frontend/dist/.gitkeep
+
 # editor / OS cruft
 *.swp
 .DS_Store

@@ -107,6 +107,12 @@ jobs:
           cache: true
           cache-dependency-path: desktop/go.sum
 
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: internal/web/frontend/package-lock.json
+
       - name: Compute version
         shell: bash
         # On a tag push the ref name IS the tag; on dispatch take it from the
@@ -128,6 +134,15 @@ jobs:
         shell: bash
         run: |
           node -e "const fs=require('fs');const p='wails.json';const j=JSON.parse(fs.readFileSync(p,'utf8'));j.info.productVersion=process.argv[1]||'0.0.0';fs.writeFileSync(p,JSON.stringify(j,null,2)+'\n')" "$VER"
+
+      - name: Build web SPA (embedded by the desktop app via internal/web)
+        shell: bash
+        # The desktop window serves the same Svelte SPA as `nt web` (desktop/main.go
+        # → web.NewServer), embedded via //go:embed. The bundle isn't committed, so
+        # build it before wails compiles the Go binary, or the app ships no UI.
+        run: |
+          npm --prefix internal/web/frontend ci
+          npm --prefix internal/web/frontend run build
 
       - name: Build app
         shell: bash
