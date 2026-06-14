@@ -37,7 +37,15 @@ jobs:
         run: cd desktop && go build ./...
 
   web:
-    runs-on: ubuntu-latest
+    # Run on Linux (case-sensitive) AND macOS (case-insensitive). The macOS leg
+    # catches case-only filename collisions — e.g. a Foo.svelte component next to
+    # a foo.svelte.ts runes module — which resolve fine on Linux but break
+    # svelte-check on macOS/Windows dev machines and release runners.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
     defaults:
       run:
         working-directory: internal/web/frontend

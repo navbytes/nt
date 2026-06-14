@@ -6,8 +6,8 @@
   import SearchBox from "./SearchBox.svelte";
   import CommandPalette from "./CommandPalette.svelte";
   import Shortcuts from "./Shortcuts.svelte";
-  import Toast from "./Toast.svelte";
-  import About from "./About.svelte";
+  import Toast from "./Toaster.svelte";
+  import About from "./AboutDialog.svelte";
   import { openPalette } from "./palette.svelte";
   import { shortcuts } from "./keys.svelte";
   import Home from "../routes/Home.svelte";
