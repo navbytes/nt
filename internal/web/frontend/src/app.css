@@ -524,6 +524,10 @@ code {
   padding: 4px 0;
   min-width: 0;
 }
+.actrow.col {
+  flex-direction: column;
+  align-items: stretch;
+}
 .actrow > .act,
 .actrow > .kind,
 .actrow > .src {

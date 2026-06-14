@@ -62,7 +62,7 @@
       <div class="actday">{day.date}</div>
       <ul class="rows">
         {#each day.events.slice(0, 12) as ev (ev.when + ev.title)}
-          <li class="actrow">
+          <li class="actrow col">
             <span class="act act--{ev.action}">{ev.action}</span>
             {#if ev.url}<a href={ev.url}>{ev.title}</a>{:else}<span>{ev.title}</span>{/if}
             <span class="src">{ev.source}</span>
