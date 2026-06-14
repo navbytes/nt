@@ -505,7 +505,7 @@ click a tab to switch, and drag the list/detail divider to resize it.
 
 A localhost HTTP adapter (`internal/web`) — the browser GUI over the same
 `task`/`note`/`links` domain as the CLI/TUI/MCP. Binds `127.0.0.1` only (no
-network exposure, no auth). Read-only by default; `nt web --edit` enables writes
+network exposure, no auth). Writes are always enabled, each guarded by a per-process CSRF token
 (notes **and** tasks), each guarded by a per-process CSRF token sent as a custom
 header (cross-site POSTs fail the CORS preflight).
 
@@ -524,7 +524,7 @@ unresolved/ambiguous → a "did you mean" page), backlinks, full-text search,
 command palette (⌘K), hover previews, **Mermaid** diagrams (vendored gzipped,
 client-side, offline). Light/dark Tokyo Night themes.
 
-**Interactive tasks** (`--edit`). The `/tasks` dashboard can complete / reopen /
+**Interactive tasks.** The `/tasks` dashboard can complete / reopen /
 set-status / delete / add — every action routed through `mutate.Engine.Apply`
 (lock + re-read + undo journal), so a browser write gets the same safety as a
 CLI/agent write and concurrent human+agent edits can't clobber each other. New
@@ -532,7 +532,7 @@ tasks are stamped `src:web`. UI is **htmx** fragment swaps (vendored, no build);
 a write broadcasts a typed `tasks` SSE event so other open clients refresh just
 the list.
 
-**Editing notes** (`--edit`). A split live-preview editor: raw buffer on the
+**Editing notes.** A split live-preview editor: raw buffer on the
 left, a preview on the right that re-renders through the server's own
 `renderBody` (`POST /preview`) so it matches what a save produces. Saves are
 atomic, frontmatter preserved verbatim, and guarded against lost updates — the

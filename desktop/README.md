@@ -93,12 +93,12 @@ but that is an *additive* evolution, not a prerequisite. See
 
 ## Desktop UX parity
 
-The shell ships the **full web UX, editing included** — `main.go` enables
-`SetEdit(true)`, so quick-add (with the live parse preview), complete /
-reschedule / undo, saved views, and the CodeMirror editor all work in the
-native window. The trust model is *stronger* than `nt web --edit`: no TCP port
-is opened at all (the webview talks to the Go handler in-process) and the CSRF
-guard still applies.
+The shell ships the **full web UX, editing included** — like `nt web`, editing
+is always on, so quick-add (with the live parse preview), complete / reschedule /
+undo, saved views, and the CodeMirror editor all work in the native window. The
+trust model is *stronger* here: no TCP port is opened at all (the webview talks
+to the Go handler in-process) and the per-process CSRF guard still applies to
+every write.
 
 Webview specifics the app accounts for:
 

@@ -30,12 +30,6 @@ func TestAPINoteDelete(t *testing.T) {
 	s.rebuild()
 	th := noteHandle(target)
 
-	// Read-only: refused.
-	if code, _ := deleteReq(s, "/api/notes/"+th, s.csrf); code != 403 {
-		t.Fatalf("delete without --edit should be 403, got %d", code)
-	}
-	s.allowEdit = true
-
 	// Missing CSRF: refused.
 	if code, _ := deleteReq(s, "/api/notes/"+th, ""); code != 403 {
 		t.Fatalf("delete without CSRF should be 403, got %d", code)

@@ -31,32 +31,11 @@ func TestProcessAlive(t *testing.T) {
 	}
 }
 
-// TestDetachChildArgsForcesResolvedEdit guards the resolved edit decision across
-// the detach re-exec: the child re-reads config, so the parent must pass --edit
-// OR --read-only explicitly — otherwise `--detach --read-only` over a `[web]
-// edit = true` store would come up editable.
-func TestDetachChildArgsForcesResolvedEdit(t *testing.T) {
-	has := func(args []string, want string) bool {
-		for _, a := range args {
-			if a == want {
-				return true
-			}
-		}
-		return false
-	}
-	editable := detachChildArgs("127.0.0.1", 4321, true)
-	if !has(editable, "--edit") || has(editable, "--read-only") {
-		t.Errorf("editable detach args = %v, want --edit (and not --read-only)", editable)
-	}
-	readonly := detachChildArgs("127.0.0.1", 4321, false)
-	if !has(readonly, "--read-only") || has(readonly, "--edit") {
-		t.Errorf("read-only detach args = %v, want --read-only (and not --edit)", readonly)
-	}
-}
-
+// TestWebProcRoundTrip checks the detached-server PID record survives a
+// write/read round-trip through the store.
 func TestWebProcRoundTrip(t *testing.T) {
 	t.Setenv("NT_DIR", t.TempDir())
-	in := &webProc{PID: 4242, URL: "http://127.0.0.1:4321", Edit: true, Started: "2026-06-09T00:00:00Z"}
+	in := &webProc{PID: 4242, URL: "http://127.0.0.1:4321", Started: "2026-06-09T00:00:00Z"}
 	if err := writeWebProc(in); err != nil {
 		t.Fatalf("write: %v", err)
 	}

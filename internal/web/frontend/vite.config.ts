@@ -4,7 +4,7 @@ import { VitePWA } from "vite-plugin-pwa";
 
 // The SPA is built to ./dist and embedded into the Go binary (see embed.go).
 // In dev, `vite` proxies the API + live-update stream to a running `nt web`
-// (default port 8765 — start it with `nt web --edit --port 8765`).
+// (default port 8765 — start it with `nt web --port 8765`).
 const API = process.env.NT_API ?? "http://127.0.0.1:8765";
 
 export default defineConfig({

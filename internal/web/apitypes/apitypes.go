@@ -7,8 +7,7 @@ package apitypes
 
 // State is GET /api/state — capabilities + headline counts for the shell.
 type State struct {
-	CanEdit      bool     `json:"canEdit"`
-	CSRF         string   `json:"csrf"` // echo as X-CSRF on writes; "" when read-only
+	CSRF         string   `json:"csrf"` // echo as X-CSRF on every write
 	Version      string   `json:"version"`
 	OpenCount    int      `json:"openCount"`
 	NoteCount    int      `json:"noteCount"`

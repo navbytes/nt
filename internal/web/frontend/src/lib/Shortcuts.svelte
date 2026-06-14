@@ -3,10 +3,9 @@
   // cheat-sheet. Kept separate from the command palette so each surface stays
   // simple; both are mounted once in Shell.
   import { navigate } from "./router.svelte";
-  import { openPalette, palette } from "./palette.svelte";
+  import { palette } from "./palette.svelte";
   import { shortcuts, goTarget, isTextEntry, captureTask, GO_CHORDS } from "./keys.svelte";
-
-  let { canEdit = false }: { canEdit?: boolean } = $props();
+  import { toggleCollapsed } from "./sidebar.svelte";
 
   // `g`-chord state: once `g` is pressed we wait briefly for the second key.
   let pendingGo = $state(false);
@@ -63,8 +62,11 @@
         break;
       case "c":
         e.preventDefault();
-        if (canEdit) captureTask();
-        else openPalette();
+        captureTask();
+        break;
+      case "[":
+        e.preventDefault();
+        toggleCollapsed();
         break;
     }
   }
@@ -90,24 +92,20 @@
   const general = $derived([
     { keys: ["⌘", "K"], label: "Command palette" },
     { keys: ["/"], label: "Search" },
-    { keys: ["c"], label: canEdit ? "Capture a task" : "Open palette" },
+    { keys: ["c"], label: "Capture a task" },
+    { keys: ["["], label: "Toggle sidebar" },
     { keys: ["?"], label: "This cheat-sheet" },
     { keys: ["Esc"], label: "Close / cancel" },
   ]);
 
-  // Row-level keys. j/k navigate in any mode; Space/e act, so only show them when
-  // editing is enabled (they no-op in read-only).
-  const taskKeys = $derived([
+  // Row-level keys. j/k navigate; Space/e/d/x act on the focused task.
+  const taskKeys = [
     { keys: ["j", "k"], label: "Move between tasks" },
-    ...(canEdit
-      ? [
-          { keys: ["Space"], label: "Complete / reopen" },
-          { keys: ["e"], label: "Edit task" },
-          { keys: ["d"], label: "Reschedule" },
-          { keys: ["x"], label: "Select (bulk actions)" },
-        ]
-      : []),
-  ]);
+    { keys: ["Space"], label: "Complete / reopen" },
+    { keys: ["e"], label: "Edit task" },
+    { keys: ["d"], label: "Reschedule" },
+    { keys: ["x"], label: "Select (bulk actions)" },
+  ];
 </script>
 
 {#if shortcuts.open}

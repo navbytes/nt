@@ -6,7 +6,7 @@
 
   // `embedded` renders Review as a tab inside Tasks (no own page title — the
   // Tasks header + the active "Review" tab already label it).
-  let { canEdit = false, embedded = false }: { canEdit?: boolean; embedded?: boolean } = $props();
+  let { embedded = false }: { embedded?: boolean } = $props();
 
   const reviewQ = createQuery({ queryKey: ["review"], queryFn: api.review });
 
@@ -28,7 +28,7 @@
       </h2>
       <ul class="rows">
         {#each tasks as t (t.id)}
-          <TaskRow {t} {canEdit} />
+          <TaskRow {t} />
         {/each}
       </ul>
     </section>

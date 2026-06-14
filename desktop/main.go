@@ -47,11 +47,11 @@ func main() {
 	}
 	srv.StartWatch() // live-reload when the store changes on disk
 
-	// Editing on: the desktop app gets the full web UX — quick-add with parse
-	// preview, complete/reschedule/undo, the CodeMirror editor. The trust model
-	// is stronger than `nt web --edit`: no TCP port is even opened (the webview
-	// talks to the Go handler in-process), and the CSRF guard still applies.
-	srv.SetEdit(true)
+	// The desktop app gets the full web UX — quick-add with parse preview,
+	// complete/reschedule/undo, the CodeMirror editor. Editing is always on (as it
+	// now is for `nt web`); the trust model here is even stronger — no TCP port is
+	// opened (the webview talks to the Go handler in-process), and the per-process
+	// CSRF guard still applies to every write.
 
 	// On macOS a webview gets working ⌘C/⌘V/⌘X/⌘A (and ⌘Q) only if the app has
 	// an Edit menu — without one the clipboard shortcuts are dead keys. Other

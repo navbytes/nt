@@ -20,11 +20,7 @@ func TestAPINoteArchive(t *testing.T) {
 		return len(decode[apitypes.SearchResponse](t, body).Results) > 0
 	}
 
-	// Gating: editing disabled, then missing CSRF — both 403.
-	if code, _ := postForm(s, "/api/notes/"+target.ID+"/archive", "", mustValues("archived", "true")); code != 403 {
-		t.Errorf("archive should 403 when read-only, got %d", code)
-	}
-	s.allowEdit = true
+	// Gating: a write without the CSRF token is refused.
 	if code, _ := postForm(s, "/api/notes/"+target.ID+"/archive", "", mustValues("archived", "true")); code != 403 {
 		t.Errorf("archive should 403 without CSRF, got %d", code)
 	}
@@ -97,7 +93,6 @@ func TestAPINoteArchive(t *testing.T) {
 // links only because it's retired, not because it needs attention).
 func TestAPIArchiveDropsOrphan(t *testing.T) {
 	s := newTestServer(t)
-	s.allowEdit = true
 	lonely, _ := note.Create(s.eng.S, "Lonely", "no links here", nil, "cli", "")
 
 	_, body := get(t, s, "/api/orphans")

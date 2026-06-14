@@ -178,17 +178,12 @@ func (s *Server) apiState(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
-	csrf := ""
-	if s.allowEdit {
-		csrf = s.csrf
-	}
 	budget := s.dayBudget
 	if budget <= 0 {
 		budget = 360 // 6h default working day
 	}
 	writeJSON(w, apitypes.State{
-		CanEdit:      s.allowEdit,
-		CSRF:         csrf,
+		CSRF:         s.csrf,
 		Version:      s.version,
 		OpenCount:    open,
 		NoteCount:    len(snap.active),
@@ -361,10 +356,6 @@ func (s *Server) apiNote(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) apiNoteRaw(w http.ResponseWriter, r *http.Request) {
-	if !s.allowEdit {
-		http.NotFound(w, r)
-		return
-	}
 	n := s.current().findHandle(r.PathValue("handle"))
 	if n == nil {
 		http.NotFound(w, r)
@@ -378,21 +369,17 @@ func (s *Server) apiNoteRaw(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, apitypes.RawNote{Text: string(data), ETag: etag(data)})
 }
 
-// apiNoteSave reuses the existing save path (--edit + CSRF + If-Match → 409 +
+// apiNoteSave reuses the existing save path (CSRF + If-Match → 409 +
 // atomic write + rebuild) — the lost-update guard is preserved verbatim.
 func (s *Server) apiNoteSave(w http.ResponseWriter, r *http.Request) {
 	s.handleSave(w, r, r.PathValue("handle"))
 }
 
-// apiNoteMove moves a note into a different folder (--edit + CSRF gated),
+// apiNoteMove moves a note into a different folder (CSRF gated),
 // rewriting every [[link]] to it via the shared RenameNote. The note keeps its
 // filename and its id, so its handle/URL is unchanged. An empty folder moves it
 // to the notes/ root.
 func (s *Server) apiNoteMove(w http.ResponseWriter, r *http.Request) {
-	if !s.allowEdit {
-		http.Error(w, "editing is disabled — start with `nt web --edit`", http.StatusForbidden)
-		return
-	}
 	if r.Header.Get("X-CSRF") != s.csrf {
 		http.Error(w, "bad or missing CSRF token", http.StatusForbidden)
 		return
@@ -425,7 +412,7 @@ func (s *Server) apiNoteMove(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// apiNoteArchive flips a note's archived frontmatter flag (--edit + CSRF gated):
+// apiNoteArchive flips a note's archived frontmatter flag (CSRF gated):
 // a soft, reversible retire that drops the note from the sidebar, ⌘K, search,
 // orphans, and the link graph while leaving it on disk and reachable from the
 // grid (with the "Archived" toggle on) and its own page. The client sends the
@@ -433,10 +420,6 @@ func (s *Server) apiNoteMove(w http.ResponseWriter, r *http.Request) {
 // It mutates a fresh copy loaded from disk — never the shared snapshot note — so
 // a concurrent reader of the current snapshot can't observe a torn write.
 func (s *Server) apiNoteArchive(w http.ResponseWriter, r *http.Request) {
-	if !s.allowEdit {
-		http.Error(w, "editing is disabled — start with `nt web --edit`", http.StatusForbidden)
-		return
-	}
 	if r.Header.Get("X-CSRF") != s.csrf {
 		http.Error(w, "bad or missing CSRF token", http.StatusForbidden)
 		return
@@ -470,17 +453,13 @@ func (s *Server) apiNoteArchive(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, apitypes.ArchivedNote{Handle: noteHandle(fresh), Archived: want})
 }
 
-// apiNoteDelete moves a note to .trash/ (--edit + CSRF gated). It mirrors the
+// apiNoteDelete moves a note to .trash/ (CSRF gated). It mirrors the
 // CLI's backlink-aware delete: a note with inbound [[links]] is refused (409,
 // with the count) unless the client picks a mode — "unlink" strips those
 // references first so nothing dangles, "force" deletes anyway and leaves them.
 // (Archive remains the soft, reversible alternative.) Not a journaled undo
 // transaction, like archive/move; recover from .trash/ by hand.
 func (s *Server) apiNoteDelete(w http.ResponseWriter, r *http.Request) {
-	if !s.allowEdit {
-		http.Error(w, "editing is disabled — start with `nt web --edit`", http.StatusForbidden)
-		return
-	}
 	if r.Header.Get("X-CSRF") != s.csrf {
 		http.Error(w, "bad or missing CSRF token", http.StatusForbidden)
 		return
@@ -515,7 +494,7 @@ func (s *Server) apiNoteDelete(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, apitypes.DeletedNote{Handle: noteHandle(n), Unlinked: unlinked})
 }
 
-// apiNoteFavorite flips a note's favorite frontmatter flag (--edit + CSRF gated):
+// apiNoteFavorite flips a note's favorite frontmatter flag (CSRF gated):
 // a lightweight star/pin that surfaces the note in the grid's "Favorites" filter
 // and marks it across views, without changing whether it's part of the working
 // set (favorites are orthogonal to archiving — a note can be either, both, or
@@ -523,10 +502,6 @@ func (s *Server) apiNoteDelete(w http.ResponseWriter, r *http.Request) {
 // ("true"/"false"); absent, it toggles. Like archive, it mutates a fresh copy
 // loaded from disk so a concurrent snapshot reader can't observe a torn write.
 func (s *Server) apiNoteFavorite(w http.ResponseWriter, r *http.Request) {
-	if !s.allowEdit {
-		http.Error(w, "editing is disabled — start with `nt web --edit`", http.StatusForbidden)
-		return
-	}
 	if r.Header.Get("X-CSRF") != s.csrf {
 		http.Error(w, "bad or missing CSRF token", http.StatusForbidden)
 		return
@@ -566,10 +541,6 @@ func (s *Server) apiNoteFavorite(w http.ResponseWriter, r *http.Request) {
 // every frontmatter key nt doesn't model (Extra). Mirrors `nt tag` / nt_tag, so
 // the same edit lands identically across surfaces.
 func (s *Server) apiNoteTags(w http.ResponseWriter, r *http.Request) {
-	if !s.allowEdit {
-		http.Error(w, "editing is disabled — start with `nt web --edit`", http.StatusForbidden)
-		return
-	}
 	if r.Header.Get("X-CSRF") != s.csrf {
 		http.Error(w, "bad or missing CSRF token", http.StatusForbidden)
 		return
@@ -627,14 +598,10 @@ func splitTags(s string) []string {
 	return out
 }
 
-// apiNoteCreate creates a new note (--edit + CSRF gated) and returns its handle
+// apiNoteCreate creates a new note (CSRF gated) and returns its handle
 // + URL. A "folder/Title" value in the title is split into a subfolder, mirroring
 // the `nt note` CLI shorthand.
 func (s *Server) apiNoteCreate(w http.ResponseWriter, r *http.Request) {
-	if !s.allowEdit {
-		http.Error(w, "editing is disabled — start with `nt web --edit`", http.StatusForbidden)
-		return
-	}
 	if r.Header.Get("X-CSRF") != s.csrf {
 		http.Error(w, "bad or missing CSRF token", http.StatusForbidden)
 		return
@@ -1038,10 +1005,6 @@ func (s *Server) apiTaskEdit(w http.ResponseWriter, r *http.Request) {
 // another writer (a CLI call, an AI session) changed the touched tasks in the
 // meantime; that refusal surfaces as 409 so the UI can say "store changed".
 func (s *Server) apiUndo(w http.ResponseWriter, r *http.Request) {
-	if !s.allowEdit {
-		http.Error(w, "editing is disabled — start with `nt web --edit`", http.StatusForbidden)
-		return
-	}
 	if r.Header.Get("X-CSRF") != s.csrf {
 		http.Error(w, "bad or missing CSRF token", http.StatusForbidden)
 		return
@@ -1085,10 +1048,6 @@ func (s *Server) apiTaskDelete(w http.ResponseWriter, r *http.Request) {
 // edit are two writes (a note file + tasks.txt), like noteCreate+taskEdit — the
 // task edit is the undoable one; an orphaned note on a mid-failure is harmless.
 func (s *Server) apiTaskNote(w http.ResponseWriter, r *http.Request) {
-	if !s.allowEdit {
-		http.Error(w, "editing is disabled — start with `nt web --edit`", http.StatusForbidden)
-		return
-	}
 	if r.Header.Get("X-CSRF") != s.csrf {
 		http.Error(w, "bad or missing CSRF token", http.StatusForbidden)
 		return

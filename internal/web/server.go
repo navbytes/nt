@@ -31,16 +31,15 @@ import (
 	"github.com/navbytes/nt/internal/task"
 )
 
-// Server holds the shared state for the viewer. (Editing, when added, hangs
-// write routes and a CSRF token here — seam #1.)
+// Server holds the shared state for the viewer. Writes (notes and tasks) are
+// always enabled; every write route is guarded by the per-process CSRF token.
 type Server struct {
 	eng       *mutate.Engine
 	version   string
 	hub       *hub
 	hlCSS     string // generated Chroma syntax-highlight stylesheet (theme-scoped)
 	hlETag    string // content-hash ETag for highlight.css (for 304s)
-	allowEdit bool   // writes enabled (nt web --edit); read-only by default
-	csrf      string // per-process token required on save (blocks cross-site POSTs)
+	csrf      string // per-process token required on every write (blocks cross-site POSTs)
 	dayBudget int    // Today capacity-bar budget in minutes ([web] day_budget_minutes; 0 ⇒ default 360)
 
 	notes *note.Cache // mtime-keyed parse cache: rebuilds re-read only changed notes
@@ -115,13 +114,12 @@ func randToken() string {
 const DefaultPort = 4321
 
 // Serve opens the store and serves the SPA on addr (e.g. "127.0.0.1:4321").
-// allowEdit enables note editing in the browser (read-only when false). If the
-// requested port is taken, it falls back to a free one (so the port is stable
-// run-to-run but a conflict doesn't crash the command). onReady, if non-nil, is
+// If the requested port is taken, it falls back to a free one (so the port is
+// stable run-to-run but a conflict doesn't crash the command). onReady, if non-nil, is
 // called with the final base URL once the listener is bound — used by the
 // detached server (`nt web --detach`) to record its real address in the PID
 // file even when the port fell back.
-func Serve(version, addr string, allowEdit bool, onReady func(url string)) error {
+func Serve(version, addr string, onReady func(url string)) error {
 	eng, err := mutate.Open()
 	if err != nil {
 		return err
@@ -130,7 +128,6 @@ func Serve(version, addr string, allowEdit bool, onReady func(url string)) error
 	if err != nil {
 		return err
 	}
-	s.allowEdit = allowEdit
 	ln, err := net.Listen("tcp", addr)
 	if err != nil && errors.Is(err, syscall.EADDRINUSE) {
 		// Preferred port busy → pick a free one instead of failing.
@@ -147,23 +144,16 @@ func Serve(version, addr string, allowEdit bool, onReady func(url string)) error
 		onReady(url)
 	}
 	fmt.Printf("nt web — serving notes at %s\n", url)
-	mode := "read-only"
-	if allowEdit {
-		mode = "editing enabled (--edit)"
-	}
-	fmt.Printf("(localhost only · Svelte SPA · %s · live-reloads on change · Ctrl+C to stop)\n", mode)
+	fmt.Printf("(localhost only · Svelte SPA · editing enabled · live-reloads on change · Ctrl+C to stop)\n")
 	return http.Serve(ln, s.routes()) //nolint:gosec // localhost dev server, no timeouts needed
 }
 
 // Handler returns the viewer's HTTP handler so another host can serve the UI
 // without nt binding a TCP port — e.g. a Wails desktop shell wiring it into
 // assetserver.Options.Handler. This is the seam that lets the exact same
-// server-rendered UI run as a native app. Call SetEdit/StartWatch first if you
-// want editing or live-reload.
+// server-rendered UI run as a native app. Call StartWatch first if you want
+// live-reload. Editing is always enabled (CSRF-guarded).
 func (s *Server) Handler() http.Handler { return s.routes() }
-
-// SetEdit toggles in-app editing (CSRF-guarded). Read-only by default.
-func (s *Server) SetEdit(v bool) { s.allowEdit = v }
 
 // SetSPA is a no-op retained for embedder compatibility; the SPA is always served.
 func (s *Server) SetSPA(_ bool) {}
@@ -254,14 +244,10 @@ func groupActivity(events []activityEvent, source string) []activityDay {
 	return days
 }
 
-// handleSave writes an edited note back to disk (nt web --edit). It is guarded by
-// a per-process CSRF token (sent as a custom header, which forces a CORS preflight
-// that a cross-site page can't satisfy) — and editing is off unless --edit.
+// handleSave writes an edited note back to disk. It is guarded by a per-process
+// CSRF token (sent as a custom header, which forces a CORS preflight that a
+// cross-site page can't satisfy).
 func (s *Server) handleSave(w http.ResponseWriter, r *http.Request, handle string) {
-	if !s.allowEdit {
-		http.Error(w, "editing is disabled — start with `nt web --edit`", http.StatusForbidden)
-		return
-	}
 	if r.Header.Get("X-CSRF") != s.csrf {
 		http.Error(w, "bad or missing CSRF token", http.StatusForbidden)
 		return
@@ -302,13 +288,9 @@ func (s *Server) handleSave(w http.ResponseWriter, r *http.Request, handle strin
 
 // handlePreview renders an editor buffer to HTML for the live split-preview,
 // reusing the exact renderBody path the note page uses (so wikilinks, mermaid,
-// and syntax highlighting match what a save will produce). Edit-mode + CSRF
-// gated; it reads but never writes.
+// and syntax highlighting match what a save will produce). CSRF gated; it reads
+// but never writes.
 func (s *Server) handlePreview(w http.ResponseWriter, r *http.Request) {
-	if !s.allowEdit {
-		http.NotFound(w, r)
-		return
-	}
 	if r.Header.Get("X-CSRF") != s.csrf {
 		http.Error(w, "bad or missing CSRF token", http.StatusForbidden)
 		return
@@ -453,16 +435,12 @@ func buildTaskGroups(doc *task.Doc, notes []*note.Note) []taskGroup {
 	return groups
 }
 
-// doTaskWrite enforces the --edit + CSRF gate, marks tasks.txt as a self-write
+// doTaskWrite enforces the CSRF gate, marks tasks.txt as a self-write
 // (so the watcher doesn't also broadcast a full reload), runs fn through
 // mutate.Engine.Apply (lock + re-read + undo journal), refreshes the read-model,
 // and nudges other clients ("tasks"). Returns true on success; on failure it has
 // already written the error response. Shared by the htmx and JSON task handlers.
 func (s *Server) doTaskWrite(w http.ResponseWriter, r *http.Request, op string, fn func(d *task.Doc, rec *mutate.Recorder) error) bool {
-	if !s.allowEdit {
-		http.Error(w, "editing is disabled — start with `nt web --edit`", http.StatusForbidden)
-		return false
-	}
 	if r.Header.Get("X-CSRF") != s.csrf {
 		http.Error(w, "bad or missing CSRF token", http.StatusForbidden)
 		return false

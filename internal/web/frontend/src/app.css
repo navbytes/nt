@@ -162,6 +162,17 @@ code {
   height: 100vh;
   overflow-y: auto;
 }
+/* Collapsed (desktop): hide the sidebar + its resize divider so the content
+   reclaims the full width. Re-open via the topbar toggle / palette / `[`. */
+.layout.sidebar-collapsed .sidebar,
+.layout.sidebar-collapsed .resizer {
+  display: none;
+}
+/* While dragging the divider, suppress text selection everywhere. */
+body.resizing {
+  cursor: col-resize;
+  user-select: none;
+}
 .content {
   flex: 1;
   min-width: 0;
@@ -1006,6 +1017,14 @@ code {
   .hamburger {
     display: inline-flex !important;
   }
+  /* Collapse + resize are desktop-only; on mobile the drawer governs the sidebar. */
+  .collapse-btn,
+  .resizer {
+    display: none;
+  }
+  .layout.sidebar-collapsed .sidebar {
+    display: block;
+  }
   .main {
     padding: 20px 16px 56px;
   }
@@ -1034,6 +1053,24 @@ code {
   cursor: pointer;
   font-size: 1.1rem;
   padding: 3px 9px;
+}
+/* Desktop-only sidebar collapse toggle (mobile uses the hamburger drawer). */
+.collapse-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--fg-soft);
+  cursor: pointer;
+  font-size: 1rem;
+  line-height: 1;
+  padding: 4px 9px;
+}
+/* Arrow points back the other way once collapsed (it now re-opens). */
+.layout.sidebar-collapsed .collapse-btn {
+  transform: scaleX(-1);
 }
 .scrim {
   display: none;

@@ -12,12 +12,10 @@
 
   let {
     t,
-    canEdit = false,
     selected = false,
     onToggleSelect,
   }: {
     t: Task;
-    canEdit?: boolean;
     /** True when this row is part of a bulk selection (W11). */
     selected?: boolean;
     /** Toggle this row's bulk selection (x key / the select checkbox). */
@@ -187,7 +185,7 @@
   // or Enter toggles done/reopen; `e` opens the inline editor; `d` opens the
   // reschedule menu. j/k are left to bubble up to the list navigator.
   function onRowKey(e: KeyboardEvent) {
-    if (editing || scheduling || !canEdit) return;
+    if (editing || scheduling) return;
     if (e.key === "Enter" || e.key === " ") {
       e.preventDefault();
       if (t.status === "done") $reopenMut.mutate(t.id);
@@ -219,7 +217,7 @@
   tabindex="-1"
   onkeydown={onRowKey}
 >
-  {#if canEdit && onToggleSelect}
+  {#if onToggleSelect}
     <button
       class="selbox"
       class:selbox--on={selected}
@@ -235,12 +233,10 @@
       >{t.priority}</span
     >
   {/if}
-  {#if canEdit}
-    {#if t.status === "done"}
-      <button class="check check--done" title="Reopen" aria-label="Reopen task" onclick={() => $reopenMut.mutate(t.id)}>●</button>
-    {:else}
-      <button class="check" title="Mark done" aria-label="Mark task done" onclick={() => $doneMut.mutate(t.id)}>○</button>
-    {/if}
+  {#if t.status === "done"}
+    <button class="check check--done" title="Reopen" aria-label="Reopen task" onclick={() => $reopenMut.mutate(t.id)}>●</button>
+  {:else}
+    <button class="check" title="Mark done" aria-label="Mark task done" onclick={() => $doneMut.mutate(t.id)}>○</button>
   {/if}
   {#if editing}
     <textarea
@@ -270,7 +266,7 @@
         title={t.due}>{due.label}</span
       >{/if}
     {#if src}<span class="src src--agent" title={`Captured by ${src}`}>{src}</span>{/if}
-    {#if canEdit && t.status !== "done"}
+    {#if t.status !== "done"}
       <span class="row__actions">
         {#if !t.noteUrl}
           <button class="rowbtn" title="Add a details note (body)" aria-label="Add details note" disabled={noteBusy} onclick={addNote}>＋📄</button>
