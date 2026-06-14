@@ -24,6 +24,7 @@ export interface FGNode {
 export interface FGLink {
   source: string;
   target: string;
+  kind?: string; // relationship: "wikilink" | "task" | "parent" | "blocks" | "discovered"
 }
 
 export function toForceGraph(data: GraphData): { nodes: FGNode[]; links: FGLink[] } {
@@ -41,7 +42,7 @@ export function toForceGraph(data: GraphData): { nodes: FGNode[]; links: FGLink[
   for (const l of data.links) {
     const s = data.nodes[l.s];
     const t = data.nodes[l.t];
-    if (s && t) links.push({ source: s.id, target: t.id });
+    if (s && t) links.push({ source: s.id, target: t.id, kind: l.kind });
   }
   return { nodes, links };
 }

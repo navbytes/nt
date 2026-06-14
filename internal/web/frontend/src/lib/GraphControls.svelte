@@ -6,6 +6,7 @@
     exitLocal,
     type ColorBy,
     type ShapeBy,
+    type SizeBy,
     type Effects,
   } from "./graphView.svelte";
   import ShapeGlyph from "./ShapeGlyph.svelte";
@@ -17,6 +18,7 @@
     sources,
     legend,
     shapeLegend,
+    edgeLegend,
     nodeCount,
     linkCount,
     visibleCount,
@@ -27,6 +29,7 @@
     sources: string[];
     legend: { value: string; label: string; color: string }[];
     shapeLegend: { value: string; label: string; shape: ShapeKind }[];
+    edgeLegend: { value: string; label: string; color: string }[];
     nodeCount: number;
     linkCount: number;
     visibleCount: number;
@@ -49,6 +52,11 @@
     { v: "folder", label: "Folder" },
     { v: "tag", label: "Tag" },
     { v: "none", label: "None" },
+  ];
+
+  const sizeOptions: { v: SizeBy; label: string }[] = [
+    { v: "degree", label: "Degree (link count)" },
+    { v: "centrality", label: "Centrality (PageRank)" },
   ];
 
   const effectsOptions: { v: Effects; label: string }[] = [
@@ -106,11 +114,23 @@
           <button class:seg--on={view.dim === "3d"} onclick={() => (view.dim = "3d")} title="3D constellation with bloom">3D ✦</button>
         </div>
       </div>
+      <!-- Layout: organic force vs. radial ego rings (radial needs a local root) -->
+      <div class="gctl__row">
+        <div class="seg" role="group" aria-label="Layout">
+          <button class:seg--on={view.layout === "force"} onclick={() => (view.layout = "force")}>Force</button>
+          <button class:seg--on={view.layout === "radial"} onclick={() => (view.layout = "radial")}
+            title="Concentric rings by distance from the focused node (Local mode, 2D)">Radial</button>
+        </div>
+      </div>
+      {#if view.layout === "radial" && !(view.mode === "local" && view.dim === "2d")}
+        <p class="gctl__hint">Radial applies in <strong>Local</strong> mode on the <strong>2D</strong> renderer.</p>
+      {/if}
       {#if view.mode === "local"}
         <div class="gctl__row gctl__depth">
           <label for="g-depth">Depth {view.depth}</label>
           <input id="g-depth" type="range" min="1" max="5" step="1" bind:value={view.depth} />
         </div>
+        <p class="gctl__hint">Shift-click a node to reveal its neighbors.</p>
       {/if}
 
       <!-- Search -->
@@ -137,6 +157,14 @@
         <label for="g-shapeby">Shape by</label>
         <select id="g-shapeby" bind:value={view.shapeBy}>
           {#each shapeOptions as o (o.v)}<option value={o.v}>{o.label}</option>{/each}
+        </select>
+      </div>
+
+      <!-- Size by -->
+      <div class="gctl__row gctl__field">
+        <label for="g-sizeby">Size by</label>
+        <select id="g-sizeby" bind:value={view.sizeBy}>
+          {#each sizeOptions as o (o.v)}<option value={o.v}>{o.label}</option>{/each}
         </select>
       </div>
 
@@ -217,6 +245,11 @@
               /> Curved links
             </label>
           </div>
+          <label
+            title="Color each edge by its relationship: wikilink, task reference, or dependency"
+          >
+            <input type="checkbox" bind:checked={view.colorLinksByType} /> Color edges by type
+          </label>
           <label><input type="checkbox" bind:checked={view.frozen} /> Freeze layout</label>
           <div class="gctl__slider">
             <label for="g-repel">Repel</label>
@@ -254,6 +287,17 @@
         <div class="gctl__legend gctl__shapelegend" aria-label="Shape legend">
           {#each shapeLegend as e (e.value)}
             <span class="shape-legend-item"><ShapeGlyph kind={e.shape} /> {e.label}</span>
+          {/each}
+        </div>
+      {/if}
+
+      <!-- Edge legend (relationship colors) — only when coloring edges by type -->
+      {#if view.colorLinksByType && edgeLegend.length}
+        <div class="gctl__legend" aria-label="Edge type legend">
+          {#each edgeLegend as e (e.value)}
+            <span class="legend-item">
+              <span class="legend-line" style="background:{e.color}"></span>{e.label}
+            </span>
           {/each}
         </div>
       {/if}
@@ -451,6 +495,19 @@
     border-radius: 50%;
     display: inline-block;
     flex: none;
+  }
+  .legend-line {
+    width: 14px;
+    height: 3px;
+    border-radius: 2px;
+    display: inline-block;
+    flex: none;
+  }
+  .gctl__hint {
+    margin: 0;
+    color: var(--muted);
+    font-size: 0.72rem;
+    line-height: 1.35;
   }
   .shape-legend-item {
     display: flex;

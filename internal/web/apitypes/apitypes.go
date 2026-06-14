@@ -198,10 +198,14 @@ type GraphNode struct {
 	Deg    int      `json:"deg"`
 }
 
-// GraphLink is one wikilink edge as a pair of indices into GraphData.Nodes.
+// GraphLink is one edge as a pair of indices into GraphData.Nodes. Kind names
+// the relationship so the viewer can color/style edges by predicate family:
+// "wikilink" (note↔note), "task" (task→note reference), or a task dependency
+// ("parent" | "blocks" | "discovered").
 type GraphLink struct {
-	S int `json:"s"`
-	T int `json:"t"`
+	S    int    `json:"s"`
+	T    int    `json:"t"`
+	Kind string `json:"kind,omitempty"`
 }
 
 // GraphData is GET /api/graph — the note↔note wikilink graph.

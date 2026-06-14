@@ -196,6 +196,9 @@ func TestGraphData(t *testing.T) {
 	if g.Nodes[0].Deg != 1 || g.Nodes[1].Deg != 1 {
 		t.Fatalf("degree not computed: %+v", g.Nodes)
 	}
+	if g.Links[0].Kind != "wikilink" {
+		t.Fatalf("note↔note edge kind = %q, want wikilink", g.Links[0].Kind)
+	}
 }
 
 func TestPreviewEndpoint(t *testing.T) {

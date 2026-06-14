@@ -12,7 +12,14 @@
     type FGNode,
     type FGLink,
   } from "../lib/graph";
-  import { nodeColor as colorOfNode, legendEntries, withAlpha } from "../lib/graphColors";
+  import {
+    nodeColor as colorOfNode,
+    legendEntries,
+    withAlpha,
+    linkKindColor,
+    linkKindLegend,
+  } from "../lib/graphColors";
+  import { bfsDepths, pageRank } from "../lib/graphMetrics";
   import { nodeShape, tracePath, shapeLegendEntries, type ShapeKind } from "../lib/graphShapes";
   import { SpriteCache, drawRadius, type SpriteVariant } from "../lib/graphSprites";
   import { view, savePersisted, enterLocal, exitLocal, type Effects } from "../lib/graphView.svelte";
@@ -28,6 +35,9 @@
   let graph = $state<any>(null);
   let hoveredId = $state<string | null>(null);
   let pinned = $state<Set<string>>(new Set());
+  // Incremental expansion (local mode): nodes the user explicitly "expanded" to
+  // pull their neighbors into view beyond the depth slider. Transient like pinned.
+  let expanded = $state<Set<string>>(new Set());
   let menu = $state<{ x: number; y: number; node: FGNode } | null>(null);
   // Effective visual level after reduced-motion / size / layout downgrades
   // (computeFx). Read by the hot draw loop and the link/vignette wiring.
@@ -37,6 +47,7 @@
   let built3d = false; // which renderer is currently mounted
   let built = false; // first build finished (gates dim-toggle rebuilds)
   let fitPending = false; // zoom-to-fit once the next layout settles
+  let lastRoot: string | null = null; // detects local-root changes to reset expansion
   let destroyed = false; // component torn down (guards async builds)
   let bloomPass: any = null; // three UnrealBloomPass (3D only)
   const BG3D = "#05060d"; // deep-space background — bloom needs near-black
@@ -50,6 +61,10 @@
   const adjacency = $derived(
     $graphQ.data ? buildAdjacency($graphQ.data) : new Map<string, Set<string>>(),
   );
+  // Centrality (PageRank) for "size by importance". Computed once per dataset and
+  // read O(1) by nodeRadius in the hot draw loop via the plain mirrors below.
+  let prMap = new Map<string, number>();
+  let prMax = 1;
   // R.pass = ids passing the active filters (persistent). Hover/selection
   // depth-of-field is layered on at draw time via focusSet + dofT, so it can
   // animate without rebuilding R on every hover.
@@ -107,6 +122,9 @@
   const sources = $derived([...new Set(allNodes.map((n) => n.source).filter(Boolean))].sort());
   const legend = $derived(legendEntries(allNodes, view.colorBy));
   const shapeLegend = $derived(shapeLegendEntries(allNodes, view.shapeBy));
+  const edgeLegend = $derived(
+    $graphQ.data ? linkKindLegend($graphQ.data.links.map((l) => l.kind)) : [],
+  );
   const selectedNode = $derived(allNodes.find((n) => n.id === view.selectedId) ?? null);
   // R is a plain (non-reactive) object read O(1) by the hot draw loop; the panel
   // reads this mirrored count instead so it stays reactive.
@@ -135,6 +153,13 @@
     }
     if (view.mode === "local" && view.rootId) {
       const within = nodesWithinDepth(view.rootId, adjacency, view.depth);
+      // Incremental expansion: each explicitly-expanded node pulls in its direct
+      // neighbors, so you can grow specific branches past the depth slider.
+      for (const id of expanded) {
+        if (!within.has(id) && !adjacency.has(id)) continue;
+        within.add(id);
+        for (const nb of adjacency.get(id) ?? []) within.add(nb);
+      }
       nodes = nodes.filter((n) => within.has(n.id));
       links = links.filter((l) => within.has(linkEndId(l.source)) && within.has(linkEndId(l.target)));
     }
@@ -163,6 +188,12 @@
 
   // ---- canvas helpers ----
   function nodeRadius(n: FGNode): number {
+    if (view.sizeBy === "centrality") {
+      // Normalize against the dataset's top score, then sqrt-scale so hubs read
+      // bigger without the long tail collapsing to invisible dots.
+      const s = (prMap.get(n.id) ?? 0) / (prMax || 1);
+      return Math.max(2.5, Math.min(14, 3 + Math.sqrt(s) * 11));
+    }
     return Math.min(12, Math.sqrt(1 + n.deg) * 3);
   }
   // nodeAlpha folds the two kinds of dimming: filtered-out nodes are always faint;
@@ -292,6 +323,10 @@
     const t = linkEndId(l.target);
     if (hoveredId && (s === hoveredId || t === hoveredId)) return LINK_HOVER;
     const bright = linkAlpha(s, t) >= 0.5;
+    // Relationship-type coloring wins over node-color when enabled.
+    if (view.colorLinksByType) {
+      return withAlpha(linkKindColor(l.kind), bright ? 0.7 : 0.12);
+    }
     if (view.colorLinks && fxLevel !== "off") {
       return withAlpha(R.color.get(s) ?? cssAccent, bright ? 0.55 : 0.12);
     }
@@ -302,7 +337,9 @@
   // Arrows + particles still render (force-graph paints them in separate passes).
   // Reads link.__controlPoints (set by force-graph this frame) to follow the curve.
   function drawLink(l: any, ctx: CanvasRenderingContext2D, scale: number) {
-    if (!(view.colorLinks && fxLevel === "full")) return; // idle → default stroke used
+    // The node-color gradient painter is idle when edges are colored by type
+    // (a typed edge is one flat color, painted by the linkColor accessor instead).
+    if (!(view.colorLinks && !view.colorLinksByType && fxLevel === "full")) return;
     const s = l.source;
     const t = l.target;
     if (!s || !t || s.x == null || t.x == null) return;
@@ -396,6 +433,14 @@
   let clickTO: ReturnType<typeof setTimeout> | undefined;
   function onNodeClick(n: FGNode, evt: MouseEvent) {
     closeMenu();
+    // Shift/Alt-click reveals a node's neighbors (incremental exploration) rather
+    // than selecting it. Roots a local view first if we're still global.
+    if (evt?.shiftKey || evt?.altKey) {
+      if (clickTO) clearTimeout(clickTO);
+      if (view.mode !== "local" || !view.rootId) enterLocal(n.id);
+      else toggleExpand(n.id);
+      return;
+    }
     if (evt?.detail >= 2) {
       if (clickTO) clearTimeout(clickTO);
       navigate(n.url);
@@ -403,6 +448,17 @@
     }
     if (clickTO) clearTimeout(clickTO);
     clickTO = setTimeout(() => selectNode(n), 200);
+  }
+
+  // toggleExpand grows/ungrows a node's neighborhood in local mode (scopedData
+  // unions the neighbors of every expanded node). Re-fits and reheats so the
+  // newly-revealed nodes lay out.
+  function toggleExpand(id: string) {
+    const next = new Set(expanded);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    expanded = next;
+    if (!view.frozen) graph?.d3ReheatSimulation?.();
   }
 
   function closeMenu() {
@@ -530,6 +586,7 @@
     const s = linkEndId(l.source);
     const t = linkEndId(l.target);
     const bright = R.pass.has(s) && R.pass.has(t);
+    if (view.colorLinksByType) return withAlpha(linkKindColor(l.kind), bright ? 0.7 : 0.08);
     if (view.colorLinks) return withAlpha(R.color.get(s) ?? cssAccent, bright ? 0.6 : 0.08);
     return bright ? "rgba(160,166,190,0.5)" : "rgba(160,166,190,0.08)";
   }
@@ -549,6 +606,50 @@
     const z = (n as any).z ?? 0;
     const ratio = 1 + 130 / (Math.hypot(x, y, z) || 1);
     graph?.cameraPosition?.({ x: x * ratio, y: y * ratio, z: z * ratio }, n, reduce ? 0 : 800);
+  }
+
+  // ---- radial / ego layout (2D) ----
+  // Radial needs a root, so it only engages in local mode on the 2D renderer.
+  function radialActive(): boolean {
+    return (
+      view.layout === "radial" && view.mode === "local" && !!view.rootId && !built3d && !!graph
+    );
+  }
+  // applyRadial installs (or removes) a d3 forceRadial that pulls each node onto a
+  // ring whose radius is its hop-distance from the root, turning the ego graph
+  // into clean concentric circles. The centering forces are zeroed while it's on
+  // (they'd fight the rings) and the root is pinned at the origin.
+  async function applyRadial() {
+    if (!graph || built3d) return;
+    const on = radialActive();
+    const nodes: FGNode[] = graph.graphData().nodes;
+    const root = view.rootId ? nodes.find((n) => n.id === view.rootId) : undefined;
+    if (on) {
+      const { forceRadial } = await import("d3-force");
+      if (!graph || !radialActive()) return; // re-check after the await
+      const depthMap = bfsDepths(view.rootId!, adjacency);
+      const maxD = Math.max(1, ...depthMap.values());
+      const ring = Math.max(40, view.linkDistance * 2.4);
+      graph.d3Force(
+        "radial",
+        forceRadial((n: FGNode) => (depthMap.get(n.id) ?? maxD + 1) * ring, 0, 0).strength(0.9),
+      );
+      graph.d3Force("x")?.strength(0);
+      graph.d3Force("y")?.strength(0);
+      if (root) {
+        root.fx = 0;
+        root.fy = 0;
+      }
+    } else {
+      graph.d3Force("radial", null); // remove
+      graph.d3Force("x")?.strength(view.centerGravity);
+      graph.d3Force("y")?.strength(view.centerGravity);
+      if (root && view.rootId && !pinned.has(view.rootId) && !view.frozen) {
+        root.fx = undefined;
+        root.fy = undefined;
+      }
+    }
+    if (!view.frozen) graph.d3ReheatSimulation();
   }
 
   // buildGraph (re)constructs the renderer for the active view.dim. It tears down
@@ -638,7 +739,9 @@
         // Gradient painter replaces the stroke only in "full" + colorLinks mode
         // (mode "after" elsewhere → drawLink no-ops and the flat stroke shows).
         .linkCanvasObject(drawLink)
-        .linkCanvasObjectMode(() => (view.colorLinks && fxLevel === "full" ? "replace" : "after"))
+        .linkCanvasObjectMode(() =>
+          view.colorLinks && !view.colorLinksByType && fxLevel === "full" ? "replace" : "after",
+        )
         .nodeCanvasObject(drawNode)
         .onRenderFramePre((ctx: CanvasRenderingContext2D) => {
           if (fxLevel !== "off") vignette(ctx);
@@ -737,6 +840,14 @@
     // establish dependencies
     void [view.mode, view.depth, view.rootId, view.showTasks, data];
     if (!graph || !data) return;
+    // Reset incremental expansion when the scope changes (new root / back to
+    // global) so stale neighborhoods don't linger. Guarded by size so clearing
+    // doesn't re-trigger this effect (scopedData reads `expanded`).
+    if (view.rootId !== lastRoot) {
+      lastRoot = view.rootId;
+      if (expanded.size) expanded = new Set();
+    }
+    if (view.mode === "global" && expanded.size) expanded = new Set();
     fitPending = true;
     graph.graphData(scopedData());
     // local mode roots a fresh layout — clear stale pins from the previous scope
@@ -762,6 +873,20 @@
     recompute();
   });
 
+  // ---- centrality (PageRank): recompute once per dataset for "size by importance" ----
+  $effect(() => {
+    void $graphQ.data;
+    prMap = pageRank(adjacency);
+    prMax = prMap.size ? Math.max(...prMap.values()) : 1;
+    repaint();
+  });
+
+  // ---- node sizing pref → repaint (matters when the sim is frozen) ----
+  $effect(() => {
+    void view.sizeBy;
+    repaint();
+  });
+
   // ---- depth-of-field: hover drives the focus fade (selection keeps its ring) ----
   $effect(() => {
     void hoveredId;
@@ -776,7 +901,7 @@
 
   // ---- 2D link styling: curvature + gradient on/off → repaint (matters when frozen) ----
   $effect(() => {
-    void [view.linkStyle, view.colorLinks, fxLevel];
+    void [view.linkStyle, view.colorLinks, view.colorLinksByType, fxLevel];
     if (!graph || built3d) return;
     graph.linkCurvature(view.linkStyle === "curved" ? 0.12 : 0);
     repaint();
@@ -784,7 +909,7 @@
 
   // ---- 3D styling: bloom strength + link color/curvature on pref change ----
   $effect(() => {
-    void [view.effects, view.colorLinks, view.linkStyle, view.dim];
+    void [view.effects, view.colorLinks, view.colorLinksByType, view.linkStyle, view.dim];
     if (!graph || !built3d) return;
     if (bloomPass) bloomPass.strength = bloomStrength();
     graph.linkColor((l: any) => link3dColor(l));
@@ -804,9 +929,18 @@
     if (charge?.strength) charge.strength(view.repel);
     const link = graph.d3Force("link");
     if (link?.distance) link.distance(view.linkDistance);
-    graph.d3Force("x")?.strength(view.centerGravity);
-    graph.d3Force("y")?.strength(view.centerGravity);
+    // Radial mode owns the x/y centering forces (zeroed) — don't fight it here.
+    const grav = radialActive() ? 0 : view.centerGravity;
+    graph.d3Force("x")?.strength(grav);
+    graph.d3Force("y")?.strength(grav);
     if (!view.frozen) graph.d3ReheatSimulation();
+  });
+
+  // ---- radial / ego layout: (re)apply when layout, scope, depth, or data change ----
+  $effect(() => {
+    void [view.layout, view.mode, view.rootId, view.depth, view.linkDistance, $graphQ.data, built];
+    if (!graph || built3d) return;
+    void applyRadial();
   });
 
   // ---- freeze: fix all nodes in place (keeps full interactivity, stops jitter) ----
@@ -858,7 +992,10 @@
       view.effects,
       view.linkStyle,
       view.colorLinks,
+      view.colorLinksByType,
       view.dim,
+      view.layout,
+      view.sizeBy,
     ];
     savePersisted();
   });
@@ -907,6 +1044,7 @@
       {sources}
       {legend}
       {shapeLegend}
+      {edgeLegend}
       nodeCount={allNodes.length}
       linkCount={$graphQ.data?.links.length ?? 0}
       {visibleCount}
@@ -927,9 +1065,15 @@
       <GraphDetails
         node={selectedNode}
         pinned={pinned.has(selectedNode.id)}
+        expanded={expanded.has(selectedNode.id)}
         onOpen={() => selectedNode && navigate(selectedNode.url)}
         onFocusLocal={() => selectedNode && enterLocal(selectedNode.id)}
         onTogglePin={() => selectedNode && togglePin(selectedNode.id)}
+        onToggleExpand={() => {
+          if (!selectedNode) return;
+          if (view.mode !== "local" || !view.rootId) enterLocal(selectedNode.id);
+          else toggleExpand(selectedNode.id);
+        }}
         onClose={() => (view.selectedId = null)}
       />
     {/if}

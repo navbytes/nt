@@ -500,8 +500,9 @@ type graphNode struct {
 	Deg    int      `json:"deg"`    // degree, for node sizing
 }
 type graphLink struct {
-	S int `json:"s"`
-	T int `json:"t"`
+	S    int    `json:"s"`
+	T    int    `json:"t"`
+	Kind string `json:"kind,omitempty"` // "wikilink" | "task" | "parent" | "blocks" | "discovered"
 }
 type graphData struct {
 	Nodes     []graphNode `json:"nodes"`
@@ -529,7 +530,7 @@ func buildGraphData(snap *snapshot) *graphData {
 	}
 
 	seen := map[[2]int]bool{} // undirected edge dedup
-	link := func(a, b int) {
+	link := func(a, b int, kind string) {
 		if a == b {
 			return
 		}
@@ -541,7 +542,7 @@ func buildGraphData(snap *snapshot) *graphData {
 			return
 		}
 		seen[key] = true
-		g.Links = append(g.Links, graphLink{S: a, T: b})
+		g.Links = append(g.Links, graphLink{S: a, T: b, Kind: kind})
 		g.Nodes[a].Deg++
 		g.Nodes[b].Deg++
 	}
@@ -575,7 +576,7 @@ func buildGraphData(snap *snapshot) *graphData {
 		}
 		for _, tgt := range outs {
 			if to, ok := idx["note:"+tgt]; ok {
-				link(from, to)
+				link(from, to, "wikilink")
 			}
 		}
 	}
@@ -610,7 +611,30 @@ func buildGraphData(snap *snapshot) *graphData {
 				Tags:   t.Tags(),
 			})
 			for _, to := range targets {
-				link(ti, to)
+				link(ti, to, "task")
+			}
+		}
+
+		// Task ↔ task dependency edges, but only between tasks that already joined
+		// the graph above (i.e. both reference a note). This enriches the edge-type
+		// legend with the real dependency predicates without inventing dangling
+		// nodes for tasks that carry no note link.
+		for _, t := range snap.doc.Tasks() {
+			from, ok := idx["task:"+t.ID()]
+			if !ok {
+				continue
+			}
+			for _, dep := range []struct{ tgt, kind string }{
+				{t.Parent(), "parent"},
+				{t.Blocks(), "blocks"},
+				{t.Discovered(), "discovered"},
+			} {
+				if dep.tgt == "" {
+					continue
+				}
+				if to, ok := idx["task:"+dep.tgt]; ok {
+					link(from, to, dep.kind)
+				}
 			}
 		}
 	}
@@ -641,7 +665,7 @@ func capGraph(g *graphData) *graphData {
 	for _, l := range g.Links {
 		if s, ok := remap[l.S]; ok {
 			if t, ok2 := remap[l.T]; ok2 {
-				links = append(links, graphLink{S: s, T: t})
+				links = append(links, graphLink{S: s, T: t, Kind: l.Kind})
 			}
 		}
 	}
