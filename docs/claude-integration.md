@@ -125,6 +125,28 @@ Tools exposed — **capture:** `nt_add`, `nt_note` (with `folder`), `nt_done`,
 journaled engine as the CLI, default `source` to `claude`, and require **stable
 task ids** (positional `task:N` is refused — the index isn't safe for an agent).
 
+### Parallel agents — workstreams
+
+When several agents share one store at once (parallel git worktrees, CI jobs, web
+sessions), set **`NT_WORKSTREAM`** in each agent's environment to keep their
+in-flight **tasks** isolated while **notes** (the knowledge base) stay shared:
+
+```jsonc
+// per-worktree MCP registration
+{ "mcpServers": { "nt": { "type": "stdio", "command": "/abs/path/to/nt",
+  "args": ["mcp"], "env": { "NT_WORKSTREAM": "auto" } } } }
+```
+
+- A literal value (`"NT_WORKSTREAM": "feat-x"`) names the workstream; **`auto`**
+  derives it from the current git branch (falling back to the directory name) —
+  the natural fit for worktree-per-branch setups like grove.
+- `nt_add` stamps the resolved id (`ws:` on the task); `nt_recall` / `nt_ready` /
+  `nt_status` / `nt_log` scope to it. Tasks with no workstream (the human's
+  CLI/TUI/web backlog) stay visible to every agent — only *another* agent's
+  stamped tasks are hidden. `nt_search` / `nt_view` are never scoped.
+- A read can pass `workstream: "*"` to see every workstream, or an explicit id to
+  target another. **Unset → no isolation**, identical to single-agent behavior.
+
 `nt_add` titles are meant to be **short and scannable** — one actionable line,
 verb-first, ~10 words / 60 chars. Put detail in the task's **body**: `nt_add`
 takes a `body` arg, saved as the task's linked note so the title stays clean and

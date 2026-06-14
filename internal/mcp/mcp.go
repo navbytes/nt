@@ -179,11 +179,15 @@ func (s *server) ready(a map[string]any) (string, error) {
 		return "", err
 	}
 	source, tag, project := str(a, "source"), str(a, "tag"), str(a, "project")
+	ws := s.workstream(a)
 	blocked := task.BlockedIDs(d.Tasks())
 	var rows []*task.Task
 	for _, t := range d.Tasks() {
 		if t.Done || (blocked[t.ID()] && !t.Done) {
 			continue // done or dependency-blocked → not ready
+		}
+		if !wsVisible(t.Key("ws"), ws) {
+			continue // another agent's parallel work; shared/own tasks stay visible
 		}
 		if source != "" && t.Source() != source {
 			continue
@@ -244,11 +248,15 @@ func (s *server) status(a map[string]any) (string, error) {
 		return "", err
 	}
 	project, tag := strings.TrimSpace(str(a, "project")), strings.TrimSpace(str(a, "tag"))
+	ws := s.workstream(a)
 	notes, _ := note.List(s.eng.S)
 	notes = note.Active(notes) // a resuming agent gets the working set, not retired memory
 	blocked := task.BlockedIDs(d.Tasks())
 
 	inScope := func(t *task.Task) bool {
+		if !wsVisible(t.Key("ws"), ws) {
+			return false // another agent's parallel work
+		}
 		if project != "" && !contains(t.Projects(), project) {
 			return false
 		}
@@ -395,6 +403,9 @@ func (s *server) add(a map[string]any) (string, error) {
 			t.SetKey("due", due)
 		}
 		t.SetKey("src", source)
+		if ws := s.workstream(a); ws != "" && ws != "*" {
+			t.SetKey("ws", ws) // isolate this agent's in-flight work from parallel ones
+		}
 		if df := str(a, "discovered_from"); df != "" {
 			if dt, amb := d.Resolve(df); dt != nil && !amb {
 				t.SetKey("discovered", dt.ID())
@@ -516,11 +527,15 @@ func (s *server) recall(a map[string]any) (string, error) {
 		return "", err
 	}
 	source, since := str(a, "source"), str(a, "since")
+	ws := s.workstream(a)
 	includeDone := boolArg(a, "include_done")
 	var tasks []*task.Task
 	for _, t := range d.Tasks() {
 		if !includeDone && t.Done {
 			continue // recall restores ACTIVE context; finished work lives in nt_log
+		}
+		if !wsVisible(t.Key("ws"), ws) {
+			continue // tasks isolate per workstream; notes below stay shared
 		}
 		if source != "" && t.Source() != source {
 			continue
@@ -579,12 +594,17 @@ func (s *server) log(a map[string]any) (string, error) {
 		}
 	}
 	done := task.CompletedSince(d.Tasks(), bound)
-	if source := str(a, "source"); source != "" {
+	source, ws := str(a, "source"), s.workstream(a)
+	if source != "" || (ws != "" && ws != "*") {
 		kept := done[:0]
 		for _, t := range done {
-			if t.Source() == source {
-				kept = append(kept, t)
+			if source != "" && t.Source() != source {
+				continue
 			}
+			if !wsVisible(t.Key("ws"), ws) {
+				continue
+			}
+			kept = append(kept, t)
 		}
 		done = kept
 	}

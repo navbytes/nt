@@ -119,6 +119,7 @@ x 2026-06-05 2026-06-01 write migration +api parent:01JZ8RT3 id:01JZ8RT9
 | provenance        | `discovered:<id>`                    | Work surfaced while doing another task (AI memory) |
 | link (untyped)    | `[[note-slug]]` / `[[<ULID>]]`       | Cross-link to any note or task (§5.1) |
 | AI / origin       | `src:claude`                         | Defaults to `src:cli` / `src:tui` |
+| workstream        | `ws:<id>`                            | Isolates one parallel agent's tasks from another's; notes stay shared (§ workstreams) |
 | stable id         | `id:<ULID>`                          | Primary handle (§7.2) |
 
 ### Format rules (binding on the parser/writer)
@@ -388,6 +389,27 @@ nt recall --source claude --json
 - **Claude Code polish (Phase 4):** a PostToolUse hook mirroring `TaskCreate`/`TaskUpdate`
   into `nt add`/`nt update`, and a `/nt` skill — built on the Phase 1 loop, not inventing it.
 
+### 8.1 Workstreams (parallel agents, one store)
+
+Several agents can share one nt store at once — grove worktrees, CI jobs, web
+sessions running in parallel. Their in-flight **tasks** should not bleed into
+each other, but their **notes** (the knowledge base) should stay shared so
+findings cross-pollinate. A *workstream* is that isolation axis, distinct from
+`src:` (which records *who* — agent vs. human — not *which line of work*).
+
+- **Storage:** a task carries `ws:<id>`. The MCP `nt_add` stamps it; nothing
+  else does, so CLI/TUI/web tasks (and any pre-workstream task) carry no `ws:`.
+- **Reads scope, notes don't.** `nt_recall`/`nt_ready`/`nt_status`/`nt_log`
+  show tasks whose `ws:` matches the current workstream **or is absent** (the
+  shared human backlog stays visible to everyone); a task stamped with a
+  *different* workstream is hidden. Notes are never scoped. `nt_search` and
+  `nt_view` stay store-wide — knowledge discovery is shared.
+- **Identity resolution (first hit wins):** explicit `workstream` call arg →
+  `NT_WORKSTREAM` env → (when either is the literal `auto`) the git branch, else
+  the cwd basename → otherwise none. Isolation is **opt-in**: with no identity
+  set, behavior is unchanged. A read may pass `workstream:"*"` to see every
+  workstream's tasks.
+
 ---
 
 ## 9. Features
@@ -434,6 +456,7 @@ nt recall --source claude --json
 | `EDITOR` | Editor for `nt edit` / body editing | `vi` |
 | `NT_ICONS` | `nerd` for Nerd Font icons | standard Unicode |
 | `NT_GIT` | `1` to auto-commit each change (multi-machine history) | off |
+| `NT_WORKSTREAM` | Workstream identity for the MCP server — isolates parallel agents' tasks (`auto` = derive from git branch / cwd) | unset (no isolation) |
 
 Everything is plain text under `$NT_DIR`. Back it up or `git init` it. For multi-machine use,
 prefer `NT_GIT=1` over file-syncing the store (§6.4).

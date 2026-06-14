@@ -138,6 +138,22 @@ the returned id directly with `nt links` / `nt tag` / `nt mv` / `nt rm`.
 - Organize notes into folders (`ref/`, `decisions/`, `inbox/`) rather than a flat root.
 - The store is global at `$NT_DIR` (default `~/.local/share/nt`); `nt path` prints it.
 
+## Workstreams (parallel sessions, shared store)
+
+When several agents share one store (e.g. parallel git worktrees), tasks are
+**isolated per workstream** so your in-flight work doesn't mix with another
+session's, while **notes stay shared** so knowledge cross-pollinates. This is
+automatic via the MCP tools when `NT_WORKSTREAM` is set (grove/CI/harness export
+it; `auto` derives it from the git branch). You don't stamp anything — `nt_add`
+records it, and `nt_recall`/`nt_ready`/`nt_status`/`nt_log` scope to it.
+
+- Tasks with no workstream (the human's CLI/TUI/web backlog) stay visible to
+  everyone — only *another* agent's stamped tasks are hidden.
+- `nt_search` and `nt_view` are never scoped — knowledge discovery is store-wide.
+- Pass `workstream: "*"` on a read to see every workstream's tasks; pass an
+  explicit `workstream` to target another one. With `NT_WORKSTREAM` unset there
+  is no scoping and behavior is unchanged.
+
 ## Automatic sync (optional)
 
 If the user wired the PostToolUse hook (`nt hook`), your `TodoWrite` list is

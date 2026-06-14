@@ -30,6 +30,12 @@ func at() map[string]any {
 }
 func it() map[string]any { return map[string]any{"type": "integer"} }
 
+// wsArg is the shared `workstream` property. It isolates parallel agents sharing
+// one store: tasks scope to a workstream, notes stay shared. Usually omitted —
+// the identity comes from NT_WORKSTREAM (or "auto"). Pass "*" on a read to see
+// every workstream's tasks.
+var wsArg = sp(`workstream id; omit to use NT_WORKSTREAM. "*" reads all workstreams' tasks`)
+
 // toolDefs is the catalog advertised to the agent. Descriptions are written for
 // the model — they say when to reach for each tool — and kept terse: prose that
 // only restates an obvious property name is dropped (the name carries it), while
@@ -39,17 +45,19 @@ var toolDefs = []toolDef{
 		Name:        "nt_ready",
 		Description: "Resuming work: open, unblocked tasks by urgency. Returns stable ids for nt_done/nt_update.",
 		InputSchema: obj(map[string]any{
-			"source":  st(),
-			"tag":     st(),
-			"project": st(),
+			"source":     st(),
+			"tag":        st(),
+			"project":    st(),
+			"workstream": wsArg,
 		}),
 	},
 	{
 		Name:        "nt_status",
 		Description: "Resuming a project/area: in-progress + blocked first, then open by urgency, recent completions, and linked notes. Scope with project and/or tag (omit both for everything).",
 		InputSchema: obj(map[string]any{
-			"project": st(),
-			"tag":     st(),
+			"project":    st(),
+			"tag":        st(),
+			"workstream": wsArg,
 		}),
 	},
 	{
@@ -71,6 +79,7 @@ var toolDefs = []toolDef{
 			"tags":            at(),
 			"discovered_from": sp("id of the originating task"),
 			"source":          st(),
+			"workstream":      wsArg,
 		}, "text"),
 	},
 	{
@@ -108,15 +117,17 @@ var toolDefs = []toolDef{
 			"brief":        map[string]any{"type": "boolean", "description": "omit note bodies — pointers only"},
 			"limit":        it(),
 			"include_done": map[string]any{"type": "boolean", "description": "also include completed tasks"},
+			"workstream":   wsArg,
 		}),
 	},
 	{
 		Name:        "nt_log",
 		Description: "Completed tasks, newest first.",
 		InputSchema: obj(map[string]any{
-			"since":  sp("on/after YYYY-MM-DD"),
-			"days":   it(),
-			"source": st(),
+			"since":      sp("on/after YYYY-MM-DD"),
+			"days":       it(),
+			"source":     st(),
+			"workstream": wsArg,
 		}),
 	},
 	{

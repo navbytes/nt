@@ -472,3 +472,108 @@ func TestMCPRecallContextControls(t *testing.T) {
 		t.Fatalf("include_done should add the completed task back (%d vs %d)", len(withDone.Tasks), len(afterDone.Tasks))
 	}
 }
+
+// helper: collect task texts from a {tasks:[...]} or bare [...] JSON payload.
+func recallTaskTexts(t *testing.T, s *server, args map[string]any) []string {
+	t.Helper()
+	out, err := s.dispatch("nt_recall", args)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var rec struct {
+		Tasks []taskOut `json:"tasks"`
+		Notes []noteOut `json:"notes"`
+	}
+	if err := json.Unmarshal([]byte(out), &rec); err != nil {
+		t.Fatal(err)
+	}
+	texts := make([]string, 0, len(rec.Tasks))
+	for _, t := range rec.Tasks {
+		texts = append(texts, t.Text)
+	}
+	return texts
+}
+
+func hasText(texts []string, want string) bool {
+	for _, s := range texts {
+		if strings.Contains(s, want) {
+			return true
+		}
+	}
+	return false
+}
+
+// TestMCPWorkstreamIsolation: parallel agents sharing one store get isolated
+// tasks but shared notes, with unstamped tasks visible to all and "*" widening.
+func TestMCPWorkstreamIsolation(t *testing.T) {
+	s := newServer(t)
+
+	// A shared/legacy task with no workstream (as the CLI/TUI/web create).
+	t.Setenv("NT_WORKSTREAM", "")
+	if _, err := s.dispatch("nt_add", map[string]any{"text": "human backlog item"}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Agent on workstream feat-a captures a task and a note.
+	t.Setenv("NT_WORKSTREAM", "feat-a")
+	if _, err := s.dispatch("nt_add", map[string]any{"text": "wire feature A"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.dispatch("nt_note", map[string]any{"title": "A finding", "body": "shared knowledge"}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Agent on workstream feat-b captures its own task.
+	t.Setenv("NT_WORKSTREAM", "feat-b")
+	if _, err := s.dispatch("nt_add", map[string]any{"text": "wire feature B"}); err != nil {
+		t.Fatal(err)
+	}
+
+	// recall as feat-a: own task + the shared/legacy task, NOT feat-b's task.
+	t.Setenv("NT_WORKSTREAM", "feat-a")
+	got := recallTaskTexts(t, s, map[string]any{})
+	if !hasText(got, "wire feature A") || !hasText(got, "human backlog item") {
+		t.Errorf("feat-a should see its own + the shared task, got %v", got)
+	}
+	if hasText(got, "wire feature B") {
+		t.Errorf("feat-a must not see feat-b's task, got %v", got)
+	}
+
+	// Notes are shared: feat-b sees the note feat-a wrote.
+	t.Setenv("NT_WORKSTREAM", "feat-b")
+	out, _ := s.dispatch("nt_recall", map[string]any{})
+	if !strings.Contains(out, "shared knowledge") {
+		t.Errorf("notes must be shared across workstreams, got %s", out)
+	}
+	gotB := recallTaskTexts(t, s, map[string]any{})
+	if !hasText(gotB, "wire feature B") || hasText(gotB, "wire feature A") {
+		t.Errorf("feat-b should see only its own + shared tasks, got %v", gotB)
+	}
+
+	// "*" widens a read to every workstream's tasks.
+	all := recallTaskTexts(t, s, map[string]any{"workstream": "*"})
+	if !hasText(all, "wire feature A") || !hasText(all, "wire feature B") {
+		t.Errorf(`workstream:"*" should see all tasks, got %v`, all)
+	}
+
+	// The call arg overrides the env identity.
+	override := recallTaskTexts(t, s, map[string]any{"workstream": "feat-a"})
+	if !hasText(override, "wire feature A") || hasText(override, "wire feature B") {
+		t.Errorf("workstream arg should override env, got %v", override)
+	}
+}
+
+// TestMCPNoWorkstreamUnchanged: with no identity set, behavior is as before —
+// every task is visible (no scoping).
+func TestMCPNoWorkstreamUnchanged(t *testing.T) {
+	s := newServer(t)
+	t.Setenv("NT_WORKSTREAM", "")
+	for _, txt := range []string{"one", "two", "three"} {
+		if _, err := s.dispatch("nt_add", map[string]any{"text": txt}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := recallTaskTexts(t, s, map[string]any{}); len(got) != 3 {
+		t.Errorf("no workstream should scope nothing, got %v", got)
+	}
+}
