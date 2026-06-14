@@ -2,16 +2,27 @@ package tui
 
 import "fmt"
 
-// confirmState is a pending y/n confirmation for a destructive action.
+// confirmState is a pending confirmation for a destructive action. In binary
+// mode (action set) the next y/enter runs action; in multi-choice mode (choices
+// set) the next key selects a handler, anything unmatched cancels.
 type confirmState struct {
-	prompt string
-	action func()
+	prompt  string
+	action  func()
+	choices map[string]func()
+	hint    string // key hint rendered in the status bar (defaults to "(y/n)")
 }
 
 // askConfirm arms a y/n confirmation; the next y/enter runs action, anything
 // else cancels (handled in Update before normal key dispatch).
 func (m *Model) askConfirm(prompt string, action func()) {
 	m.confirm = &confirmState{prompt: prompt, action: action}
+}
+
+// askChoice arms a multi-key confirmation (e.g. delete-with-backlinks): each key
+// in choices runs its handler; any other key cancels. hint is the status-bar key
+// legend, e.g. "(u/f/esc)".
+func (m *Model) askChoice(prompt, hint string, choices map[string]func()) {
+	m.confirm = &confirmState{prompt: prompt, choices: choices, hint: hint}
 }
 
 // toggleMark marks/unmarks the current task.

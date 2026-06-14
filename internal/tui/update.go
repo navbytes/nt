@@ -64,13 +64,20 @@ func (m *Model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
-	// A pending y/n confirmation consumes the next key.
+	// A pending confirmation consumes the next key.
 	if m.confirm != nil {
 		c := m.confirm
 		m.confirm = nil
-		if key == "y" || key == "Y" || key == "enter" {
+		switch {
+		case c.choices != nil: // multi-choice (e.g. delete-with-backlinks)
+			if act, ok := c.choices[strings.ToLower(key)]; ok {
+				act()
+			} else {
+				m.setStatus("cancelled")
+			}
+		case key == "y" || key == "Y" || key == "enter":
 			c.action()
-		} else {
+		default:
 			m.setStatus("cancelled")
 		}
 		return m, nil
@@ -232,7 +239,11 @@ func (m *Model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.toggleDone()
 		}
 	case "X":
-		m.deleteTargets()
+		if m.tab == tabNotes {
+			m.deleteNoteTarget()
+		} else {
+			m.deleteTargets()
+		}
 	case "d":
 		if m.pendD {
 			m.pendD = false

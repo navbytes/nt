@@ -144,6 +144,24 @@ func (e *Engine) UnlinkNote(target *note.Note) (updated int, err error) {
 	return updated, nil
 }
 
+// TrashNote moves a note file into the store's .trash/ (recoverable by hand).
+// Like RenameNote/Archive it is a file move, not a journaled undo transaction;
+// callers resolve inbound links first (UnlinkNote) when they don't want dangles.
+func (e *Engine) TrashNote(n *note.Note) error {
+	trash := filepath.Join(e.S.Dir, ".trash")
+	if err := os.MkdirAll(trash, 0o755); err != nil {
+		return err
+	}
+	rel := n.Rel
+	if rel == "" {
+		if r, err := filepath.Rel(e.S.NotesDir(), n.Path); err == nil {
+			rel = filepath.ToSlash(r)
+		}
+	}
+	dest := filepath.Join(trash, strings.ReplaceAll(rel, "/", "_"))
+	return os.Rename(n.Path, dest)
+}
+
 func base(rel string) string {
 	return strings.TrimSuffix(filepath.Base(rel), ".md")
 }

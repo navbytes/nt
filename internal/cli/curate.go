@@ -4,7 +4,6 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -307,12 +306,7 @@ func rmNote(e *mutate.Engine, n *note.Note, force, unlink, yes bool) int {
 		fmt.Printf("unlinked %d reference(s)\n", updated)
 	}
 
-	trash := filepath.Join(e.S.Dir, ".trash")
-	if err := os.MkdirAll(trash, 0o755); err != nil {
-		return fail(err)
-	}
-	dest := filepath.Join(trash, strings.ReplaceAll(n.Rel, "/", "_"))
-	if err := os.Rename(n.Path, dest); err != nil {
+	if err := e.TrashNote(n); err != nil {
 		return fail(err)
 	}
 	fmt.Printf("deleted %s → .trash/\n", n.Rel)

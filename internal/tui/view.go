@@ -165,8 +165,12 @@ func (m *Model) footerView() string {
 			stKeyBg.Render("t") + stBarBg.Render(" text   ") +
 			lipgloss.NewStyle().Foreground(cDim).Background(cBarBg).Render("esc")
 	} else if m.confirm != nil {
+		hint := "(y/n)"
+		if m.confirm.hint != "" {
+			hint = m.confirm.hint
+		}
 		content = lipgloss.NewStyle().Foreground(cOrange).Background(cBarBg).Render("  "+m.confirm.prompt+" ") +
-			stKeyBg.Render("(y/n)")
+			stKeyBg.Render(hint)
 	} else if m.followMode {
 		content = m.followBar()
 	} else if m.ik != inNone {
@@ -239,7 +243,7 @@ func (m *Model) keybarPairs() [][2]string {
 	hasTokens := len(m.collectTargets()) > 0
 	switch m.tab {
 	case tabNotes:
-		p := [][2]string{{"j/k", "move"}, {"enter", "detail"}, {"A", "add note"}, {"r", "rename"}, {"e", "edit"}}
+		p := [][2]string{{"j/k", "move"}, {"enter", "detail"}, {"A", "add note"}, {"r", "rename"}, {"e", "edit"}, {"x", "archive"}, {"X", "delete"}}
 		if hasTokens {
 			p = append(p, [2]string{"f", "follow"})
 		}
@@ -924,7 +928,7 @@ func (m *Model) helpView() string {
 			{"esc", "clear marks → filter → scope"},
 		}},
 		{"edit (acts on marks if any, else current)", [][2]string{
-			{"x  or  dd", "toggle done · on a note: archive / restore"}, {"s", "toggle doing"}, {"X", "delete (confirms; u to undo)"},
+			{"x  or  dd", "toggle done · on a note: archive / restore"}, {"s", "toggle doing"}, {"X", "delete task (u to undo) · note → .trash (shows inbound links; unlink or force)"},
 			{"a / A", "add task / note"},
 			{"r", "rename"}, {"e / E", "edit in $EDITOR"}, {"p", "cycle priority"},
 			{"D", "set due date"}, {"t / T", "add / remove tag"},
