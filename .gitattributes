@@ -1,6 +1,15 @@
-# Generated TypeScript types mirrored from the Go wire contract by tygo. Committed
-# (so the SPA's type-check has them) but marked generated so GitHub collapses them
-# in PR diffs and drops them from the repo's language stats. Regenerate with
-# `make web-types`. (The built web bundle, internal/web/frontend/dist, is no
-# longer committed — it's generated at build time; see .gitignore.)
+# Generated / build artifacts, committed on purpose — the Svelte SPA is embedded
+# into the Go binary via //go:embed (so `go build`/`go install` work without a Node
+# toolchain), and api-types.ts is generated from the Go wire contract by tygo.
+# Marking them keeps the churn out of code review:
+#   linguist-generated=true → GitHub collapses them in PR diffs + drops them from
+#                             the repo's language stats.
+#   -diff                   → git skips textual diffs for the minified bundle
+#                             (still reported as changed, so CI's freshness check
+#                             and `git diff --quiet` keep working).
+
+# Embedded, pre-built web bundle (regenerate with `make web-build`).
+internal/web/frontend/dist/** linguist-generated=true -diff
+
+# Generated TypeScript types mirrored from Go apitypes (regenerate with `make web-types`).
 internal/web/frontend/src/lib/api-types.ts linguist-generated=true

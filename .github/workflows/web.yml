@@ -27,10 +27,14 @@ jobs:
       - name: Component tests (vitest)
         run: npm test
       - name: Build
-        # dist/ is generated at build time and is no longer committed; this just
-        # proves the bundle builds cleanly. CI and the release pipeline rebuild it
-        # where it actually gets embedded into a binary.
         run: npm run build
+      - name: Verify committed dist/ is up to date
+        run: |
+          if ! git diff --quiet -- dist; then
+            echo "::error::internal/web/frontend/dist is stale — run 'make web-build' and commit the result."
+            git diff --stat -- dist
+            exit 1
+          fi
 
   e2e:
     runs-on: ubuntu-latest

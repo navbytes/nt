@@ -21,11 +21,10 @@ web-stop: build
 	./$(BINARY) web --stop
 
 # --- Svelte SPA (internal/web/frontend) --------------------------------------
-# The built bundle (internal/web/frontend/dist) is embedded via //go:embed but is
-# NOT committed — it's generated here. CI and the release pipeline (goreleaser +
-# the desktop job) run web-build before compiling Go, so released binaries embed a
-# fresh UI. Locally, run `make web-build` on a fresh clone or after changing the
-# frontend; a plain `go build`/`go install` with no prior build embeds no UI.
+# The built bundle is committed (internal/web/frontend/dist) so `go build` /
+# `go install` — which never run npm — still embed a current UI. Run web-build
+# after changing the frontend, then commit the regenerated dist/. CI verifies
+# the committed dist matches a fresh build.
 WEB_DIR := internal/web/frontend
 
 web-build:
