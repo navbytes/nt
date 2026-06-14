@@ -2,7 +2,7 @@
   // Draggable divider on the sidebar's right edge. Pointer-drag resizes; arrow
   // keys nudge (Shift = larger step), Home/End jump to min/max, double-click
   // resets. Hidden on mobile and when the sidebar is collapsed (see app.css).
-  import { sidebar, setWidth, resetWidth, MIN_W, MAX_W } from "./sidebar.svelte";
+  import { sidebar, setWidth, resetWidth, MIN_W, MAX_W } from "./sidebarState.svelte";
 
   let dragging = false;
   let startX = 0;

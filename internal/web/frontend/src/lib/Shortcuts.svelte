@@ -5,7 +5,7 @@
   import { navigate } from "./router.svelte";
   import { palette } from "./palette.svelte";
   import { shortcuts, goTarget, isTextEntry, captureTask, GO_CHORDS } from "./keys.svelte";
-  import { toggleCollapsed } from "./sidebar.svelte";
+  import { toggleCollapsed } from "./sidebarState.svelte";
 
   // `g`-chord state: once `g` is pressed we wait briefly for the second key.
   let pendingGo = $state(false);

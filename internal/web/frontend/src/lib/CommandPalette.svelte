@@ -6,7 +6,7 @@
   import { requestMoveNote, requestNewNote } from "./noteUI.svelte";
   import { captureTask } from "./keys.svelte";
   import { openAbout } from "./about.svelte";
-  import { toggleCollapsed } from "./sidebar.svelte";
+  import { toggleCollapsed } from "./sidebarState.svelte";
 
   let q = $state("");
   let active = $state(0);

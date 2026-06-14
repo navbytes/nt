@@ -4,7 +4,7 @@
   import { loc, navigate } from "./router.svelte";
   import Sidebar from "./Sidebar.svelte";
   import SidebarResizer from "./SidebarResizer.svelte";
-  import { sidebar, toggleCollapsed } from "./sidebar.svelte";
+  import { sidebar, toggleCollapsed } from "./sidebarState.svelte";
   import SearchBox from "./SearchBox.svelte";
   import CommandPalette from "./CommandPalette.svelte";
   import Shortcuts from "./Shortcuts.svelte";
