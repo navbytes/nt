@@ -6,8 +6,8 @@ import (
 )
 
 // SpawnNext builds the next occurrence of a recurring task (SPEC §9). The new
-// task copies the description, priority, recurrence, source, and parent, gets a
-// fresh ULID, and is scheduled by NextDue. Call it while the original is still
+// task copies the description, priority, recurrence, source, workstream, and
+// parent, gets a fresh ULID, and is scheduled by NextDue. Call it while the original is still
 // open (before SetDone moves the priority to a pri: key). Returns nil if the
 // recurrence spec is empty or unparseable (so no malformed duplicate spawns).
 func SpawnNext(t *Task, today string) *Task {
@@ -28,6 +28,9 @@ func SpawnNext(t *Task, today string) *Task {
 	}
 	if p := t.Parent(); p != "" { // keep a recurring subtask attached to its parent
 		n.SetKey("parent", p)
+	}
+	if w := t.Key("ws"); w != "" { // keep a recurring agent task in its workstream
+		n.SetKey("ws", w)
 	}
 	return n
 }

@@ -403,9 +403,15 @@ func (s *server) add(a map[string]any) (string, error) {
 			t.SetKey("due", due)
 		}
 		t.SetKey("src", source)
-		if ws := s.workstream(a); ws != "" && ws != "*" {
-			t.SetKey("ws", ws) // isolate this agent's in-flight work from parallel ones
+		// Normalize the workstream from the resolved identity, unconditionally: this
+		// overrides (or strips) any inline `ws:` the agent may have put in the text,
+		// so a task can't spoof its way out of — or into — another workstream. "*" is
+		// a read-only widen sentinel, never a stored id, so it clears to shared.
+		ws := s.workstream(a)
+		if ws == "*" {
+			ws = ""
 		}
+		t.SetKey("ws", ws) // empty deletes the key → shared backlog
 		if df := str(a, "discovered_from"); df != "" {
 			if dt, amb := d.Resolve(df); dt != nil && !amb {
 				t.SetKey("discovered", dt.ID())
@@ -495,6 +501,15 @@ func (s *server) update(a map[string]any) (string, error) {
 		}
 		if due != "" {
 			t.SetKey("due", due)
+		}
+		// Claim/reassign: only an EXPLICIT arg moves a task between workstreams —
+		// never the ambient identity, so updating a shared task's status doesn't
+		// silently capture it. "*" releases it back to the shared backlog.
+		if w, ok := a["workstream"].(string); ok {
+			if w = strings.TrimSpace(w); w == "*" {
+				w = ""
+			}
+			t.SetKey("ws", w)
 		}
 		out = t
 		return nil
@@ -818,13 +833,15 @@ type taskOut struct {
 	Project    string   `json:"project,omitempty"`
 	Tags       []string `json:"tags,omitempty"`
 	Source     string   `json:"source,omitempty"`
+	Workstream string   `json:"workstream,omitempty"`
 	Discovered string   `json:"discovered_from,omitempty"`
 }
 
 func taskToOut(t *task.Task) taskOut {
 	o := taskOut{
 		ID: t.ID(), Text: t.Text, Status: t.Status(), Due: t.Due(),
-		Completed: t.Completed, Tags: t.Tags(), Source: t.Source(), Discovered: t.Discovered(),
+		Completed: t.Completed, Tags: t.Tags(), Source: t.Source(),
+		Workstream: t.Key("ws"), Discovered: t.Discovered(),
 	}
 	if t.Priority != 0 {
 		o.Priority = string(t.Priority)

@@ -91,10 +91,11 @@ var toolDefs = []toolDef{
 		Name:        "nt_update",
 		Description: "Change a task's status, priority, or due by id.",
 		InputSchema: obj(map[string]any{
-			"id":       st(),
-			"status":   enum("open", "doing", "blocked", "done"),
-			"priority": enum("high", "med", "low"),
-			"due":      sp("today|+3d|YYYY-MM-DD"),
+			"id":         st(),
+			"status":     enum("open", "doing", "blocked", "done"),
+			"priority":   enum("high", "med", "low"),
+			"due":        sp("today|+3d|YYYY-MM-DD"),
+			"workstream": sp(`reassign to a workstream; "*" releases to the shared backlog`),
 		}, "id"),
 	},
 	{

@@ -577,3 +577,101 @@ func TestMCPNoWorkstreamUnchanged(t *testing.T) {
 		t.Errorf("no workstream should scope nothing, got %v", got)
 	}
 }
+
+// TestMCPWorkstreamScopesAllReads: ready/status/log scope to the workstream too,
+// not just recall (each got its own filter call site).
+func TestMCPWorkstreamScopesAllReads(t *testing.T) {
+	s := newServer(t)
+
+	t.Setenv("NT_WORKSTREAM", "feat-a")
+	outA, _ := s.dispatch("nt_add", map[string]any{"text": "ready in A"})
+	var addedA taskOut
+	json.Unmarshal([]byte(outA), &addedA)
+	if addedA.Workstream != "feat-a" {
+		t.Fatalf("nt_add should expose workstream in taskOut, got %+v", addedA)
+	}
+	// A completed task in A, for nt_log scoping.
+	doneOut, _ := s.dispatch("nt_add", map[string]any{"text": "done in A"})
+	var doneA taskOut
+	json.Unmarshal([]byte(doneOut), &doneA)
+	s.dispatch("nt_done", map[string]any{"id": doneA.ID})
+
+	t.Setenv("NT_WORKSTREAM", "feat-b")
+	s.dispatch("nt_add", map[string]any{"text": "ready in B"})
+
+	// nt_ready as feat-b: only B's task.
+	t.Setenv("NT_WORKSTREAM", "feat-b")
+	out, _ := s.dispatch("nt_ready", map[string]any{})
+	var ready []taskOut
+	json.Unmarshal([]byte(out), &ready)
+	if len(ready) != 1 || ready[0].Text != "ready in B" {
+		t.Errorf("nt_ready should scope to feat-b, got %+v", ready)
+	}
+
+	// nt_status as feat-a: A's open task present, B's absent.
+	t.Setenv("NT_WORKSTREAM", "feat-a")
+	out, _ = s.dispatch("nt_status", map[string]any{})
+	if !strings.Contains(out, "ready in A") || strings.Contains(out, "ready in B") {
+		t.Errorf("nt_status should scope to feat-a, got %s", out)
+	}
+
+	// nt_log as feat-a: A's completed task present; as feat-b: absent.
+	out, _ = s.dispatch("nt_log", map[string]any{})
+	if !strings.Contains(out, "done in A") {
+		t.Errorf("nt_log should show feat-a's completed task, got %s", out)
+	}
+	t.Setenv("NT_WORKSTREAM", "feat-b")
+	out, _ = s.dispatch("nt_log", map[string]any{})
+	if strings.Contains(out, "done in A") {
+		t.Errorf("nt_log must not show feat-a's completed task to feat-b, got %s", out)
+	}
+}
+
+// TestMCPAddStarIsShared: nt_add with workstream "*" (or an inline ws: in text)
+// must NOT stamp a literal — the task lands in the shared backlog.
+func TestMCPAddStarIsShared(t *testing.T) {
+	s := newServer(t)
+	out, _ := s.dispatch("nt_add", map[string]any{"text": "spoof ws:sneaky", "workstream": "*"})
+	var added taskOut
+	json.Unmarshal([]byte(out), &added)
+	if added.Workstream != "" {
+		t.Errorf(`"*"/inline ws must not stamp a workstream, got %q`, added.Workstream)
+	}
+	// Visible to a scoped agent (it's shared).
+	t.Setenv("NT_WORKSTREAM", "feat-a")
+	if got := recallTaskTexts(t, s, map[string]any{}); !hasText(got, "spoof") {
+		t.Errorf("a shared task should be visible to a scoped agent, got %v", got)
+	}
+}
+
+// TestMCPUpdateClaimsWorkstream: nt_update can claim a shared task into a
+// workstream and release it back with "*".
+func TestMCPUpdateClaimsWorkstream(t *testing.T) {
+	s := newServer(t)
+	t.Setenv("NT_WORKSTREAM", "") // create it shared
+	out, _ := s.dispatch("nt_add", map[string]any{"text": "shared chore"})
+	var task taskOut
+	json.Unmarshal([]byte(out), &task)
+
+	// Claim into feat-a.
+	if _, err := s.dispatch("nt_update", map[string]any{"id": task.ID, "workstream": "feat-a"}); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("NT_WORKSTREAM", "feat-b")
+	if got := recallTaskTexts(t, s, map[string]any{}); hasText(got, "shared chore") {
+		t.Errorf("after claim into feat-a, feat-b must not see it, got %v", got)
+	}
+	t.Setenv("NT_WORKSTREAM", "feat-a")
+	if got := recallTaskTexts(t, s, map[string]any{}); !hasText(got, "shared chore") {
+		t.Errorf("feat-a should see the task it claimed, got %v", got)
+	}
+
+	// Release back to shared with "*".
+	if _, err := s.dispatch("nt_update", map[string]any{"id": task.ID, "workstream": "*"}); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("NT_WORKSTREAM", "feat-b")
+	if got := recallTaskTexts(t, s, map[string]any{}); !hasText(got, "shared chore") {
+		t.Errorf("after release, feat-b should see it again, got %v", got)
+	}
+}

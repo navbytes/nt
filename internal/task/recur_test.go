@@ -100,3 +100,22 @@ func TestSpawnNext(t *testing.T) {
 		t.Error("spawn should be open")
 	}
 }
+
+func TestSpawnNextCarriesWorkstream(t *testing.T) {
+	// A recurring task stamped to a workstream must spawn its next occurrence in
+	// the SAME workstream, or completing it would leak the recurrence into the
+	// shared backlog (visible to every agent).
+	tk := Parse([]byte("water plants due:2026-06-01 rec:weekly src:claude ws:feat-a id:01ABC\n")).Tasks()[0]
+	n := SpawnNext(tk, "2026-06-01")
+	if n == nil {
+		t.Fatal("SpawnNext returned nil for a recurring task")
+	}
+	if got := n.Key("ws"); got != "feat-a" {
+		t.Errorf("spawned occurrence ws = %q, want feat-a (workstream must carry forward)", got)
+	}
+	// An unstamped recurring task stays unstamped (shared) — no spurious ws.
+	tk2 := Parse([]byte("pay rent due:2026-06-01 rec:monthly id:01XYZ\n")).Tasks()[0]
+	if got := SpawnNext(tk2, "2026-06-01").Key("ws"); got != "" {
+		t.Errorf("unstamped recurrence should stay shared, got ws=%q", got)
+	}
+}

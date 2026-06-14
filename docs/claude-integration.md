@@ -137,9 +137,13 @@ in-flight **tasks** isolated while **notes** (the knowledge base) stay shared:
   "args": ["mcp"], "env": { "NT_WORKSTREAM": "auto" } } } }
 ```
 
-- A literal value (`"NT_WORKSTREAM": "feat-x"`) names the workstream; **`auto`**
-  derives it from the current git branch (falling back to the directory name) —
-  the natural fit for worktree-per-branch setups like grove.
+- A **literal** value (`"NT_WORKSTREAM": "feat-x"`) names the workstream — the
+  most robust choice, and what a harness/CI should export. **`auto`** instead
+  derives the id from the git branch checked out in the **MCP server process's
+  working directory** (falling back to that directory's basename) — convenient
+  for worktree-per-process setups like grove, where each `nt mcp` runs in its own
+  worktree. Avoid `auto` when one server is shared across trees, or the branch may
+  be renamed mid-session; prefer a literal there.
 - `nt_add` stamps the resolved id (`ws:` on the task); `nt_recall` / `nt_ready` /
   `nt_status` / `nt_log` scope to it. Tasks with no workstream (the human's
   CLI/TUI/web backlog) stay visible to every agent — only *another* agent's
