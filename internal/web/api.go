@@ -2,6 +2,7 @@ package web
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/url"
 	"path"
@@ -39,6 +40,7 @@ func (s *Server) apiRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/notes/{handle}/raw", s.apiNoteRaw)
 	mux.HandleFunc("POST /api/notes/{handle}", s.apiNoteSave)
 	mux.HandleFunc("POST /api/notes/{handle}/move", s.apiNoteMove)
+	mux.HandleFunc("DELETE /api/notes/{handle}", s.apiNoteDelete)
 	mux.HandleFunc("POST /api/notes/{handle}/archive", s.apiNoteArchive)
 	mux.HandleFunc("POST /api/notes/{handle}/favorite", s.apiNoteFavorite)
 	mux.HandleFunc("POST /api/notes/{handle}/tags", s.apiNoteTags)
@@ -466,6 +468,51 @@ func (s *Server) apiNoteArchive(w http.ResponseWriter, r *http.Request) {
 	s.rebuild()
 	s.hub.broadcast("reload") // sidebar/grid/graph drop or restore the note
 	writeJSON(w, apitypes.ArchivedNote{Handle: noteHandle(fresh), Archived: want})
+}
+
+// apiNoteDelete moves a note to .trash/ (--edit + CSRF gated). It mirrors the
+// CLI's backlink-aware delete: a note with inbound [[links]] is refused (409,
+// with the count) unless the client picks a mode — "unlink" strips those
+// references first so nothing dangles, "force" deletes anyway and leaves them.
+// (Archive remains the soft, reversible alternative.) Not a journaled undo
+// transaction, like archive/move; recover from .trash/ by hand.
+func (s *Server) apiNoteDelete(w http.ResponseWriter, r *http.Request) {
+	if !s.allowEdit {
+		http.Error(w, "editing is disabled — start with `nt web --edit`", http.StatusForbidden)
+		return
+	}
+	if r.Header.Get("X-CSRF") != s.csrf {
+		http.Error(w, "bad or missing CSRF token", http.StatusForbidden)
+		return
+	}
+	snap := s.current()
+	n := snap.findHandle(r.PathValue("handle"))
+	if n == nil {
+		http.NotFound(w, r)
+		return
+	}
+	mode := r.URL.Query().Get("mode") // "", "unlink", or "force"
+	inbound := len(snap.backlinks[n.Path])
+	if inbound > 0 && mode != "unlink" && mode != "force" {
+		http.Error(w, fmt.Sprintf("%d inbound link(s) would dangle — choose unlink or force", inbound), http.StatusConflict)
+		return
+	}
+	unlinked := 0
+	if mode == "unlink" && inbound > 0 {
+		u, err := s.eng.UnlinkNote(n)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		unlinked = u
+	}
+	if err := s.eng.TrashNote(n); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	s.rebuild()
+	s.hub.broadcast("reload")
+	writeJSON(w, apitypes.DeletedNote{Handle: noteHandle(n), Unlinked: unlinked})
 }
 
 // apiNoteFavorite flips a note's favorite frontmatter flag (--edit + CSRF gated):

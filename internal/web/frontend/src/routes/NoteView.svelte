@@ -2,6 +2,7 @@
   import { createQuery, useQueryClient } from "@tanstack/svelte-query";
   import { api } from "../lib/api";
   import { noteUI } from "../lib/noteUI.svelte";
+  import { navigate } from "../lib/router.svelte";
   import Editor from "../lib/Editor.svelte";
   import { renderMermaidIn, observeTheme } from "../lib/mermaid";
 
@@ -89,6 +90,29 @@
       }
     } finally {
       favBusy = false;
+    }
+  }
+
+  // ---- delete (to .trash) with backlink handling, mirroring the CLI/TUI ----
+  let confirmingDelete = $state(false);
+  let deleteBusy = $state(false);
+  let deleteErr = $state("");
+
+  async function doDelete(mode: "" | "unlink" | "force") {
+    deleteErr = "";
+    deleteBusy = true;
+    try {
+      await api.noteDelete(handle, mode);
+      // The note is gone from every surface — refresh them and leave the page.
+      for (const k of [["notes"], ["notesGrid"], ["orphans"], ["graph"], ["state"], ["tags"]]) {
+        await qc.invalidateQueries({ queryKey: k });
+      }
+      confirmingDelete = false;
+      navigate("/notes");
+    } catch (e) {
+      deleteErr = String(e);
+    } finally {
+      deleteBusy = false;
     }
   }
 
@@ -215,8 +239,25 @@
             {n.archived ? "Unarchive" : "Archive"}
           </button>
           <button class="btn btn--ghost btn--sm" onclick={() => (editing = true)}>Edit</button>
+          <button class="btn btn--ghost btn--sm btn--danger" onclick={() => { deleteErr = ""; confirmingDelete = true; }}>Delete</button>
         {/if}
       </div>
+      {#if confirmingDelete}
+        <div class="movebar movebar--danger">
+          {#if n.backlinks.length}
+            <span class="movebar__label">
+              Delete “{n.title}”? {n.backlinks.length} note{n.backlinks.length === 1 ? "" : "s"} link here — see “Linked from” below.
+            </span>
+            <button class="btn btn--sm" onclick={() => doDelete("unlink")} disabled={deleteBusy}>Unlink &amp; delete</button>
+            <button class="btn btn--sm btn--danger" onclick={() => doDelete("force")} disabled={deleteBusy}>Delete anyway</button>
+          {:else}
+            <span class="movebar__label">Delete “{n.title}”? Moves it to .trash/.</span>
+            <button class="btn btn--sm btn--danger" onclick={() => doDelete("")} disabled={deleteBusy}>Delete</button>
+          {/if}
+          <button class="btn btn--ghost btn--sm" onclick={() => (confirmingDelete = false)}>Cancel</button>
+          {#if deleteErr}<span class="error small">{deleteErr}</span>{/if}
+        </div>
+      {/if}
       {#if addingTask}
         <div class="movebar">
           <span class="movebar__label">New task</span>
@@ -320,5 +361,17 @@
   }
   .star--on {
     color: #f5b301;
+  }
+  /* Destructive actions read in a muted red and warm fully on hover, so Delete
+     is visually distinct from the neutral ghost buttons next to it. */
+  .btn--danger {
+    color: #e5484d;
+  }
+  .btn--danger:hover {
+    background: #e5484d;
+    color: #fff;
+  }
+  .movebar--danger {
+    border-color: #e5484d;
   }
 </style>

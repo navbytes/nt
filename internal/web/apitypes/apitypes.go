@@ -264,6 +264,13 @@ type FavoritedNote struct {
 	Favorite bool   `json:"favorite"`
 }
 
+// DeletedNote is the result of DELETE /api/notes/{handle} — the deleted note's
+// handle and how many inbound [[links]] were stripped first (when mode=unlink).
+type DeletedNote struct {
+	Handle   string `json:"handle"`
+	Unlinked int    `json:"unlinked"`
+}
+
 // NoteTags is POST /api/notes/{handle}/tags — the note's tags after the edit.
 type NoteTags struct {
 	Handle string   `json:"handle"`

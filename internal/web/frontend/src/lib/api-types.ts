@@ -303,6 +303,14 @@ export interface FavoritedNote {
   favorite: boolean;
 }
 /**
+ * DeletedNote is the result of DELETE /api/notes/{handle} — the deleted note's
+ * handle and how many inbound [[links]] were stripped first (when mode=unlink).
+ */
+export interface DeletedNote {
+  handle: string;
+  unlinked: number /* int */;
+}
+/**
  * NoteTags is POST /api/notes/{handle}/tags — the note's tags after the edit.
  */
 export interface NoteTags {

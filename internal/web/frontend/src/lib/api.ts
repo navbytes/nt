@@ -20,6 +20,7 @@ import type {
   MovedNote,
   ArchivedNote,
   FavoritedNote,
+  DeletedNote,
   NoteTags,
   JournalResponse,
 } from "./api-types";
@@ -120,6 +121,18 @@ export const api = {
     postForm<FavoritedNote>(`/api/notes/${encodeURIComponent(handle)}/favorite`, {
       favorite: String(favorite),
     }),
+
+  /** Delete a note to .trash/. mode "" refuses (409) when the note has inbound
+   *  [[links]]; "unlink" strips them first, "force" deletes anyway (dangling). */
+  noteDelete: async (handle: string, mode: "" | "unlink" | "force" = ""): Promise<DeletedNote> => {
+    const q = mode ? `?mode=${mode}` : "";
+    const r = await fetch(`/api/notes/${encodeURIComponent(handle)}${q}`, {
+      method: "DELETE",
+      headers: { "X-CSRF": csrf },
+    });
+    if (!r.ok) throw new Error(`${(await r.text()) || r.status}`);
+    return (await r.json()) as DeletedNote;
+  },
 
   /** Edit a note's frontmatter tags only (body untouched). add/remove are
    *  comma/space-separated; returns the tags after the edit. */
