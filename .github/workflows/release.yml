@@ -140,9 +140,10 @@ jobs:
         # The desktop window serves the same Svelte SPA as `nt web` (desktop/main.go
         # → web.NewServer), embedded via //go:embed. The bundle isn't committed, so
         # build it before wails compiles the Go binary, or the app ships no UI.
+        # This job runs in desktop/, so target the SPA via an absolute path.
         run: |
-          npm --prefix internal/web/frontend ci
-          npm --prefix internal/web/frontend run build
+          npm --prefix "$GITHUB_WORKSPACE/internal/web/frontend" ci
+          npm --prefix "$GITHUB_WORKSPACE/internal/web/frontend" run build
 
       - name: Build app
         shell: bash
