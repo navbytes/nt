@@ -50,6 +50,8 @@
   let lastRoot: string | null = null; // detects local-root changes to reset expansion
   let destroyed = false; // component torn down (guards async builds)
   let bloomPass: any = null; // three UnrealBloomPass (3D only)
+  let three3d: any = null; // the lazy-loaded THREE namespace (3D only)
+  let SpriteText3d: any = null; // lazy-loaded three-spritetext ctor (3D labels)
   const BG3D = "#05060d"; // deep-space background — bloom needs near-black
 
   const reduce =
@@ -578,17 +580,76 @@
   }
 
   // ---- 3D renderer helpers (sphere + line materials, bloom, camera) ----
+  // Hovering focuses the neighborhood (like the 2D depth-of-field): the hovered
+  // node + its neighbors stay lit while everything else recedes hard.
   function node3dColor(n: FGNode): string {
     const base = R.color.get(n.id) ?? cssAccent;
+    if (hoveredId) {
+      const near = n.id === hoveredId || (adjacency.get(hoveredId)?.has(n.id) ?? false);
+      return near ? base : withAlpha(base, 0.05);
+    }
     return R.pass.has(n.id) ? base : withAlpha(base, 0.1); // dimmed = recede
   }
   function link3dColor(l: any): string {
     const s = linkEndId(l.source);
     const t = linkEndId(l.target);
+    if (hoveredId) {
+      if (s !== hoveredId && t !== hoveredId) return "rgba(160,166,190,0.03)";
+      if (view.colorLinksByType) return withAlpha(linkKindColor(l.kind), 0.9);
+      if (view.colorLinks) return withAlpha(R.color.get(s) ?? cssAccent, 0.85);
+      return "rgba(190,196,220,0.85)";
+    }
     const bright = R.pass.has(s) && R.pass.has(t);
     if (view.colorLinksByType) return withAlpha(linkKindColor(l.kind), bright ? 0.7 : 0.08);
     if (view.colorLinks) return withAlpha(R.color.get(s) ?? cssAccent, bright ? 0.6 : 0.08);
     return bright ? "rgba(160,166,190,0.5)" : "rgba(160,166,190,0.08)";
+  }
+  // node3dVal drives the sphere volume. Honors the "Size by" pref so centrality
+  // (PageRank) hubs read bigger in 3D too, matching the 2D radius logic.
+  function node3dVal(n: FGNode): number {
+    if (view.sizeBy === "centrality") {
+      const s = (prMap.get(n.id) ?? 0) / (prMax || 1);
+      return 1 + s * 60; // emphasize hubs in the volume scale
+    }
+    return 1 + n.deg;
+  }
+  // Approximate the rendered sphere radius (3d-force-graph: nodeRelSize · ∛val,
+  // default nodeRelSize = 4) so labels/halos can be offset clear of the node.
+  function node3dRadius(n: FGNode): number {
+    return 4 * Math.cbrt(node3dVal(n));
+  }
+  // node3dObject adds (on top of the default sphere) a text label for hubs /
+  // selected / pinned nodes and a translucent halo for the selected node, so the
+  // 3D view gains the readability + selection cues the 2D canvas already has.
+  function node3dObject(n: FGNode): any {
+    if (!three3d) return undefined;
+    const group = new three3d.Group();
+    const labelOn =
+      view.showLabels && (n.deg >= 5 || n.id === view.selectedId || pinned.has(n.id));
+    if (labelOn && SpriteText3d) {
+      const s = new SpriteText3d(displayTitle(n.title, 24));
+      s.color = cssFg;
+      s.backgroundColor = false;
+      s.textHeight = 5;
+      s.position.y = node3dRadius(n) + 6;
+      group.add(s);
+    }
+    if (n.id === view.selectedId) {
+      const geom = new three3d.SphereGeometry(node3dRadius(n) + 5, 16, 16);
+      const mat = new three3d.MeshBasicMaterial({
+        color: cssAccent,
+        transparent: true,
+        opacity: 0.18,
+      });
+      group.add(new three3d.Mesh(geom, mat));
+    }
+    return group.children.length ? group : undefined;
+  }
+  // Re-apply the node objects (labels + selection halo). Called when selection /
+  // labels / sizing change — rebuilds the per-node three objects.
+  function refresh3dObjects() {
+    if (!graph || !built3d) return;
+    graph.nodeThreeObject((n: FGNode) => node3dObject(n));
   }
   function bloomStrength(): number {
     return view.effects === "off" ? 0 : view.effects === "subtle" ? 1.1 : 2.0;
@@ -669,14 +730,19 @@
       const { default: ForceGraph3D } = await import("3d-force-graph");
       // @ts-ignore - three 0.184 ships no bundled type declarations; only Vector2 is used
       const THREE: any = await import("three");
+      const { default: SpriteText } = await import("three-spritetext");
       if (!container || destroyed) return;
+      three3d = THREE;
+      SpriteText3d = SpriteText;
       const g: any = new ForceGraph3D(container, { controlType: "orbit" });
       g.nodeId("id")
-        .nodeVal((n: FGNode) => 1 + n.deg)
+        .nodeVal((n: FGNode) => node3dVal(n))
         .nodeLabel((n: FGNode) => n.title)
         .nodeColor((n: FGNode) => node3dColor(n))
         .nodeOpacity(0.92)
         .nodeResolution(14)
+        .nodeThreeObjectExtend(true)
+        .nodeThreeObject((n: FGNode) => node3dObject(n))
         .linkColor((l: any) => link3dColor(l))
         .linkOpacity(0.55)
         .linkWidth(0)
@@ -716,6 +782,26 @@
         bloomPass = bloom;
       } catch (e) {
         console.warn("3D bloom unavailable:", e);
+      }
+
+      // Depth fog: distant nodes fade into the background, a strong depth cue on
+      // big constellations (skipped in the flat "Effects: off" look).
+      if (view.effects !== "off") {
+        try {
+          g.scene().fog = new THREE.FogExp2(BG3D, 0.0009);
+        } catch (e) {
+          console.warn("3D fog unavailable:", e);
+        }
+      }
+      // Ambient auto-rotate (OrbitControls), off by default.
+      try {
+        const ctrls = g.controls?.();
+        if (ctrls) {
+          ctrls.autoRotate = view.autoRotate;
+          ctrls.autoRotateSpeed = 0.6;
+        }
+      } catch {
+        /* controls not ready — the effect below re-applies */
       }
       built3d = true;
       graph = g;
@@ -890,7 +976,10 @@
   // ---- depth-of-field: hover drives the focus fade (selection keeps its ring) ----
   $effect(() => {
     void hoveredId;
-    startDof(hoveredId !== null);
+    // 3D: re-tint node/link materials for the hover neighborhood highlight.
+    // 2D: animate the canvas depth-of-field.
+    if (built3d) refresh3dColors();
+    else startDof(hoveredId !== null);
   });
 
   // ---- keep the effective level current on effects-pref / layout change ----
@@ -914,6 +1003,31 @@
     if (bloomPass) bloomPass.strength = bloomStrength();
     graph.linkColor((l: any) => link3dColor(l));
     graph.linkCurvature(view.linkStyle === "curved" ? 0.18 : 0);
+  });
+
+  // ---- 3D node objects: rebuild labels + selection halo on selection/label change ----
+  $effect(() => {
+    void [view.selectedId, view.showLabels, pinned];
+    if (built3d) refresh3dObjects();
+  });
+
+  // ---- 3D sizing: re-apply node volume + objects when "Size by" / data changes ----
+  $effect(() => {
+    void [view.sizeBy, $graphQ.data];
+    if (!graph || !built3d) return;
+    graph.nodeVal((n: FGNode) => node3dVal(n));
+    refresh3dObjects();
+  });
+
+  // ---- 3D auto-rotate toggle ----
+  $effect(() => {
+    void [view.autoRotate, view.dim];
+    if (!graph || !built3d) return;
+    const ctrls = graph.controls?.();
+    if (ctrls) {
+      ctrls.autoRotate = view.autoRotate;
+      ctrls.autoRotateSpeed = 0.6;
+    }
   });
 
   // ---- rebuild the renderer when the 2D/3D toggle flips ----
@@ -996,6 +1110,7 @@
       view.dim,
       view.layout,
       view.sizeBy,
+      view.autoRotate,
     ];
     savePersisted();
   });

@@ -47,6 +47,7 @@ const PERSIST_KEYS = [
   "dim",
   "layout",
   "sizeBy",
+  "autoRotate",
 ] as const;
 
 interface ViewState {
@@ -77,6 +78,7 @@ interface ViewState {
   dim: Dim;
   layout: Layout;
   sizeBy: SizeBy;
+  autoRotate: boolean; // 3D: slow ambient orbit
 }
 
 const defaults: ViewState = {
@@ -107,6 +109,7 @@ const defaults: ViewState = {
   dim: "2d",
   layout: "force",
   sizeBy: "degree",
+  autoRotate: false,
 };
 
 function loadPersisted(): Partial<ViewState> {
