@@ -6,10 +6,11 @@
 /dist/
 
 # Built Svelte SPA — generated at build time (`make web-build`) and embedded via
-# //go:embed; not committed. The .gitkeep placeholder is kept so the embed still
-# compiles on a checkout that hasn't run the build yet.
+# //go:embed; not committed. The placeholder file is kept so the embed still
+# compiles on a checkout that hasn't run the build yet — including `go install`,
+# which is why it must NOT be a dot-file (Go drops dot-files from module zips).
 /internal/web/frontend/dist/*
-!/internal/web/frontend/dist/.gitkeep
+!/internal/web/frontend/dist/placeholder
 
 # editor / OS cruft
 *.swp
