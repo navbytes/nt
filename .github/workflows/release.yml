@@ -179,6 +179,12 @@ jobs:
 
       - name: Notarize and staple
         if: matrix.os == 'macos-latest' && env.APPLE_NOTARY_PASSWORD != ''
+        # Apple's notary service intermittently accepts a submission then leaves
+        # it "In Progress" for hours without returning a verdict (a recurring
+        # Apple-side incident, often not even shown on their status page). Cap
+        # the step so a stuck submission fails fast instead of running to
+        # GitHub's 6h job ceiling (which kills the job and skips Package/Upload).
+        timeout-minutes: 25
         shell: bash
         run: |
           ditto -c -k --keepParent build/bin/nt.app "$RUNNER_TEMP/notarize.zip"
@@ -186,11 +192,12 @@ jobs:
           # service; a transient runner network blip (e.g. NSURLError -1009)
           # mid-poll kills it non-zero and would fail an otherwise-good release.
           # Retry the submit+wait a few times — notarizing identical bits again
-          # is cheap and idempotent — before giving up.
+          # is cheap and idempotent — before giving up. --timeout bounds each
+          # wait so a stuck queue can't hang past the step cap above.
           for attempt in 1 2 3; do
             if xcrun notarytool submit "$RUNNER_TEMP/notarize.zip" \
                  --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" \
-                 --password "$APPLE_NOTARY_PASSWORD" --wait; then
+                 --password "$APPLE_NOTARY_PASSWORD" --wait --timeout 10m; then
               break
             fi
             if [ "$attempt" = 3 ]; then
