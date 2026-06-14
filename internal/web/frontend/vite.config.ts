@@ -26,9 +26,9 @@ export default defineConfig({
       registerType: "autoUpdate",
       includeAssets: ["favicon.svg", "favicon-32.png", "apple-touch-icon.png"],
       manifest: {
-        name: "nt — notes & tasks",
+        name: "nt — tasks & notes",
         short_name: "nt",
-        description: "Durable notes & tasks — the memory layer for AI coding sessions.",
+        description: "Tasks & notes as plain text — durable memory your AI agents can't lose.",
         theme_color: "#16161e",
         background_color: "#16161e",
         display: "standalone",

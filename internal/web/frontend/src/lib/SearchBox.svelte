@@ -111,7 +111,7 @@
     onkeydown={onKey}
     onfocus={() => (open = true)}
     oninput={() => (open = true)}
-    placeholder="Search notes & tasks…"
+    placeholder="Search tasks & notes…"
     autocomplete="off"
     spellcheck="false"
     role="combobox"

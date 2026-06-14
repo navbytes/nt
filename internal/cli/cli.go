@@ -252,7 +252,7 @@ func printHelp() {
 	fmt.Print(helpText)
 }
 
-const helpText = `nt — terminal task & note manager (durable memory for AI sessions)
+const helpText = `nt — tasks & notes as plain text · durable memory for AI agents
 
 USAGE
   nt                          open the interactive TUI

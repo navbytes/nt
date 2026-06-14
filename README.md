@@ -2,7 +2,7 @@
 
 # nt
 
-### Tasks and notes as plain text — and durable memory your AI agents can't lose.
+### Tasks & notes as plain text — durable memory your AI agents can't lose.
 
 **Agents forget. Your files don't.** `nt` is a terminal-first task & note manager that keeps everything as plain files — todo.txt tasks and Markdown notes — so your editor, `grep`, `git`, and your AI coding agents all read and write the same source of truth. One static binary. No database. No cloud.
 
