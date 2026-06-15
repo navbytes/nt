@@ -7,6 +7,7 @@
   import { navigate } from "./router.svelte";
   import { highlightParts } from "./text";
   import type { SearchResult } from "./api-types";
+  import Icon from "./Icon.svelte";
 
   let q = $state("");
   let debounced = $state("");
@@ -155,7 +156,8 @@
         {/each}
         <li role="presentation">
           <button class="sbox__item sbox__all" class:active={active === -1 && false} onclick={goFull}>
-            Search all results for “{debounced}” →
+            Search all results for “{debounced}”
+            <Icon name="arrow-right" size={13} />
           </button>
         </li>
       {/if}
@@ -169,17 +171,24 @@
     flex: 1;
     max-width: 420px;
   }
+  /* NSSearchField: pill-ish filled field with a leading magnifier. The glyph is
+     an inline SVG using a neutral stroke (#6e6e73) that reads in both themes. */
   .sbox input {
     width: 100%;
-    padding: 6px 12px;
-    background: var(--bg-inset);
-    border: 1px solid var(--border);
+    padding: 6px 12px 6px 30px;
+    background-color: var(--fill);
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%236e6e73' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='11' cy='11' r='7'/%3E%3Cpath d='m20 20-3.6-3.6'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: 9px center;
+    background-size: 14px;
+    border: 0.5px solid var(--separator);
     border-radius: var(--radius-sm);
     color: var(--fg);
     font-size: 0.9rem;
   }
+  /* Drop the bare outline:none so the global :focus-visible halo shows; keep the
+     accent border swap. */
   .sbox input:focus {
-    outline: none;
     border-color: var(--accent);
   }
   .sbox__list {
@@ -193,10 +202,12 @@
     list-style: none;
     max-height: 60vh;
     overflow-y: auto;
-    background: var(--bg-elev);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25);
+    background: color-mix(in srgb, var(--bg-elevated) 90%, transparent);
+    -webkit-backdrop-filter: blur(20px) saturate(170%);
+    backdrop-filter: blur(20px) saturate(170%);
+    border: 0.5px solid var(--separator);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-popover);
   }
   .sbox__msg {
     padding: 8px 10px;
@@ -218,7 +229,17 @@
     font-size: 0.88rem;
   }
   .sbox__item.active {
-    background: var(--bg-inset);
+    background: var(--accent-fill);
+    color: var(--on-accent);
+  }
+  /* Inside the selected row, secondary text + the kind pill go translucent white
+     (matching .palette__item.active) so they stay legible on the accent fill. */
+  .sbox__item.active .sbox__snippet {
+    color: color-mix(in srgb, var(--on-accent) 75%, transparent);
+  }
+  .sbox__item.active .sbox__kind {
+    color: color-mix(in srgb, var(--on-accent) 80%, transparent);
+    border-color: color-mix(in srgb, var(--on-accent) 40%, transparent);
   }
   .sbox__kind {
     font-size: 0.62rem;
@@ -238,12 +259,23 @@
     font-size: 0.8rem;
   }
   .sbox__item mark {
-    background: color-mix(in srgb, var(--accent) 30%, transparent);
+    background: var(--accent-tint-strong);
     color: inherit;
     border-radius: 2px;
   }
+  /* On the selected (accent-filled) row, the tint would vanish — use a
+     translucent white wash so matched spans still stand out. */
+  .sbox__item.active mark {
+    background: color-mix(in srgb, var(--on-accent) 28%, transparent);
+  }
   .sbox__all {
+    display: flex;
+    align-items: center;
+    gap: 5px;
     color: var(--accent);
     font-size: 0.82rem;
+  }
+  .sbox__item.active.sbox__all {
+    color: var(--on-accent);
   }
 </style>

@@ -3,6 +3,7 @@
   import { api } from "../lib/api";
   import type { Task, ReviewResponse } from "../lib/api";
   import TaskRow from "../lib/TaskRow.svelte";
+  import Icon from "../lib/Icon.svelte";
 
   // `embedded` renders Review as a tab inside Tasks (no own page title — the
   // Tasks header + the active "Review" tab already label it).
@@ -41,7 +42,11 @@
   <p class="error">Couldn't load the review.</p>
 {:else if $reviewQ.data}
   {#if total($reviewQ.data) === 0}
-    <p class="muted big">Nothing needs attention — you're on top of it ✨</p>
+    <div class="empty empty--hero">
+      <div class="empty__art" aria-hidden="true"><Icon name="check" size={28} strokeWidth={2} /></div>
+      <p class="empty__lead">You're on top of it</p>
+      <p class="muted">Nothing overdue, stale, undated, or stuck right now.</p>
+    </div>
   {/if}
   {@render bucket("Overdue", $reviewQ.data.overdue, true)}
   {@render bucket(`Stale — open ≥ ${$reviewQ.data.staleDays}d, no progress`, $reviewQ.data.stale)}
@@ -86,10 +91,6 @@
     flex-wrap: wrap;
     gap: 6px;
     margin-top: 8px;
-  }
-  .big {
-    font-size: 1rem;
-    margin-top: 20px;
   }
   /* As a Tasks tab there's no page title above; give the subtitle some air. */
   .rev-sub--embedded {

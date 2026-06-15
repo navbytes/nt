@@ -2,6 +2,7 @@
   import { createQuery, createMutation, useQueryClient } from "@tanstack/svelte-query";
   import { api, type TaskGroup, type Task } from "./api";
   import TaskRow from "./TaskRow.svelte";
+  import Icon from "./Icon.svelte";
   import { priorityRank, priorityClass } from "./text";
   import { parseQuickAdd } from "./quickparse";
   import { taskMatcher } from "./taskfilter";
@@ -190,6 +191,8 @@
   const selCount = $derived(selected.filter((id) => visibleIds.has(id)).length);
   let bulkBusy = $state(false);
   let rescheduling = $state(false);
+  let bulkMenuEl: HTMLElement | undefined = $state();
+  let bulkMenuRestore: HTMLElement | null = null;
 
   const BULK_DUE = [
     { label: "Today", value: "today" },
@@ -197,6 +200,32 @@
     { label: "Next week", value: "+7d" },
     { label: "No date", value: "none" },
   ];
+
+  // Mirror TaskRow's reschedule menu: focus the first item on open, restore
+  // focus to the trigger on close, and let Arrow/Esc drive it (role="menu").
+  function openBulkMenu() {
+    bulkMenuRestore = document.activeElement as HTMLElement;
+    rescheduling = true;
+    queueMicrotask(() => bulkMenuEl?.querySelector("button")?.focus());
+  }
+  function closeBulkMenu() {
+    rescheduling = false;
+    bulkMenuRestore?.focus?.();
+    bulkMenuRestore = null;
+  }
+  function onBulkMenuKey(e: KeyboardEvent) {
+    e.stopPropagation(); // the list's j/k handler must never see menu keys
+    if (e.key === "Escape") {
+      e.preventDefault();
+      closeBulkMenu();
+    } else if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault();
+      const items = [...(bulkMenuEl?.querySelectorAll("button") ?? [])];
+      const i = items.indexOf(document.activeElement as HTMLButtonElement);
+      const n = e.key === "ArrowDown" ? (i + 1) % items.length : (i - 1 + items.length) % items.length;
+      items[n]?.focus();
+    }
+  }
 
   const refreshAll = () => {
     for (const k of [["tasks"], ["tasks-view"], ["review"], ["state"], ["activity"]]) {
@@ -275,7 +304,10 @@
 {#if $tasksQ.isPending}
   <p class="muted">Loading tasks…</p>
 {:else if $tasksQ.error}
-  <p class="error">{String($tasksQ.error)}</p>
+  <div class="loaderr" role="alert">
+    <p class="loaderr__msg">Couldn't load tasks.</p>
+    <button class="btn btn--ghost btn--sm" onclick={() => $tasksQ.refetch()}>Try again</button>
+  </div>
 {:else}
   {#each groups as group (group.status)}
     <section class="group">
@@ -292,7 +324,10 @@
       {#if group.tasks.length === 0}<p class="muted small">none</p>{/if}
     </section>
   {:else}
-    <div class="empty">
+    <div class="empty empty--hero">
+      <div class="empty__art" class:empty__art--onboard={!emptyText} aria-hidden="true">
+        <Icon name={emptyText ? "check" : "plus"} size={28} strokeWidth={2} />
+      </div>
       <p class="empty__lead">{emptyText || "No tasks yet."}</p>
       {#if !emptyText}
         <p class="muted">
@@ -309,9 +344,25 @@
     <span class="bulk__count">{selCount} selected</span>
     <button class="bulk__btn" disabled={bulkBusy} onclick={bulkDone}>Complete</button>
     <div class="bulk__resched">
-      <button class="bulk__btn" disabled={bulkBusy} onclick={() => (rescheduling = !rescheduling)}>Reschedule ▾</button>
+      <button
+        class="bulk__btn"
+        disabled={bulkBusy}
+        aria-haspopup="menu"
+        aria-expanded={rescheduling}
+        onclick={() => (rescheduling ? closeBulkMenu() : openBulkMenu())}
+        >Reschedule <Icon name="chevron-down" size={13} /></button
+      >
       {#if rescheduling}
-        <div class="bulk__menu" role="menu">
+        <div class="bulk__backdrop" role="presentation" onclick={closeBulkMenu}></div>
+        <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
+        <div
+          class="bulk__menu"
+          role="menu"
+          aria-label="Reschedule selected tasks"
+          tabindex="-1"
+          bind:this={bulkMenuEl}
+          onkeydown={onBulkMenuKey}
+        >
           {#each BULK_DUE as p (p.value)}
             <button role="menuitem" class="bulk__item" onclick={() => bulkDue(p.value)}>{p.label}</button>
           {/each}
@@ -334,10 +385,12 @@
     gap: 8px;
     margin-top: 16px;
     padding: 8px 12px;
-    background: var(--bg-elev);
-    border: 1px solid var(--border);
+    background: color-mix(in srgb, var(--bg-elevated) 92%, transparent);
+    -webkit-backdrop-filter: blur(20px) saturate(170%);
+    backdrop-filter: blur(20px) saturate(170%);
+    border: 0.5px solid var(--separator);
     border-radius: var(--radius);
-    box-shadow: 0 8px 28px rgba(0, 0, 0, 0.22);
+    box-shadow: var(--shadow-popover);
   }
   .bulk__count {
     font-size: 0.85rem;
@@ -345,16 +398,30 @@
     margin-right: 4px;
   }
   .bulk__btn {
-    background: var(--bg-inset);
-    border: 1px solid var(--border);
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    min-height: 28px;
+    background: var(--fill);
+    border: 0.5px solid var(--separator-strong);
     border-radius: var(--radius-sm);
     color: var(--fg);
     cursor: pointer;
     padding: 4px 12px;
     font-size: 0.85rem;
+    transition:
+      background var(--motion-fast) var(--ease),
+      color var(--motion-fast) var(--ease),
+      border-color var(--motion-fast) var(--ease),
+      transform var(--motion-fast) var(--ease);
   }
   .bulk__btn:hover:not(:disabled) {
-    border-color: var(--accent);
+    background: var(--fill-strong);
+    border-color: color-mix(in srgb, var(--separator-strong) 55%, var(--fg-soft));
+  }
+  .bulk__btn:active:not(:disabled) {
+    background: var(--fill-active);
+    transform: scale(0.96);
   }
   .bulk__btn:disabled {
     opacity: 0.5;
@@ -370,21 +437,39 @@
     color: var(--muted);
     margin-left: auto;
   }
+  .bulk__btn--ghost:hover:not(:disabled) {
+    background: var(--fill-hover);
+    color: var(--fg);
+  }
   .bulk__resched {
     position: relative;
+  }
+  /* Transparent full-viewport catcher so any outside click dismisses the menu. */
+  .bulk__backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 1;
   }
   .bulk__menu {
     position: absolute;
     left: 0;
     bottom: calc(100% + 6px);
+    z-index: 2;
     display: flex;
     flex-direction: column;
     min-width: 130px;
     padding: 4px;
-    background: var(--bg-elev);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
+    background: color-mix(in srgb, var(--bg-elevated) 90%, transparent);
+    -webkit-backdrop-filter: blur(20px) saturate(170%);
+    backdrop-filter: blur(20px) saturate(170%);
+    border: 0.5px solid var(--separator);
+    border-radius: var(--radius-popover);
+    box-shadow: var(--shadow-popover);
+    transform-origin: bottom left;
+    animation: popover-in var(--motion) var(--ease-spring);
+  }
+  .bulk__menu:focus {
+    outline: none;
   }
   .bulk__item {
     text-align: left;
@@ -392,12 +477,32 @@
     border: none;
     color: var(--fg);
     padding: 5px 9px;
-    border-radius: 4px;
+    border-radius: var(--radius-xs);
     cursor: pointer;
     font-size: 0.85rem;
+    transition: background var(--motion-fast) var(--ease);
   }
-  .bulk__item:hover {
-    background: var(--bg-inset);
+  /* Arrow-key focus is programmatic (:focus, not :focus-visible); highlight the
+     active item directly, with the same calm fill on hover. */
+  .bulk__item:hover,
+  .bulk__item:focus {
+    background: var(--fill-hover);
+    outline: none;
+  }
+  .bulk__item:focus-visible {
+    background: var(--accent-fill);
+    color: var(--on-accent);
+  }
+  /* Friendly load-failure state — never expose the raw error object. */
+  .loaderr {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin: 28px 0;
+  }
+  .loaderr__msg {
+    margin: 0;
+    color: var(--fg-soft);
   }
   /* Live parse preview under the quick-add box: a calm strip that mirrors how the
      task will look once added, so the todo.txt shorthand is discoverable. */
@@ -420,7 +525,7 @@
     font-size: 0.72rem;
     color: var(--fg-soft);
     background: var(--bg-elev);
-    border: 1px solid var(--border);
+    border: 0.5px solid var(--separator-strong);
     border-radius: 999px;
     padding: 0 7px;
   }

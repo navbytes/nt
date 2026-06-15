@@ -66,21 +66,33 @@ func main() {
 	// Hand the existing handler to Wails. No TCP port is opened — the native
 	// webview talks to the Go handler in-process.
 	err = wails.Run(&options.App{
-		Title:            "nt",
-		Width:            1280,
-		Height:           860,
-		MinWidth:         640,
-		MinHeight:        480,
-		Menu:             appMenu,
-		BackgroundColour: &options.RGBA{R: 0x1b, G: 0x26, B: 0x3b, A: 1}, // Tokyo Night base (pre-paint flash)
+		Title:     "nt",
+		Width:     1280,
+		Height:    860,
+		MinWidth:  640,
+		MinHeight: 480,
+		Menu:      appMenu,
+		// Neutral pre-paint backing (shown for one frame before the webview
+		// renders). Window vibrancy masks it; a light neutral is least jarring.
+		BackgroundColour: &options.RGBA{R: 0xEC, G: 0xEC, B: 0xEC, A: 1},
 		AssetServer: &assetserver.Options{
 			Handler: srv.Handler(),
 		},
 		Mac: &mac.Options{
-			// Standard title bar: hidden-inset overlays the traffic lights on the
-			// sidebar's brand corner. No forced DarkAqua — the window chrome
-			// follows the system appearance, matching the app's adaptive theme.
-			TitleBar: mac.TitleBarDefault(),
+			// Hidden-inset title bar: the traffic lights inset over the sidebar's
+			// top corner and content runs full height (FullSizeContent). The
+			// frontend insets the sidebar below the lights via [data-desktop].
+			TitleBar: mac.TitleBarHiddenInset(),
+			// Translucent window + transparent webview install the native macOS
+			// NSVisualEffectView vibrancy behind the UI; the sidebar and topbar
+			// stay translucent to reveal it while the content pane paints opaque.
+			WebviewIsTransparent: true,
+			WindowIsTranslucent:  true,
+			// Follow the system appearance — the app's theme is adaptive.
+			Appearance: mac.DefaultAppearance,
+			Preferences: &mac.Preferences{
+				TabFocusesLinks: mac.Enabled,
+			},
 		},
 	})
 	if err != nil {

@@ -1,6 +1,7 @@
 <script lang="ts">
   import { createQuery } from "@tanstack/svelte-query";
   import { api } from "./api";
+  import Icon from "./Icon.svelte";
   import type { FGNode } from "./graph";
 
   let {
@@ -43,7 +44,7 @@
 <aside class="gdetails" aria-label="Selected note">
   <div class="gdetails__head">
     <div class="gdetails__crumb">{node.folder || "root"}</div>
-    <button class="icon-btn" title="Close (Esc)" aria-label="Close details" onclick={onClose}>×</button>
+    <button class="icon-btn" title="Close (Esc)" aria-label="Close details" onclick={onClose}><Icon name="close" /></button>
   </div>
   <h2 class="gdetails__title">{node.title}</h2>
 
@@ -68,11 +69,15 @@
 
   <div class="gdetails__actions">
     <button class="btn btn--sm" onclick={onOpen}>Open note</button>
-    <button class="btn btn--ghost btn--sm" onclick={onFocusLocal}>Focus local ⌖</button>
+    <button class="btn btn--ghost btn--sm gdetails__act" onclick={onFocusLocal}>
+      <Icon name="focus" size={14} /> Focus local
+    </button>
     <button
-      class="btn btn--ghost btn--sm"
+      class="btn btn--ghost btn--sm gdetails__act"
       title="Reveal this node's neighbors (shift-click a node does this too)"
-      onclick={onToggleExpand}>{expanded ? "Collapse" : "Expand"} neighbors</button
+      onclick={onToggleExpand}>
+      <span class="gdetails__chev" class:gdetails__chev--open={expanded}><Icon name="chevron-right" size={13} /></span>
+      {expanded ? "Collapse" : "Expand"} neighbors</button
     >
     <button class="btn btn--ghost btn--sm" onclick={onTogglePin}>{pinned ? "Unpin" : "Pin"}</button>
   </div>
@@ -86,10 +91,10 @@
     z-index: 20;
     width: 300px;
     max-width: 40vw;
-    background: var(--bg-elev);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    box-shadow: 0 8px 28px rgba(0, 0, 0, 0.22);
+    background: var(--bg-elevated);
+    border: 0.5px solid var(--separator);
+    border-radius: var(--radius-popover);
+    box-shadow: var(--shadow-popover);
     padding: 12px 14px;
   }
   .gdetails__head {
@@ -102,7 +107,7 @@
     font-size: 0.72rem;
     color: var(--muted);
     text-transform: uppercase;
-    letter-spacing: 0.04em;
+    letter-spacing: var(--tracking-caps);
   }
   .gdetails__title {
     margin: 2px 0 6px;
@@ -133,6 +138,21 @@
     display: flex;
     flex-wrap: wrap;
     gap: 6px;
+  }
+  /* Buttons that lead with an icon: center the glyph against the label. */
+  .gdetails__act {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+  }
+  /* Expand/collapse disclosure: chevron points right, rotates down when the
+     neighbors are revealed (neutralized under reduced-motion globally). */
+  .gdetails__chev {
+    display: inline-flex;
+    transition: transform var(--motion-fast) var(--ease);
+  }
+  .gdetails__chev--open {
+    transform: rotate(90deg);
   }
   .pin-badge {
     font-size: 0.72rem;

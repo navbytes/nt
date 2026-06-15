@@ -11,14 +11,26 @@
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <link rel="icon" href="/favicon-32.png" sizes="32x32" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
-    <meta name="theme-color" content="#16161e" />
+    <meta name="theme-color" content="#ffffff" />
     <link rel="stylesheet" href="/static/highlight.css" />
     <script>
-      // Apply persisted theme before paint to avoid a flash (mirrors v1).
+      // Apply persisted theme + detect the native desktop shell before paint
+      // (avoids a theme flash and a titlebar-inset jump).
       try {
         var d = document.documentElement,
           t = localStorage.getItem("nt-theme");
         if (t) d.setAttribute("data-theme", t);
+        // Native macOS app (Wails WKWebView) overlays content under the traffic
+        // lights — enable the window-chrome insets + drag regions.
+        if (/wails\.io/i.test(navigator.userAgent) || window.runtime) {
+          d.setAttribute("data-desktop", "");
+        }
+        // Keep the PWA/status-bar tint in sync with the resolved theme.
+        var dark =
+          t === "dark" ||
+          (!t && window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches);
+        var m = document.querySelector('meta[name="theme-color"]');
+        if (m) m.setAttribute("content", dark ? "#1e1e20" : "#ffffff");
       } catch (e) {}
     </script>
   </head>

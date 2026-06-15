@@ -9,6 +9,7 @@
   import { priorityClass, relativeDue, meaningfulSource, displayTitle } from "./text";
   import { showToast } from "./toast.svelte";
   import { navigate } from "./router.svelte";
+  import Icon from "./Icon.svelte";
 
   let {
     t,
@@ -225,7 +226,8 @@
       aria-checked={selected}
       aria-label="Select task"
       title="Select (x)"
-      onclick={onToggleSelect}>{selected ? "☑" : "☐"}</button
+      onclick={onToggleSelect}
+      ><Icon name={selected ? "square-check" : "square"} filled={selected} size={15} /></button
     >
   {/if}
   {#if pri && t.status !== "done"}
@@ -234,9 +236,9 @@
     >
   {/if}
   {#if t.status === "done"}
-    <button class="check check--done" title="Reopen" aria-label="Reopen task" onclick={() => $reopenMut.mutate(t.id)}>●</button>
+    <button class="check check--done" title="Reopen" aria-label="Reopen task" onclick={() => $reopenMut.mutate(t.id)}></button>
   {:else}
-    <button class="check" title="Mark done" aria-label="Mark task done" onclick={() => $doneMut.mutate(t.id)}>○</button>
+    <button class="check" title="Mark done" aria-label="Mark task done" onclick={() => $doneMut.mutate(t.id)}></button>
   {/if}
   {#if editing}
     <textarea
@@ -248,15 +250,15 @@
       onkeydown={onEditKey}
     ></textarea>
     <span class="row__actions row__actions--shown">
-      <button class="rowbtn" title="Save (↵)" aria-label="Save" onclick={saveEdit}>✓</button>
-      <button class="rowbtn rowbtn--danger" title="Cancel (esc)" aria-label="Cancel" onclick={() => (editing = false)}>×</button>
+      <button class="rowbtn" title="Save (↵)" aria-label="Save" onclick={saveEdit}><Icon name="check" size={15} /></button>
+      <button class="rowbtn rowbtn--danger" title="Cancel (esc)" aria-label="Cancel" onclick={() => (editing = false)}><Icon name="close" size={14} /></button>
     </span>
   {:else}
     <span class="row__text" class:done={t.status === "done"} title={t.text}>{t.text}</span>
-    {#if t.recur}<span class="row__recur" title="Recurring task">↻</span>{/if}
+    {#if t.recur}<span class="row__recur" title="Recurring task"><Icon name="repeat" size={13} /></span>{/if}
     {#if t.status === "doing"}<span class="status-pill status-pill--doing">doing</span>{/if}
-    {#if t.status === "blocked"}<span class="status-pill status-pill--blocked" title={t.blocker ? `blocked by: ${t.blocker}` : "blocked"}>⊘ blocked</span>{/if}
-    {#if t.noteUrl}<a class="chip chip--note" href={t.noteUrl} title={`Details: ${t.noteTitle ?? ""}`}>📄 details</a>{/if}
+    {#if t.status === "blocked"}<span class="status-pill status-pill--blocked" title={t.blocker ? `blocked by: ${t.blocker}` : "blocked"}><Icon name="blocked" size={11} /> blocked</span>{/if}
+    {#if t.noteUrl}<a class="chip chip--note" href={t.noteUrl} title={`Details: ${t.noteTitle ?? ""}`}><Icon name="document" size={12} /> details</a>{/if}
     {#if t.project}<a class="chip" href={`/search?tag=${encodeURIComponent(t.project)}`}>+{t.project}</a>{/if}
     {#each t.tags ?? [] as tag (tag)}<a class="chip chip--tag" href={`/search?tag=${encodeURIComponent(tag)}`}>@{tag}</a>{/each}
     {#if due}<span
@@ -269,12 +271,12 @@
     {#if t.status !== "done"}
       <span class="row__actions">
         {#if !t.noteUrl}
-          <button class="rowbtn" title="Add a details note (body)" aria-label="Add details note" disabled={noteBusy} onclick={addNote}>＋📄</button>
+          <button class="rowbtn" title="Add a details note (body)" aria-label="Add details note" disabled={noteBusy} onclick={addNote}><Icon name="plus" size={14} /></button>
         {/if}
-        <button class="rowbtn" title="Reschedule (d)" aria-label="Reschedule task" onclick={openSchedule}>⏱</button>
-        <button class="rowbtn" title="Edit text" aria-label="Edit task text" onclick={startEdit}>✎</button>
-        <button class="rowbtn" title={t.status === "doing" ? "Stop (set open)" : "Start (set doing)"} onclick={toggleDoing}>◐</button>
-        <button class="rowbtn rowbtn--danger" title="Delete (undoable)" onclick={del}>×</button>
+        <button class="rowbtn" title="Reschedule (d)" aria-label="Reschedule task" onclick={openSchedule}><Icon name="calendar" size={15} /></button>
+        <button class="rowbtn" title="Edit text" aria-label="Edit task text" onclick={startEdit}><Icon name="edit" size={15} /></button>
+        <button class="rowbtn" aria-label={t.status === "doing" ? "Stop (set open)" : "Start (set doing)"} title={t.status === "doing" ? "Stop (set open)" : "Start (set doing)"} onclick={toggleDoing}><Icon name="doing" size={15} /></button>
+        <button class="rowbtn rowbtn--danger" aria-label="Delete task" title="Delete (undoable)" onclick={del}><Icon name="trash" size={15} /></button>
       </span>
     {/if}
     {#if scheduling}
@@ -307,14 +309,14 @@
   /* Roving keyboard focus (j/k). Programmatic focus, so we style :focus directly
      rather than :focus-visible (which can skip scripted focus). */
   .row:focus {
-    outline: 2px solid var(--accent);
+    outline: 2px solid var(--accent-color);
     outline-offset: -2px;
     border-radius: var(--radius-sm);
   }
   /* Bulk selection (W11): a calm tinted row + a checkbox that stays hidden until
      hover/selection so unselected rows keep their clean look. */
   .row--selected {
-    background: color-mix(in srgb, var(--accent) 12%, transparent);
+    background: var(--accent-tint);
     border-radius: var(--radius-sm);
   }
   .selbox {
@@ -335,7 +337,7 @@
     opacity: 1;
   }
   .selbox--on {
-    color: var(--accent);
+    color: var(--accent-color);
   }
   .row__actions {
     margin-left: auto;
@@ -362,29 +364,48 @@
     overflow: hidden;
     padding: 3px 8px;
     background: var(--bg-elev);
-    border: 1px solid var(--accent);
+    border: 1px solid var(--accent-color);
     border-radius: var(--radius-sm);
     color: var(--fg);
   }
   .row__edit:focus {
     outline: none;
+    box-shadow: var(--focus-ring-tight);
   }
+  /* Hover-revealed inline actions: a borderless ghost button sized to a proper
+     macOS hit target (≥28px), with fill-based hover/press and the global focus
+     halo (it picks up :focus-visible from app.css). */
   .rowbtn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 28px;
+    min-height: 28px;
     background: none;
     border: 1px solid transparent;
     border-radius: var(--radius-sm);
     color: var(--muted);
     cursor: pointer;
-    padding: 1px 6px;
-    font-size: 0.9rem;
+    padding: 0 6px;
+    transition:
+      background var(--motion-fast) var(--ease),
+      color var(--motion-fast) var(--ease),
+      transform var(--motion-fast) var(--ease);
   }
   .rowbtn:hover {
-    border-color: var(--border);
+    background: var(--fill-hover);
     color: var(--fg);
+  }
+  .rowbtn:active {
+    background: var(--fill-active);
+    transform: scale(0.96);
+  }
+  .rowbtn:disabled {
+    opacity: 0.5;
+    cursor: default;
   }
   .rowbtn--danger:hover {
     color: var(--red);
-    border-color: var(--red);
   }
   .status-pill {
     font-size: 0.68rem;
@@ -394,20 +415,20 @@
     border-radius: 999px;
   }
   .status-pill--doing {
-    color: var(--accent);
-    border: 1px solid var(--accent);
+    color: var(--accent-color);
+    border: 0.5px solid var(--accent-color);
   }
   .status-pill--blocked {
     color: var(--red);
-    border: 1px solid var(--red);
+    border: 0.5px solid var(--red);
   }
   .chip--tag {
     color: var(--accent-2);
   }
   /* The "details" chip linking to a task's body note. */
   .chip--note {
-    color: var(--accent);
-    background: color-mix(in srgb, var(--accent) 10%, transparent);
+    color: var(--accent-color);
+    background: var(--accent-tint);
   }
   .chip--note:hover {
     text-decoration: underline;
@@ -432,7 +453,7 @@
   }
   /* The "doing" accent wins over the priority bar when both apply. */
   .row--doing {
-    box-shadow: inset 2px 0 0 var(--accent);
+    box-shadow: inset 2px 0 0 var(--accent-color);
   }
   .row__due {
     color: var(--muted);
@@ -463,10 +484,14 @@
     flex-direction: column;
     min-width: 132px;
     padding: 4px;
-    background: var(--bg-elev);
-    border: 1px solid var(--border);
-    border-radius: var(--radius-sm);
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+    background: color-mix(in srgb, var(--bg-elevated) 90%, transparent);
+    -webkit-backdrop-filter: blur(20px) saturate(170%);
+    backdrop-filter: blur(20px) saturate(170%);
+    border: 0.5px solid var(--separator);
+    border-radius: var(--radius-popover);
+    box-shadow: var(--shadow-popover);
+    transform-origin: top right;
+    animation: popover-in var(--motion) var(--ease-spring);
   }
   .sched:focus {
     outline: none;
@@ -477,25 +502,28 @@
     border: none;
     color: var(--fg);
     padding: 5px 9px;
-    border-radius: 4px;
+    border-radius: var(--radius-xs);
     cursor: pointer;
     font-size: 0.85rem;
+    transition: background var(--motion-fast) var(--ease);
   }
+  /* Arrow-key focus is programmatic (:focus, not :focus-visible), so highlight
+     the active item directly; mouse hover gets the same calm fill. */
   .sched__item:hover,
   .sched__item:focus {
-    background: var(--bg-inset);
+    background: var(--fill-hover);
     outline: none;
   }
   .sched__item:focus-visible {
-    outline: 1px solid var(--accent);
-    outline-offset: -1px;
+    background: var(--accent-fill);
+    color: var(--on-accent);
   }
 
   /* Agent-captured tasks (e.g. src:claude) — nt's reason to exist; quiet, but
      legible, so you can tell what your AI session added. */
   .src--agent {
-    color: var(--accent);
-    background: color-mix(in srgb, var(--accent) 12%, transparent);
+    color: var(--accent-color);
+    background: var(--accent-tint);
     padding: 0 5px;
     border-radius: 999px;
     font-size: 0.7rem;
