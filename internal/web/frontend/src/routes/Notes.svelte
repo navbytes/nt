@@ -10,46 +10,223 @@
   const daily = $derived(loc.path === "/journal");
 
   const gridQ = createQuery({ queryKey: ["notesGrid"], queryFn: api.notesGrid });
-  // Orphans (notes with no links in or out) fold in here as a filter, rather
-  // than a separate top-level route.
+  // Orphans (notes with no links in or out) fold in here as a filter.
   const orphansQ = createQuery({ queryKey: ["orphans"], queryFn: api.orphans });
   const orphanUrls = $derived(new Set(($orphansQ.data?.notes ?? []).map((n) => n.url)));
 
-  // Archived notes ride along in the grid payload (flagged), hidden by default;
-  // the Archived toggle reveals them — a dedicated view of the retired set.
   const archivedCount = $derived(($gridQ.data?.notes ?? []).filter((n) => n.archived).length);
-
-  // Favorites are the starred working-set notes; the Favorites filter narrows
-  // the grid to them. (Star/unstar happens on a note's own page.)
   const favoriteCount = $derived(
     ($gridQ.data?.notes ?? []).filter((n) => n.favorite && !n.archived).length,
   );
 
-  // Persisted view controls.
-  let dense = $state(localStorage.getItem("nt-notes-dense") === "1");
+  type Layout = "cards" | "compact" | "list" | "timeline";
+  type Sort = "updated" | "created" | "title" | "folder" | "tags";
+  type GroupBy = "none" | "folder" | "tag" | "recency";
+  type Recency = "all" | "7" | "30" | "90";
+
+  // View prefs persist (like the old dense/sort did); content filters stay
+  // ephemeral — they reset on reload, matching the previous behaviour.
+  let layout = $state<Layout>((localStorage.getItem("nt-notes-layout") as Layout) ?? "cards");
+  let sort = $state<Sort>((localStorage.getItem("nt-notes-sort") as Sort) ?? "updated");
+  let sortDir = $state<"asc" | "desc">(
+    (localStorage.getItem("nt-notes-sortdir") as "asc" | "desc") ?? "desc",
+  );
+  let groupBy = $state<GroupBy>((localStorage.getItem("nt-notes-group") as GroupBy) ?? "none");
+  $effect(() => localStorage.setItem("nt-notes-layout", layout));
+  $effect(() => localStorage.setItem("nt-notes-sort", sort));
+  $effect(() => localStorage.setItem("nt-notes-sortdir", sortDir));
+  $effect(() => localStorage.setItem("nt-notes-group", groupBy));
+
+  // Content filters (ephemeral).
   let folder = $state("");
+  let q = $state("");
+  let activeTags = $state<string[]>([]);
+  let recency = $state<Recency>("all");
   let orphansOnly = $state(false);
   let archivedOnly = $state(false);
   let favoritesOnly = $state(false);
-  let sort = $state<"updated" | "title" | "folder">(
-    (localStorage.getItem("nt-notes-sort") as "updated" | "title" | "folder") ?? "updated",
-  );
-  $effect(() => localStorage.setItem("nt-notes-dense", dense ? "1" : "0"));
-  $effect(() => localStorage.setItem("nt-notes-sort", sort));
 
-  const cards = $derived.by((): NoteCard[] => {
+  const hasFilters = $derived(
+    !!folder ||
+      !!q.trim() ||
+      activeTags.length > 0 ||
+      recency !== "all" ||
+      orphansOnly ||
+      archivedOnly ||
+      favoritesOnly,
+  );
+  function clearFilters(): void {
+    folder = "";
+    q = "";
+    activeTags = [];
+    recency = "all";
+    orphansOnly = false;
+    archivedOnly = false;
+    favoritesOnly = false;
+  }
+
+  // Tag vocabulary (working set), for the "+ Tag" picker — sorted alphabetically.
+  const allTags = $derived.by(() => {
+    const seen = new Set<string>();
+    for (const n of $gridQ.data?.notes ?? []) {
+      if (n.archived) continue;
+      for (const t of n.tags ?? []) seen.add(t);
+    }
+    return [...seen].sort((a, b) => a.localeCompare(b));
+  });
+
+  function toggleTag(t: string, e?: Event): void {
+    e?.preventDefault();
+    e?.stopPropagation();
+    activeTags = activeTags.includes(t) ? activeTags.filter((x) => x !== t) : [...activeTags, t];
+  }
+  function addTag(t: string): void {
+    if (t && !activeTags.includes(t)) activeTags = [...activeTags, t];
+  }
+  // Sort keys read best in different directions; snap to a sane default on change.
+  function pickSort(k: Sort): void {
+    sort = k;
+    sortDir = k === "title" || k === "folder" ? "asc" : "desc";
+  }
+  function cutoff(days: number): string {
+    const d = new Date();
+    d.setDate(d.getDate() - days);
+    return d.toISOString().slice(0, 10);
+  }
+
+  const filtered = $derived.by((): NoteCard[] => {
     let ns = [...($gridQ.data?.notes ?? [])];
     // Default view is the working set; the Archived toggle flips to retired only.
     ns = ns.filter((n) => (archivedOnly ? n.archived : !n.archived));
     if (folder) ns = ns.filter((n) => n.folder === folder || n.folder.startsWith(folder + "/"));
     if (orphansOnly) ns = ns.filter((n) => orphanUrls.has(n.url));
     if (favoritesOnly) ns = ns.filter((n) => n.favorite);
+    // Multi-tag is AND: a note must carry every selected tag.
+    if (activeTags.length) ns = ns.filter((n) => activeTags.every((t) => n.tags?.includes(t)));
+    if (recency !== "all") {
+      const c = cutoff(Number(recency));
+      ns = ns.filter((n) => (n.updated ?? "") >= c);
+    }
+    const needle = q.trim().toLowerCase();
+    if (needle) {
+      ns = ns.filter(
+        (n) =>
+          n.title.toLowerCase().includes(needle) ||
+          (n.preview ?? "").toLowerCase().includes(needle) ||
+          (n.tags ?? []).some((t) => t.toLowerCase().includes(needle)),
+      );
+    }
+    const dir = sortDir === "desc" ? -1 : 1;
     ns.sort((a, b) => {
-      if (sort === "title") return a.title.localeCompare(b.title);
-      if (sort === "folder") return a.folder.localeCompare(b.folder) || a.title.localeCompare(b.title);
-      return (b.updated ?? "").localeCompare(a.updated ?? ""); // newest first
+      let r = 0;
+      if (sort === "title") r = a.title.localeCompare(b.title);
+      else if (sort === "folder")
+        r = a.folder.localeCompare(b.folder) || a.title.localeCompare(b.title);
+      else if (sort === "tags") r = (a.tags?.length ?? 0) - (b.tags?.length ?? 0);
+      else if (sort === "created") r = (a.created ?? "").localeCompare(b.created ?? "");
+      else r = (a.updated ?? "").localeCompare(b.updated ?? "");
+      return (r || a.title.localeCompare(b.title)) * dir;
     });
     return ns;
+  });
+
+  // Grouping splits the filtered+sorted list into labelled sections. A note can
+  // appear under several tag groups (one per tag); folder/recency are exclusive.
+  type Group = { key: string; label: string; cards: NoteCard[] };
+  function push(m: Map<string, NoteCard[]>, k: string, n: NoteCard): void {
+    const a = m.get(k);
+    if (a) a.push(n);
+    else m.set(k, [n]);
+  }
+  const groups = $derived.by((): Group[] => {
+    const ns = filtered;
+    if (groupBy === "none") return [{ key: "", label: "", cards: ns }];
+    if (groupBy === "folder") {
+      const m = new Map<string, NoteCard[]>();
+      for (const n of ns) push(m, n.folder || "(root)", n);
+      return [...m.entries()]
+        .sort((a, b) =>
+          a[0] === "(root)" ? -1 : b[0] === "(root)" ? 1 : a[0].localeCompare(b[0]),
+        )
+        .map(([k, cards]) => ({ key: k, label: k, cards }));
+    }
+    if (groupBy === "tag") {
+      const m = new Map<string, NoteCard[]>();
+      for (const n of ns) {
+        const ts = n.tags?.length ? n.tags : ["(untagged)"];
+        for (const t of ts) push(m, t, n);
+      }
+      return [...m.entries()]
+        .sort((a, b) =>
+          a[0] === "(untagged)" ? 1 : b[0] === "(untagged)" ? -1 : a[0].localeCompare(b[0]),
+        )
+        .map(([k, cards]) => ({ key: k, label: k === "(untagged)" ? k : "#" + k, cards }));
+    }
+    // recency
+    const c7 = cutoff(7);
+    const c30 = cutoff(30);
+    const today = new Date().toISOString().slice(0, 10);
+    const order = ["Today", "Past week", "Past month", "Older", "Undated"];
+    const m = new Map<string, NoteCard[]>();
+    for (const n of ns) {
+      const d = n.updated ?? "";
+      const k = !d
+        ? "Undated"
+        : d >= today
+          ? "Today"
+          : d >= c7
+            ? "Past week"
+            : d >= c30
+              ? "Past month"
+              : "Older";
+      push(m, k, n);
+    }
+    return order.filter((k) => m.has(k)).map((k) => ({ key: k, label: k, cards: m.get(k)! }));
+  });
+
+  const total = $derived(filtered.length);
+
+  // Timeline view: notes laid out chronologically, grouped by month. The axis is
+  // the date you're sorting by (Created, else Updated/last-touched); the sort
+  // direction toggle flips oldest↔newest.
+  const MONTHS = [
+    "January", "February", "March", "April", "May", "June",
+    "July", "August", "September", "October", "November", "December",
+  ];
+  function monthLabel(yyyymm: string): string {
+    const [y, m] = yyyymm.split("-");
+    return (MONTHS[Number(m) - 1] ?? m) + " " + y;
+  }
+  type TLEntry = { card: NoteCard; date: string };
+  type TLMonth = { key: string; label: string; entries: TLEntry[] };
+  const timeline = $derived.by((): TLMonth[] => {
+    const useCreated = sort === "created";
+    const dateOf = (c: NoteCard): string => (useCreated ? c.created : c.updated) ?? "";
+    const dir = sortDir === "desc" ? -1 : 1;
+    const dated = filtered
+      .filter((c) => dateOf(c))
+      .map((c): TLEntry => ({ card: c, date: dateOf(c) }))
+      .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0) * dir);
+    const m = new Map<string, TLEntry[]>();
+    for (const e of dated) {
+      const mk = e.date.slice(0, 7); // YYYY-MM
+      const a = m.get(mk);
+      if (a) a.push(e);
+      else m.set(mk, [e]);
+    }
+    const months: TLMonth[] = [...m.entries()].map(([key, entries]) => ({
+      key,
+      label: monthLabel(key),
+      entries,
+    }));
+    const undated = filtered.filter((c) => !dateOf(c));
+    if (undated.length)
+      months.push({
+        key: "undated",
+        label: "Undated",
+        entries: undated.map((c): TLEntry => ({ card: c, date: "" })),
+      });
+    return months;
   });
 </script>
 
@@ -61,22 +238,80 @@
       <button class:seg--on={daily} onclick={() => navigate("/journal")}>Daily</button>
     </div>
   </div>
-  {#if !daily}
+
+  {#if !daily && $gridQ.data}
     <div class="notes-controls">
-      {#if $gridQ.data}
-        <select class="select" bind:value={folder} aria-label="Filter by folder">
+      <select class="select" bind:value={folder} aria-label="Filter by folder">
         <option value="">All folders</option>
         {#each $gridQ.data.folders as f (f)}<option value={f}>{f}</option>{/each}
       </select>
-      <select class="select" bind:value={sort} aria-label="Sort notes">
-        <option value="updated">Updated</option>
-        <option value="title">Title</option>
-        <option value="folder">Folder</option>
+
+      {#if allTags.length}
+        <select
+          class="select"
+          aria-label="Add tag filter"
+          onchange={(e) => {
+            const sel = e.currentTarget as HTMLSelectElement;
+            addTag(sel.value);
+            sel.value = "";
+          }}
+        >
+          <option value="">＋ Tag…</option>
+          {#each allTags as t (t)}
+            {#if !activeTags.includes(t)}<option value={t}>#{t}</option>{/if}
+          {/each}
+        </select>
+      {/if}
+
+      <select class="select" bind:value={recency} aria-label="Filter by recency">
+        <option value="all">Any time</option>
+        <option value="7">Past week</option>
+        <option value="30">Past month</option>
+        <option value="90">Past 90 days</option>
       </select>
-      <div class="seg" role="group" aria-label="Card density">
-        <button class:seg--on={!dense} onclick={() => (dense = false)}>Cards</button>
-        <button class:seg--on={dense} onclick={() => (dense = true)}>Compact</button>
+
+      <div class="sortwrap">
+        <select
+          class="select"
+          value={sort}
+          aria-label="Sort notes"
+          onchange={(e) => pickSort((e.currentTarget as HTMLSelectElement).value as Sort)}
+        >
+          <option value="updated">Updated</option>
+          <option value="created">Created</option>
+          <option value="title">Title</option>
+          <option value="folder">Folder</option>
+          <option value="tags">Tag count</option>
+        </select>
+        <button
+          class="dirbtn"
+          title={sortDir === "desc" ? "Descending — click for ascending" : "Ascending — click for descending"}
+          aria-label="Toggle sort direction"
+          onclick={() => (sortDir = sortDir === "desc" ? "asc" : "desc")}
+        >{sortDir === "desc" ? "↓" : "↑"}</button>
       </div>
+
+      {#if layout !== "timeline"}
+        <select class="select" bind:value={groupBy} aria-label="Group notes">
+          <option value="none">No grouping</option>
+          <option value="folder">Group: Folder</option>
+          <option value="tag">Group: Tag</option>
+          <option value="recency">Group: Recency</option>
+        </select>
+      {/if}
+
+      <div class="seg" role="group" aria-label="Layout">
+        <button class:seg--on={layout === "cards"} onclick={() => (layout = "cards")}>Cards</button>
+        <button class:seg--on={layout === "compact"} onclick={() => (layout = "compact")}>Compact</button>
+        <button class:seg--on={layout === "list"} onclick={() => (layout = "list")}>List</button>
+        <button
+          class:seg--on={layout === "timeline"}
+          onclick={() => {
+            layout = "timeline";
+            if (sort !== "created" && sort !== "updated") pickSort("updated");
+          }}>Timeline</button>
+      </div>
+
       {#if favoriteCount > 0 || favoritesOnly}
         <button
           class="notes-toggle"
@@ -102,7 +337,29 @@
           onclick={() => (archivedOnly = !archivedOnly)}
         >📦 Archived{#if archivedCount}<span class="notes-toggle__count"> {archivedCount}</span>{/if}</button>
       {/if}
-    {/if}
+    </div>
+
+    <div class="notes-filterrow">
+      <div class="qfilter">
+        <input
+          bind:value={q}
+          onkeydown={(e) => e.key === "Escape" && (q = "")}
+          placeholder="Filter notes by title, text, or #tag…"
+          aria-label="Filter notes"
+          autocomplete="off"
+        />
+        {#if q}<button class="qfilter__clear" onclick={() => (q = "")} aria-label="Clear text filter">×</button>{/if}
+      </div>
+      {#if activeTags.length}
+        <div class="tagbar" role="group" aria-label="Active tag filters">
+          {#each activeTags as t (t)}
+            <button class="chip chip--active" onclick={() => toggleTag(t)} title="Remove this tag filter">#{t} ×</button>
+          {/each}
+        </div>
+      {/if}
+      {#if hasFilters}
+        <button class="notes-clear" onclick={clearFilters}>Clear all</button>
+      {/if}
     </div>
   {/if}
 </div>
@@ -113,13 +370,12 @@
   <p class="muted">Loading…</p>
 {:else if $gridQ.error}
   <p class="error">Couldn't load notes.</p>
-{:else if cards.length === 0}
-  {#if orphansOnly}
-    <p class="muted">No orphan notes — every note is linked. ✨</p>
-  {:else if archivedOnly}
-    <p class="muted">No archived notes.</p>
-  {:else if folder}
-    <p class="muted">No notes in {folder} yet.</p>
+{:else if total === 0}
+  {#if hasFilters}
+    <p class="muted">
+      No notes match these filters.
+      <button class="linklike" onclick={clearFilters}>Clear all</button>
+    </p>
   {:else}
     <div class="empty">
       <p class="empty__lead">No notes yet.</p>
@@ -130,25 +386,77 @@
       </p>
     </div>
   {/if}
-{:else}
-  <div class="notegrid" class:notegrid--dense={dense}>
-    {#each cards as n (n.handle)}
-      <a class="notecard" href={n.url}>
-        <div class="notecard__top">
-          <span class="notecard__title">{#if n.favorite}<span class="notecard__star" title="Favorite">★</span>{/if}{n.title}</span>
-          {#if n.updated}<span class="notecard__date">{n.updated}</span>{/if}
-        </div>
-        {#if n.folder}<span class="notecard__folder">{n.folder}/</span>{/if}
-        {#if !dense && n.preview}<p class="notecard__preview">{n.preview}</p>{/if}
-        {#if n.tags && n.tags.length}
-          <div class="notecard__tags">
-            {#each n.tags.slice(0, 4) as t (t)}<span class="chip">#{t}</span>{/each}
-            {#if n.tags.length > 4}<span class="chip chip--more" title={n.tags.join(" ")}>+{n.tags.length - 4}</span>{/if}
+{:else if layout === "timeline"}
+  <div class="timeline">
+    {#each timeline as month (month.key)}
+      <h2 class="notegroup tl__month">{month.label}<span class="notegroup__count">{month.entries.length}</span></h2>
+      <div class="tl__rail">
+        {#each month.entries as e (e.card.handle)}
+          <div class="tl__entry">
+            <span class="tl__dot" aria-hidden="true"></span>
+            <span class="tl__date">{e.date ? e.date.slice(5) : "—"}</span>
+            <a class="tl__title" href={e.card.url}
+              >{#if e.card.favorite}<span class="notecard__star" title="Favorite">★</span>{/if}{e.card.title}</a>
+            {#if e.card.folder}<span class="noterow__folder">{e.card.folder}/</span>{/if}
+            {#if e.card.tags && e.card.tags.length}
+              <span class="noterow__tags">
+                {#each e.card.tags.slice(0, 4) as t (t)}
+                  <button class="chip" class:chip--active={activeTags.includes(t)} onclick={(ev) => toggleTag(t, ev)}>#{t}</button>
+                {/each}
+              </span>
+            {/if}
           </div>
-        {/if}
-      </a>
+        {/each}
+      </div>
     {/each}
   </div>
+{:else}
+  {#each groups as g (g.key)}
+    {#if g.label}
+      <h2 class="notegroup">{g.label}<span class="notegroup__count">{g.cards.length}</span></h2>
+    {/if}
+    {#if layout === "list"}
+      <div class="notelist">
+        {#each g.cards as n (n.handle)}
+          <div class="noterow">
+            <a class="noterow__title" href={n.url}
+              >{#if n.favorite}<span class="notecard__star" title="Favorite">★</span>{/if}{n.title}</a>
+            {#if n.folder}<span class="noterow__folder">{n.folder}/</span>{/if}
+            {#if n.tags && n.tags.length}
+              <span class="noterow__tags">
+                {#each n.tags.slice(0, 5) as t (t)}
+                  <button class="chip" class:chip--active={activeTags.includes(t)} onclick={(e) => toggleTag(t, e)}>#{t}</button>
+                {/each}
+              </span>
+            {/if}
+            {#if n.updated}<span class="noterow__date">{n.updated}</span>{/if}
+          </div>
+        {/each}
+      </div>
+    {:else}
+      <div class="notegrid" class:notegrid--dense={layout === "compact"}>
+        {#each g.cards as n (n.handle)}
+          <div class="notecard">
+            <div class="notecard__top">
+              <a class="notecard__title notecard__link" href={n.url}
+                >{#if n.favorite}<span class="notecard__star" title="Favorite">★</span>{/if}{n.title}</a>
+              {#if n.updated}<span class="notecard__date">{n.updated}</span>{/if}
+            </div>
+            {#if n.folder}<span class="notecard__folder">{n.folder}/</span>{/if}
+            {#if layout === "cards" && n.preview}<p class="notecard__preview">{n.preview}</p>{/if}
+            {#if n.tags && n.tags.length}
+              <div class="notecard__tags">
+                {#each n.tags.slice(0, 4) as t (t)}
+                  <button class="chip" class:chip--active={activeTags.includes(t)} onclick={(e) => toggleTag(t, e)}>#{t}</button>
+                {/each}
+                {#if n.tags.length > 4}<span class="chip chip--more" title={n.tags.join(" ")}>+{n.tags.length - 4}</span>{/if}
+              </div>
+            {/if}
+          </div>
+        {/each}
+      </div>
+    {/if}
+  {/each}
 {/if}
 
 <style>
@@ -163,7 +471,74 @@
     gap: 8px;
     flex-wrap: wrap;
   }
-  /* Segmented density control + the orphans toggle, sharing one pill look. */
+  .notes-filterrow {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-top: 8px;
+  }
+  /* Quick text filter — mirrors the Tasks page's .qfilter look. */
+  .qfilter {
+    position: relative;
+    flex: 1 1 220px;
+    min-width: 200px;
+  }
+  .qfilter input {
+    width: 100%;
+    padding: 6px 28px 6px 12px;
+    font-size: 0.9rem;
+    background: var(--bg-inset);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    color: var(--fg);
+  }
+  .qfilter input:focus {
+    outline: none;
+    border-color: var(--accent);
+  }
+  .qfilter__clear {
+    position: absolute;
+    right: 6px;
+    top: 50%;
+    transform: translateY(-50%);
+    background: none;
+    border: none;
+    color: var(--muted);
+    cursor: pointer;
+    font-size: 1rem;
+    line-height: 1;
+    padding: 2px 6px;
+  }
+  .qfilter__clear:hover {
+    color: var(--fg);
+  }
+  .tagbar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+  .notes-clear {
+    background: none;
+    border: none;
+    color: var(--accent);
+    cursor: pointer;
+    font-size: 0.8rem;
+    padding: 4px 6px;
+  }
+  .notes-clear:hover {
+    text-decoration: underline;
+  }
+  .linklike {
+    background: none;
+    border: none;
+    color: var(--accent);
+    cursor: pointer;
+    font: inherit;
+    padding: 0;
+    text-decoration: underline;
+  }
+  /* Segmented controls + toggles share one pill look. */
   .seg {
     display: flex;
     border: 1px solid var(--border);
@@ -199,6 +574,64 @@
   .notes-toggle__count {
     opacity: 0.8;
   }
+  /* Sort key + direction toggle, joined into one pill. */
+  .sortwrap {
+    display: flex;
+    align-items: stretch;
+  }
+  .sortwrap .select {
+    border-top-right-radius: 0;
+    border-bottom-right-radius: 0;
+  }
+  .dirbtn {
+    border: 1px solid var(--border);
+    border-left: none;
+    border-top-right-radius: var(--radius-sm);
+    border-bottom-right-radius: var(--radius-sm);
+    background: var(--bg-inset);
+    color: var(--fg-soft);
+    cursor: pointer;
+    padding: 0 9px;
+    font-size: 0.85rem;
+  }
+  .dirbtn:hover {
+    color: var(--fg);
+  }
+  /* Group headers. */
+  .notegroup {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    margin: 20px 0 8px;
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--fg-soft);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+  .notegroup__count {
+    font-size: 0.75rem;
+    font-weight: 400;
+    color: var(--muted);
+  }
+  /* Interactive tag chips (the global .chip is borderless; reset button chrome). */
+  .chip {
+    border: none;
+    font-family: inherit;
+    cursor: pointer;
+    line-height: 1.5;
+  }
+  button.chip:hover {
+    background: var(--border);
+  }
+  .chip--active {
+    background: var(--accent);
+    color: #fff;
+  }
+  .chip--more {
+    cursor: default;
+  }
+  /* Card grid (unchanged from before, minus the anchor → div for stretched link). */
   .notegrid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
@@ -210,6 +643,7 @@
     gap: 8px;
   }
   .notecard {
+    position: relative;
     display: block;
     padding: 12px 14px;
     border: 1px solid var(--border);
@@ -222,7 +656,6 @@
   }
   .notecard:hover {
     border-color: var(--accent);
-    text-decoration: none;
     transform: translateY(-1px);
   }
   .notegrid--dense .notecard {
@@ -236,9 +669,18 @@
   }
   .notecard__title {
     font-weight: 600;
+    color: var(--fg);
+    text-decoration: none;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+  /* Stretched link: the title anchor covers the whole card so the card is
+     clickable, while tag buttons (z-indexed above) stay independently clickable. */
+  .notecard__link::after {
+    content: "";
+    position: absolute;
+    inset: 0;
   }
   .notecard__star {
     color: #f5b301;
@@ -251,6 +693,7 @@
     font-family: var(--font-mono);
   }
   .notecard__folder {
+    display: block;
     font-size: 0.72rem;
     color: var(--muted);
     font-family: var(--font-mono);
@@ -267,9 +710,117 @@
     overflow: hidden;
   }
   .notecard__tags {
+    position: relative;
+    z-index: 1;
     display: flex;
     flex-wrap: wrap;
     gap: 4px;
     margin-top: 8px;
+  }
+  /* List layout: dense one-line rows, scannable. */
+  .notelist {
+    margin-top: 14px;
+    border-top: 1px solid var(--border);
+  }
+  .noterow {
+    position: relative;
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    padding: 7px 10px;
+    border-bottom: 1px solid var(--border);
+  }
+  .noterow:hover {
+    background: var(--bg-inset);
+  }
+  .noterow__title {
+    flex: 1 1 auto;
+    font-weight: 600;
+    color: var(--fg);
+    text-decoration: none;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .noterow__title::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+  }
+  .noterow__folder {
+    flex: 0 0 auto;
+    font-size: 0.72rem;
+    color: var(--muted);
+    font-family: var(--font-mono);
+  }
+  .noterow__tags {
+    position: relative;
+    z-index: 1;
+    display: flex;
+    gap: 4px;
+    flex: 0 0 auto;
+    max-width: 40%;
+    overflow: hidden;
+  }
+  .noterow__date {
+    flex: 0 0 auto;
+    font-size: 0.7rem;
+    color: var(--muted);
+    font-family: var(--font-mono);
+  }
+  /* Timeline layout: a vertical rail with month sections and dated entries. */
+  .timeline {
+    margin-top: 4px;
+  }
+  .tl__month {
+    margin-top: 22px;
+  }
+  .tl__rail {
+    position: relative;
+    margin: 4px 0 0 8px;
+    padding-left: 18px;
+    border-left: 2px solid var(--border);
+  }
+  .tl__entry {
+    position: relative;
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    padding: 6px 8px;
+    border-radius: var(--radius-sm);
+  }
+  .tl__entry:hover {
+    background: var(--bg-inset);
+  }
+  .tl__dot {
+    position: absolute;
+    left: -21px;
+    top: 0.6em;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 0 0 3px var(--bg);
+  }
+  .tl__date {
+    flex: 0 0 auto;
+    min-width: 3.4em;
+    font-size: 0.7rem;
+    color: var(--muted);
+    font-family: var(--font-mono);
+  }
+  .tl__title {
+    flex: 1 1 auto;
+    font-weight: 600;
+    color: var(--fg);
+    text-decoration: none;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .tl__title::after {
+    content: "";
+    position: absolute;
+    inset: 0;
   }
 </style>

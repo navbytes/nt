@@ -265,6 +265,7 @@ export interface NoteCard {
   tags?: string[];
   preview?: string; // first lines of the body, plain text
   updated?: string; // YYYY-MM-DD (updated, else created)
+  created?: string; // YYYY-MM-DD created date (drives the Created sort)
   archived?: boolean; // retired; hidden unless the grid's "Archived" toggle is on
   favorite?: boolean; // starred; surfaced by the grid's "Favorites" filter
 }
