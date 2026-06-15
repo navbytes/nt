@@ -1,8 +1,9 @@
 <script lang="ts">
-  import { createQuery } from "@tanstack/svelte-query";
+  import { createQuery, useQueryClient } from "@tanstack/svelte-query";
   import { api } from "../lib/api";
   import type { NoteCard } from "../lib/api";
   import { loc, navigate } from "../lib/router.svelte";
+  import { showToast } from "../lib/toast.svelte";
   import Journal from "./Journal.svelte";
 
   // Daily (journal) is a view of Notes, selected by the /journal path. The grid
@@ -63,6 +64,44 @@
     orphansOnly = false;
     archivedOnly = false;
     favoritesOnly = false;
+  }
+
+  // Inline "New note" creation right on the grid — mirrors the sidebar's flow
+  // (an in-place field, not prompt(), which webviews don't support) and creates
+  // into the active folder filter so it lands where you're looking.
+  const qc = useQueryClient();
+  let newOpen = $state(false);
+  let newTitle = $state("");
+  let newInput: HTMLInputElement | undefined = $state();
+  let creating = $state(false);
+  function openNew(): void {
+    newOpen = true;
+    queueMicrotask(() => newInput?.focus());
+  }
+  async function submitNew(e: SubmitEvent): Promise<void> {
+    e.preventDefault();
+    const title = newTitle.trim();
+    if (!title || creating) return;
+    creating = true;
+    try {
+      const res = await api.noteCreate(title, folder); // folder "" = root
+      await qc.invalidateQueries({ queryKey: ["notesGrid"] });
+      await qc.invalidateQueries({ queryKey: ["notes"] });
+      newTitle = "";
+      newOpen = false;
+      navigate(res.url);
+    } catch (err) {
+      showToast(`Couldn't create the note: ${String(err)}`);
+    } finally {
+      creating = false;
+    }
+  }
+  function onNewKey(e: KeyboardEvent): void {
+    if (e.key === "Escape") {
+      e.preventDefault();
+      newOpen = false;
+      newTitle = "";
+    }
   }
 
   // Tag vocabulary (working set), for the "+ Tag" picker — sorted alphabetically.
@@ -237,6 +276,32 @@
       <button class:seg--on={!daily} onclick={() => navigate("/notes")}>All</button>
       <button class:seg--on={daily} onclick={() => navigate("/journal")}>Daily</button>
     </div>
+    {#if !daily}
+      {#if newOpen}
+        <form class="newnote" onsubmit={submitNew}>
+          <input
+            bind:this={newInput}
+            bind:value={newTitle}
+            onkeydown={onNewKey}
+            placeholder={folder ? `New note in ${folder}/…` : "New note title…"}
+            aria-label="New note title"
+            autocomplete="off"
+            disabled={creating}
+          />
+          <button type="submit" class="newnote__go" disabled={creating || !newTitle.trim()}>Create</button>
+          <button
+            type="button"
+            class="newnote__x"
+            onclick={() => {
+              newOpen = false;
+              newTitle = "";
+            }}
+            aria-label="Cancel">×</button>
+        </form>
+      {:else}
+        <button class="newnote__open" onclick={openNew}>＋ New note</button>
+      {/if}
+    {/if}
   </div>
 
   {#if !daily && $gridQ.data}
@@ -464,6 +529,65 @@
     display: flex;
     align-items: center;
     gap: 16px;
+  }
+  /* Primary "New note" action + its inline title field, pushed to the right. */
+  .newnote__open {
+    margin-left: auto;
+    padding: 5px 12px;
+    background: var(--accent);
+    color: #fff;
+    border: 1px solid var(--accent);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    font-size: 0.85rem;
+    font-weight: 600;
+  }
+  .newnote__open:hover {
+    filter: brightness(1.06);
+  }
+  .newnote {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .newnote input {
+    min-width: 220px;
+    padding: 5px 10px;
+    font-size: 0.85rem;
+    background: var(--bg-inset);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    color: var(--fg);
+  }
+  .newnote input:focus {
+    outline: none;
+    border-color: var(--accent);
+  }
+  .newnote__go {
+    padding: 5px 12px;
+    background: var(--accent);
+    color: #fff;
+    border: 1px solid var(--accent);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    font-size: 0.85rem;
+  }
+  .newnote__go:disabled {
+    opacity: 0.5;
+    cursor: default;
+  }
+  .newnote__x {
+    background: none;
+    border: none;
+    color: var(--muted);
+    cursor: pointer;
+    font-size: 1.1rem;
+    line-height: 1;
+    padding: 2px 6px;
+  }
+  .newnote__x:hover {
+    color: var(--fg);
   }
   .notes-controls {
     display: flex;
