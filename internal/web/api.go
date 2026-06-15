@@ -225,6 +225,7 @@ func (s *Server) apiNotesGrid(w http.ResponseWriter, r *http.Request) {
 			Tags:     n.Tags,
 			Preview:  notePreview(n.Body),
 			Updated:  dateOnly(updated),
+			Created:  dateOnly(n.Created),
 			Archived: n.Archived,
 			Favorite: n.Favorite,
 		})

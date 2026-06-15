@@ -230,6 +230,7 @@ type NoteCard struct {
 	Tags     []string `json:"tags,omitempty"`
 	Preview  string   `json:"preview,omitempty"`  // first lines of the body, plain text
 	Updated  string   `json:"updated,omitempty"`  // YYYY-MM-DD (updated, else created)
+	Created  string   `json:"created,omitempty"`  // YYYY-MM-DD created date (drives the Created sort)
 	Archived bool     `json:"archived,omitempty"` // retired; hidden unless the grid's "Archived" toggle is on
 	Favorite bool     `json:"favorite,omitempty"` // starred; surfaced by the grid's "Favorites" filter
 }
