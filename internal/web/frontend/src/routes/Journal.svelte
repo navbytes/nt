@@ -3,6 +3,7 @@
   import { api } from "../lib/api";
   import { loc, navigate } from "../lib/router.svelte";
   import NoteView from "./NoteView.svelte";
+  import Icon from "../lib/Icon.svelte";
 
   const qc = useQueryClient();
   const journalQ = createQuery({ queryKey: ["journal"], queryFn: api.journal });
@@ -59,12 +60,16 @@
 <div class="jrnl">
   <header class="jrnl__bar">
     <div class="jrnl__nav">
-      <button class="jrnl__step" aria-label="Previous day" onclick={() => go(addDays(active, -1))}>‹</button>
+      <button class="jrnl__step" aria-label="Previous day" onclick={() => go(addDays(active, -1))}
+        ><Icon name="chevron-left" size={16} /></button
+      >
       <h1 class="jrnl__date">
         {pretty(active)}
         {#if isToday}<span class="jrnl__today">today</span>{/if}
       </h1>
-      <button class="jrnl__step" aria-label="Next day" onclick={() => go(addDays(active, 1))}>›</button>
+      <button class="jrnl__step" aria-label="Next day" onclick={() => go(addDays(active, 1))}
+        ><Icon name="chevron-right" size={16} /></button
+      >
     </div>
     {#if !isToday && $journalQ.data}
       <button class="jrnl__jump" onclick={() => go($journalQ.data.today)}>Jump to today</button>
@@ -115,7 +120,8 @@
   }
   .jrnl__date {
     margin: 0;
-    font-size: 1.4rem;
+    font-size: var(--text-title1);
+    letter-spacing: var(--tracking-title);
   }
   .jrnl__today {
     font-size: 0.6em;
@@ -129,18 +135,30 @@
     margin-left: 8px;
   }
   .jrnl__step {
-    background: var(--bg-inset);
-    border: 1px solid var(--border);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 30px;
+    min-height: 28px;
+    background: var(--fill);
+    border: 0.5px solid var(--separator-strong);
     border-radius: var(--radius-sm);
     color: var(--fg-soft);
     cursor: pointer;
-    font-size: 1.1rem;
     line-height: 1;
-    padding: 4px 12px;
+    padding: 4px 10px;
+    transition:
+      background var(--motion-fast) var(--ease),
+      color var(--motion-fast) var(--ease),
+      border-color var(--motion-fast) var(--ease);
   }
   .jrnl__step:hover {
-    color: var(--accent);
-    border-color: var(--accent);
+    background: var(--fill-strong);
+    color: var(--fg);
+    border-color: color-mix(in srgb, var(--separator-strong) 60%, var(--fg-soft));
+  }
+  .jrnl__step:active {
+    transform: scale(0.96);
   }
   .jrnl__jump {
     background: transparent;
@@ -156,7 +174,7 @@
   }
   .jrnl__recent {
     margin-top: 36px;
-    border-top: 1px solid var(--border-soft);
+    border-top: 0.5px solid var(--separator);
     padding-top: 16px;
   }
   .jrnl__recent-head {
@@ -183,6 +201,7 @@
     color: var(--fg-soft);
   }
   .jrnl__recent a.active {
+    background: var(--accent-tint);
     color: var(--accent);
     font-weight: 600;
   }

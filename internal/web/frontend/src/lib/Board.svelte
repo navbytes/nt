@@ -3,6 +3,7 @@
   import { api, type TaskGroup, type Task } from "./api";
   import { showToast } from "./toast.svelte";
   import { displayTitle } from "./text";
+  import Icon from "./Icon.svelte";
 
   const qc = useQueryClient();
   const tasksQ = createQuery({ queryKey: ["tasks"], queryFn: api.tasks });
@@ -52,15 +53,21 @@
   let dragFrom = $state("");
   let overCol = $state("");
 
+  // The one place a card actually changes column. Done is the *action*
+  // (Complete handles recurrence); every other column is a plain status write
+  // that the API also un-dones if needed. Both the drag-drop and the keyboard
+  // "Move to…" select funnel through here so they stay in lockstep.
+  function moveTo(id: string, from: string, target: string) {
+    if (!id || from === target) return;
+    if (target === "done") $doneMut.mutate(id);
+    else $statusMut.mutate({ id, status: target });
+  }
+
   function drop(target: string) {
     const id = dragId,
       from = dragFrom;
     dragId = dragFrom = overCol = "";
-    if (!id || from === target) return;
-    // Done is the *action* (Complete handles recurrence); every other column is
-    // a plain status write that the API also un-dones if needed.
-    if (target === "done") $doneMut.mutate(id);
-    else $statusMut.mutate({ id, status: target });
+    moveTo(id, from, target);
   }
 
   const dateOf = (due?: string) => (due ? due.slice(0, 10) : "");
@@ -112,19 +119,37 @@
               <span class="bcard__title">{t.text}</span>
             </div>
             <div class="bcard__meta">
-              {#if t.recur}<span class="row__recur" title="Recurring task">↻</span>{/if}
+              {#if t.recur}<span class="row__recur" title="Recurring task" aria-label="Recurring task">↻</span>{/if}
               {#if t.project}<a class="chip" href={`/search?tag=${encodeURIComponent(t.project)}`}>+{t.project}</a>{/if}
               {#each (t.tags ?? []).slice(0, 3) as tag (tag)}<a class="chip chip--tag" href={`/search?tag=${encodeURIComponent(tag)}`}>@{tag}</a>{/each}
               {#if (t.tags?.length ?? 0) > 3}<span class="chip chip--more">+{(t.tags?.length ?? 0) - 3}</span>{/if}
               {#if t.due}<span class="row__due" class:row__due--over={dateOf(t.due) < todayISO() && col.key !== "done"}>{fmtDue(t.due)}</span>{/if}
             </div>
             <div class="bcard__actions">
-              {#if col.key !== "done"}<button class="rowbtn" title="Mark done" aria-label="Mark done" onclick={() => $doneMut.mutate(t.id)}>✓</button>{/if}
+              <!-- Full-Keyboard-Access move: the board's only way to change a
+                   card's column without a mouse drag. Funnels through moveTo()
+                   (same as ondrop); resets so it always reads "Move to…". -->
+              <select
+                class="bcard__move"
+                aria-label="Move task to column"
+                title="Move to…"
+                onchange={(e) => {
+                  const target = e.currentTarget.value;
+                  e.currentTarget.value = "";
+                  moveTo(t.id, col.key, target);
+                }}
+              >
+                <option value="" disabled selected>Move to…</option>
+                {#each COLUMNS as c (c.key)}
+                  {#if c.key !== col.key}<option value={c.key}>{c.label}</option>{/if}
+                {/each}
+              </select>
+              {#if col.key !== "done"}<button class="rowbtn" title="Mark done" aria-label="Mark done" onclick={() => $doneMut.mutate(t.id)}><Icon name="check" size={14} /></button>{/if}
               <button
                 class="rowbtn rowbtn--danger"
                 title="Delete (undoable)"
                 aria-label="Delete task"
-                onclick={() => del(t)}>×</button>
+                onclick={() => del(t)}><Icon name="close" size={14} /></button>
             </div>
           </article>
         {/each}
@@ -149,23 +174,27 @@
   }
   .bcol {
     background: var(--bg-inset);
-    border: 1px solid transparent;
+    border: 0.5px solid transparent;
     border-radius: var(--radius);
     padding: 8px;
     min-width: 0;
+    transition:
+      border-color var(--motion-fast) var(--ease),
+      background var(--motion-fast) var(--ease);
   }
   .bcol--over {
-    border-color: var(--accent);
+    border-color: var(--accent-color);
     border-style: dashed;
+    background: var(--accent-tint);
   }
   .bcol--done {
     opacity: 0.72;
   }
   .bcol__head {
-    font-size: 0.78rem;
+    font-size: var(--text-subhead);
     font-weight: 600;
     text-transform: uppercase;
-    letter-spacing: 0.04em;
+    letter-spacing: var(--tracking-caps);
     color: var(--fg-soft);
     margin: 2px 4px 8px;
     display: flex;
@@ -175,7 +204,7 @@
   .bcol__count {
     color: var(--muted);
     font-family: var(--font-mono);
-    font-size: 0.72rem;
+    font-size: var(--text-footnote);
   }
   .bcol__cards {
     display: flex;
@@ -185,55 +214,74 @@
   }
   .bcol__empty {
     color: var(--muted);
-    font-size: 0.75rem;
+    font-size: var(--text-callout);
     text-align: center;
     padding: 12px 0;
-    border: 1px dashed var(--border);
+    border: 0.5px dashed var(--separator-strong);
     border-radius: var(--radius-sm);
     margin: 0;
   }
   .bcard {
-    background: var(--bg-elev);
-    border: 1px solid var(--border);
-    border-left: 3px solid var(--border);
-    border-radius: var(--radius-sm);
+    background: var(--bg-elevated);
+    border: 0.5px solid var(--separator);
+    border-left: 3px solid var(--separator-strong);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-card);
     padding: 8px 10px;
     cursor: grab;
+    transition:
+      background var(--motion-fast) var(--ease),
+      border-color var(--motion-fast) var(--ease),
+      box-shadow var(--motion-fast) var(--ease);
+  }
+  /* Hover stays quiet — a faint fill tint + brighter hairline, no lift/translate
+     (cards don't move under the cursor; the drag handle is the whole card). */
+  .bcard:hover {
+    background: var(--fill-hover);
+    border-color: var(--separator-strong);
   }
   .bcard--dragging {
     opacity: 0.4;
   }
-  /* Priority color cue, derived from the task's (A..Z) priority — no storage. */
+  /* Priority color cue, derived from the task's (A..Z) priority — no storage.
+     Shares the theme-tuned --pri-* bands with the task rows so A/B/C read
+     identically across the list and the board. */
   .bcard.pri-A {
-    border-left-color: var(--red);
+    border-left-color: var(--pri-a);
   }
   .bcard.pri-B {
-    border-left-color: #d9892b;
+    border-left-color: var(--pri-b);
   }
   .bcard.pri-C {
-    border-left-color: var(--accent-2);
+    border-left-color: var(--pri-c);
   }
   .bcard__top {
     display: flex;
     gap: 6px;
     align-items: baseline;
   }
+  /* Priority letter — the same filled, theme-tuned --pri-* pill the task rows
+     use, so A/B/C read identically board-wide (A no longer diverges to plain
+     red). Letter + shape carry urgency, never colour alone. */
   .bcard__pri {
     flex: none;
     font-family: var(--font-mono);
-    font-size: 0.68rem;
+    font-size: var(--text-footnote);
     font-weight: 700;
-    color: var(--red);
-    border: 1px solid currentColor;
-    border-radius: 3px;
-    padding: 0 3px;
-    line-height: 1.3;
+    color: var(--pri-fg);
+    background: var(--muted);
+    border-radius: var(--radius-xs);
+    padding: 0 4px;
+    line-height: 1.4;
+  }
+  .pri-A .bcard__pri {
+    background: var(--pri-a);
   }
   .pri-B .bcard__pri {
-    color: #d9892b;
+    background: var(--pri-b);
   }
   .pri-C .bcard__pri {
-    color: var(--accent-2);
+    background: var(--pri-c);
   }
   .bcard__title {
     min-width: 0;
@@ -254,13 +302,72 @@
   }
   .bcard__actions {
     display: flex;
+    align-items: center;
     gap: 4px;
     justify-content: flex-end;
     margin-top: 6px;
     opacity: 0;
-    transition: opacity 0.1s;
+    transition: opacity var(--motion-fast) var(--ease);
   }
   .bcard:hover .bcard__actions {
     opacity: 1;
+  }
+  /* Keep the actions reachable (and the focus halo visible) for keyboard users,
+     who never trigger :hover — reveal whenever anything inside gets focus. */
+  .bcard__actions:focus-within {
+    opacity: 1;
+  }
+  /* Quiet keyboard "Move to…" select — sized like the icon buttons, pushed to
+     the left of the row so the destructive actions stay at the trailing edge. */
+  .bcard__move {
+    margin-right: auto;
+    max-width: 96px;
+    font: inherit;
+    font-size: var(--text-footnote);
+    padding: 2px 4px;
+    color: var(--muted);
+    background: var(--fill);
+    border: 0.5px solid var(--separator);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    transition:
+      background var(--motion-fast) var(--ease),
+      color var(--motion-fast) var(--ease),
+      border-color var(--motion-fast) var(--ease);
+  }
+  .bcard__move:hover {
+    color: var(--fg);
+    border-color: var(--separator-strong);
+  }
+  /* Icon action buttons — local copy of the task-row primitive: a ≥28px macOS
+     hit target with fill-based hover/press; the global :focus-visible halo
+     (app.css) handles keyboard focus, so no bare outline reset here. */
+  .rowbtn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 28px;
+    min-height: 28px;
+    background: none;
+    border: 0.5px solid transparent;
+    border-radius: var(--radius-sm);
+    color: var(--muted);
+    cursor: pointer;
+    padding: 0 6px;
+    transition:
+      background var(--motion-fast) var(--ease),
+      color var(--motion-fast) var(--ease),
+      transform var(--motion-fast) var(--ease);
+  }
+  .rowbtn:hover {
+    background: var(--fill-hover);
+    color: var(--fg);
+  }
+  .rowbtn:active {
+    background: var(--fill-active);
+    transform: scale(0.96);
+  }
+  .rowbtn--danger:hover {
+    color: var(--red);
   }
 </style>

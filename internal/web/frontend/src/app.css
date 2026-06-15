@@ -1,75 +1,271 @@
-/* Design tokens ported from the v1 stylesheet (Tokyo Night). The full design
-   system migrates as components land; this covers the Phase 3 shell + routes. */
+/* =====================================================================
+   nt design system — macOS-native (Apple-neutral surfaces + system blue).
+   Defines surfaces, an Apple labelColor hierarchy, control fills, hairline
+   separators, an AA-tuned system-blue accent, an SF type ramp, an 8pt
+   spacing scale, continuous-radius + layered-shadow tokens, a motion
+   system, and a keyboard focus halo. The legacy token names (--bg, --fg,
+   --muted, --border, --accent, …) are kept as aliases at the end of :root,
+   so every existing component re-skins to this system unchanged. Light is
+   the base; dark overrides the raw tokens (aliases resolve dynamically).
+   ===================================================================== */
 :root {
-  --bg: #faf8f3;
-  --bg-elev: #fff;
-  --bg-inset: #efece4;
-  --fg: #2b2a26;
-  --fg-soft: #4a4843;
-  --muted: #6e6a61; /* darkened for WCAG AA (≥4.5:1 on --bg); was #87837a (~3.5:1) */
-  --border: #e2ddd2;
-  --border-soft: #ece8df;
-  --accent: #5a52d6;
-  --accent-2: #1f7a8c;
-  --green: #4a7c3a;
-  --red: #b3472f;
-  /* task priority bands — deep enough that white chip text clears WCAG AA;
-     A reuses the warning red so red stays reserved for "most urgent". */
+  color-scheme: light;
+
+  /* ---- surfaces ---- */
+  --bg-window: #ececec; /* behind native window vibrancy / fallback */
+  --bg-content: #ffffff; /* opaque detail pane */
+  --bg-elevated: #ffffff; /* cards, popovers, menus */
+  --bg-topbar: rgba(246, 246, 248, 0.72); /* translucent toolbar */
+  --bg-sidebar: rgba(245, 245, 247, 0.6); /* translucent sidebar (reveals vibrancy) */
+
+  /* ---- fills (control backgrounds) ---- */
+  --fill: #f0f0f3; /* solid control fill (inputs, chips) */
+  --fill-strong: #e6e6eb;
+  --fill-hover: rgba(0, 0, 0, 0.05);
+  --fill-active: rgba(0, 0, 0, 0.09);
+
+  /* ---- label hierarchy (primary/secondary/tertiary all AA on white + fill) ---- */
+  --label-primary: #1d1d1f; /* ~16:1 */
+  --label-secondary: #424245; /* ~9:1 */
+  --label-tertiary: #6e6e73; /* ~5.0:1 — lightest text that still clears AA */
+  --label-quaternary: #aeaeb2; /* decorative / disabled only (sub-AA) */
+
+  /* ---- hairline separators ---- */
+  --separator: rgba(0, 0, 0, 0.1);
+  --separator-strong: rgba(0, 0, 0, 0.16);
+
+  /* ---- accent (system blue, AA-tuned: white-on-fill and accent-on-white both ≥5:1) ---- */
+  --accent-color: #0066e0; /* text / links / selection / icons */
+  --accent-fill: #0066e0; /* solid button background (white text 5.2:1) */
+  --accent-hover: #0058c4;
+  --accent-active: #004fb0;
+  --on-accent: #ffffff;
+  --accent-tint: rgba(0, 102, 224, 0.12); /* selection wells */
+  --accent-tint-strong: rgba(0, 102, 224, 0.16);
+  --teal: #176574; /* secondary accent (due dates) — 6.2:1 */
+
+  /* signature gradients — vibrant, modern energy. --grad-accent is button-safe
+     (white text clears AA at both stops); --grad-vivid is brighter, for
+     decorative moments (progress, brand, aurora) where no text sits on top. */
+  --grad-accent: linear-gradient(135deg, #0a6fe6 0%, #6f43e0 100%);
+  --grad-vivid: linear-gradient(135deg, #1aa0ff 0%, #6f5bf5 52%, #b15bf0 100%);
+  --aurora-1: rgba(10, 132, 255, 0.1);
+  --aurora-2: rgba(138, 92, 246, 0.09);
+
+  /* ---- status ---- */
+  --green-color: #1e7d34;
+  --red-color: #d70015;
+
+  /* ---- task priority bands (kept — already WCAG-tuned) ---- */
   --pri-a: #b3472f;
   --pri-b: #a8620a;
   --pri-c: #3b6fb0;
   --pri-fg: #fff;
-  --radius: 8px;
-  --radius-sm: 5px;
-  --sidebar-w: 260px;
-  --font-ui: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+
+  /* ---- focus halo + scrim ---- */
+  --focus-ring: 0 0 0 3.5px rgba(0, 102, 224, 0.4);
+  --focus-ring-tight: 0 0 0 2px rgba(0, 102, 224, 0.45);
+  --scrim: rgba(0, 0, 0, 0.18);
+
+  /* ---- radii (continuous-corner feel) ---- */
+  --radius-xs: 5px;
+  --radius-sm: 7px;
+  --radius-md: 10px;
+  --radius-lg: 13px;
+  --radius-popover: 16px;
+  --radius-sheet: 20px;
+
+  /* ---- shadows (subtle, layered) ---- */
+  --shadow-control: 0 0.5px 1px rgba(0, 0, 0, 0.06), 0 1px 1px rgba(0, 0, 0, 0.04);
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.05), 0 0 0 0.5px rgba(0, 0, 0, 0.04);
+  --shadow-popover: 0 0 0 0.5px rgba(0, 0, 0, 0.08), 0 12px 32px -8px rgba(0, 0, 0, 0.22),
+    0 4px 10px -4px rgba(0, 0, 0, 0.12);
+
+  /* ---- spacing (8pt) ---- */
+  --space-1: 2px;
+  --space-2: 4px;
+  --space-3: 8px;
+  --space-4: 12px;
+  --space-5: 16px;
+  --space-6: 20px;
+  --space-7: 24px;
+  --space-8: 32px;
+  --space-9: 40px;
+  --space-10: 48px;
+
+  /* ---- type (SF ramp; 13px UI / 15px prose) ---- */
+  --font-ui: -apple-system, BlinkMacSystemFont, system-ui, "Segoe UI", Roboto, Helvetica, Arial,
+    sans-serif;
   --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
-  /* graph canvas (Graph.svelte reads these via getComputedStyle on theme change) */
-  --graph-bg-edge: rgba(58, 52, 40, 0.07); /* vignette: faint warm corner darkening */
-  --graph-glow-alpha: 0.3; /* node halo strength — soft colored drop-shadow on light */
-  --graph-glow-blur: 6; /* halo softness knob */
+  /* Apple's New York serif (native — ships with macOS, reached via ui-serif).
+     Used for large titles + editorial prose headings: an editorial, literary
+     voice for a notes tool, with zero web-font dependency. */
+  --font-serif: "New York", ui-serif, "Iowan Old Style", Palatino, Georgia, serif;
+  --text-largetitle: 1.625rem; /* 26 */
+  --text-title1: 1.375rem; /* 22 */
+  --text-title2: 1.0625rem; /* 17 */
+  --text-headline: 0.8125rem; /* 13 / 600 */
+  --text-body: 0.8125rem; /* 13 UI */
+  --text-prose: 0.9375rem; /* 15 reading */
+  --text-callout: 0.75rem; /* 12 */
+  --text-subhead: 0.6875rem; /* 11 */
+  --text-footnote: 0.625rem; /* 10 */
+  --leading-tight: 1.25;
+  --leading-ui: 1.45;
+  --leading-prose: 1.65;
+  --tracking-largetitle: -0.022em;
+  --tracking-title: -0.016em;
+  --tracking-body: -0.006em;
+  --tracking-caps: 0.06em;
+
+  /* ---- motion ---- */
+  --motion-fast: 120ms;
+  --motion: 200ms;
+  --motion-slow: 320ms;
+  --ease: cubic-bezier(0.4, 0, 0.2, 1); /* macOS ease-in-out */
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1); /* decelerate — entrances */
+  --ease-spring: cubic-bezier(0.34, 1.4, 0.64, 1); /* subtle overshoot — press, check */
+
+  /* ---- layout ---- */
+  --sidebar-w: 240px;
+  --titlebar-h: 52px; /* traffic-light safe zone (hidden-inset titlebar) */
+
+  /* ---- graph canvas (Graph.svelte reads these via getComputedStyle on theme change) ---- */
+  --graph-bg-edge: rgba(0, 0, 0, 0.06);
+  --graph-glow-alpha: 0.3;
+  --graph-glow-blur: 6;
+
+  /* ===== legacy aliases — existing components keep working, re-skinned ===== */
+  --bg: var(--bg-content);
+  --bg-elev: var(--bg-elevated);
+  --bg-inset: var(--fill);
+  --fg: var(--label-primary);
+  --fg-soft: var(--label-secondary);
+  --muted: var(--label-tertiary);
+  --border: var(--separator-strong);
+  --border-soft: var(--separator);
+  --accent: var(--accent-color);
+  --accent-2: var(--teal);
+  --green: var(--green-color);
+  --red: var(--red-color);
+  --radius: var(--radius-md);
 }
+
+/* Dark: override the raw tokens only — the legacy aliases above resolve to
+   these automatically since CSS custom properties are evaluated lazily. */
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
-    --bg: #16161e;
-    --bg-elev: #1a1b26;
-    --bg-inset: #1f2335;
-    --fg: #c0caf5;
-    --fg-soft: #a9b1d6;
-    --muted: #7882a6;
-    --border: #2a2b3c;
-    --border-soft: #232431;
-    --accent: #7aa2f7;
-    --accent-2: #7dcfff;
-    --green: #9ece6a;
-    --red: #f7768e;
-    /* on dark, Tokyo Night brights carry the band and dark chip text clears AA */
+    color-scheme: dark;
+
+    /* Dark elevation ramp — window (sidebar/topbar vibrancy) sits darkest, the
+       content pane steps up so it separates from the chrome, cards/popovers
+       step up again. Without this spread everything reads as one flat black. */
+    --bg-window: #161618;
+    --bg-content: #202024;
+    --bg-elevated: #2c2c31;
+    --bg-topbar: rgba(26, 26, 30, 0.72);
+    --bg-sidebar: rgba(26, 26, 30, 0.62);
+
+    --fill: #2c2c30;
+    --fill-strong: #3a3a3f;
+    --fill-hover: rgba(255, 255, 255, 0.07);
+    --fill-active: rgba(255, 255, 255, 0.12);
+
+    --label-primary: #f5f5f7;
+    --label-secondary: #c7c7cc;
+    --label-tertiary: #9a9aa0; /* ~5.3:1 on content */
+    --label-quaternary: #6c6c70;
+
+    --separator: rgba(255, 255, 255, 0.11);
+    --separator-strong: rgba(255, 255, 255, 0.17);
+
+    --accent-color: #339dff; /* legible on dark — ~5.4:1 */
+    --accent-fill: #0a6fe0; /* white text 4.7:1 */
+    --accent-hover: #1e7fe6;
+    --accent-active: #0a6fe0;
+    --on-accent: #ffffff;
+    --accent-tint: rgba(51, 157, 255, 0.18);
+    --accent-tint-strong: rgba(51, 157, 255, 0.26);
+    --teal: #64d2ff;
+    --aurora-1: rgba(40, 150, 255, 0.16);
+    --aurora-2: rgba(150, 108, 255, 0.14);
+
+    --green-color: #30d158;
+    --red-color: #ff453a;
+
     --pri-a: #f7768e;
     --pri-b: #e0af68;
     --pri-c: #7aa2f7;
     --pri-fg: #16161e;
-    --graph-bg-edge: rgba(0, 0, 0, 0.5); /* deeper vignette for "cosmos" depth */
-    --graph-glow-alpha: 0.6; /* additive glow reads brighter on dark */
+
+    --focus-ring: 0 0 0 3.5px rgba(51, 157, 255, 0.5);
+    --focus-ring-tight: 0 0 0 2px rgba(51, 157, 255, 0.55);
+    --scrim: rgba(0, 0, 0, 0.5);
+
+    --shadow-control: 0 0.5px 1px rgba(0, 0, 0, 0.4);
+    --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.4), 0 0 0 0.5px rgba(0, 0, 0, 0.5),
+      inset 0 0.5px 0 rgba(255, 255, 255, 0.06);
+    --shadow-popover: 0 0 0 0.5px rgba(0, 0, 0, 0.6), 0 16px 40px -8px rgba(0, 0, 0, 0.6),
+      0 4px 12px -4px rgba(0, 0, 0, 0.45), inset 0 0.5px 0 rgba(255, 255, 255, 0.08);
+
+    --graph-bg-edge: rgba(0, 0, 0, 0.5);
+    --graph-glow-alpha: 0.6;
     --graph-glow-blur: 10;
   }
 }
+
+/* Explicit dark (theme toggle writes data-theme="dark") — mirrors the @media. */
 [data-theme="dark"] {
-  --bg: #16161e;
-  --bg-elev: #1a1b26;
-  --bg-inset: #1f2335;
-  --fg: #c0caf5;
-  --fg-soft: #a9b1d6;
-  --muted: #7882a6;
-  --border: #2a2b3c;
-  --border-soft: #232431;
-  --accent: #7aa2f7;
-  --accent-2: #7dcfff;
-  --green: #9ece6a;
-  --red: #f7768e;
+  color-scheme: dark;
+
+  --bg-window: #161618;
+  --bg-content: #202024;
+  --bg-elevated: #2c2c31;
+  --bg-topbar: rgba(26, 26, 30, 0.72);
+  --bg-sidebar: rgba(26, 26, 30, 0.62);
+
+  --fill: #2c2c30;
+  --fill-strong: #3a3a3f;
+  --fill-hover: rgba(255, 255, 255, 0.07);
+  --fill-active: rgba(255, 255, 255, 0.12);
+
+  --label-primary: #f5f5f7;
+  --label-secondary: #c7c7cc;
+  --label-tertiary: #9a9aa0;
+  --label-quaternary: #6c6c70;
+
+  --separator: rgba(255, 255, 255, 0.11);
+  --separator-strong: rgba(255, 255, 255, 0.17);
+
+  --accent-color: #339dff;
+  --accent-fill: #0a6fe0;
+  --accent-hover: #1e7fe6;
+  --accent-active: #0a6fe0;
+  --on-accent: #ffffff;
+  --accent-tint: rgba(51, 157, 255, 0.18);
+  --accent-tint-strong: rgba(51, 157, 255, 0.26);
+  --teal: #64d2ff;
+  --aurora-1: rgba(40, 150, 255, 0.16);
+  --aurora-2: rgba(150, 108, 255, 0.14);
+
+  --green-color: #30d158;
+  --red-color: #ff453a;
+
   --pri-a: #f7768e;
   --pri-b: #e0af68;
   --pri-c: #7aa2f7;
   --pri-fg: #16161e;
+
+  --focus-ring: 0 0 0 3.5px rgba(51, 157, 255, 0.5);
+  --focus-ring-tight: 0 0 0 2px rgba(51, 157, 255, 0.55);
+  --scrim: rgba(0, 0, 0, 0.5);
+
+  --shadow-control: 0 0.5px 1px rgba(0, 0, 0, 0.4);
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.4), 0 0 0 0.5px rgba(0, 0, 0, 0.5),
+    inset 0 0.5px 0 rgba(255, 255, 255, 0.06);
+  --shadow-popover: 0 0 0 0.5px rgba(0, 0, 0, 0.6), 0 16px 40px -8px rgba(0, 0, 0, 0.6),
+    0 4px 12px -4px rgba(0, 0, 0, 0.45), inset 0 0.5px 0 rgba(255, 255, 255, 0.08);
+
   --graph-bg-edge: rgba(0, 0, 0, 0.5);
   --graph-glow-alpha: 0.6;
   --graph-glow-blur: 10;
@@ -78,13 +274,58 @@
 * {
   box-sizing: border-box;
 }
+/* Transparent page surface lets the native macOS window vibrancy show through
+   (Wails WindowIsTranslucent + WebviewIsTransparent). The content pane paints
+   its own opaque layer; the sidebar/topbar stay translucent. In a plain
+   browser this falls back to the system canvas — still coherent per theme. */
+html,
+body {
+  background: transparent;
+}
 body {
   margin: 0;
-  background: var(--bg);
   color: var(--fg);
   font-family: var(--font-ui);
-  font-size: 15px;
-  line-height: 1.6;
+  font-size: var(--text-body);
+  line-height: var(--leading-ui);
+  letter-spacing: var(--tracking-body);
+  -webkit-font-smoothing: antialiased; /* matches AppKit text rendering on Retina */
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  font-feature-settings: "kern", "liga", "calt";
+}
+
+/* Global keyboard-focus halo. Fires only on keyboard navigation (:focus-visible,
+   fully supported in WKWebView) — never on mouse click, matching AppKit. Uses
+   box-shadow (not outline) so it hugs the border-radius and layers with borders. */
+:where(a, button, input, textarea, select, [tabindex], [role="button"], [role="option"],
+  [role="menuitem"], [role="checkbox"], [role="tab"]):focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+  border-color: var(--accent-color);
+}
+/* Kill any legacy default outline that slips through on mouse focus. */
+:focus:not(:focus-visible) {
+  outline: none;
+}
+/* Themed placeholders (the UA default is low-contrast and un-themed). */
+input::placeholder,
+textarea::placeholder {
+  color: var(--muted);
+  opacity: 1;
+}
+
+/* Faint film-grain overlay — adds tactile, editorial depth to the otherwise
+   flat surfaces without tinting them. Deliberately barely-there; a static
+   texture (no motion), so reduced-motion is unaffected. */
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  pointer-events: none;
+  opacity: var(--grain, 0.025);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
 }
 a {
   color: var(--accent);
@@ -94,15 +335,33 @@ a:hover {
   text-decoration: underline;
 }
 h1 {
-  font-size: 1.6rem;
-  margin: 0 0 16px;
+  font-family: var(--font-serif);
+  font-size: var(--text-largetitle);
+  line-height: var(--leading-tight);
+  letter-spacing: -0.012em; /* New York wants a gentler optical tightening than SF */
+  font-weight: 600;
+  margin: 0 0 var(--space-4);
+  animation: title-in var(--motion-slow) var(--ease-out) both;
+}
+/* A gentle editorial entrance for the page title on each view (reduced-motion
+   neutralizes it via the global rule). */
+@keyframes title-in {
+  from {
+    opacity: 0;
+    transform: translateY(5px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
 }
 code {
   font-family: var(--font-mono);
   font-size: 0.9em;
   background: var(--bg-inset);
   padding: 1px 5px;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
+  font-variant-numeric: tabular-nums;
 }
 .muted {
   color: var(--muted);
@@ -129,11 +388,12 @@ code {
   left: 8px;
   top: -64px;
   z-index: 100;
-  background: var(--accent);
-  color: #fff;
+  background: var(--accent-fill);
+  color: var(--on-accent);
   padding: 8px 14px;
   border-radius: var(--radius-sm);
-  transition: top 0.15s ease;
+  box-shadow: var(--shadow-popover);
+  transition: top var(--motion-fast) var(--ease);
 }
 .skip-link:focus {
   top: 8px;
@@ -151,12 +411,41 @@ code {
     scroll-behavior: auto !important;
   }
 }
+
+/* macOS "Increase Contrast" (System Settings › Accessibility › Display):
+   strengthen separators + label tiers, thicken the focus halo, and add an
+   explicit border to selections that otherwise rely on a background tint. */
+@media (prefers-contrast: more) {
+  :root {
+    --separator: rgba(0, 0, 0, 0.3);
+    --separator-strong: rgba(0, 0, 0, 0.45);
+    --label-secondary: #2b2a26;
+    --label-tertiary: #56524a;
+  }
+  :where(a, button, input, select, textarea, [tabindex]):focus-visible {
+    box-shadow: var(--focus-ring), 0 0 0 1px var(--accent-color);
+  }
+  .nav__link.active,
+  .tree__note.active,
+  .tree__toggle.active {
+    outline: 1px solid currentColor;
+    outline-offset: -1px;
+  }
+}
+@media (prefers-contrast: more) and (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --separator: rgba(255, 255, 255, 0.32);
+    --separator-strong: rgba(255, 255, 255, 0.5);
+    --label-secondary: #f0f0f5;
+    --label-tertiary: #c2c2c8;
+  }
+}
 .sidebar {
   width: var(--sidebar-w);
   flex: 0 0 var(--sidebar-w);
-  border-right: 1px solid var(--border-soft);
-  background: var(--bg-elev);
-  padding: 16px 12px;
+  border-right: 0.5px solid var(--separator);
+  background: var(--bg-sidebar); /* translucent — reveals native window vibrancy */
+  padding: var(--space-5) var(--space-3);
   position: sticky;
   top: 0;
   height: 100vh;
@@ -176,14 +465,22 @@ body.resizing {
 .content {
   flex: 1;
   min-width: 0;
+  /* opaque detail pane + a soft aurora wash (modern, "alive") — the glows pool
+     in the top-right and bottom-left; kept low-opacity so text stays crisp. */
+  background:
+    radial-gradient(72% 60% at 92% -10%, var(--aurora-1), transparent 60%),
+    radial-gradient(62% 55% at -10% 110%, var(--aurora-2), transparent 60%),
+    var(--bg-content);
 }
 .topbar {
   display: flex;
   align-items: center;
-  gap: 14px;
-  padding: 10px 24px;
-  border-bottom: 1px solid var(--border-soft);
-  background: var(--bg-elev);
+  gap: var(--space-4);
+  padding: var(--space-3) var(--space-5);
+  border-bottom: 0.5px solid var(--separator);
+  background: var(--bg-topbar); /* translucent toolbar material */
+  -webkit-backdrop-filter: saturate(180%) blur(20px);
+  backdrop-filter: saturate(180%) blur(20px);
   position: sticky;
   top: 0;
   z-index: 5;
@@ -191,27 +488,50 @@ body.resizing {
 .topbar__search {
   flex: 0 1 320px;
 }
+/* Visual styling lives in SearchBox.svelte (.sbox input) so the NSSearchField
+   treatment stays in one place; this only governs layout width. */
 .topbar__search input {
   width: 100%;
-  font: inherit;
-  font-size: 14px;
-  padding: 6px 12px;
-  background: var(--bg-inset);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  color: var(--fg);
 }
 .main {
   width: 100%;
-  padding: 28px 36px 64px;
+  padding: var(--space-7) var(--space-8) var(--space-10);
+}
+
+/* ---- native desktop window chrome (Wails sets [data-desktop] on <html>) ----
+   Only in the macOS app do the traffic lights overlay the content (FullSize
+   content view), so the inset + window-drag regions are gated to desktop and
+   never waste space in the browser build. */
+[data-desktop] .sidebar {
+  padding-top: calc(var(--titlebar-h) + var(--space-1));
+  -webkit-app-region: drag; /* drag the window by empty sidebar areas */
+}
+[data-desktop] .topbar {
+  -webkit-app-region: drag;
+}
+[data-desktop] .sidebar a,
+[data-desktop] .sidebar button,
+[data-desktop] .sidebar input,
+[data-desktop] .sidebar [role="button"],
+[data-desktop] .topbar a,
+[data-desktop] .topbar button,
+[data-desktop] .topbar input,
+[data-desktop] .topbar [role="button"] {
+  -webkit-app-region: no-drag; /* keep controls clickable */
 }
 .store-warning {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
   margin: 0;
-  padding: 8px 24px;
-  background: color-mix(in srgb, var(--red) 18%, var(--bg));
+  padding: var(--space-3) var(--space-7);
+  background: color-mix(in srgb, var(--red) 12%, var(--bg-content));
+  color: var(--fg); /* AA-legible body; red is carried by the border + ⚠ icon */
+  font-size: 0.8rem;
+  border-bottom: 0.5px solid color-mix(in srgb, var(--red) 55%, transparent);
+}
+.store-warning .icon {
   color: var(--red);
-  font-size: 0.85rem;
-  border-bottom: 1px solid var(--red);
 }
 .stat {
   font-size: 13px;
@@ -230,25 +550,44 @@ body.resizing {
   padding: 1px 6px;
 }
 .icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 28px;
+  min-height: 28px;
   background: transparent;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   color: var(--fg-soft);
   cursor: pointer;
   padding: 4px 9px;
+  transition:
+    background var(--motion-fast) var(--ease),
+    color var(--motion-fast) var(--ease),
+    border-color var(--motion-fast) var(--ease),
+    transform var(--motion-fast) var(--ease);
+}
+.icon-btn:hover {
+  background: var(--fill-hover);
+  color: var(--fg);
+  border-color: color-mix(in srgb, var(--border) 55%, var(--fg-soft));
+}
+.icon-btn:active {
+  background: var(--fill-active);
+  transform: scale(0.96);
 }
 
 /* ---- sidebar nav + tree ---- */
 .brand {
-  display: block;
-  font-weight: 700;
-  font-size: 1.1rem;
-  margin: 4px 8px 16px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-mono); /* terminal-style wordmark — nt is a CLI tool at heart */
+  font-weight: 600;
+  font-size: 0.95rem;
+  letter-spacing: 0;
+  margin: 4px 8px 18px;
   color: var(--fg);
-}
-.brand::before {
-  content: "▌ ";
-  color: var(--accent);
 }
 .nav {
   display: grid;
@@ -256,31 +595,36 @@ body.resizing {
   margin-bottom: 18px;
 }
 .nav__link {
-  padding: 6px 10px;
+  padding: var(--space-2) var(--space-3);
   border-radius: var(--radius-sm);
   color: var(--fg-soft);
+  transition:
+    background var(--motion-fast) var(--ease),
+    color var(--motion-fast) var(--ease);
 }
 .nav__link:hover {
-  background: var(--bg-inset);
+  background: var(--fill-hover);
   text-decoration: none;
 }
 .nav__link.active {
-  background: var(--bg-inset);
-  color: var(--accent);
+  background: var(--accent-tint);
+  color: var(--accent-color);
   font-weight: 600;
 }
 .nav__label {
-  font-size: 11px;
+  font-family: var(--font-mono);
+  font-size: 10px;
   text-transform: uppercase;
-  letter-spacing: 0.05em;
+  letter-spacing: 0.06em;
   color: var(--muted);
   padding: 4px 10px;
   margin-top: 8px;
 }
 .tree__head {
-  font-size: 11px;
+  font-family: var(--font-mono);
+  font-size: 10px;
   text-transform: uppercase;
-  letter-spacing: 0.05em;
+  letter-spacing: 0.06em;
   color: var(--muted);
   padding: 4px 10px;
 }
@@ -292,19 +636,24 @@ body.resizing {
   padding: 4px 10px;
   border-radius: var(--radius-sm);
   font: inherit;
-  font-size: 14px;
+  font-size: 13px;
   color: var(--fg-soft);
   background: transparent;
   border: 0;
   cursor: pointer;
+  transition:
+    background var(--motion-fast) var(--ease),
+    color var(--motion-fast) var(--ease);
 }
 .tree__note:hover,
 .tree__toggle:hover {
-  background: var(--bg-inset);
+  background: var(--fill-hover);
   text-decoration: none;
 }
-.tree__note.active {
-  color: var(--accent);
+.tree__note.active,
+.tree__toggle.active {
+  background: var(--accent-tint);
+  color: var(--accent-color);
   font-weight: 600;
 }
 .tree__caret {
@@ -328,28 +677,56 @@ body.resizing {
   flex: 1;
   font: inherit;
   padding: 8px 12px;
-  background: var(--bg-inset);
+  background: var(--fill);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
   color: var(--fg);
+  transition:
+    border-color var(--motion-fast) var(--ease),
+    box-shadow var(--motion-fast) var(--ease);
 }
 .btn {
   font: inherit;
-  font-size: 13px;
-  padding: 8px 16px;
+  font-size: var(--text-body);
+  font-weight: 550;
+  padding: 7px 15px;
   border-radius: var(--radius-sm);
-  border: 1px solid var(--accent);
-  background: var(--accent);
-  color: #fff;
+  border: 0;
+  /* vibrant signature gradient + a soft indigo glow — modern, energetic CTA */
+  background: var(--grad-accent);
+  color: var(--on-accent);
   cursor: pointer;
+  box-shadow: var(--shadow-control), 0 4px 14px -4px rgba(95, 64, 224, 0.5);
+  transition:
+    filter var(--motion-fast) var(--ease),
+    box-shadow var(--motion) var(--ease),
+    transform var(--motion) var(--ease-spring);
+}
+.btn:hover {
+  filter: brightness(1.07) saturate(1.05);
+  transform: translateY(-1px);
+  box-shadow: var(--shadow-control), 0 8px 22px -4px rgba(95, 64, 224, 0.62);
+}
+.btn:active {
+  filter: brightness(0.96);
+  transform: translateY(0) scale(0.97);
+  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.22);
+}
+.btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+  box-shadow: none;
+  filter: none;
+  transform: none;
 }
 .group {
   margin-bottom: 22px;
 }
 .group__title {
-  font-size: 12px;
+  font-family: var(--font-mono);
+  font-size: 11px;
   text-transform: uppercase;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.05em;
   color: var(--muted);
   margin: 0 0 8px;
 }
@@ -359,6 +736,40 @@ body.resizing {
   padding: 0;
   display: grid;
   gap: 2px;
+}
+/* Staggered entrance for task rows — a quick, modern cascade on load/navigation.
+   Keyed {#each} reuses nodes, so it does not replay on data refetch; only new
+   rows animate. Neutralized under reduced-motion by the global rule. */
+.rows .row {
+  animation: row-in var(--motion) var(--ease-out) both;
+}
+.rows .row:nth-child(2) {
+  animation-delay: 28ms;
+}
+.rows .row:nth-child(3) {
+  animation-delay: 56ms;
+}
+.rows .row:nth-child(4) {
+  animation-delay: 84ms;
+}
+.rows .row:nth-child(5) {
+  animation-delay: 112ms;
+}
+.rows .row:nth-child(6) {
+  animation-delay: 140ms;
+}
+.rows .row:nth-child(n + 7) {
+  animation-delay: 168ms;
+}
+@keyframes row-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
 }
 .row {
   display: flex;
@@ -382,26 +793,112 @@ body.resizing {
   color: var(--muted);
   font-size: 13px;
 }
+/* Align inline icon + label inside chips, status pills, and reading-nav links
+   (icons were swapped in from emoji/text glyphs). */
+.chip,
+.status-pill,
+.row__recur,
+.prevnext__link {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+/* Task completion checkbox — a 28px hit target wrapping a 19px ring that fills
+   green with a drawn checkmark on completion (Reminders/Things feel). The ○/●
+   glyph in the markup is hidden (color/font-size 0); the ring + tick are drawn
+   so they can animate. Fully neutralized under reduced-motion. */
 .check {
   align-self: center;
-  width: 20px;
-  height: 20px;
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
   flex: 0 0 auto;
-  border: 1px solid var(--border);
-  border-radius: 50%;
+  border: 0;
   background: transparent;
-  color: var(--muted);
+  color: transparent;
+  font-size: 0;
   cursor: pointer;
   padding: 0;
-  line-height: 1;
 }
-.check:hover {
-  border-color: var(--accent);
-  color: var(--accent);
+.check::before {
+  content: "";
+  width: 19px;
+  height: 19px;
+  border-radius: 50%;
+  border: 1.5px solid var(--separator-strong);
+  background: transparent;
+  transition:
+    border-color var(--motion-fast) var(--ease),
+    background var(--motion-fast) var(--ease),
+    transform var(--motion-fast) var(--ease-spring);
 }
-.check--done {
-  color: var(--green);
+.check::after {
+  content: "";
+  position: absolute;
+  top: 46%;
+  left: 50%;
+  width: 4px;
+  height: 8.5px;
+  border: solid var(--on-accent);
+  border-width: 0 1.75px 1.75px 0;
+  transform: translate(-50%, -50%) rotate(45deg) scale(0);
+  transform-origin: center;
+  opacity: 0;
+  transition:
+    transform var(--motion-fast) var(--ease-spring),
+    opacity var(--motion-fast) var(--ease);
+}
+.check:hover::before {
+  border-color: var(--accent-color);
+  background: var(--accent-tint);
+}
+.check:active::before {
+  transform: scale(0.88);
+}
+.check--done::before {
   border-color: var(--green);
+  background: var(--green);
+  animation:
+    check-pop var(--motion) var(--ease-spring),
+    check-burst 520ms var(--ease-out);
+}
+.check--done::after {
+  transform: translate(-50%, -50%) rotate(45deg) scale(1);
+  opacity: 1;
+}
+@keyframes check-pop {
+  0% {
+    transform: scale(0.7);
+  }
+  55% {
+    transform: scale(1.12);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+/* a green burst-ring radiating out on completion — a satisfying little reward */
+@keyframes check-burst {
+  from {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--green) 55%, transparent);
+  }
+  to {
+    box-shadow: 0 0 0 11px color-mix(in srgb, var(--green) 0%, transparent);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .check::before,
+  .check::after,
+  .check--done::before {
+    animation: none;
+    transition: none;
+  }
+  .check--done::after {
+    transform: translate(-50%, -50%) rotate(45deg) scale(1);
+  }
 }
 .row__text {
   flex: 1;
@@ -428,8 +925,12 @@ body.resizing {
   font-size: 12px;
   color: var(--accent);
   background: var(--bg-inset);
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
   padding: 1px 7px;
+  transition:
+    background var(--motion-fast) var(--ease),
+    color var(--motion-fast) var(--ease),
+    border-color var(--motion-fast) var(--ease);
 }
 .chip--more {
   color: var(--muted); /* the "+N" overflow chip on capped tag lists */
@@ -466,9 +967,33 @@ body.resizing {
   margin: 28px 0;
 }
 .empty__lead {
-  font-size: 1.05rem;
+  font-family: var(--font-serif);
+  font-size: 1.18rem;
   font-weight: 600;
+  letter-spacing: -0.01em;
   margin: 0 0 6px;
+}
+/* A centered, illustrated empty state for hero "you're all clear" / onboarding
+   moments — a soft icon-in-a-tinted-circle above the serif lead (Reminders-style). */
+.empty--hero {
+  max-width: 44ch;
+  margin: 44px auto;
+  text-align: center;
+}
+.empty__art {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 64px;
+  height: 64px;
+  margin: 0 auto 18px;
+  border-radius: 50%;
+  color: var(--green);
+  background: color-mix(in srgb, var(--green) 13%, transparent);
+}
+.empty__art--onboard {
+  color: var(--accent-color);
+  background: var(--accent-tint);
 }
 .empty code {
   font-family: var(--font-mono);
@@ -522,9 +1047,10 @@ body.resizing {
   color: var(--fg);
 }
 .actday {
-  font-size: 12px;
+  font-family: var(--font-mono);
+  font-size: 11px;
   text-transform: uppercase;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.05em;
   color: var(--muted);
   margin: 18px 0 6px;
 }
@@ -561,11 +1087,13 @@ body.resizing {
   height: 52px;
   border-radius: 50%;
   border: none;
-  background: var(--accent);
-  color: #fff;
+  background: var(--grad-accent);
+  color: var(--on-accent);
   font-size: 26px;
   line-height: 1;
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25);
+  box-shadow:
+    0 8px 24px -4px rgba(95, 64, 224, 0.55),
+    0 2px 6px rgba(0, 0, 0, 0.2);
   cursor: pointer;
   z-index: 40;
   align-items: center;
@@ -613,9 +1141,10 @@ body.resizing {
   font-size: 13px;
 }
 .toc__head {
+  font-family: var(--font-mono);
   text-transform: uppercase;
-  letter-spacing: 0.04em;
-  font-size: 11px;
+  letter-spacing: 0.05em;
+  font-size: 10px;
   color: var(--muted);
   margin-bottom: 8px;
 }
@@ -715,11 +1244,15 @@ body.resizing {
   margin-bottom: 20px;
 }
 .prose {
-  line-height: 1.7;
+  font-size: var(--text-prose);
+  line-height: var(--leading-prose);
+  letter-spacing: 0;
 }
 .prose :global(h1),
 .prose :global(h2),
 .prose :global(h3) {
+  font-family: var(--font-serif);
+  letter-spacing: -0.01em;
   margin-top: 1.6em;
   scroll-margin-top: 72px; /* clear the sticky topbar when jumping to an anchor */
 }
@@ -831,29 +1364,73 @@ body.resizing {
 
 /* ---- command palette ---- */
 .palette-btn {
-  background: var(--bg-inset);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 28px;
+  background: var(--fill);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  padding: 3px 8px;
+  padding: 4px 9px;
+  color: var(--fg-soft);
   cursor: pointer;
+  transition:
+    background var(--motion-fast) var(--ease),
+    color var(--motion-fast) var(--ease),
+    border-color var(--motion-fast) var(--ease),
+    transform var(--motion-fast) var(--ease);
+}
+.palette-btn:hover {
+  background: var(--fill-strong);
+  color: var(--fg);
+  border-color: color-mix(in srgb, var(--border) 55%, var(--fg-soft));
+}
+.palette-btn:active {
+  transform: scale(0.96);
 }
 .palette__backdrop {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.35);
+  background: var(--scrim);
+  -webkit-backdrop-filter: blur(8px) saturate(115%);
+  backdrop-filter: blur(8px) saturate(115%);
   display: flex;
   justify-content: center;
   align-items: flex-start;
   padding-top: 12vh;
   z-index: 50;
+  animation: backdrop-in var(--motion) var(--ease);
 }
 .palette {
   width: min(560px, 92vw);
-  background: var(--bg-elev);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  box-shadow: 0 16px 48px rgba(0, 0, 0, 0.3);
+  background: color-mix(in srgb, var(--bg-elevated) 90%, transparent);
+  -webkit-backdrop-filter: blur(20px) saturate(170%);
+  backdrop-filter: blur(20px) saturate(170%);
+  border: 0.5px solid var(--separator);
+  border-radius: var(--radius-popover);
+  box-shadow: var(--shadow-popover);
   overflow: hidden;
+  transform-origin: top center;
+  animation: popover-in var(--motion) var(--ease-spring);
+}
+/* shared popover/menu entrance keyframes (reused by toasts + dialogs) */
+@keyframes backdrop-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@keyframes popover-in {
+  from {
+    opacity: 0;
+    transform: translateY(-8px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
 }
 .palette__input {
   width: 100%;
@@ -886,9 +1463,17 @@ body.resizing {
   background: transparent;
   color: var(--fg);
   cursor: pointer;
+  transition:
+    background var(--motion-fast) var(--ease),
+    color var(--motion-fast) var(--ease);
 }
 .palette__item.active {
-  background: var(--bg-inset);
+  background: var(--accent-fill);
+  color: var(--on-accent);
+}
+.palette__item.active .palette__kind,
+.palette__item.active .palette__sub {
+  color: color-mix(in srgb, var(--on-accent) 75%, transparent);
 }
 .palette__kind {
   font-family: var(--font-mono);
@@ -917,9 +1502,22 @@ body.resizing {
 
 /* ---- editor ---- */
 .btn--ghost {
-  background: transparent;
+  background: var(--bg-elev);
+  background-image: linear-gradient(var(--bg-elev), color-mix(in srgb, var(--bg-elev) 92%, #000));
   color: var(--fg-soft);
   border-color: var(--border);
+  box-shadow: var(--shadow-control);
+}
+.btn--ghost:hover {
+  filter: none;
+  background: var(--fill);
+  color: var(--fg);
+  border-color: color-mix(in srgb, var(--border) 55%, var(--fg-soft));
+}
+.btn--ghost:active {
+  background: var(--fill-active);
+  transform: scale(0.985);
+  box-shadow: var(--shadow-control);
 }
 .btn--sm {
   padding: 3px 10px;
@@ -1002,8 +1600,8 @@ body.resizing {
     height: 100vh;
     z-index: 30;
     transform: translateX(-100%);
-    transition: transform 0.2s ease;
-    box-shadow: 2px 0 18px rgba(0, 0, 0, 0.35);
+    transition: transform var(--motion) var(--ease);
+    box-shadow: var(--shadow-popover);
   }
   .sidebar--open {
     transform: translateX(0);

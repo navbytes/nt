@@ -26,6 +26,11 @@
 
 {#if $activityQ.isPending}
   <p class="muted">Loading…</p>
+{:else if $activityQ.error}
+  <div class="empty">
+    <p class="empty__lead">Couldn't load activity</p>
+    <button class="btn btn--ghost btn--sm" onclick={() => $activityQ.refetch()}>Try again</button>
+  </div>
 {:else}
   {#each days as day (day.date)}
     <div class="actday">{day.date}</div>
@@ -40,6 +45,9 @@
       {/each}
     </ul>
   {:else}
-    <p class="muted">No activity.</p>
+    <div class="empty">
+      <p class="empty__lead">{source ? `No activity from “${source}”` : "No activity yet"}</p>
+      <p class="muted">Your adds, completions, and edits show up here as you (or your agents) work.</p>
+    </div>
   {/each}
 {/if}

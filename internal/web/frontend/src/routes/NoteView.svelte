@@ -4,6 +4,7 @@
   import { noteUI } from "../lib/noteUI.svelte";
   import { navigate } from "../lib/router.svelte";
   import Editor from "../lib/Editor.svelte";
+  import Icon from "../lib/Icon.svelte";
   import { renderMermaidIn, observeTheme } from "../lib/mermaid";
 
   let { handle }: { handle: string } = $props();
@@ -214,7 +215,11 @@
 {:else if $noteQ.isPending}
   <p class="muted">Loading…</p>
 {:else if $noteQ.error}
-  <p class="error">Note not found.</p>
+  <div class="empty">
+    <p class="empty__lead">Note not found.</p>
+    <p class="muted">This note may have been moved, renamed, or deleted.</p>
+    <a class="btn btn--ghost btn--sm" href="/notes">Back to notes</a>
+  </div>
 {:else if $noteQ.data}
   {@const n = $noteQ.data}
   <div class="notewrap">
@@ -223,22 +228,23 @@
         {#each n.crumbs as c (c)}<span>{c}</span>{/each}
         <span class="crumbs__file">{n.file}</span>
         <span class="spacer"></span>
-        <a class="btn btn--ghost btn--sm" href={`/graph?focus=${encodeURIComponent(handle)}`}>Graph ⌖</a>
+        <a class="btn btn--ghost btn--sm iconbtn" href={`/graph?focus=${encodeURIComponent(handle)}`}><Icon name="focus" size={14} /> Graph</a>
         <button
           class="btn btn--ghost btn--sm star"
           class:star--on={n.favorite}
           onclick={doFavorite}
           disabled={favBusy}
           aria-pressed={n.favorite}
+          aria-label={n.favorite ? "Remove from favorites" : "Add to favorites"}
           title={n.favorite ? "Remove from favorites" : "Add to favorites"}
-        >{n.favorite ? "★" : "☆"}</button>
-        <button class="btn btn--ghost btn--sm" onclick={() => (addingTask = !addingTask)}>＋ Task</button>
+        ><Icon name="star" filled={n.favorite} size={15} /></button>
+        <button class="btn btn--ghost btn--sm iconbtn" onclick={() => (addingTask = !addingTask)}><Icon name="plus" size={14} /> Task</button>
         <button class="btn btn--ghost btn--sm" onclick={openMove}>Move</button>
-        <button class="btn btn--ghost btn--sm" onclick={doArchive} disabled={archiveBusy}>
-          {n.archived ? "Unarchive" : "Archive"}
+        <button class="btn btn--ghost btn--sm iconbtn" onclick={doArchive} disabled={archiveBusy}>
+          <Icon name="archive" size={14} /> {n.archived ? "Unarchive" : "Archive"}
         </button>
         <button class="btn btn--ghost btn--sm" onclick={() => (editing = true)}>Edit</button>
-        <button class="btn btn--ghost btn--sm btn--danger" onclick={() => { deleteErr = ""; confirmingDelete = true; }}>Delete</button>
+        <button class="btn btn--ghost btn--sm btn--danger iconbtn" onclick={() => { deleteErr = ""; confirmingDelete = true; }}><Icon name="trash" size={14} /> Delete</button>
       </div>
       {#if confirmingDelete}
         <div class="movebar movebar--danger">
@@ -290,7 +296,8 @@
       {/if}
       {#if n.archived}
         <div class="archived-banner" role="note">
-          <span>📦 Archived — hidden from the sidebar, search, orphans, and the graph. Still on disk.</span>
+          <Icon name="archive" size={15} />
+          <span>Archived — hidden from the sidebar, search, orphans, and the graph. Still on disk.</span>
         </div>
       {/if}
       <h1>{n.title}</h1>
@@ -328,9 +335,13 @@
       {/if}
 
       <nav class="prevnext">
-        {#if n.prev}<a href={n.prev.url}>← {n.prev.title}</a>{/if}
+        {#if n.prev}<a class="prevnext__link" href={n.prev.url}
+            ><Icon name="chevron-left" size={14} /> {n.prev.title}</a
+          >{/if}
         <span class="spacer"></span>
-        {#if n.next}<a href={n.next.url}>{n.next.title} →</a>{/if}
+        {#if n.next}<a class="prevnext__link" href={n.next.url}
+            >{n.next.title} <Icon name="chevron-right" size={14} /></a
+          >{/if}
       </nav>
     </article>
 
@@ -351,25 +362,33 @@
 {/if}
 
 <style>
-  /* The favorite star: gold when on, inheriting the ghost-button frame so it
-     sits flush with Move/Edit. A touch larger so the glyph reads as a star. */
+  /* Icon-plus-label ghost buttons: align the SF-style glyph with its text. */
+  .iconbtn {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+  }
+  /* The favorite star: amber when on, inheriting the ghost-button frame so it
+     sits flush with Move/Edit. */
   .star {
-    font-size: 1rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
     line-height: 1;
   }
   .star--on {
-    color: #f5b301;
+    color: var(--pri-b);
   }
   /* Destructive actions read in a muted red and warm fully on hover, so Delete
      is visually distinct from the neutral ghost buttons next to it. */
   .btn--danger {
-    color: #e5484d;
+    color: var(--red);
   }
   .btn--danger:hover {
-    background: #e5484d;
-    color: #fff;
+    background: var(--red);
+    color: var(--on-accent);
   }
   .movebar--danger {
-    border-color: #e5484d;
+    border-color: var(--red);
   }
 </style>

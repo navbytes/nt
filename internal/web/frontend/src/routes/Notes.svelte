@@ -5,6 +5,7 @@
   import { loc, navigate } from "../lib/router.svelte";
   import { showToast } from "../lib/toast.svelte";
   import Journal from "./Journal.svelte";
+  import Icon from "../lib/Icon.svelte";
 
   // Daily (journal) is a view of Notes, selected by the /journal path. The grid
   // is the default; the header toggle switches between them.
@@ -273,8 +274,8 @@
   <div class="notes-head">
     <h1>Notes</h1>
     <div class="seg" role="group" aria-label="Notes view">
-      <button class:seg--on={!daily} onclick={() => navigate("/notes")}>All</button>
-      <button class:seg--on={daily} onclick={() => navigate("/journal")}>Daily</button>
+      <button class:seg--on={!daily} aria-pressed={!daily} onclick={() => navigate("/notes")}>All</button>
+      <button class:seg--on={daily} aria-pressed={daily} onclick={() => navigate("/journal")}>Daily</button>
     </div>
     {#if !daily}
       {#if newOpen}
@@ -296,10 +297,10 @@
               newOpen = false;
               newTitle = "";
             }}
-            aria-label="Cancel">×</button>
+            aria-label="Cancel"><Icon name="close" size={15} /></button>
         </form>
       {:else}
-        <button class="newnote__open" onclick={openNew}>＋ New note</button>
+        <button class="newnote__open" onclick={openNew}><Icon name="plus" size={14} /> New note</button>
       {/if}
     {/if}
   </div>
@@ -353,7 +354,7 @@
           title={sortDir === "desc" ? "Descending — click for ascending" : "Ascending — click for descending"}
           aria-label="Toggle sort direction"
           onclick={() => (sortDir = sortDir === "desc" ? "asc" : "desc")}
-        >{sortDir === "desc" ? "↓" : "↑"}</button>
+        ><Icon name={sortDir === "desc" ? "arrow-down" : "arrow-up"} size={14} /></button>
       </div>
 
       {#if layout !== "timeline"}
@@ -366,11 +367,12 @@
       {/if}
 
       <div class="seg" role="group" aria-label="Layout">
-        <button class:seg--on={layout === "cards"} onclick={() => (layout = "cards")}>Cards</button>
-        <button class:seg--on={layout === "compact"} onclick={() => (layout = "compact")}>Compact</button>
-        <button class:seg--on={layout === "list"} onclick={() => (layout = "list")}>List</button>
+        <button class:seg--on={layout === "cards"} aria-pressed={layout === "cards"} onclick={() => (layout = "cards")}>Cards</button>
+        <button class:seg--on={layout === "compact"} aria-pressed={layout === "compact"} onclick={() => (layout = "compact")}>Compact</button>
+        <button class:seg--on={layout === "list"} aria-pressed={layout === "list"} onclick={() => (layout = "list")}>List</button>
         <button
           class:seg--on={layout === "timeline"}
+          aria-pressed={layout === "timeline"}
           onclick={() => {
             layout = "timeline";
             if (sort !== "created" && sort !== "updated") pickSort("updated");
@@ -384,7 +386,7 @@
           aria-pressed={favoritesOnly}
           title="Show only starred notes"
           onclick={() => (favoritesOnly = !favoritesOnly)}
-        >★ Favorites{#if favoriteCount}<span class="notes-toggle__count"> {favoriteCount}</span>{/if}</button>
+        ><Icon name="star" filled={favoritesOnly} size={14} /> Favorites{#if favoriteCount}<span class="notes-toggle__count"> {favoriteCount}</span>{/if}</button>
       {/if}
       <button
         class="notes-toggle"
@@ -400,7 +402,7 @@
           aria-pressed={archivedOnly}
           title="Show retired notes (hidden from the sidebar, search, and graph)"
           onclick={() => (archivedOnly = !archivedOnly)}
-        >📦 Archived{#if archivedCount}<span class="notes-toggle__count"> {archivedCount}</span>{/if}</button>
+        ><Icon name="archive" size={14} /> Archived{#if archivedCount}<span class="notes-toggle__count"> {archivedCount}</span>{/if}</button>
       {/if}
     </div>
 
@@ -413,12 +415,12 @@
           aria-label="Filter notes"
           autocomplete="off"
         />
-        {#if q}<button class="qfilter__clear" onclick={() => (q = "")} aria-label="Clear text filter">×</button>{/if}
+        {#if q}<button class="qfilter__clear" onclick={() => (q = "")} aria-label="Clear text filter"><Icon name="close" size={14} /></button>{/if}
       </div>
       {#if activeTags.length}
         <div class="tagbar" role="group" aria-label="Active tag filters">
           {#each activeTags as t (t)}
-            <button class="chip chip--active" onclick={() => toggleTag(t)} title="Remove this tag filter">#{t} ×</button>
+            <button class="chip chip--active" onclick={() => toggleTag(t)} title="Remove this tag filter" aria-label={`Remove tag filter #${t}`}>#{t} <Icon name="close" size={12} /></button>
           {/each}
         </div>
       {/if}
@@ -434,7 +436,11 @@
 {:else if $gridQ.isPending}
   <p class="muted">Loading…</p>
 {:else if $gridQ.error}
-  <p class="error">Couldn't load notes.</p>
+  <div class="empty">
+    <p class="empty__lead">Couldn't load notes.</p>
+    <p class="muted">Something went wrong reaching the store. Check that <code>nt</code> is running, then try again.</p>
+    <button class="btn btn--ghost btn--sm" onclick={() => $gridQ.refetch()}>Try again</button>
+  </div>
 {:else if total === 0}
   {#if hasFilters}
     <p class="muted">
@@ -461,7 +467,7 @@
             <span class="tl__dot" aria-hidden="true"></span>
             <span class="tl__date">{e.date ? e.date.slice(5) : "—"}</span>
             <a class="tl__title" href={e.card.url}
-              >{#if e.card.favorite}<span class="notecard__star" title="Favorite">★</span>{/if}{e.card.title}</a>
+              >{#if e.card.favorite}<span class="notecard__star" title="Favorite"><Icon name="star" filled size={13} /></span>{/if}{e.card.title}</a>
             {#if e.card.folder}<span class="noterow__folder">{e.card.folder}/</span>{/if}
             {#if e.card.tags && e.card.tags.length}
               <span class="noterow__tags">
@@ -485,7 +491,7 @@
         {#each g.cards as n (n.handle)}
           <div class="noterow">
             <a class="noterow__title" href={n.url}
-              >{#if n.favorite}<span class="notecard__star" title="Favorite">★</span>{/if}{n.title}</a>
+              >{#if n.favorite}<span class="notecard__star" title="Favorite"><Icon name="star" filled size={13} /></span>{/if}{n.title}</a>
             {#if n.folder}<span class="noterow__folder">{n.folder}/</span>{/if}
             {#if n.tags && n.tags.length}
               <span class="noterow__tags">
@@ -504,7 +510,7 @@
           <div class="notecard">
             <div class="notecard__top">
               <a class="notecard__title notecard__link" href={n.url}
-                >{#if n.favorite}<span class="notecard__star" title="Favorite">★</span>{/if}{n.title}</a>
+                >{#if n.favorite}<span class="notecard__star" title="Favorite"><Icon name="star" filled size={13} /></span>{/if}{n.title}</a>
               {#if n.updated}<span class="notecard__date">{n.updated}</span>{/if}
             </div>
             {#if n.folder}<span class="notecard__folder">{n.folder}/</span>{/if}
@@ -533,10 +539,13 @@
   /* Primary "New note" action + its inline title field, pushed to the right. */
   .newnote__open {
     margin-left: auto;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
     padding: 5px 12px;
-    background: var(--accent);
-    color: #fff;
-    border: 1px solid var(--accent);
+    background: var(--accent-fill);
+    color: var(--on-accent);
+    border: 1px solid var(--accent-fill);
     border-radius: var(--radius-sm);
     cursor: pointer;
     font-size: 0.85rem;
@@ -555,20 +564,19 @@
     min-width: 220px;
     padding: 5px 10px;
     font-size: 0.85rem;
-    background: var(--bg-inset);
-    border: 1px solid var(--border);
+    background: var(--fill);
+    border: 0.5px solid var(--separator);
     border-radius: var(--radius-sm);
     color: var(--fg);
   }
   .newnote input:focus {
-    outline: none;
     border-color: var(--accent);
   }
   .newnote__go {
     padding: 5px 12px;
-    background: var(--accent);
-    color: #fff;
-    border: 1px solid var(--accent);
+    background: var(--accent-fill);
+    color: var(--on-accent);
+    border: 1px solid var(--accent-fill);
     border-radius: var(--radius-sm);
     cursor: pointer;
     font-size: 0.85rem;
@@ -578,13 +586,16 @@
     cursor: default;
   }
   .newnote__x {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
     background: none;
     border: none;
     color: var(--muted);
     cursor: pointer;
-    font-size: 1.1rem;
     line-height: 1;
-    padding: 2px 6px;
+    padding: 4px 6px;
+    border-radius: var(--radius-xs);
   }
   .newnote__x:hover {
     color: var(--fg);
@@ -612,13 +623,12 @@
     width: 100%;
     padding: 6px 28px 6px 12px;
     font-size: 0.9rem;
-    background: var(--bg-inset);
-    border: 1px solid var(--border);
+    background: var(--fill);
+    border: 0.5px solid var(--separator);
     border-radius: var(--radius-sm);
     color: var(--fg);
   }
   .qfilter input:focus {
-    outline: none;
     border-color: var(--accent);
   }
   .qfilter__clear {
@@ -626,13 +636,16 @@
     right: 6px;
     top: 50%;
     transform: translateY(-50%);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
     background: none;
     border: none;
     color: var(--muted);
     cursor: pointer;
-    font-size: 1rem;
     line-height: 1;
     padding: 2px 6px;
+    border-radius: var(--radius-xs);
   }
   .qfilter__clear:hover {
     color: var(--fg);
@@ -662,38 +675,52 @@
     padding: 0;
     text-decoration: underline;
   }
-  /* Segmented controls + toggles share one pill look. */
+  /* macOS AppKit segmented control: a gray track holding an elevated pill on
+     the selected segment (not a saturated accent fill). */
   .seg {
     display: flex;
-    border: 1px solid var(--border);
+    gap: 2px;
+    padding: 2px;
+    background: var(--fill);
+    border: 0.5px solid var(--separator);
     border-radius: var(--radius-sm);
-    overflow: hidden;
   }
   .seg button {
-    padding: 5px 12px;
-    background: var(--bg-inset);
+    padding: 4px 12px;
+    background: transparent;
     border: none;
+    border-radius: calc(var(--radius-sm) - 1px);
     color: var(--fg-soft);
     cursor: pointer;
     font-size: 0.8rem;
+    transition:
+      background var(--motion-fast) var(--ease),
+      color var(--motion-fast) var(--ease),
+      box-shadow var(--motion-fast) var(--ease);
   }
   .seg button.seg--on {
-    background: var(--accent);
-    color: #fff;
+    background: var(--bg-elevated);
+    color: var(--fg);
+    box-shadow: var(--shadow-control);
   }
+  /* On/off filter toggles: a tinted accent well when active (distinct from the
+     neutral segmented track, which only ever switches one exclusive view). */
   .notes-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
     padding: 5px 12px;
-    background: var(--bg-inset);
-    border: 1px solid var(--border);
+    background: var(--fill);
+    border: 0.5px solid var(--separator);
     border-radius: var(--radius-sm);
     color: var(--fg-soft);
     cursor: pointer;
     font-size: 0.8rem;
   }
   .notes-toggle--on {
-    background: var(--accent);
-    color: #fff;
-    border-color: var(--accent);
+    background: var(--accent-fill);
+    color: var(--on-accent);
+    border-color: var(--accent-fill);
   }
   .notes-toggle__count {
     opacity: 0.8;
@@ -708,15 +735,17 @@
     border-bottom-right-radius: 0;
   }
   .dirbtn {
-    border: 1px solid var(--border);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: 0.5px solid var(--separator);
     border-left: none;
     border-top-right-radius: var(--radius-sm);
     border-bottom-right-radius: var(--radius-sm);
-    background: var(--bg-inset);
+    background: var(--fill);
     color: var(--fg-soft);
     cursor: pointer;
     padding: 0 9px;
-    font-size: 0.85rem;
   }
   .dirbtn:hover {
     color: var(--fg);
@@ -746,11 +775,11 @@
     line-height: 1.5;
   }
   button.chip:hover {
-    background: var(--border);
+    background: var(--fill-strong);
   }
   .chip--active {
-    background: var(--accent);
-    color: #fff;
+    background: var(--accent-fill);
+    color: var(--on-accent);
   }
   .chip--more {
     cursor: default;
@@ -770,13 +799,15 @@
     position: relative;
     display: block;
     padding: 12px 14px;
-    border: 1px solid var(--border);
+    border: 0.5px solid var(--separator);
     border-radius: var(--radius);
-    background: var(--bg-elev);
+    background: var(--bg-elevated);
     color: var(--fg);
+    box-shadow: var(--shadow-card);
     transition:
-      border-color 0.12s,
-      transform 0.12s;
+      border-color var(--motion-fast) var(--ease),
+      box-shadow var(--motion-fast) var(--ease),
+      transform var(--motion-fast) var(--ease);
   }
   .notecard:hover {
     border-color: var(--accent);
@@ -807,7 +838,9 @@
     inset: 0;
   }
   .notecard__star {
-    color: #f5b301;
+    display: inline-flex;
+    align-items: center;
+    color: var(--pri-b);
     margin-right: 4px;
   }
   .notecard__date {
@@ -844,7 +877,7 @@
   /* List layout: dense one-line rows, scannable. */
   .notelist {
     margin-top: 14px;
-    border-top: 1px solid var(--border);
+    border-top: 0.5px solid var(--separator);
   }
   .noterow {
     position: relative;
@@ -852,10 +885,10 @@
     align-items: baseline;
     gap: 10px;
     padding: 7px 10px;
-    border-bottom: 1px solid var(--border);
+    border-bottom: 0.5px solid var(--separator);
   }
   .noterow:hover {
-    background: var(--bg-inset);
+    background: var(--fill);
   }
   .noterow__title {
     flex: 1 1 auto;
@@ -903,7 +936,7 @@
     position: relative;
     margin: 4px 0 0 8px;
     padding-left: 18px;
-    border-left: 2px solid var(--border);
+    border-left: 2px solid var(--separator-strong);
   }
   .tl__entry {
     position: relative;
@@ -914,7 +947,7 @@
     border-radius: var(--radius-sm);
   }
   .tl__entry:hover {
-    background: var(--bg-inset);
+    background: var(--fill);
   }
   .tl__dot {
     position: absolute;

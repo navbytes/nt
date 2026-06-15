@@ -7,6 +7,7 @@
   import { captureTask } from "./keys.svelte";
   import { openAbout } from "./about.svelte";
   import { toggleCollapsed } from "./sidebarState.svelte";
+  import Icon from "./Icon.svelte";
 
   let q = $state("");
   let active = $state(0);
@@ -153,19 +154,22 @@
       tabindex="-1"
       onclick={(e) => e.stopPropagation()}
     >
-      <input
-        bind:this={inputEl}
-        bind:value={q}
-        onkeydown={onInputKey}
-        class="palette__input"
-        placeholder="Search notes, run a command, jump to…"
-        autocomplete="off"
-        spellcheck="false"
-        role="combobox"
-        aria-expanded="true"
-        aria-controls="palette-listbox"
-        aria-activedescendant={items.length ? `palette-opt-${active}` : undefined}
-      />
+      <div class="palette__search">
+        <Icon name="search" size={16} />
+        <input
+          bind:this={inputEl}
+          bind:value={q}
+          onkeydown={onInputKey}
+          class="palette__input"
+          placeholder="Search notes, run a command, jump to…"
+          autocomplete="off"
+          spellcheck="false"
+          role="combobox"
+          aria-expanded="true"
+          aria-controls="palette-listbox"
+          aria-activedescendant={items.length ? `palette-opt-${active}` : undefined}
+        />
+      </div>
       <ul class="palette__list" id="palette-listbox" role="listbox">
         {#each items as it, i (it.kind + (it.url ?? it.label))}
           <li role="presentation">
@@ -191,3 +195,28 @@
     </div>
   </div>
 {/if}
+
+<style>
+  /* Leading search glyph in the input row. The palette container, input, list,
+     and hint styling all live in app.css; this only positions the new icon and
+     indents the field so its text clears the glyph. */
+  .palette__search {
+    position: relative;
+  }
+  .palette__search :global(.icon) {
+    position: absolute;
+    left: 18px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: var(--muted);
+  }
+  .palette__search :global(.palette__input) {
+    padding-left: 44px;
+  }
+  /* The field is auto-focused when the palette opens; the modal context + the
+     hairline underline are affordance enough, so suppress the global focus halo
+     here to avoid a jarring ring on open (app.css already sets outline:none). */
+  .palette__search :global(.palette__input:focus-visible) {
+    box-shadow: none;
+  }
+</style>

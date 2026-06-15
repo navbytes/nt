@@ -10,6 +10,7 @@
     type Effects,
   } from "./graphView.svelte";
   import ShapeGlyph from "./ShapeGlyph.svelte";
+  import Icon from "./Icon.svelte";
   import type { ShapeKind } from "./graphShapes";
 
   let {
@@ -91,9 +92,9 @@
 <div class="gctl" class:gctl--open={open}>
   <div class="gctl__bar">
     <button class="gctl__toggle" onclick={() => (open = !open)} aria-expanded={open} title="Toggle controls">
-      <span class="gctl__chev">{open ? "▾" : "▸"}</span> Graph
+      <span class="gctl__chev" class:gctl__chev--open={open}><Icon name="chevron-right" size={14} /></span> Graph
     </button>
-    <button class="icon-btn" title="Fit to view (f)" aria-label="Fit graph to view" onclick={onFit}>⛶</button>
+    <button class="icon-btn" title="Fit to view (f)" aria-label="Fit graph to view" onclick={onFit}><Icon name="focus" /></button>
   </div>
 
   {#if open}
@@ -101,8 +102,8 @@
       <!-- Mode -->
       <div class="gctl__row">
         <div class="seg" role="group" aria-label="Graph mode">
-          <button class:seg--on={view.mode === "global"} onclick={exitLocal}>Global</button>
-          <button class:seg--on={view.mode === "local"} disabled={!view.rootId && !view.selectedId}
+          <button class:seg--on={view.mode === "global"} aria-pressed={view.mode === "global"} onclick={exitLocal}>Global</button>
+          <button class:seg--on={view.mode === "local"} aria-pressed={view.mode === "local"} disabled={!view.rootId && !view.selectedId}
             onclick={() => { view.mode = "local"; view.rootId = view.rootId ?? view.selectedId; }}>Local</button>
         </div>
       </div>
@@ -110,15 +111,15 @@
       <!-- Renderer: 2D canvas / 3D WebGL constellation -->
       <div class="gctl__row">
         <div class="seg" role="group" aria-label="Renderer dimension">
-          <button class:seg--on={view.dim === "2d"} onclick={() => (view.dim = "2d")}>2D</button>
-          <button class:seg--on={view.dim === "3d"} onclick={() => (view.dim = "3d")} title="3D constellation with bloom">3D ✦</button>
+          <button class:seg--on={view.dim === "2d"} aria-pressed={view.dim === "2d"} onclick={() => (view.dim = "2d")}>2D</button>
+          <button class:seg--on={view.dim === "3d"} aria-pressed={view.dim === "3d"} onclick={() => (view.dim = "3d")} title="3D constellation with bloom">3D ✦</button>
         </div>
       </div>
       <!-- Layout: organic force vs. radial ego rings (radial needs a local root) -->
       <div class="gctl__row">
         <div class="seg" role="group" aria-label="Layout">
-          <button class:seg--on={view.layout === "force"} onclick={() => (view.layout = "force")}>Force</button>
-          <button class:seg--on={view.layout === "radial"} onclick={() => (view.layout = "radial")}
+          <button class:seg--on={view.layout === "force"} aria-pressed={view.layout === "force"} onclick={() => (view.layout = "force")}>Force</button>
+          <button class:seg--on={view.layout === "radial"} aria-pressed={view.layout === "radial"} onclick={() => (view.layout = "radial")}
             title="Concentric rings by distance from the focused node (Local mode, 2D)">Radial</button>
         </div>
       </div>
@@ -204,10 +205,10 @@
       {#if view.filterFolders.length || view.filterTags.length}
         <div class="gctl__chips">
           {#each view.filterFolders as f (f)}
-            <button class="chip-toggle on" onclick={() => (view.filterFolders = toggleIn(view.filterFolders, f))}>{f} ×</button>
+            <button class="chip-toggle on" aria-label={`Remove folder filter ${f}`} onclick={() => (view.filterFolders = toggleIn(view.filterFolders, f))}>{f} <Icon name="close" size={11} /></button>
           {/each}
           {#each view.filterTags as t (t)}
-            <button class="chip-toggle on" onclick={() => (view.filterTags = toggleIn(view.filterTags, t))}>#{t} ×</button>
+            <button class="chip-toggle on" aria-label={`Remove tag filter ${t}`} onclick={() => (view.filterTags = toggleIn(view.filterTags, t))}>#{t} <Icon name="close" size={11} /></button>
           {/each}
         </div>
       {/if}
@@ -220,7 +221,7 @@
 
       <!-- Advanced -->
       <button class="gctl__adv" onclick={() => (advanced = !advanced)} aria-expanded={advanced}>
-        {advanced ? "▾" : "▸"} Physics &amp; display
+        <span class="gctl__chev" class:gctl__chev--open={advanced}><Icon name="chevron-right" size={13} /></span> Physics &amp; display
       </button>
       {#if advanced}
         <div class="gctl__adv-body">
@@ -321,10 +322,10 @@
     left: 12px;
     z-index: 20;
     width: 232px;
-    background: var(--bg-elev);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    box-shadow: 0 4px 18px rgba(0, 0, 0, 0.16);
+    background: var(--bg-elevated);
+    border: 0.5px solid var(--separator);
+    border-radius: var(--radius-popover);
+    box-shadow: var(--shadow-popover);
     font-size: 0.82rem;
   }
   .gctl__bar {
@@ -344,9 +345,15 @@
     align-items: center;
     gap: 4px;
   }
+  /* Disclosure chevron: points right when closed, rotates down when open
+     (the global reduced-motion rule neutralizes the spin). */
   .gctl__chev {
+    display: inline-flex;
     color: var(--muted);
-    font-size: 0.7rem;
+    transition: transform var(--motion-fast) var(--ease);
+  }
+  .gctl__chev--open {
+    transform: rotate(90deg);
   }
   .gctl__body {
     padding: 4px 10px 10px;
@@ -383,38 +390,56 @@
   .gctl select {
     width: 100%;
     padding: 5px 8px;
-    border: 1px solid var(--border);
+    border: 0.5px solid var(--separator-strong);
     border-radius: var(--radius-sm);
-    background: var(--bg-inset);
+    background: var(--fill);
     color: var(--fg);
     font-size: 0.82rem;
+    transition:
+      border-color var(--motion-fast) var(--ease),
+      box-shadow var(--motion-fast) var(--ease);
   }
   .gctl__field select {
     width: auto;
   }
+  /* macOS segmented control: a gray hairline track holds equal segments; the
+     selected one lifts onto an elevated pill (NSSegmentedControl). */
   .seg {
     display: flex;
     width: 100%;
-    border: 1px solid var(--border);
+    gap: 2px;
+    padding: 2px;
+    background: var(--fill);
+    border: 0.5px solid var(--separator);
     border-radius: var(--radius-sm);
-    overflow: hidden;
   }
   .seg button {
     flex: 1;
-    padding: 5px 6px;
-    background: var(--bg-inset);
-    border: none;
+    padding: 4px 6px;
+    background: transparent;
+    border: 0.5px solid transparent;
+    border-radius: var(--radius-xs);
     color: var(--fg-soft);
     cursor: pointer;
     font-size: 0.8rem;
+    transition:
+      background var(--motion-fast) var(--ease),
+      color var(--motion-fast) var(--ease),
+      box-shadow var(--motion-fast) var(--ease);
+  }
+  .seg button:hover:not(.seg--on):not(:disabled) {
+    color: var(--fg);
   }
   .seg button:disabled {
     opacity: 0.5;
     cursor: not-allowed;
   }
   .seg--on {
-    background: var(--accent) !important;
-    color: #fff !important;
+    background: var(--bg-elevated);
+    border-color: var(--separator);
+    box-shadow: var(--shadow-control);
+    color: var(--fg);
+    font-weight: 550;
   }
   .gctl__chips,
   .gctl__filtersel {
@@ -428,18 +453,33 @@
     min-width: 90px;
   }
   .chip-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
     padding: 3px 8px;
-    border: 1px solid var(--border);
+    border: 0.5px solid var(--separator-strong);
     border-radius: 999px;
-    background: var(--bg-inset);
+    background: var(--fill);
     color: var(--fg-soft);
     cursor: pointer;
     font-size: 0.75rem;
+    transition:
+      background var(--motion-fast) var(--ease),
+      color var(--motion-fast) var(--ease),
+      border-color var(--motion-fast) var(--ease);
+  }
+  .chip-toggle:hover {
+    color: var(--fg);
+    border-color: var(--fg-soft);
   }
   .chip-toggle.on {
-    background: var(--accent);
-    border-color: var(--accent);
-    color: #fff;
+    background: var(--accent-fill);
+    border-color: var(--accent-fill);
+    color: var(--on-accent);
+  }
+  .chip-toggle.on:hover {
+    color: var(--on-accent);
+    border-color: var(--accent-fill);
   }
   .gctl__adv {
     background: none;
@@ -455,7 +495,7 @@
     flex-direction: column;
     gap: 7px;
     padding: 2px 0 4px;
-    border-left: 2px solid var(--border-soft);
+    border-left: 0.5px solid var(--separator);
     padding-left: 8px;
   }
   .gctl__slider {
@@ -472,7 +512,7 @@
     display: flex;
     flex-wrap: wrap;
     gap: 4px 8px;
-    border-top: 1px solid var(--border-soft);
+    border-top: 0.5px solid var(--separator);
     padding-top: 8px;
   }
   .legend-item {
@@ -486,10 +526,16 @@
     font-size: 0.75rem;
     padding: 1px 3px;
     border-radius: var(--radius-sm);
+    transition:
+      background var(--motion-fast) var(--ease),
+      color var(--motion-fast) var(--ease);
+  }
+  .legend-item:hover:not(:disabled) {
+    color: var(--fg);
   }
   .legend-item.on {
     color: var(--fg);
-    background: var(--bg-inset);
+    background: var(--fill);
   }
   .legend-item:disabled {
     cursor: default;
@@ -525,13 +571,13 @@
   .gctl__stats {
     color: var(--muted);
     font-size: 0.73rem;
-    border-top: 1px solid var(--border-soft);
+    border-top: 0.5px solid var(--separator);
     padding-top: 6px;
   }
   .linklike {
     background: none;
     border: none;
-    color: var(--accent);
+    color: var(--accent-color);
     cursor: pointer;
     font-size: 0.78rem;
     padding: 0;

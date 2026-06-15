@@ -89,6 +89,37 @@
     }
   });
 
+  // Trap Tab inside the dialog so focus can't escape to the page behind the
+  // backdrop (mirrors CommandPalette). Escape closes. The window-level onKey
+  // also closes on Escape; handling it here keeps the dialog self-contained.
+  function onDialogKey(e: KeyboardEvent) {
+    if (e.key === "Escape") {
+      e.preventDefault();
+      shortcuts.open = false;
+      return;
+    }
+    if (e.key !== "Tab" || !dialogEl) return;
+    const focusables = dialogEl.querySelectorAll<HTMLElement>(
+      'a[href], button:not([disabled]), input, [tabindex]:not([tabindex="-1"])',
+    );
+    if (focusables.length === 0) {
+      // Nothing focusable inside — keep focus on the dialog itself.
+      e.preventDefault();
+      dialogEl.focus();
+      return;
+    }
+    const first = focusables[0];
+    const last = focusables[focusables.length - 1];
+    const activeEl = document.activeElement;
+    if (!e.shiftKey && (activeEl === last || activeEl === dialogEl)) {
+      e.preventDefault();
+      first?.focus();
+    } else if (e.shiftKey && (activeEl === first || activeEl === dialogEl)) {
+      e.preventDefault();
+      last?.focus();
+    }
+  }
+
   const general = $derived([
     { keys: ["⌘", "K"], label: "Command palette" },
     { keys: ["/"], label: "Search" },
@@ -118,6 +149,7 @@
       aria-labelledby="sc-title"
       tabindex="-1"
       bind:this={dialogEl}
+      onkeydown={onDialogKey}
       onclick={(e) => e.stopPropagation()}
     >
       <h2 id="sc-title" class="sc__title">Keyboard shortcuts</h2>
@@ -160,20 +192,24 @@
   .sc__backdrop {
     position: fixed;
     inset: 0;
-    background: rgba(0, 0, 0, 0.4);
+    background: var(--scrim);
+    -webkit-backdrop-filter: blur(8px) saturate(115%);
+    backdrop-filter: blur(8px) saturate(115%);
     display: flex;
     align-items: center;
     justify-content: center;
     z-index: 60;
     padding: 16px;
+    animation: backdrop-in var(--motion) var(--ease);
   }
   .sc {
-    background: var(--bg-elev);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    box-shadow: 0 16px 48px rgba(0, 0, 0, 0.3);
+    background: var(--bg-elevated);
+    border: 0.5px solid var(--separator);
+    border-radius: var(--radius-popover);
+    box-shadow: var(--shadow-popover);
     width: min(560px, 100%);
     padding: 20px 22px 16px;
+    animation: popover-in var(--motion) var(--ease-spring);
   }
   .sc:focus {
     outline: none;

@@ -23,27 +23,37 @@
   <p class="muted">Type a query above, or pick a tag.</p>
 {:else if $searchQ.isPending}
   <p class="muted">Searching…</p>
+{:else if $searchQ.error}
+  <div class="empty">
+    <p class="empty__lead">Search failed</p>
+    <button class="btn btn--ghost btn--sm" onclick={() => $searchQ.refetch()}>Try again</button>
+  </div>
 {:else if $searchQ.data}
-  <ul class="results">
-    {#each $searchQ.data.results as r, i (i)}
-      <li class="result">
-        {#if r.kind === "task"}<span class="result__kind">task</span>{/if}
-        <a class="result__title" href={r.url}>
-          {#each parts(r.title, q) as p}{#if p.hit}<mark>{p.text}</mark>{:else}{p.text}{/if}{/each}
-        </a>
-        {#if r.path}<span class="result__path">{r.path}</span>{/if}
-        {#if r.snippet}
-          <p class="result__snippet">
-            {#each parts(r.snippet, q) as p}{#if p.hit}<mark>{p.text}</mark>{:else}{p.text}{/if}{/each}
-          </p>
-        {/if}
-      </li>
-    {:else}
-      <p class="muted">No matches.</p>
-    {/each}
-  </ul>
-  {#if $searchQ.data.truncated}
-    <p class="muted small">Showing the first {$searchQ.data.results.length} matches — narrow your query for more.</p>
+  {#if $searchQ.data.results.length}
+    <ul class="results">
+      {#each $searchQ.data.results as r, i (i)}
+        <li class="result">
+          {#if r.kind === "task"}<span class="result__kind">task</span>{/if}
+          <a class="result__title" href={r.url}>
+            {#each parts(r.title, q) as p}{#if p.hit}<mark>{p.text}</mark>{:else}{p.text}{/if}{/each}
+          </a>
+          {#if r.path}<span class="result__path">{r.path}</span>{/if}
+          {#if r.snippet}
+            <p class="result__snippet">
+              {#each parts(r.snippet, q) as p}{#if p.hit}<mark>{p.text}</mark>{:else}{p.text}{/if}{/each}
+            </p>
+          {/if}
+        </li>
+      {/each}
+    </ul>
+    {#if $searchQ.data.truncated}
+      <p class="muted small">Showing the first {$searchQ.data.results.length} matches — narrow your query for more.</p>
+    {/if}
+  {:else}
+    <div class="empty">
+      <p class="empty__lead">No matches</p>
+      <p class="muted">Nothing matched {tag ? `#${tag}` : `“${q}”`}. Try a different term or check the spelling.</p>
+    </div>
   {/if}
 {/if}
 
@@ -55,7 +65,7 @@
   }
   .result {
     padding: 10px 0;
-    border-bottom: 1px solid var(--border-soft);
+    border-bottom: 0.5px solid var(--separator);
   }
   .result__title {
     font-weight: 600;
@@ -87,7 +97,7 @@
     line-height: 1.5;
   }
   mark {
-    background: color-mix(in srgb, var(--accent) 30%, transparent);
+    background: var(--accent-tint-strong);
     color: inherit;
     border-radius: 2px;
     padding: 0 1px;

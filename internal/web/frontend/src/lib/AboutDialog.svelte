@@ -24,10 +24,32 @@
     }
   });
 
+  // Escape closes; Tab is trapped inside the dialog so focus can't escape to
+  // the page behind the backdrop (mirrors CommandPalette).
   function onKey(e: KeyboardEvent) {
     if (e.key === "Escape") {
       e.preventDefault();
       about.open = false;
+      return;
+    }
+    if (e.key !== "Tab" || !dialogEl) return;
+    const focusables = dialogEl.querySelectorAll<HTMLElement>(
+      'a[href], button:not([disabled]), input, [tabindex]:not([tabindex="-1"])',
+    );
+    if (focusables.length === 0) {
+      e.preventDefault();
+      dialogEl.focus();
+      return;
+    }
+    const first = focusables[0];
+    const last = focusables[focusables.length - 1];
+    const activeEl = document.activeElement;
+    if (!e.shiftKey && (activeEl === last || activeEl === dialogEl)) {
+      e.preventDefault();
+      first?.focus();
+    } else if (e.shiftKey && (activeEl === first || activeEl === dialogEl)) {
+      e.preventDefault();
+      last?.focus();
     }
   }
 </script>
@@ -66,21 +88,25 @@
   .ab__backdrop {
     position: fixed;
     inset: 0;
-    background: rgba(0, 0, 0, 0.4);
+    background: var(--scrim);
+    -webkit-backdrop-filter: blur(8px) saturate(115%);
+    backdrop-filter: blur(8px) saturate(115%);
     display: flex;
     align-items: center;
     justify-content: center;
     z-index: 60;
     padding: 16px;
+    animation: backdrop-in var(--motion) var(--ease);
   }
   .ab {
-    background: var(--bg-elev);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    box-shadow: 0 16px 48px rgba(0, 0, 0, 0.3);
+    background: var(--bg-elevated);
+    border: 0.5px solid var(--separator);
+    border-radius: var(--radius-popover);
+    box-shadow: var(--shadow-popover);
     width: min(420px, 100%);
     padding: 24px 24px 18px;
     text-align: center;
+    animation: popover-in var(--motion) var(--ease-spring);
   }
   .ab:focus {
     outline: none;

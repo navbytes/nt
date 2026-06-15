@@ -12,6 +12,7 @@
   import About from "./AboutDialog.svelte";
   import { openPalette } from "./palette.svelte";
   import { shortcuts } from "./keys.svelte";
+  import Icon from "./Icon.svelte";
   import Home from "../routes/Home.svelte";
   import NoteView from "../routes/NoteView.svelte";
   import Tasks from "../routes/Tasks.svelte";
@@ -41,15 +42,30 @@
     drawerOpen = false;
   });
 
+  // Track the resolved theme so the toolbar toggle shows the right glyph
+  // (sun when dark → tap for light; moon when light → tap for dark).
+  let isDark = $state(false);
+  function resolveDark(): boolean {
+    const root = document.documentElement;
+    const attr = root.getAttribute("data-theme");
+    if (attr === "dark") return true;
+    if (attr === "light") return false;
+    return window.matchMedia("(prefers-color-scheme: dark)").matches;
+  }
+  $effect(() => {
+    isDark = resolveDark();
+  });
+
   function toggleTheme() {
     const root = document.documentElement;
-    const dark =
-      root.getAttribute("data-theme") === "dark" ||
-      (!root.hasAttribute("data-theme") &&
-        window.matchMedia("(prefers-color-scheme: dark)").matches);
-    const next = dark ? "light" : "dark";
+    const next = resolveDark() ? "light" : "dark";
     root.setAttribute("data-theme", next);
     localStorage.setItem("nt-theme", next);
+    isDark = next === "dark";
+    // keep the PWA/status-bar tint in sync
+    document
+      .querySelector('meta[name="theme-color"]')
+      ?.setAttribute("content", next === "dark" ? "#1e1e20" : "#ffffff");
   }
 
 </script>
@@ -68,17 +84,24 @@
         class="hamburger"
         onclick={() => (drawerOpen = !drawerOpen)}
         aria-label="Toggle navigation menu"
-        aria-expanded={drawerOpen}>☰</button
+        aria-expanded={drawerOpen}><Icon name="sidebar" /></button
       >
       <button
         class="collapse-btn"
         onclick={toggleCollapsed}
         title="Toggle sidebar ([)"
         aria-label="Toggle sidebar"
-        aria-expanded={!sidebar.collapsed}>⇤</button
+        aria-expanded={!sidebar.collapsed}><Icon name="sidebar" /></button
       >
       <div class="topbar__search"><SearchBox /></div>
-      <button class="palette-btn" onclick={openPalette} title="Command palette (⌘K)" aria-label="Open command palette">
+      <button
+        class="palette-btn"
+        onclick={openPalette}
+        title="Command palette (⌘K)"
+        aria-haspopup="dialog"
+        aria-label="Open command palette"
+      >
+        <Icon name="search" size={14} />
         <span class="kbd">⌘K</span>
       </button>
       <span class="spacer"></span>
@@ -90,13 +113,24 @@
         class="icon-btn"
         onclick={() => (shortcuts.open = true)}
         title="Keyboard shortcuts (?)"
-        aria-label="Keyboard shortcuts">?</button
+        aria-haspopup="dialog"
+        aria-expanded={shortcuts.open}
+        aria-label="Keyboard shortcuts"><Icon name="help" /></button
       >
-      <button class="icon-btn" onclick={toggleTheme} title="Toggle theme" aria-label="Toggle light/dark theme">◐</button>
+      <button
+        class="icon-btn"
+        onclick={toggleTheme}
+        title="Toggle theme"
+        aria-pressed={isDark}
+        aria-label="Toggle light/dark theme"><Icon name={isDark ? "sun" : "moon"} /></button
+      >
     </header>
 
     {#if $stateQ.data?.warning}
-      <div class="store-warning" role="alert">⚠ {$stateQ.data.warning}</div>
+      <div class="store-warning" role="alert">
+        <Icon name="warning" size={15} />
+        {$stateQ.data.warning}
+      </div>
     {/if}
 
     <main class="main" id="main-content" tabindex="-1">
@@ -133,7 +167,9 @@
   </div>
 
   <!-- Mobile-only capture affordance: thumb-reachable, jumps to the task add. -->
-  <button class="fab" aria-label="New task" title="New task" onclick={() => navigate("/tasks")}>＋</button>
+  <button class="fab" aria-label="New task" title="New task" onclick={() => navigate("/tasks")}
+    ><Icon name="plus" size={22} /></button
+  >
 
   <CommandPalette />
   <Shortcuts />

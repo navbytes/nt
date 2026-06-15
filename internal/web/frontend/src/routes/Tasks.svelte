@@ -2,6 +2,7 @@
   import TaskRows from "../lib/TaskRows.svelte";
   import Board from "../lib/Board.svelte";
   import Review from "./Review.svelte";
+  import Icon from "../lib/Icon.svelte";
 
   type TaskView = "agenda" | "status" | "board" | "review";
   // initialView is set when the app lands on /review (the old Review route now
@@ -50,14 +51,14 @@
     <!-- A recalled saved view: the pill names it; × returns to the regular tabs. -->
     <span class="viewpill">
       {viewName}
-      <a class="viewpill__close" href="/tasks" title="Leave this view" aria-label="Leave this view">×</a>
+      <a class="viewpill__close" href="/tasks" title="Leave this view" aria-label="Leave this view"><Icon name="close" size={13} /></a>
     </span>
   {:else}
     <div class="seg" role="group" aria-label="View tasks as">
-      <button class:seg--on={view === "agenda"} onclick={() => (view = "agenda")}>Agenda</button>
-      <button class:seg--on={view === "status"} onclick={() => (view = "status")}>Status</button>
-      <button class:seg--on={view === "board"} onclick={() => (view = "board")}>Board</button>
-      <button class:seg--on={view === "review"} onclick={() => (view = "review")}>Review</button>
+      <button class:seg--on={view === "agenda"} aria-pressed={view === "agenda"} onclick={() => (view = "agenda")}>Agenda</button>
+      <button class:seg--on={view === "status"} aria-pressed={view === "status"} onclick={() => (view = "status")}>Status</button>
+      <button class:seg--on={view === "board"} aria-pressed={view === "board"} onclick={() => (view = "board")}>Board</button>
+      <button class:seg--on={view === "review"} aria-pressed={view === "review"} onclick={() => (view = "review")}>Review</button>
     </div>
   {/if}
 </div>
@@ -71,7 +72,7 @@
       aria-label="Filter tasks"
       autocomplete="off"
     />
-    {#if filter}<button class="qfilter__clear" onclick={() => (filter = "")} aria-label="Clear filter">×</button>{/if}
+    {#if filter}<button class="qfilter__clear" onclick={() => (filter = "")} aria-label="Clear filter"><Icon name="close" size={14} /></button>{/if}
   </div>
 {/if}
 
@@ -94,13 +95,12 @@
     width: 100%;
     padding: 6px 28px 6px 12px;
     font-size: 0.9rem;
-    background: var(--bg-inset);
-    border: 1px solid var(--border);
+    background: var(--fill);
+    border: 0.5px solid var(--separator);
     border-radius: var(--radius-sm);
     color: var(--fg);
   }
   .qfilter input:focus {
-    outline: none;
     border-color: var(--accent);
   }
   .qfilter__clear {
@@ -108,13 +108,16 @@
     right: 6px;
     top: 50%;
     transform: translateY(-50%);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
     background: none;
     border: none;
     color: var(--muted);
     cursor: pointer;
-    font-size: 1rem;
     line-height: 1;
     padding: 2px 6px;
+    border-radius: var(--radius-xs);
   }
   .qfilter__clear:hover {
     color: var(--fg);
@@ -125,23 +128,33 @@
     justify-content: space-between;
     gap: 16px;
   }
+  /* macOS AppKit segmented control: a gray track holding an elevated pill on
+     the selected segment (not a saturated accent fill). */
   .seg {
     display: flex;
-    border: 1px solid var(--border);
+    gap: 2px;
+    padding: 2px;
+    background: var(--fill);
+    border: 0.5px solid var(--separator);
     border-radius: var(--radius-sm);
-    overflow: hidden;
   }
   .seg button {
-    padding: 5px 12px;
-    background: var(--bg-inset);
+    padding: 4px 12px;
+    background: transparent;
     border: none;
+    border-radius: calc(var(--radius-sm) - 1px);
     color: var(--fg-soft);
     cursor: pointer;
     font-size: 0.85rem;
+    transition:
+      background var(--motion-fast) var(--ease),
+      color var(--motion-fast) var(--ease),
+      box-shadow var(--motion-fast) var(--ease);
   }
   .seg--on {
-    background: var(--accent) !important;
-    color: #fff !important;
+    background: var(--bg-elevated);
+    color: var(--fg);
+    box-shadow: var(--shadow-control);
   }
   .viewpill {
     display: inline-flex;
@@ -155,13 +168,15 @@
     font-weight: 600;
   }
   .viewpill__close {
+    display: inline-flex;
+    align-items: center;
     color: var(--muted);
     font-weight: 400;
-    padding: 0 4px;
+    padding: 2px 4px;
     border-radius: 999px;
   }
   .viewpill__close:hover {
     color: var(--fg);
-    background: var(--bg-inset);
+    background: var(--fill);
   }
 </style>

@@ -1,23 +1,34 @@
 <script lang="ts">
   // Renders the single app toast (see toast.svelte.ts). Mounted once in Shell.
   import { toast, dismissToast } from "./toast.svelte";
+  import Icon from "./Icon.svelte";
+  import { fly } from "svelte/transition";
+  import { cubicOut } from "svelte/easing";
 
   async function runUndo() {
     const u = toast.current?.undo;
     dismissToast();
     await u?.();
   }
+
+  // Svelte transitions aren't covered by the global prefers-reduced-motion CSS
+  // rule, so gate the duration ourselves: 0ms = snap in/out, no slide.
+  const reduceMotion =
+    typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const flyArgs = { y: 10, duration: reduceMotion ? 0 : 200, easing: cubicOut };
 </script>
 
-<div class="toastwrap" aria-live="polite">
+<div class="toastwrap" aria-live="polite" aria-atomic="true">
   {#if toast.current}
     {#key toast.current.id}
-      <div class="toast">
+      <div class="toast" transition:fly={flyArgs}>
         <span class="toast__msg">{toast.current.message}</span>
         {#if toast.current.undo}
           <button class="toast__undo" onclick={runUndo}>Undo</button>
         {/if}
-        <button class="toast__close" aria-label="Dismiss" onclick={dismissToast}>×</button>
+        <button class="toast__close" aria-label="Dismiss" onclick={dismissToast}>
+          <Icon name="close" size={14} />
+        </button>
       </div>
     {/key}
   {/if}
@@ -38,28 +49,15 @@
     align-items: center;
     gap: 10px;
     padding: 9px 12px 9px 16px;
-    background: var(--bg-elev);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.25);
+    /* macOS notification material: translucent elevated surface over a blur. */
+    background: color-mix(in srgb, var(--bg-elevated) 85%, transparent);
+    -webkit-backdrop-filter: blur(18px) saturate(150%);
+    backdrop-filter: blur(18px) saturate(150%);
+    border: 0.5px solid var(--separator);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-popover);
     font-size: 0.88rem;
     color: var(--fg);
-    animation: toast-in 0.15s ease-out;
-  }
-  @media (prefers-reduced-motion: reduce) {
-    .toast {
-      animation: none;
-    }
-  }
-  @keyframes toast-in {
-    from {
-      opacity: 0;
-      transform: translateY(6px);
-    }
-    to {
-      opacity: 1;
-      transform: none;
-    }
   }
   .toast__undo {
     background: none;
@@ -73,14 +71,16 @@
   }
   .toast__undo:hover {
     background: var(--accent);
-    color: #fff;
+    color: var(--on-accent);
   }
   .toast__close {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
     background: none;
     border: none;
     color: var(--muted);
     cursor: pointer;
-    font-size: 1rem;
     padding: 0 2px;
   }
   .toast__close:hover {
