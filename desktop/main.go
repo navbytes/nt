@@ -66,12 +66,12 @@ func main() {
 	// Hand the existing handler to Wails. No TCP port is opened — the native
 	// webview talks to the Go handler in-process.
 	err = wails.Run(&options.App{
-		Title:            "nt",
-		Width:            1280,
-		Height:           860,
-		MinWidth:         640,
-		MinHeight:        480,
-		Menu: appMenu,
+		Title:     "nt",
+		Width:     1280,
+		Height:    860,
+		MinWidth:  640,
+		MinHeight: 480,
+		Menu:      appMenu,
 		// Neutral pre-paint backing (shown for one frame before the webview
 		// renders). Window vibrancy masks it; a light neutral is least jarring.
 		BackgroundColour: &options.RGBA{R: 0xEC, G: 0xEC, B: 0xEC, A: 1},
