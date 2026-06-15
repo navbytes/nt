@@ -181,33 +181,36 @@ jobs:
         if: matrix.os == 'macos-latest' && env.APPLE_NOTARY_PASSWORD != ''
         # Apple's notary service intermittently accepts a submission then leaves
         # it "In Progress" for hours without returning a verdict (a recurring
-        # Apple-side incident, often not even shown on their status page). Cap
-        # the step so a stuck submission fails fast instead of running to
-        # GitHub's 6h job ceiling (which kills the job and skips Package/Upload).
-        timeout-minutes: 25
+        # Apple-side incident, often not even shown on their status page). We do
+        # NOT let that block the macOS release: wait up to 30 min for a verdict,
+        # then publish the codesigned app regardless. timeout-minutes is a hard
+        # backstop so the step can never run to GitHub's 6h job ceiling.
+        timeout-minutes: 35
         shell: bash
         run: |
           ditto -c -k --keepParent build/bin/nt.app "$RUNNER_TEMP/notarize.zip"
-          # `notarytool --wait` does a long HTTP poll against Apple's notary
-          # service; a transient runner network blip (e.g. NSURLError -1009)
-          # mid-poll kills it non-zero and would fail an otherwise-good release.
-          # Retry the submit+wait a few times — notarizing identical bits again
-          # is cheap and idempotent — before giving up. --timeout bounds each
-          # wait so a stuck queue can't hang past the step cap above.
-          for attempt in 1 2 3; do
-            if xcrun notarytool submit "$RUNNER_TEMP/notarize.zip" \
-                 --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" \
-                 --password "$APPLE_NOTARY_PASSWORD" --wait --timeout 10m; then
-              break
-            fi
-            if [ "$attempt" = 3 ]; then
-              echo "::error::notarization failed after $attempt attempts" >&2
-              exit 1
-            fi
-            echo "notarytool attempt $attempt failed (likely transient); retrying in $((attempt * 30))s..." >&2
-            sleep $((attempt * 30))
-          done
-          xcrun stapler staple build/bin/nt.app
+          # Submit and wait up to 30m. Classify on the final *status* (not exit
+          # code) so we can tell a real rejection (Invalid) — which must fail the
+          # release — apart from "Apple never answered" (timeout / still
+          # In Progress), which must NOT block it.
+          out="$(xcrun notarytool submit "$RUNNER_TEMP/notarize.zip" \
+                   --apple-id "$APPLE_ID" --team-id "$APPLE_TEAM_ID" \
+                   --password "$APPLE_NOTARY_PASSWORD" --wait --timeout 30m 2>&1)" || true
+          echo "$out"
+          if echo "$out" | grep -q "status: Accepted"; then
+            xcrun stapler staple build/bin/nt.app
+            echo "notarized and stapled"
+          elif echo "$out" | grep -q "status: Invalid"; then
+            echo "::error::notarization rejected (Invalid) — see notarytool output above" >&2
+            exit 1
+          else
+            # No verdict within 30m (Apple notary unresponsive). Ship the
+            # codesigned, hardened-runtime app anyway — it is NOT stapled, so a
+            # downloaded copy will hit Gatekeeper on first launch until a
+            # notarized build is published (right-click > Open, or
+            # `xattr -dr com.apple.quarantine nt.app`).
+            echo "::warning::notarization did not return a verdict within 30m (Apple notary unresponsive); publishing codesigned-but-unnotarized macOS app"
+          fi
 
       # --- Package per platform ---
       - name: Package (macOS)
