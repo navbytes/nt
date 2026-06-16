@@ -229,23 +229,35 @@
         {#each n.crumbs ?? [] as c (c)}<span>{c}</span>{/each}
         <span class="crumbs__file">{n.file}</span>
         <span class="spacer"></span>
-        <a class="btn btn--ghost btn--sm iconbtn" href={`/graph?focus=${encodeURIComponent(handle)}`}><Icon name="focus" size={14} /> Graph</a>
-        <button
-          class="btn btn--ghost btn--sm star"
-          class:star--on={n.favorite}
-          onclick={doFavorite}
-          disabled={favBusy}
-          aria-pressed={n.favorite}
-          aria-label={n.favorite ? "Remove from favorites" : "Add to favorites"}
-          title={n.favorite ? "Remove from favorites" : "Add to favorites"}
-        ><Icon name="star" filled={n.favorite} size={15} /></button>
-        <button class="btn btn--ghost btn--sm iconbtn" onclick={() => (addingTask = !addingTask)}><Icon name="plus" size={14} /> Task</button>
-        <button class="btn btn--ghost btn--sm" onclick={openMove}>Move</button>
-        <button class="btn btn--ghost btn--sm iconbtn" onclick={doArchive} disabled={archiveBusy}>
-          <Icon name="archive" size={14} /> {n.archived ? "Unarchive" : "Archive"}
-        </button>
-        <button class="btn btn--ghost btn--sm" onclick={() => (editing = true)}>Edit</button>
-        <button class="btn btn--ghost btn--sm btn--danger iconbtn" onclick={() => { deleteErr = ""; confirmingDelete = true; }}><Icon name="trash" size={14} /> Delete</button>
+        <div class="pillbar__row">
+          <div class="pillbar">
+            <a class="pillbar__btn" href={`/graph?focus=${encodeURIComponent(handle)}`}><Icon name="focus" size={15} /> Graph</a>
+            <span class="pillbar__sep"></span>
+            <button
+              class="pillbar__btn pillbar__btn--icon"
+              class:pillbar__btn--on={n.favorite}
+              onclick={doFavorite}
+              disabled={favBusy}
+              aria-pressed={n.favorite}
+              aria-label={n.favorite ? "Remove from favorites" : "Add to favorites"}
+              title={n.favorite ? "Remove from favorites" : "Add to favorites"}
+            ><Icon name="star" filled={n.favorite} size={16} /></button>
+          </div>
+          <div class="pillbar">
+            <button class="pillbar__btn" onclick={() => (addingTask = !addingTask)}><Icon name="plus" size={15} /> Task</button>
+            <span class="pillbar__sep"></span>
+            <button class="pillbar__btn" onclick={openMove}>Move</button>
+            <span class="pillbar__sep"></span>
+            <button class="pillbar__btn" onclick={doArchive} disabled={archiveBusy}>
+              <Icon name="archive" size={15} /> {n.archived ? "Unarchive" : "Archive"}
+            </button>
+            <span class="pillbar__sep"></span>
+            <button class="pillbar__btn" onclick={() => (editing = true)}><Icon name="edit" size={15} /> Edit</button>
+          </div>
+          <div class="pillbar">
+            <button class="pillbar__btn pillbar__btn--danger" onclick={() => { deleteErr = ""; confirmingDelete = true; }}><Icon name="trash" size={15} /> Delete</button>
+          </div>
+        </div>
       </div>
       {#if confirmingDelete}
         <div class="movebar movebar--danger">
@@ -385,26 +397,9 @@
 {/if}
 
 <style>
-  /* The action bar (crumbs + tools) is sticky-feeling chrome above the article.
-     Restyled toward the Aurora language: a refined breadcrumb trail (mono file
-     name), and ghost-button tools the existing global .btn--ghost already
-     dresses — only the layout + a couple of accents are set here. */
-  .iconbtn {
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-  }
-  /* The favorite star: amber when on, inheriting the ghost-button frame so it
-     sits flush with Move/Edit. */
-  .star {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    line-height: 1;
-  }
-  .star--on {
-    color: var(--pri-b);
-  }
+  /* The action bar (crumbs + tools) is chrome above the article: a refined mono
+     breadcrumb trail, and the note tools grouped into frosted-glass .pillbar
+     clusters (styled globally in app.css). */
   /* Destructive actions read in a muted red and warm fully on hover, so Delete
      is visually distinct from the neutral ghost buttons next to it. */
   .btn--danger {
