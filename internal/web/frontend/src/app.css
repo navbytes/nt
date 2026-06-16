@@ -659,6 +659,96 @@ body.resizing {
   transform: scale(0.96);
 }
 
+/* ---- frosted-glass toolbar pills ----
+   Related controls clustered into a fully-rounded, translucent pill with hairline
+   dividers + monochrome controls — a modern editor-toolbar treatment that reads as
+   one cohesive object floating over the content. Reused by the note actions, the
+   editor bar, and other toolbars. .pillbar__row holds several pills in a line. */
+.pillbar__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+}
+.pillbar {
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
+  padding: 3px;
+  background: color-mix(in srgb, var(--bg-elevated) 72%, transparent);
+  -webkit-backdrop-filter: saturate(var(--glass-saturate)) blur(var(--glass-blur));
+  backdrop-filter: saturate(var(--glass-saturate)) blur(var(--glass-blur));
+  border: 0.5px solid var(--separator);
+  border-radius: 999px;
+  box-shadow: var(--shadow-card), var(--glass-hairline);
+}
+.pillbar__btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 30px;
+  padding: 5px 12px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--fg-soft);
+  cursor: pointer;
+  font: inherit;
+  font-size: var(--text-body);
+  white-space: nowrap;
+  transition:
+    background var(--motion-fast) var(--ease),
+    color var(--motion-fast) var(--ease),
+    filter var(--motion-fast) var(--ease),
+    transform var(--motion-fast) var(--ease);
+}
+.pillbar__btn:hover {
+  background: var(--fill-hover);
+  color: var(--fg);
+  text-decoration: none;
+}
+.pillbar__btn:active {
+  transform: scale(0.96);
+}
+.pillbar__btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+  transform: none;
+}
+.pillbar__btn--icon {
+  padding: 5px;
+  min-width: 30px;
+  justify-content: center;
+}
+/* a pressed/active state (e.g. favorited) — spectral-tint well + accent glyph */
+.pillbar__btn--on {
+  color: var(--accent-color);
+  background: var(--accent-tint);
+}
+/* the prominent action in a bar (Save) — filled accent gradient */
+.pillbar__btn--accent {
+  background: var(--grad-accent);
+  color: var(--on-accent);
+  font-weight: 550;
+  box-shadow: 0 2px 9px -4px var(--spectral-glow);
+}
+.pillbar__btn--accent:hover {
+  filter: brightness(1.06) saturate(1.04);
+  color: var(--on-accent);
+  background: var(--grad-accent);
+}
+.pillbar__btn--danger:hover {
+  background: color-mix(in srgb, var(--red) 14%, transparent);
+  color: var(--red);
+}
+/* hairline divider between sub-groups inside a pill */
+.pillbar__sep {
+  align-self: stretch;
+  width: 0.5px;
+  margin: 4px 3px;
+  background: var(--separator-strong);
+}
+
 /* ---- sidebar nav + tree ---- */
 .brand {
   display: flex;

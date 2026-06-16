@@ -126,10 +126,13 @@
 
 <div class="editor">
   <div class="editor__bar">
-    <button class="btn" onclick={save} disabled={saving || !loaded}>
-      {saving ? "Saving…" : "Save"}
-    </button>
-    <button class="btn btn--ghost" onclick={onClose}>Cancel</button>
+    <div class="pillbar">
+      <button class="pillbar__btn pillbar__btn--accent" onclick={save} disabled={saving || !loaded}>
+        {saving ? "Saving…" : "Save"}
+      </button>
+      <span class="pillbar__sep"></span>
+      <button class="pillbar__btn" onclick={onClose}>Cancel</button>
+    </div>
     <span class="kbd">⌘/Ctrl+S</span>
     {#if error}<span class="error">{error}</span>{/if}
   </div>
