@@ -147,7 +147,11 @@ func TestSyntaxHighlight(t *testing.T) {
 	s := newTestServer(t)
 	doc, notes := s.load()
 	html, _ := renderBody("```go\nfunc main() {}\n```\n", doc, notes)
-	if !strings.Contains(string(html), `class="chroma"`) || !strings.Contains(string(html), `class="kd"`) {
+	// chroma ≥2.26 tags the <pre> with the style mode (e.g. class="chroma dark"),
+	// so match the class prefix rather than the exact attribute. nt themes code
+	// via the root [data-theme] + `.chroma .token` selectors, so the extra mode
+	// class is inert.
+	if !strings.Contains(string(html), `class="chroma`) || !strings.Contains(string(html), `class="kd"`) {
 		t.Fatalf("go code not highlighted:\n%s", html)
 	}
 	if plain, _ := renderBody("```nosuchlang\nx\n```\n", doc, notes); strings.Contains(string(plain), "chroma") {
