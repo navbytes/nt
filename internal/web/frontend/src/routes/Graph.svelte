@@ -48,6 +48,7 @@
   let built3d = false; // which renderer is currently mounted
   let built = false; // first build finished (gates dim-toggle rebuilds)
   let fitPending = false; // zoom-to-fit once the next layout settles
+  let warmupTick = 0; // throttles the 3D re-frame while the layout is inflating
   let lastRoot: string | null = null; // detects local-root changes to reset expansion
   let destroyed = false; // component torn down (guards async builds)
   let bloomPass: any = null; // three UnrealBloomPass (3D only)
@@ -987,6 +988,10 @@
         })
         .onEngineTick(() => {
           if (!engineRunning) engineRunning = true;
+          // Track the inflating layout so nodes don't appear to "keep shrinking"
+          // during 3D warmup: re-frame instantly every few ticks until it settles
+          // (the camera only fit once, on stop, so a big graph shrank for ~15s).
+          if (fitPending && ++warmupTick % 12 === 0) graph?.zoomToFit?.(0, 60);
         })
         .onEngineStop(() => {
           engineRunning = false;

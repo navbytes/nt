@@ -567,7 +567,11 @@
   }
   .prevnext__link--next {
     text-align: right;
-    flex-direction: row;
+    justify-content: flex-end;
+  }
+  /* mirror the Previous card: right-align the label + title in the Next card */
+  .prevnext__link--next .prevnext__col {
+    align-items: flex-end;
   }
   .prevnext__link:hover {
     color: var(--label-primary);
