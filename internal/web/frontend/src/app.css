@@ -586,20 +586,31 @@ body.resizing {
    never waste space in the browser build. */
 [data-desktop] .sidebar {
   padding-top: calc(var(--titlebar-h) + var(--space-1));
-  -webkit-app-region: drag; /* drag the window by empty sidebar areas */
+  /* Wails' WKWebView starts a window drag from JS by reading the --wails-draggable
+     custom property off the *clicked element* (window.wails). It does NOT honor
+     Chromium's -webkit-app-region — WKWebView ignores that. Because Wails tests
+     e.target (not a geometric region) we need a property that *inherits*, so the
+     whole chrome subtree reports drag; the no-drag rule below carves controls
+     back out (no-drag also inherits to their icon/text children). */
+  --wails-draggable: drag; /* drag the window by empty sidebar areas */
 }
 [data-desktop] .topbar {
-  -webkit-app-region: drag;
+  --wails-draggable: drag;
 }
 [data-desktop] .sidebar a,
 [data-desktop] .sidebar button,
 [data-desktop] .sidebar input,
+[data-desktop] .sidebar select,
+[data-desktop] .sidebar textarea,
 [data-desktop] .sidebar [role="button"],
 [data-desktop] .topbar a,
 [data-desktop] .topbar button,
 [data-desktop] .topbar input,
-[data-desktop] .topbar [role="button"] {
-  -webkit-app-region: no-drag; /* keep controls clickable */
+[data-desktop] .topbar select,
+[data-desktop] .topbar textarea,
+[data-desktop] .topbar [role="button"],
+[data-desktop] .topbar .topbar__search {
+  --wails-draggable: no-drag; /* controls (incl. the whole search box + its dropdown) stay clickable */
 }
 /* Collapsed sidebar on desktop: the sidebar (which normally clears the traffic
    lights) is hidden, so inset the topbar's left edge past them — stops the toggle

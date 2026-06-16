@@ -186,10 +186,11 @@
 </div>
 
 <style>
-  /* .content is the positioning context for the aurora layer. We order layers with
-     explicit child z-indexes (aurora 0 < main 1 < topbar 5) rather than
-     isolation:isolate — that isolate stacking context broke the native
-     -webkit-app-region window-drag on the desktop topbar. */
+  /* .content is the positioning context for the aurora layer. Children are ordered
+     with explicit z-indexes (aurora 0 < main 1 < topbar 5) so the ambient aurora
+     sits behind everything without needing isolation:isolate. (Desktop window-drag
+     is handled by Wails reading --wails-draggable off the click target — see
+     app.css [data-desktop] — so it's independent of stacking contexts here.) */
   .content {
     position: relative;
   }
