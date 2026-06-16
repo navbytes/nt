@@ -79,6 +79,14 @@
   {/if}
 
   <div class="content">
+    <!-- Ambient aurora: drifting spectral blobs behind all content. The static
+         wash lives on .content (app.css); this adds the *motion* the maintainer
+         wants. Sits behind content + topbar, never intercepts clicks, and is
+         neutralized under reduced-motion (explicit guard for the infinite loop). -->
+    <div class="aurora" aria-hidden="true">
+      <span class="aurora__blob aurora__blob--1"></span>
+      <span class="aurora__blob aurora__blob--2"></span>
+    </div>
     <header class="topbar">
       <button
         class="hamburger"
@@ -176,3 +184,98 @@
   <Toast />
   <About />
 </div>
+
+<style>
+  /* Make .content a positioning + stacking context for the aurora layer.
+     isolation:isolate (not overflow/contain) so the sticky topbar still pins
+     to the viewport. The aurora clips its own blobs; .content stays unclipped. */
+  .content {
+    position: relative;
+    isolation: isolate;
+  }
+
+  /* The drifting ambient aurora. Absolutely fills the content pane, behind every
+     child (z-index:0; the topbar is z-index:5 and main is lifted to z-index:1),
+     and passes all clicks through. Two soft spectral blobs ease back and forth
+     on the GPU (transform/opacity only). */
+  .aurora {
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    overflow: hidden;
+    pointer-events: none;
+  }
+  .aurora__blob {
+    position: absolute;
+    border-radius: 50%;
+    filter: blur(70px);
+    /* deliberately faint — an ambient wash, kept low so body text stays AA
+       (the blobs also pool in the corners, mostly behind chrome + margins). */
+    opacity: 0.28;
+    will-change: transform;
+  }
+  .aurora__blob--1 {
+    top: -16%;
+    right: -10%;
+    width: 46vw;
+    max-width: 620px;
+    aspect-ratio: 1;
+    background: radial-gradient(circle at 50% 50%, var(--spectral-1), transparent 68%);
+    animation: aurora-drift var(--aurora-drift) var(--ease) infinite alternate;
+  }
+  .aurora__blob--2 {
+    bottom: -22%;
+    left: -14%;
+    width: 52vw;
+    max-width: 680px;
+    aspect-ratio: 1;
+    background: radial-gradient(circle at 50% 50%, var(--spectral-3), transparent 68%);
+    /* a touch slower + offset so the two blobs never move in lockstep */
+    animation: aurora-drift calc(var(--aurora-drift) * 1.35) var(--ease) -8s infinite alternate;
+  }
+  /* Lift real content above the aurora (topbar already sits at z-index:5). */
+  .store-warning,
+  .main {
+    position: relative;
+    z-index: 1;
+  }
+
+  /* ── Topbar refinements (behavior unchanged) ──────────────────────────
+     Counts speak in the mono "system voice": uppercase, tracked, tabular so
+     the digits don't jitter as they update. The strong value keeps full
+     contrast; the unit label recedes. */
+  .stat {
+    font-family: var(--font-mono);
+    font-size: var(--text-subhead);
+    text-transform: uppercase;
+    letter-spacing: var(--tracking-caps);
+    color: var(--label-tertiary);
+    font-variant-numeric: tabular-nums;
+  }
+  .stat strong {
+    font-weight: 600;
+    color: var(--label-secondary);
+  }
+  a.stat:hover {
+    color: var(--label-secondary);
+    text-decoration: none;
+  }
+  a.stat:hover strong {
+    color: var(--spectral-2);
+  }
+  /* The ⌘K hint reads as a key cap rather than loose text. */
+  .palette-btn .kbd {
+    padding: 1px 5px;
+    border-radius: var(--radius-xs);
+    background: var(--fill-strong);
+    box-shadow: var(--glass-hairline);
+  }
+
+  /* Belt-and-suspenders: the global rule zeroes durations, but for an infinite
+     ambient loop we also stop it outright. */
+  @media (prefers-reduced-motion: reduce) {
+    .aurora__blob {
+      animation: none;
+    }
+  }
+</style>

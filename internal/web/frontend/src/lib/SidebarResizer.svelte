@@ -88,12 +88,17 @@
     content: "";
     position: absolute;
     inset: 0 2px;
+    border-radius: 2px;
     background: transparent;
-    transition: background 0.12s ease;
+    transition:
+      background var(--motion-fast) var(--ease),
+      opacity var(--motion-fast) var(--ease);
   }
+  /* A spectral thread lights up the divider on hover/keyboard focus. */
   .resizer:hover::before,
   .resizer:focus-visible::before {
-    background: var(--accent);
+    background: var(--grad-spectral-160);
+    box-shadow: 0 0 8px -1px var(--spectral-glow);
   }
   .resizer:focus-visible {
     outline: none;

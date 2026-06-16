@@ -6,7 +6,7 @@
   // activity) so every surface stays consistent from a single click.
   import { createMutation, useQueryClient } from "@tanstack/svelte-query";
   import { api, type Task, type TaskGroup } from "./api";
-  import { priorityClass, relativeDue, meaningfulSource, displayTitle } from "./text";
+  import { priorityClass, relativeDue, meaningfulSource, displayTitle, fmtDuration } from "./text";
   import { showToast } from "./toast.svelte";
   import { navigate } from "./router.svelte";
   import Icon from "./Icon.svelte";
@@ -113,6 +113,29 @@
   const due = $derived(t.due ? relativeDue(t.due) : null);
   // Only surface a source badge for non-default origins (chiefly an AI agent).
   const src = $derived(meaningfulSource(t.source));
+  // Time estimate (todo.txt est:) as a terse "1h 30m" — real data the quick-add
+  // preview already speaks, surfaced on the row so a task's weight reads at a
+  // glance. 0/absent → no chip (unestimated tasks stay calm). Hidden when done.
+  const est = $derived(t.est && t.status !== "done" ? fmtDuration(t.est) : "");
+
+  // Due-date urgency "temperature": a single tier that paints the due chip so the
+  // pressure of a deadline reads at a glance — overdue runs hot (red), today is
+  // the accent, the next few days are cool teal, anything further out stays muted.
+  // Done tasks never carry urgency. Date-only diff (a task due *today* isn't yet
+  // overdue), so it agrees with relativeDue()/the agenda buckets — no API change.
+  type Urgency = "over" | "today" | "soon" | "later";
+  function dueUrgency(dueRaw: string): Urgency {
+    const [y, mo, d] = dueRaw.slice(0, 10).split("-").map(Number);
+    if (!y || !mo || !d) return "later";
+    const now = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const diff = Math.round((new Date(y, mo - 1, d).getTime() - today.getTime()) / 86400000);
+    if (diff < 0) return "over";
+    if (diff === 0) return "today";
+    if (diff <= 3) return "soon"; // within the working horizon — worth a cue
+    return "later";
+  }
+  const urgency = $derived(t.due && t.status !== "done" ? dueUrgency(t.due) : null);
 
   function toggleDoing() {
     $statusMut.mutate({ id: t.id, status: t.status === "doing" ? "open" : "doing" });
@@ -259,13 +282,12 @@
     {#if t.status === "doing"}<span class="status-pill status-pill--doing">doing</span>{/if}
     {#if t.status === "blocked"}<span class="status-pill status-pill--blocked" title={t.blocker ? `blocked by: ${t.blocker}` : "blocked"}><Icon name="blocked" size={11} /> blocked</span>{/if}
     {#if t.noteUrl}<a class="chip chip--note" href={t.noteUrl} title={`Details: ${t.noteTitle ?? ""}`}><Icon name="document" size={12} /> details</a>{/if}
-    {#if t.project}<a class="chip" href={`/search?tag=${encodeURIComponent(t.project)}`}>+{t.project}</a>{/if}
+    {#if t.project}<a class="chip chip--proj" href={`/search?tag=${encodeURIComponent(t.project)}`}>+{t.project}</a>{/if}
     {#each t.tags ?? [] as tag (tag)}<a class="chip chip--tag" href={`/search?tag=${encodeURIComponent(tag)}`}>@{tag}</a>{/each}
+    {#if est}<span class="row__est" title={`Estimated ${est}`} aria-label={`Estimated ${est}`}>{est}</span>{/if}
     {#if due}<span
-        class="row__due"
-        class:row__due--over={due.overdue && t.status !== "done"}
-        class:row__due--soon={due.soon && t.status !== "done"}
-        title={t.due}>{due.label}</span
+        class="row__due {urgency ? `row__due--${urgency}` : ''}"
+        title={t.due}>{#if urgency === "over"}<Icon name="flame" size={11} filled />{/if}{due.label}</span
       >{/if}
     {#if src}<span class="src src--agent" title={`Captured by ${src}`}>{src}</span>{/if}
     {#if t.status !== "done"}
@@ -408,22 +430,59 @@
     color: var(--red);
   }
   .status-pill {
-    font-size: 0.68rem;
+    font-family: var(--font-mono);
+    font-size: 0.62rem;
     text-transform: uppercase;
-    letter-spacing: 0.04em;
-    padding: 1px 6px;
+    letter-spacing: var(--tracking-caps);
+    padding: 1px 7px;
     border-radius: 999px;
   }
+  /* A live task's pill — the accent colour (AA in both themes) with a hairline
+     ring; the spectral thread lives on the row's decorative left bar/wash, never
+     under this text. */
   .status-pill--doing {
     color: var(--accent-color);
-    border: 0.5px solid var(--accent-color);
+    box-shadow: inset 0 0 0 0.5px color-mix(in srgb, var(--accent-color) 50%, transparent);
   }
   .status-pill--blocked {
     color: var(--red);
-    border: 0.5px solid var(--red);
+    box-shadow: inset 0 0 0 0.5px color-mix(in srgb, var(--red) 50%, transparent);
+  }
+  /* Sharpen the shared .pri primitive locally: a crisper square-ish chip with a
+     faint inner light-catch + soft band glow, so priority reads as a deliberate
+     marker (shape + letter still carry it, never colour alone). */
+  .pri {
+    border-radius: var(--radius-xs);
+    box-shadow:
+      inset 0 0.5px 0 rgba(255, 255, 255, 0.35),
+      0 1px 4px -1px color-mix(in srgb, currentColor 0%, transparent);
+  }
+  .pri--a {
+    box-shadow:
+      inset 0 0.5px 0 rgba(255, 255, 255, 0.35),
+      0 1px 5px -1px color-mix(in srgb, var(--pri-a) 55%, transparent);
+  }
+  .pri--b {
+    box-shadow:
+      inset 0 0.5px 0 rgba(255, 255, 255, 0.35),
+      0 1px 5px -1px color-mix(in srgb, var(--pri-b) 50%, transparent);
+  }
+  /* Project chip: a quiet fill with a subtle accent edge so a task's home reads
+     as a structural anchor, distinct from the @tag chips. */
+  .chip--proj {
+    color: var(--accent-color);
+    box-shadow: inset 0 0 0 0.5px color-mix(in srgb, var(--accent-color) 40%, transparent);
+  }
+  .chip--proj:hover {
+    background: var(--accent-tint);
+    text-decoration: none;
   }
   .chip--tag {
     color: var(--accent-2);
+  }
+  .chip--tag:hover {
+    background: color-mix(in srgb, var(--accent-2) 12%, transparent);
+    text-decoration: none;
   }
   /* The "details" chip linking to a task's body note. */
   .chip--note {
@@ -451,22 +510,79 @@
     padding-left: 8px;
     margin-left: -8px;
   }
-  /* The "doing" accent wins over the priority bar when both apply. */
+  /* The "doing" accent wins over the priority bar when both apply — a live task
+     gets the signature spectral thread + a faint wash, so in-progress work glows
+     a touch warmer than the rest of the list without breaking its calm. */
   .row--doing {
-    box-shadow: inset 2px 0 0 var(--accent-color);
+    box-shadow: inset 3px 0 0 0 var(--spectral-2);
+    background: linear-gradient(
+      90deg,
+      color-mix(in srgb, var(--spectral-2) 7%, transparent),
+      transparent 28%
+    );
+    border-radius: var(--radius-sm);
   }
+  /* Due-date temperature: one label whose colour encodes how much pressure the
+     deadline carries — overdue runs hot (red + flame), today is the accent, the
+     next few days are cool teal, anything further out stays a calm muted label.
+     The colour sits on the plain content surface (not a coloured fill) so every
+     tier clears WCAG AA in both themes; a hairline ring gives today/soon/over
+     their pill shape without eroding contrast. Mono + tabular from .row__due. */
   .row__due {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
     color: var(--muted);
     font-variant-numeric: tabular-nums;
     white-space: nowrap;
   }
+  /* Time-estimate chip (todo.txt est:) — a calm, neutral mono pill carrying the
+     task's weight. Deliberately colourless so it never competes with the due
+     temperature; a leading dot stands in for a clock glyph at this size. */
+  .row__est {
+    flex: none; /* metadata keeps intrinsic size; only .row__text (flex:1) truncates */
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-family: var(--font-mono);
+    font-size: var(--text-footnote);
+    font-variant-numeric: tabular-nums;
+    color: var(--label-secondary);
+    background: var(--bg-inset);
+    border-radius: 999px;
+    padding: 1px 7px;
+    white-space: nowrap;
+  }
+  .row__est::before {
+    content: "";
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    border: 1px solid currentColor;
+    opacity: 0.7;
+  }
+  .row__due--later {
+    color: var(--muted);
+  }
   .row__due--soon {
-    color: var(--fg-soft);
+    color: var(--teal);
+    padding: 1px 7px;
+    border-radius: 999px;
+    box-shadow: inset 0 0 0 0.5px color-mix(in srgb, var(--teal) 45%, transparent);
+  }
+  .row__due--today {
+    color: var(--accent-color);
     font-weight: 600;
+    padding: 1px 7px;
+    border-radius: 999px;
+    box-shadow: inset 0 0 0 0.5px color-mix(in srgb, var(--accent-color) 50%, transparent);
   }
   .row__due--over {
     color: var(--red);
     font-weight: 600;
+    padding: 1px 7px;
+    border-radius: 999px;
+    box-shadow: inset 0 0 0 0.5px color-mix(in srgb, var(--red) 50%, transparent);
   }
   /* Quick-reschedule popover: a small anchored menu of due presets. The fixed
      transparent backdrop makes any outside click dismiss it. */

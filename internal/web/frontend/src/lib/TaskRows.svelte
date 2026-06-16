@@ -272,6 +272,17 @@
       newText = "";
     }
   }
+
+  // Tint a group header by what the bucket means. In the agenda layout the
+  // status IS a date bucket, so "Overdue" runs hot and "Today" takes the accent
+  // — the same temperature language the due chips speak. Status/saved-view
+  // groups (open/doing/blocked/…) don't map to a temperature, so they stay
+  // neutral. Returns a modifier suffix or "" for the default mono header.
+  function headerTone(status: string): "" | "over" | "today" {
+    if (status === "Overdue") return "over";
+    if (status === "Today") return "today";
+    return "";
+  }
 </script>
 
 {#if showAdd}
@@ -310,8 +321,12 @@
   </div>
 {:else}
   {#each groups as group (group.status)}
+    {@const tone = headerTone(group.status)}
     <section class="group">
-      <h2 class="group__title">{group.status} · {group.tasks.length}</h2>
+      <h2 class="group__title {tone ? `group__title--${tone}` : ''}">
+        <span class="group__name">{group.status}</span>
+        <span class="group__count">{group.tasks.length}</span>
+      </h2>
       <ul class="rows">
         {#each group.tasks as t (t.id)}
           <TaskRow
@@ -326,7 +341,14 @@
   {:else}
     <div class="empty empty--hero">
       <div class="empty__art" class:empty__art--onboard={!emptyText} aria-hidden="true">
-        <Icon name={emptyText ? "check" : "plus"} size={28} strokeWidth={2} />
+        {#if emptyText}
+          <Icon name="check" size={28} strokeWidth={2} />
+        {:else}
+          <!-- Spectral knowledge-graph motif (the brand mark) for the onboarding
+               hero — a gentle nod that tasks + notes share one linked store. -->
+          <span class="empty__halo"></span>
+          <Icon name="graph" size={30} strokeWidth={1.6} />
+        {/if}
       </div>
       <p class="empty__lead">{emptyText || "No tasks yet."}</p>
       {#if !emptyText}
@@ -375,6 +397,67 @@
 {/if}
 
 <style>
+  /* Group header: the mono microlabel (from app.css) gets a tabular count chip
+     and an optional temperature tone for the agenda's date buckets. */
+  .group__title {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .group__name {
+    display: inline-flex;
+    align-items: center;
+  }
+  /* Count chip — tabular mono in a calm inset pill, so the bucket size reads as
+     metadata, not a heading word. */
+  .group__count {
+    font-size: var(--text-footnote);
+    font-variant-numeric: tabular-nums;
+    color: var(--label-secondary);
+    background: var(--bg-inset);
+    border-radius: 999px;
+    padding: 0 6px;
+    line-height: 1.6;
+  }
+  /* Agenda date buckets speak the due-temperature language: overdue runs hot,
+     today takes the accent. Colour sits on the content surface (AA in both
+     themes); a leading tick of colour anchors it. */
+  .group__title--over .group__name {
+    color: var(--red);
+  }
+  .group__title--over .group__count {
+    color: var(--red);
+    background: color-mix(in srgb, var(--red) 11%, transparent);
+  }
+  .group__title--today .group__name {
+    color: var(--accent-color);
+  }
+  .group__title--today .group__count {
+    color: var(--accent-color);
+    background: var(--accent-tint);
+  }
+
+  /* Onboarding empty hero: a soft spectral halo blooming behind the graph mark,
+     so the brand motif glows without any text sitting on the gradient. */
+  .empty__halo {
+    position: absolute;
+    width: 64px;
+    height: 64px;
+    border-radius: 50%;
+    background: var(--grad-spectral);
+    opacity: 0.22;
+    filter: blur(11px);
+    z-index: 0;
+  }
+  .empty__art {
+    position: relative; /* contain the halo */
+    overflow: visible;
+  }
+  .empty__art :global(.icon) {
+    position: relative;
+    z-index: 1;
+  }
+
   /* Bulk action bar (W11): a sticky footer that appears once rows are selected. */
   .bulk {
     position: sticky;
@@ -385,16 +468,17 @@
     gap: 8px;
     margin-top: 16px;
     padding: 8px 12px;
-    background: color-mix(in srgb, var(--bg-elevated) 92%, transparent);
-    -webkit-backdrop-filter: blur(20px) saturate(170%);
-    backdrop-filter: blur(20px) saturate(170%);
-    border: 0.5px solid var(--separator);
+    background: color-mix(in srgb, var(--bg-elevated) 82%, transparent);
+    -webkit-backdrop-filter: saturate(var(--glass-saturate)) blur(var(--glass-blur));
+    backdrop-filter: saturate(var(--glass-saturate)) blur(var(--glass-blur));
     border-radius: var(--radius);
-    box-shadow: var(--shadow-popover);
+    box-shadow: var(--shadow-float), var(--glass-hairline);
   }
   .bulk__count {
-    font-size: 0.85rem;
-    font-weight: 600;
+    font-family: var(--font-mono);
+    font-size: var(--text-callout);
+    font-variant-numeric: tabular-nums;
+    color: var(--label-secondary);
     margin-right: 4px;
   }
   .bulk__btn {

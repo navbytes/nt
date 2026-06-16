@@ -26,6 +26,7 @@
   import GraphControls from "../lib/GraphControls.svelte";
   import GraphDetails from "../lib/GraphDetails.svelte";
   import GraphContextMenu from "../lib/GraphContextMenu.svelte";
+  import Icon from "../lib/Icon.svelte";
 
   let { focus = "" }: { focus?: string } = $props();
 
@@ -120,12 +121,12 @@
   // ---- derived option lists for the controls panel ----
   const allNodes = $derived(($graphQ.data ? toForceGraph($graphQ.data).nodes : []) as FGNode[]);
   const folders = $derived([...new Set(allNodes.map((n) => n.folder).filter(Boolean))].sort());
-  const tags = $derived([...new Set(allNodes.flatMap((n) => n.tags))].sort());
+  const tags = $derived([...new Set(allNodes.flatMap((n) => n.tags ?? []))].sort());
   const sources = $derived([...new Set(allNodes.map((n) => n.source).filter(Boolean))].sort());
   const legend = $derived(legendEntries(allNodes, view.colorBy));
   const shapeLegend = $derived(shapeLegendEntries(allNodes, view.shapeBy));
   const edgeLegend = $derived(
-    $graphQ.data ? linkKindLegend($graphQ.data.links.map((l) => l.kind)) : [],
+    $graphQ.data ? linkKindLegend(($graphQ.data.links ?? []).map((l) => l.kind)) : [],
   );
   const selectedNode = $derived(allNodes.find((n) => n.id === view.selectedId) ?? null);
   // R is a plain (non-reactive) object read O(1) by the hot draw loop; the panel
@@ -137,7 +138,7 @@
     if (view.hideOrphans && n.deg === 0) return false;
     if (view.filterFolders.length && !view.filterFolders.includes(n.folder)) return false;
     if (view.filterSources.length && !view.filterSources.includes(n.source)) return false;
-    if (view.filterTags.length && !n.tags.some((t) => view.filterTags.includes(t))) return false;
+    if (view.filterTags.length && !(n.tags ?? []).some((t) => view.filterTags.includes(t))) return false;
     const q = view.search.trim().toLowerCase();
     if (q && !n.title.toLowerCase().includes(q)) return false;
     return true;
@@ -1142,13 +1143,27 @@
 
 <div class="graph-stage">
   {#if $graphQ.isPending}
-    <div class="graph-overlay"><p class="muted">Loading graph…</p></div>
+    <div class="graph-overlay">
+      <div class="graph-msg">
+        <span class="graph-msg__art graph-msg__art--load"><Icon name="graph" size={26} /></span>
+        <p class="graph-msg__eyebrow">Knowledge graph</p>
+        <p class="graph-msg__lead">Mapping your notes…</p>
+      </div>
+    </div>
   {:else if $graphQ.error}
-    <div class="graph-overlay"><p class="error">Couldn't load the graph.</p></div>
+    <div class="graph-overlay">
+      <div class="graph-msg">
+        <span class="graph-msg__art graph-msg__art--err"><Icon name="warning" size={24} /></span>
+        <p class="graph-msg__lead">Couldn't load the graph</p>
+        <p class="muted">Something went wrong reaching the store.</p>
+      </div>
+    </div>
   {:else if allNodes.length === 0}
     <div class="graph-overlay">
-      <div class="graph-empty">
-        <h2>No graph yet</h2>
+      <div class="graph-msg">
+        <span class="graph-msg__art graph-msg__art--empty"><Icon name="graph" size={26} /></span>
+        <p class="graph-msg__eyebrow">Knowledge graph</p>
+        <p class="graph-msg__lead">No graph yet</p>
         <p class="muted">Create notes and connect them with <code>[[wikilinks]]</code> to see your graph grow.</p>
       </div>
     </div>
@@ -1251,26 +1266,90 @@
     justify-content: center;
     z-index: 10;
   }
-  .graph-empty {
+  /* Centered editorial message for the loading / empty / error states — mono
+     eyebrow over a serif lead, with a spectral-tinted icon medallion. Matches
+     the app's .empty--hero language. */
+  .graph-msg {
     text-align: center;
-    max-width: 340px;
+    max-width: 360px;
+    padding: 0 var(--space-5);
   }
-  .graph-empty h2 {
-    margin: 0 0 8px;
+  .graph-msg__art {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 64px;
+    height: 64px;
+    margin: 0 auto var(--space-4);
+    border-radius: 50%;
+    color: var(--spectral-2);
+    background:
+      linear-gradient(
+        135deg,
+        color-mix(in srgb, var(--spectral-1) 18%, transparent),
+        color-mix(in srgb, var(--spectral-3) 18%, transparent)
+      );
+    box-shadow: var(--glow-spectral);
   }
+  /* loading medallion gently breathes (transform/opacity only; reduced-motion
+     neutralizes it via the global rule). */
+  .graph-msg__art--load {
+    animation: graph-pulse 2.4s var(--ease) infinite;
+  }
+  @keyframes graph-pulse {
+    0%,
+    100% {
+      opacity: 0.75;
+      transform: scale(1);
+    }
+    50% {
+      opacity: 1;
+      transform: scale(1.06);
+    }
+  }
+  .graph-msg__art--err {
+    color: var(--red);
+    background: color-mix(in srgb, var(--red) 13%, transparent);
+    box-shadow: none;
+  }
+  .graph-msg__eyebrow {
+    margin: 0 0 var(--space-1);
+    font-family: var(--font-mono);
+    font-size: var(--text-subhead);
+    text-transform: uppercase;
+    letter-spacing: var(--tracking-caps);
+    color: var(--accent-color);
+  }
+  .graph-msg__lead {
+    font-family: var(--font-serif);
+    font-size: 1.3rem;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    margin: 0 0 var(--space-2);
+    color: var(--fg);
+  }
+  /* Glass info banner (truncation / large-graph notice) — translucent pill with
+     the float shadow + light-catch hairline, floated over the canvas. */
   .graph-banner {
     position: absolute;
     top: 12px;
     left: 50%;
     transform: translateX(-50%);
     z-index: 15;
-    background: var(--bg-elev);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    padding: 7px 14px;
-    font-size: 0.8rem;
-    color: var(--fg-soft);
-    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.18);
+    max-width: min(560px, 80vw);
+    background: color-mix(in srgb, var(--bg-elevated) 86%, transparent);
+    -webkit-backdrop-filter: saturate(var(--glass-saturate)) blur(var(--glass-blur));
+    backdrop-filter: saturate(var(--glass-saturate)) blur(var(--glass-blur));
+    border: 0.5px solid var(--separator);
+    border-radius: 999px;
+    padding: 7px 16px;
+    font-size: var(--text-callout);
+    color: var(--label-secondary);
+    box-shadow: var(--shadow-float), var(--glass-hairline);
+    text-align: center;
+  }
+  .graph-banner strong {
+    color: var(--fg);
   }
   .sr-only {
     position: absolute;

@@ -49,8 +49,47 @@
      decorative moments (progress, brand, aurora) where no text sits on top. */
   --grad-accent: linear-gradient(135deg, #0a6fe6 0%, #6f43e0 100%);
   --grad-vivid: linear-gradient(135deg, #1aa0ff 0%, #6f5bf5 52%, #b15bf0 100%);
-  --aurora-1: rgba(10, 132, 255, 0.1);
-  --aurora-2: rgba(138, 92, 246, 0.09);
+  --aurora-1: rgba(10, 132, 255, 0.14);
+  --aurora-2: rgba(138, 92, 246, 0.12);
+
+  /* ===== Aurora reinvention layer (spectral identity · glass · depth · display) =====
+     All additive: existing tokens above are untouched, so every shipped
+     component keeps its look and opts into the new vocabulary deliberately. */
+
+  /* Tokyo-Night spectral thread — the signature gradient (brand mark, progress,
+     graph, milestones, ambient wash). Lighter than --grad-accent on purpose, so
+     it carries NO body text; text-bearing buttons keep --grad-accent for AA. */
+  --spectral-1: #7aa2f7; /* blue */
+  --spectral-2: #7c6cf0; /* indigo */
+  --spectral-3: #bb9af7; /* magenta */
+  --grad-spectral: linear-gradient(135deg, var(--spectral-1) 0%, var(--spectral-2) 52%, var(--spectral-3) 100%);
+  --grad-spectral-160: linear-gradient(160deg, var(--spectral-1) 0%, var(--spectral-2) 50%, var(--spectral-3) 100%);
+  --spectral-glow: rgba(124, 108, 240, 0.45);
+
+  /* Glass material — translucent panels over native vibrancy / the aurora wash. */
+  --glass-blur: 30px;
+  --glass-saturate: 190%;
+  --glass-hairline: inset 0 0.5px 0 rgba(255, 255, 255, 0.65); /* top light-catch */
+
+  /* Bento / elevation depth — layered spatial shadows for floating cards. */
+  --shadow-bento: 0 1px 2px rgba(0, 0, 0, 0.05), 0 10px 26px -14px rgba(24, 24, 48, 0.2),
+    0 0 0 0.5px rgba(0, 0, 0, 0.045);
+  --shadow-float: 0 2px 6px rgba(0, 0, 0, 0.06), 0 20px 50px -18px rgba(24, 24, 48, 0.3),
+    0 0 0 0.5px rgba(0, 0, 0, 0.05);
+  --glow-spectral: 0 8px 28px -8px var(--spectral-glow);
+  --glow-accent: 0 8px 24px -8px color-mix(in srgb, var(--accent-color) 55%, transparent);
+
+  /* Ambient aurora drift (GPU transform only; reduced-motion neutralizes it). */
+  --aurora-drift: 26s;
+
+  /* Display type — confident editorial titles (Home hero, landing page). */
+  --text-display: 2.5rem; /* 40 */
+  --text-display-sm: 1.9rem; /* ~30 */
+  --tracking-display: -0.028em;
+
+  /* Data-viz (capacity ring, sparkline, streak bars). */
+  --viz-track: rgba(0, 0, 0, 0.08);
+  --viz-grid: rgba(0, 0, 0, 0.06);
 
   /* ---- status ---- */
   --green-color: #1e7d34;
@@ -101,7 +140,7 @@
      Used for large titles + editorial prose headings: an editorial, literary
      voice for a notes tool, with zero web-font dependency. */
   --font-serif: "New York", ui-serif, "Iowan Old Style", Palatino, Georgia, serif;
-  --text-largetitle: 1.625rem; /* 26 */
+  --text-largetitle: 1.75rem; /* 28 — bolder page titles */
   --text-title1: 1.375rem; /* 22 */
   --text-title2: 1.0625rem; /* 17 */
   --text-headline: 0.8125rem; /* 13 / 600 */
@@ -190,6 +229,18 @@
     --aurora-1: rgba(40, 150, 255, 0.16);
     --aurora-2: rgba(150, 108, 255, 0.14);
 
+    --spectral-1: #8ab4ff;
+    --spectral-2: #9a86ff;
+    --spectral-3: #cba6ff;
+    --spectral-glow: rgba(138, 116, 255, 0.55);
+    --glass-hairline: inset 0 0.5px 0 rgba(255, 255, 255, 0.1);
+    --shadow-bento: 0 1px 2px rgba(0, 0, 0, 0.4), 0 12px 30px -14px rgba(0, 0, 0, 0.6),
+      0 0 0 0.5px rgba(0, 0, 0, 0.5), inset 0 0.5px 0 rgba(255, 255, 255, 0.05);
+    --shadow-float: 0 2px 8px rgba(0, 0, 0, 0.5), 0 24px 56px -18px rgba(0, 0, 0, 0.7),
+      0 0 0 0.5px rgba(0, 0, 0, 0.55), inset 0 0.5px 0 rgba(255, 255, 255, 0.06);
+    --viz-track: rgba(255, 255, 255, 0.1);
+    --viz-grid: rgba(255, 255, 255, 0.08);
+
     --green-color: #30d158;
     --red-color: #ff453a;
 
@@ -247,6 +298,18 @@
   --teal: #64d2ff;
   --aurora-1: rgba(40, 150, 255, 0.16);
   --aurora-2: rgba(150, 108, 255, 0.14);
+
+  --spectral-1: #8ab4ff;
+  --spectral-2: #9a86ff;
+  --spectral-3: #cba6ff;
+  --spectral-glow: rgba(138, 116, 255, 0.55);
+  --glass-hairline: inset 0 0.5px 0 rgba(255, 255, 255, 0.1);
+  --shadow-bento: 0 1px 2px rgba(0, 0, 0, 0.4), 0 12px 30px -14px rgba(0, 0, 0, 0.6),
+    0 0 0 0.5px rgba(0, 0, 0, 0.5), inset 0 0.5px 0 rgba(255, 255, 255, 0.05);
+  --shadow-float: 0 2px 8px rgba(0, 0, 0, 0.5), 0 24px 56px -18px rgba(0, 0, 0, 0.7),
+    0 0 0 0.5px rgba(0, 0, 0, 0.55), inset 0 0.5px 0 rgba(255, 255, 255, 0.06);
+  --viz-track: rgba(255, 255, 255, 0.1);
+  --viz-grid: rgba(255, 255, 255, 0.08);
 
   --green-color: #30d158;
   --red-color: #ff453a;
@@ -355,6 +418,22 @@ h1 {
     transform: none;
   }
 }
+/* Ambient aurora drift — a slow GPU-only parallax for the content aurora layer
+   (Shell paints the layer; this animates it). Neutralized by reduced-motion. */
+@keyframes aurora-drift {
+  from {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+  to {
+    transform: translate3d(2.5%, 1.5%, 0) scale(1.08);
+  }
+}
+/* Spectral sweep — pans a wide gradient across animated brand text / accents. */
+@keyframes spectral-pan {
+  to {
+    background-position: 200% center;
+  }
+}
 code {
   font-family: var(--font-mono);
   font-size: 0.9em;
@@ -445,6 +524,8 @@ code {
   flex: 0 0 var(--sidebar-w);
   border-right: 0.5px solid var(--separator);
   background: var(--bg-sidebar); /* translucent — reveals native window vibrancy */
+  -webkit-backdrop-filter: saturate(var(--glass-saturate)) blur(var(--glass-blur));
+  backdrop-filter: saturate(var(--glass-saturate)) blur(var(--glass-blur));
   padding: var(--space-5) var(--space-3);
   position: sticky;
   top: 0;
@@ -479,8 +560,9 @@ body.resizing {
   padding: var(--space-3) var(--space-5);
   border-bottom: 0.5px solid var(--separator);
   background: var(--bg-topbar); /* translucent toolbar material */
-  -webkit-backdrop-filter: saturate(180%) blur(20px);
-  backdrop-filter: saturate(180%) blur(20px);
+  -webkit-backdrop-filter: saturate(var(--glass-saturate)) blur(var(--glass-blur));
+  backdrop-filter: saturate(var(--glass-saturate)) blur(var(--glass-blur));
+  box-shadow: var(--glass-hairline);
   position: sticky;
   top: 0;
   z-index: 5;

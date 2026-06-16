@@ -27,6 +27,10 @@ test("command palette (⌘K) finds a note and navigates to it", async ({ page })
   const input = page.locator(".palette__input");
   await expect(input).toBeVisible();
   await input.fill("Design");
+  // The notes index loads asynchronously; wait for the note result to surface so
+  // the highlighted top hit is the note, not the "Search for…" fallback (avoids a
+  // race where Enter fires before the index has populated).
+  await expect(page.getByRole("option", { name: /design\.md/ })).toBeVisible();
   await input.press("Enter");
   await expect(page).toHaveURL(/\/n\//);
   await expect(page.locator(".note > h1")).toHaveText("Design");

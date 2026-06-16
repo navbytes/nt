@@ -1,0 +1,40 @@
+name: Pages
+
+# Deploys the static marketing site in site/ to GitHub Pages.
+#
+# One-time setup (maintainer, in the GitHub UI): Settings → Pages →
+# "Build and deployment" → Source = "GitHub Actions". Until that is set,
+# the deploy step has nowhere to publish.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "site/**"
+      - ".github/workflows/pages.yml"
+  workflow_dispatch:
+
+# Allow GITHUB_TOKEN to deploy to Pages and mint an OIDC token for verification.
+permissions:
+  pages: write
+  id-token: write
+  contents: read
+
+# One deploy at a time; let an in-flight production deploy finish.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+      - id: deployment
+        uses: actions/deploy-pages@v4

@@ -44,20 +44,20 @@
 <aside class="gdetails" aria-label="Selected note">
   <div class="gdetails__head">
     <div class="gdetails__crumb">{node.folder || "root"}</div>
-    <button class="icon-btn" title="Close (Esc)" aria-label="Close details" onclick={onClose}><Icon name="close" /></button>
+    <button class="icon-btn gdetails__close" title="Close (Esc)" aria-label="Close details" onclick={onClose}><Icon name="close" /></button>
   </div>
   <h2 class="gdetails__title">{node.title}</h2>
 
   <div class="gdetails__meta">
-    {#if node.source}<span class="src">{node.source}</span>{/if}
-    <span class="muted small">{node.deg} connection{node.deg === 1 ? "" : "s"}</span>
-    {#if $noteQ.data}<span class="muted small">· {$noteQ.data.backlinks.length} backlink{$noteQ.data.backlinks.length === 1 ? "" : "s"}</span>{/if}
-    {#if pinned}<span class="pin-badge" title="Pinned">📌 pinned</span>{/if}
+    {#if node.source}<span class="gdetails__src">{node.source}</span>{/if}
+    <span class="gdetails__stat">{node.deg} link{node.deg === 1 ? "" : "s"}</span>
+    {#if $noteQ.data}<span class="gdetails__stat">{$noteQ.data.backlinks?.length ?? 0} backlink{($noteQ.data.backlinks?.length ?? 0) === 1 ? "" : "s"}</span>{/if}
+    {#if pinned}<span class="gdetails__pin"><Icon name="star" size={11} filled={true} /> pinned</span>{/if}
   </div>
 
-  {#if node.tags.length}
+  {#if node.tags?.length}
     <div class="gdetails__tags">
-      {#each node.tags as t (t)}<span class="chip">#{t}</span>{/each}
+      {#each node.tags as t (t)}<span class="gtag">#{t}</span>{/each}
     </div>
   {/if}
 
@@ -79,11 +79,15 @@
       <span class="gdetails__chev" class:gdetails__chev--open={expanded}><Icon name="chevron-right" size={13} /></span>
       {expanded ? "Collapse" : "Expand"} neighbors</button
     >
-    <button class="btn btn--ghost btn--sm" onclick={onTogglePin}>{pinned ? "Unpin" : "Pin"}</button>
+    <button class="btn btn--ghost btn--sm gdetails__act" onclick={onTogglePin}>
+      <Icon name="star" size={13} filled={pinned} /> {pinned ? "Unpin" : "Pin"}
+    </button>
   </div>
 </aside>
 
 <style>
+  /* Glass detail panel — floats over the canvas with the spatial float shadow +
+     top light-catch hairline, plus a faint spectral top rule for identity. */
   .gdetails {
     position: absolute;
     top: 12px;
@@ -91,53 +95,120 @@
     z-index: 20;
     width: 300px;
     max-width: 40vw;
-    background: var(--bg-elevated);
+    background: color-mix(in srgb, var(--bg-elevated) 85%, transparent);
+    -webkit-backdrop-filter: saturate(var(--glass-saturate)) blur(var(--glass-blur));
+    backdrop-filter: saturate(var(--glass-saturate)) blur(var(--glass-blur));
     border: 0.5px solid var(--separator);
     border-radius: var(--radius-popover);
-    box-shadow: var(--shadow-popover);
-    padding: 12px 14px;
+    box-shadow: var(--shadow-float), var(--glass-hairline);
+    padding: var(--space-4) var(--space-5) var(--space-5);
+    overflow: hidden;
+    animation: gdetails-in var(--motion) var(--ease-out);
+  }
+  /* spectral hairline along the top edge — the panel's identity cue */
+  .gdetails::before {
+    content: "";
+    position: absolute;
+    inset: 0 0 auto 0;
+    height: 2px;
+    background: var(--grad-spectral);
+    opacity: 0.85;
+  }
+  @keyframes gdetails-in {
+    from {
+      opacity: 0;
+      transform: translateY(-6px);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
   }
   .gdetails__head {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 8px;
+    gap: var(--space-3);
   }
   .gdetails__crumb {
-    font-size: 0.72rem;
+    font-family: var(--font-mono);
+    font-size: var(--text-subhead);
     color: var(--muted);
     text-transform: uppercase;
     letter-spacing: var(--tracking-caps);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .gdetails__close {
+    flex: none;
+    min-width: 24px;
+    min-height: 24px;
+    border-color: transparent;
+    background: transparent;
   }
   .gdetails__title {
-    margin: 2px 0 6px;
-    font-size: 1.05rem;
-    line-height: 1.25;
+    font-family: var(--font-serif);
+    margin: var(--space-1) 0 var(--space-3);
+    font-size: var(--text-title1);
+    line-height: var(--leading-tight);
+    letter-spacing: var(--tracking-title);
     color: var(--fg);
   }
   .gdetails__meta {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
-    gap: 6px;
-    margin-bottom: 8px;
+    gap: var(--space-2) var(--space-3);
+    margin-bottom: var(--space-3);
+  }
+  /* mono microlabels for the source + counts */
+  .gdetails__src,
+  .gdetails__stat {
+    font-family: var(--font-mono);
+    font-size: var(--text-subhead);
+    text-transform: uppercase;
+    letter-spacing: var(--tracking-caps);
+    color: var(--muted);
+  }
+  .gdetails__src {
+    color: var(--label-secondary);
+  }
+  .gdetails__pin {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    font-family: var(--font-mono);
+    font-size: var(--text-subhead);
+    text-transform: uppercase;
+    letter-spacing: var(--tracking-caps);
+    color: var(--spectral-2);
   }
   .gdetails__tags {
     display: flex;
     flex-wrap: wrap;
-    gap: 5px;
-    margin-bottom: 8px;
+    gap: var(--space-2);
+    margin-bottom: var(--space-3);
+  }
+  /* spectral-tinted tag chip (matches the Tags screen's vocabulary) */
+  .gtag {
+    font-size: var(--text-callout);
+    padding: 1px 8px;
+    border-radius: 999px;
+    color: var(--fg);
+    background: color-mix(in srgb, var(--spectral-2) 13%, transparent);
+    border: 0.5px solid color-mix(in srgb, var(--spectral-2) 30%, transparent);
   }
   .gdetails__preview {
-    font-size: 0.83rem;
-    color: var(--fg-soft);
-    line-height: 1.5;
-    margin: 0 0 12px;
+    font-size: var(--text-body);
+    color: var(--label-secondary);
+    line-height: var(--leading-prose);
+    margin: 0 0 var(--space-4);
   }
   .gdetails__actions {
     display: flex;
     flex-wrap: wrap;
-    gap: 6px;
+    gap: var(--space-2);
   }
   /* Buttons that lead with an icon: center the glyph against the label. */
   .gdetails__act {
@@ -153,9 +224,5 @@
   }
   .gdetails__chev--open {
     transform: rotate(90deg);
-  }
-  .pin-badge {
-    font-size: 0.72rem;
-    color: var(--muted);
   }
 </style>
