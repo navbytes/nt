@@ -186,12 +186,12 @@
 </div>
 
 <style>
-  /* Make .content a positioning + stacking context for the aurora layer.
-     isolation:isolate (not overflow/contain) so the sticky topbar still pins
-     to the viewport. The aurora clips its own blobs; .content stays unclipped. */
+  /* .content is the positioning context for the aurora layer. We order layers with
+     explicit child z-indexes (aurora 0 < main 1 < topbar 5) rather than
+     isolation:isolate — that isolate stacking context broke the native
+     -webkit-app-region window-drag on the desktop topbar. */
   .content {
     position: relative;
-    isolation: isolate;
   }
 
   /* The drifting ambient aurora. Absolutely fills the content pane, behind every

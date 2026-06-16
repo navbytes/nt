@@ -601,6 +601,12 @@ body.resizing {
 [data-desktop] .topbar [role="button"] {
   -webkit-app-region: no-drag; /* keep controls clickable */
 }
+/* Collapsed sidebar on desktop: the sidebar (which normally clears the traffic
+   lights) is hidden, so inset the topbar's left edge past them — stops the toggle
+   from colliding with the traffic lights and leaves a clean window-drag strip. */
+[data-desktop] .layout.sidebar-collapsed .topbar {
+  padding-left: 76px;
+}
 .store-warning {
   display: flex;
   align-items: center;
