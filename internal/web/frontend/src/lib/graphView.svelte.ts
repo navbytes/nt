@@ -48,6 +48,7 @@ const PERSIST_KEYS = [
   "layout",
   "sizeBy",
   "autoRotate",
+  "hulls",
 ] as const;
 
 interface ViewState {
@@ -79,6 +80,7 @@ interface ViewState {
   layout: Layout;
   sizeBy: SizeBy;
   autoRotate: boolean; // 3D: slow ambient orbit
+  hulls: boolean; // soft spectral halos pooled behind colour clusters
 }
 
 const defaults: ViewState = {
@@ -110,6 +112,7 @@ const defaults: ViewState = {
   layout: "force",
   sizeBy: "degree",
   autoRotate: false,
+  hulls: true,
 };
 
 function loadPersisted(): Partial<ViewState> {
