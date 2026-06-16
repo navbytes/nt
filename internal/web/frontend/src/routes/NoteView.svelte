@@ -225,7 +225,8 @@
   <div class="notewrap">
     <article class="note">
       <div class="crumbs">
-        {#each n.crumbs as c (c)}<span>{c}</span>{/each}
+        <a class="crumbs__root" href="/notes">Notes</a>
+        {#each n.crumbs ?? [] as c (c)}<span>{c}</span>{/each}
         <span class="crumbs__file">{n.file}</span>
         <span class="spacer"></span>
         <a class="btn btn--ghost btn--sm iconbtn" href={`/graph?focus=${encodeURIComponent(handle)}`}><Icon name="focus" size={14} /> Graph</a>
@@ -248,7 +249,7 @@
       </div>
       {#if confirmingDelete}
         <div class="movebar movebar--danger">
-          {#if n.backlinks.length}
+          {#if n.backlinks?.length}
             <span class="movebar__label">
               Delete “{n.title}”? {n.backlinks.length} note{n.backlinks.length === 1 ? "" : "s"} link here — see “Linked from” below.
             </span>
@@ -300,11 +301,17 @@
           <span>Archived — hidden from the sidebar, search, orphans, and the graph. Still on disk.</span>
         </div>
       {/if}
-      <h1>{n.title}</h1>
+      <h1 class="note__title">{n.title}</h1>
       <div class="note__meta">
-        {#if n.source}<span class="src">{n.source}</span>{/if}
-        {#if n.created}<span class="muted">{n.created}</span>{/if}
-        {#each n.tags as t (t)}<a class="chip" href={`/search?tag=${encodeURIComponent(t)}`}>#{t}</a>{/each}
+        {#if n.folder}<span class="note__metaitem note__folder"><Icon name="document" size={13} /> {n.folder}</span>{/if}
+        {#if n.created}<span class="note__metaitem note__date"><Icon name="calendar" size={13} /> {n.created}</span>{/if}
+        {#if n.backlinks?.length}<a class="note__metaitem note__links" href="#linked-from"><Icon name="graph" size={13} /> {n.backlinks.length} backlink{n.backlinks.length === 1 ? "" : "s"}</a>{/if}
+        {#if n.source}<span class="note__metaitem src">{n.source}</span>{/if}
+        {#if n.tags?.length}
+          <span class="note__tags">
+            {#each n.tags as t (t)}<a class="chip" href={`/search?tag=${encodeURIComponent(t)}`}>#{t}</a>{/each}
+          </span>
+        {/if}
       </div>
 
       <!-- bodyHTML is rendered server-side by goldmark (safe mode, escaped). -->
@@ -321,8 +328,8 @@
         </section>
       {/if}
 
-      {#if n.backlinks.length}
-        <section class="panel">
+      {#if n.backlinks?.length}
+        <section class="panel" id="linked-from">
           <h2 class="group__title">Linked from</h2>
           <ul class="rows">
             {#each n.backlinks as bl (bl.url + bl.text)}
@@ -334,35 +341,54 @@
         </section>
       {/if}
 
-      <nav class="prevnext">
-        {#if n.prev}<a class="prevnext__link" href={n.prev.url}
-            ><Icon name="chevron-left" size={14} /> {n.prev.title}</a
-          >{/if}
-        <span class="spacer"></span>
-        {#if n.next}<a class="prevnext__link" href={n.next.url}
-            >{n.next.title} <Icon name="chevron-right" size={14} /></a
-          >{/if}
-      </nav>
+      {#if n.prev || n.next}
+        <nav class="prevnext" aria-label="Adjacent notes">
+          {#if n.prev}
+            <a class="prevnext__link prevnext__link--prev" href={n.prev.url}>
+              <Icon name="chevron-left" size={15} />
+              <span class="prevnext__col">
+                <span class="prevnext__dir">Previous</span>
+                <span class="prevnext__title">{n.prev.title}</span>
+              </span>
+            </a>
+          {/if}
+          <span class="spacer"></span>
+          {#if n.next}
+            <a class="prevnext__link prevnext__link--next" href={n.next.url}>
+              <span class="prevnext__col">
+                <span class="prevnext__dir">Next</span>
+                <span class="prevnext__title">{n.next.title}</span>
+              </span>
+              <Icon name="chevron-right" size={15} />
+            </a>
+          {/if}
+        </nav>
+      {/if}
     </article>
 
     {#if toc.length > 1}
       <nav class="toc" aria-label="On this page">
         <div class="toc__head">On this page</div>
-        {#each toc as item (item.id)}
-          <a
-            href={"#" + item.id}
-            class="toc__link toc__link--l{item.level}"
-            class:active={activeId === item.id}
-            onclick={(e) => jump(e, item.id)}>{item.text}</a
-          >
-        {/each}
+        <div class="toc__links">
+          {#each toc as item (item.id)}
+            <a
+              href={"#" + item.id}
+              class="toc__link toc__link--l{item.level}"
+              class:active={activeId === item.id}
+              onclick={(e) => jump(e, item.id)}>{item.text}</a
+            >
+          {/each}
+        </div>
       </nav>
     {/if}
   </div>
 {/if}
 
 <style>
-  /* Icon-plus-label ghost buttons: align the SF-style glyph with its text. */
+  /* The action bar (crumbs + tools) is sticky-feeling chrome above the article.
+     Restyled toward the Aurora language: a refined breadcrumb trail (mono file
+     name), and ghost-button tools the existing global .btn--ghost already
+     dresses — only the layout + a couple of accents are set here. */
   .iconbtn {
     display: inline-flex;
     align-items: center;
@@ -390,5 +416,225 @@
   }
   .movebar--danger {
     border-color: var(--red);
+  }
+
+  /* ── Breadcrumbs ─────────────────────────────────────────────────────────
+     Refined trail: a "Notes" home link + folder crumbs in mono, the file name
+     emphasized. Overrides the app.css base via component-scoped specificity. */
+  .crumbs {
+    align-items: center;
+    font-family: var(--font-mono);
+    font-size: var(--text-subhead);
+    letter-spacing: var(--tracking-caps);
+    text-transform: uppercase;
+    color: var(--muted);
+    padding-bottom: var(--space-2);
+  }
+  .crumbs__root {
+    color: var(--muted);
+    transition: color var(--motion-fast) var(--ease);
+  }
+  .crumbs__root:hover {
+    color: var(--accent-color);
+    text-decoration: none;
+  }
+  .crumbs__file {
+    color: var(--label-secondary);
+    text-transform: none;
+  }
+
+  /* ── Title + metadata ────────────────────────────────────────────────────
+     A serif display title (the global h1 is already serif; we scale it up and
+     lean into the display tracking), over a mono metadata row. */
+  .note__title {
+    font-size: var(--text-display-sm);
+    letter-spacing: var(--tracking-display);
+    margin-bottom: var(--space-3);
+  }
+  .note__meta {
+    gap: var(--space-4);
+    margin-bottom: var(--space-7);
+    padding-bottom: var(--space-5);
+    border-bottom: 0.5px solid var(--separator);
+  }
+  .note__metaitem {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-family: var(--font-mono);
+    font-size: var(--text-subhead);
+    letter-spacing: var(--tracking-caps);
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+  .note__metaitem :global(.icon) {
+    color: var(--label-quaternary);
+  }
+  .note__folder {
+    text-transform: none;
+  }
+  a.note__links {
+    color: var(--muted);
+    transition: color var(--motion-fast) var(--ease);
+  }
+  a.note__links:hover {
+    color: var(--accent-color);
+    text-decoration: none;
+  }
+  a.note__links:hover :global(.icon) {
+    color: var(--spectral-2);
+  }
+  .note__tags {
+    display: inline-flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+  }
+  /* Tag chips here are links (global .chip is a borderless tint pill); give them
+     a faint hairline so they read as affordances in the metadata row. */
+  .note__tags .chip {
+    color: var(--accent-color);
+    background: var(--accent-tint);
+    box-shadow: inset 0 0 0 0.5px color-mix(in srgb, var(--accent-color) 22%, transparent);
+    transition:
+      background var(--motion-fast) var(--ease),
+      box-shadow var(--motion-fast) var(--ease);
+  }
+  .note__tags .chip:hover {
+    background: var(--accent-tint-strong);
+    text-decoration: none;
+  }
+
+  /* ── Archived banner ─────────────────────────────────────────────────────
+     A glassy, dashed amber note (kept reversible-feeling). Overrides the
+     app.css base with the spectral/teal accent edge. */
+  .archived-banner {
+    align-items: center;
+    background: color-mix(in srgb, var(--teal) 8%, var(--bg-elevated));
+    border: 0.5px dashed color-mix(in srgb, var(--teal) 45%, transparent);
+    border-left: 3px solid var(--teal);
+    border-radius: var(--radius-md);
+    color: var(--label-secondary);
+  }
+  .archived-banner :global(.icon) {
+    color: var(--teal);
+  }
+
+  /* ── Action / move / task bars ───────────────────────────────────────────
+     Glassy inset bars (the app.css base is a flat inset fill). */
+  .movebar {
+    background: color-mix(in srgb, var(--bg-elevated) 72%, transparent);
+    -webkit-backdrop-filter: saturate(var(--glass-saturate)) blur(var(--glass-blur));
+    backdrop-filter: saturate(var(--glass-saturate)) blur(var(--glass-blur));
+    border: 0.5px solid var(--separator);
+    box-shadow: var(--glass-hairline);
+    border-radius: var(--radius-md);
+  }
+  .movebar__label {
+    font-family: var(--font-mono);
+    letter-spacing: var(--tracking-caps);
+  }
+
+  /* ── Related panels (task refs + backlinks) ──────────────────────────────
+     The shared .panel/.group__title/.rows globals already carry the mono
+     heading + hairline rows; only a touch of polish on the heading + link rows. */
+  .panel {
+    scroll-margin-top: 72px;
+  }
+  .panel .group__title {
+    font-size: var(--text-callout);
+    letter-spacing: var(--tracking-caps);
+  }
+
+  /* ── Prev / next ─────────────────────────────────────────────────────────
+     Two glass "cards" pulling left/right, each with a mono direction label over
+     the (serif-ish) title. Overrides the app.css .prevnext base layout. */
+  .prevnext {
+    gap: var(--space-4);
+    border-top: 0.5px solid var(--separator);
+  }
+  .prevnext__link {
+    flex: 1 1 0;
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    max-width: 48%;
+    padding: var(--space-4);
+    border-radius: var(--radius-md);
+    background: color-mix(in srgb, var(--bg-elevated) 70%, transparent);
+    -webkit-backdrop-filter: saturate(var(--glass-saturate)) blur(var(--glass-blur));
+    backdrop-filter: saturate(var(--glass-saturate)) blur(var(--glass-blur));
+    box-shadow: var(--glass-hairline), 0 0 0 0.5px var(--separator);
+    color: var(--label-secondary);
+    transition:
+      box-shadow var(--motion-fast) var(--ease),
+      transform var(--motion-fast) var(--ease),
+      color var(--motion-fast) var(--ease);
+  }
+  .prevnext__link--next {
+    text-align: right;
+    flex-direction: row;
+  }
+  .prevnext__link:hover {
+    color: var(--label-primary);
+    text-decoration: none;
+    transform: translateY(-1px);
+    box-shadow: var(--shadow-bento);
+  }
+  .prevnext__link :global(.icon) {
+    flex: none;
+    color: var(--muted);
+    transition: color var(--motion-fast) var(--ease);
+  }
+  .prevnext__link:hover :global(.icon) {
+    color: var(--spectral-2);
+  }
+  .prevnext__col {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+  }
+  .prevnext__link--next .prevnext__col {
+    align-items: flex-end;
+  }
+  .prevnext__dir {
+    font-family: var(--font-mono);
+    font-size: var(--text-subhead);
+    text-transform: uppercase;
+    letter-spacing: var(--tracking-caps);
+    color: var(--muted);
+  }
+  .prevnext__title {
+    font-weight: 600;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 100%;
+  }
+
+  /* ── Table of contents ───────────────────────────────────────────────────
+     The app.css base draws the rail + active state; here we lift the active
+     link to a spectral accent (text + a spectral left border) and add a mono
+     header treatment, matching the sidebar/nav microlabel language. */
+  .toc__head {
+    letter-spacing: var(--tracking-caps);
+    padding-left: 10px;
+  }
+  .toc__link {
+    transition:
+      color var(--motion-fast) var(--ease),
+      border-color var(--motion-fast) var(--ease),
+      background var(--motion-fast) var(--ease);
+  }
+  .toc__link.active {
+    color: var(--spectral-2);
+    border-left-color: var(--spectral-2);
+    font-weight: 600;
+  }
+
+  @media (max-width: 640px) {
+    .prevnext__link {
+      max-width: none;
+    }
   }
 </style>

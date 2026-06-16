@@ -93,15 +93,21 @@
   }
   .qfilter input {
     width: 100%;
-    padding: 6px 28px 6px 12px;
-    font-size: 0.9rem;
+    padding: 7px 28px 7px 12px;
+    font: inherit;
+    font-size: var(--text-body);
     background: var(--fill);
     border: 0.5px solid var(--separator);
     border-radius: var(--radius-sm);
     color: var(--fg);
+    transition:
+      border-color var(--motion-fast) var(--ease),
+      box-shadow var(--motion-fast) var(--ease);
   }
   .qfilter input:focus {
-    border-color: var(--accent);
+    outline: none;
+    border-color: var(--accent-color);
+    box-shadow: var(--focus-ring-tight);
   }
   .qfilter__clear {
     position: absolute;
@@ -128,44 +134,71 @@
     justify-content: space-between;
     gap: 16px;
   }
-  /* macOS AppKit segmented control: a gray track holding an elevated pill on
-     the selected segment (not a saturated accent fill). */
+  /* Glass segmented control: a translucent track holding an elevated pill on the
+     selected segment. Mono microlabels (the sidebar/nav language); the active
+     pill carries a hairline-thin spectral underline so the choice glows without
+     a saturated fill (and no gradient sits under the label text → AA-safe). */
   .seg {
     display: flex;
     gap: 2px;
-    padding: 2px;
-    background: var(--fill);
-    border: 0.5px solid var(--separator);
+    padding: 3px;
+    background: color-mix(in srgb, var(--bg-elevated) 70%, transparent);
+    -webkit-backdrop-filter: saturate(var(--glass-saturate)) blur(var(--glass-blur));
+    backdrop-filter: saturate(var(--glass-saturate)) blur(var(--glass-blur));
     border-radius: var(--radius-sm);
+    box-shadow: var(--glass-hairline), 0 0 0 0.5px var(--separator);
   }
   .seg button {
-    padding: 4px 12px;
+    position: relative;
+    padding: 4px 13px;
     background: transparent;
     border: none;
     border-radius: calc(var(--radius-sm) - 1px);
-    color: var(--fg-soft);
+    color: var(--label-secondary);
     cursor: pointer;
-    font-size: 0.85rem;
+    font-family: var(--font-mono);
+    font-size: var(--text-subhead);
+    text-transform: uppercase;
+    letter-spacing: var(--tracking-caps);
     transition:
       background var(--motion-fast) var(--ease),
       color var(--motion-fast) var(--ease),
       box-shadow var(--motion-fast) var(--ease);
+  }
+  .seg button:hover:not(.seg--on) {
+    color: var(--fg);
+    background: var(--fill-hover);
   }
   .seg--on {
     background: var(--bg-elevated);
     color: var(--fg);
     box-shadow: var(--shadow-control);
   }
+  /* A short spectral underline anchors the active segment (decorative; honors
+     reduced-motion via the global transition reset). */
+  .seg--on::after {
+    content: "";
+    position: absolute;
+    left: 50%;
+    bottom: 2px;
+    transform: translateX(-50%);
+    width: 16px;
+    height: 2px;
+    border-radius: 2px;
+    background: var(--grad-spectral);
+  }
   .viewpill {
     display: inline-flex;
     align-items: center;
     gap: 6px;
     padding: 3px 6px 3px 12px;
-    border: 1px solid var(--accent);
     border-radius: 999px;
-    color: var(--accent);
-    font-size: 0.85rem;
-    font-weight: 600;
+    color: var(--accent-color);
+    background: var(--accent-tint);
+    box-shadow: inset 0 0 0 0.5px color-mix(in srgb, var(--accent-color) 45%, transparent);
+    font-family: var(--font-mono);
+    font-size: var(--text-callout);
+    letter-spacing: var(--tracking-body);
   }
   .viewpill__close {
     display: inline-flex;

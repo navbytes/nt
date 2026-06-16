@@ -1,4 +1,5 @@
 <script lang="ts">
+  import Icon from "./Icon.svelte";
   import type { FGNode } from "./graph";
 
   let {
@@ -29,7 +30,7 @@
 
   // Keep the menu inside the viewport.
   const left = $derived(Math.min(x, window.innerWidth - 210));
-  const top = $derived(Math.min(y, window.innerHeight - 240));
+  const top = $derived(Math.min(y, window.innerHeight - 250));
 </script>
 
 <svelte:window onkeydown={(e) => e.key === "Escape" && onClose()} />
@@ -47,14 +48,16 @@
 
 <div class="ctx-menu" style="left:{left}px; top:{top}px" role="menu">
   <div class="ctx-title" title={node.title}>{node.title}</div>
-  <button role="menuitem" onclick={onOpen}>Open note</button>
-  <button role="menuitem" onclick={onOpenNewTab}>Open in new tab</button>
-  <button role="menuitem" onclick={onFocusLocal}>Focus local graph</button>
+  <button role="menuitem" onclick={onOpen}><Icon name="arrow-right" size={14} /> Open note</button>
+  <button role="menuitem" onclick={onOpenNewTab}><Icon name="document" size={14} /> Open in new tab</button>
+  <button role="menuitem" onclick={onFocusLocal}><Icon name="focus" size={14} /> Focus local graph</button>
   <div class="ctx-sep"></div>
-  <button role="menuitem" onclick={onTogglePin}>{pinned ? "Unpin node" : "Pin node"}</button>
+  <button role="menuitem" onclick={onTogglePin}>
+    <Icon name="star" size={14} filled={pinned} /> {pinned ? "Unpin node" : "Pin node"}
+  </button>
   <div class="ctx-sep"></div>
-  <button role="menuitem" onclick={onCopyLink}>Copy wikilink</button>
-  <button role="menuitem" onclick={onCopyPath}>Copy note path</button>
+  <button role="menuitem" onclick={onCopyLink}><Icon name="tag" size={14} /> Copy wikilink</button>
+  <button role="menuitem" onclick={onCopyPath}><Icon name="command" size={14} /> Copy note path</button>
 </div>
 
 <style>
@@ -63,47 +66,77 @@
     inset: 0;
     z-index: 40;
   }
+  /* Glass floating menu — translucent panel over the canvas with the float
+     shadow + top light-catch hairline (matches the app's popover/glass system). */
   .ctx-menu {
     position: fixed;
     z-index: 41;
-    min-width: 190px;
-    background: var(--bg-elev);
-    border: 1px solid var(--border);
-    border-radius: var(--radius);
-    box-shadow: 0 8px 28px rgba(0, 0, 0, 0.28);
-    padding: 4px;
-    font-size: 0.85rem;
+    min-width: 196px;
+    background: color-mix(in srgb, var(--bg-elevated) 88%, transparent);
+    -webkit-backdrop-filter: saturate(var(--glass-saturate)) blur(var(--glass-blur));
+    backdrop-filter: saturate(var(--glass-saturate)) blur(var(--glass-blur));
+    border: 0.5px solid var(--separator);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-float), var(--glass-hairline);
+    padding: var(--space-1);
+    font-size: var(--text-body);
+    animation: ctx-in var(--motion-fast) var(--ease-out);
+    transform-origin: top left;
+  }
+  @keyframes ctx-in {
+    from {
+      opacity: 0;
+      transform: scale(0.97);
+    }
+    to {
+      opacity: 1;
+      transform: scale(1);
+    }
   }
   .ctx-title {
-    padding: 5px 8px 7px;
+    padding: 6px 10px 7px;
     font-weight: 600;
     color: var(--fg);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
     max-width: 240px;
-    border-bottom: 1px solid var(--border-soft);
+    border-bottom: 0.5px solid var(--separator);
     margin-bottom: 3px;
   }
   .ctx-menu button {
-    display: block;
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
     width: 100%;
     text-align: left;
-    padding: 6px 8px;
+    padding: 6px 10px;
     background: none;
     border: none;
     border-radius: var(--radius-sm);
     color: var(--fg-soft);
     cursor: pointer;
-    font-size: 0.85rem;
+    font-size: var(--text-body);
+    transition:
+      background var(--motion-fast) var(--ease),
+      color var(--motion-fast) var(--ease);
   }
+  .ctx-menu button :global(.icon) {
+    color: var(--muted);
+    transition: color var(--motion-fast) var(--ease);
+  }
+  /* Spectral-tinted hover — a soft wash, not a hard accent fill, so the floating
+     menu stays calm over the graph. */
   .ctx-menu button:hover {
-    background: var(--bg-inset);
+    background: color-mix(in srgb, var(--spectral-2) 14%, transparent);
     color: var(--fg);
   }
+  .ctx-menu button:hover :global(.icon) {
+    color: var(--spectral-2);
+  }
   .ctx-sep {
-    height: 1px;
-    background: var(--border-soft);
+    height: 0.5px;
+    background: var(--separator);
     margin: 3px 4px;
   }
 </style>

@@ -2,7 +2,7 @@
   import { createQuery, createMutation, useQueryClient } from "@tanstack/svelte-query";
   import { api, type TaskGroup, type Task } from "./api";
   import { showToast } from "./toast.svelte";
-  import { displayTitle } from "./text";
+  import { displayTitle, fmtDuration } from "./text";
   import Icon from "./Icon.svelte";
 
   const qc = useQueryClient();
@@ -70,9 +70,22 @@
     moveTo(id, from, target);
   }
 
-  const dateOf = (due?: string) => (due ? due.slice(0, 10) : "");
-  const todayISO = () => new Date().toISOString().slice(0, 10);
   const fmtDue = (due: string) => (due.includes("T") ? due.replace("T", " ") : due);
+
+  // Due-date "temperature" for a card's due chip — the same tiers the list rows
+  // speak (overdue→hot, today→accent, soon→teal, later→muted). Date-only diff so
+  // a task due today isn't overdue; Done cards never run hot. Local, no API change.
+  function dueTier(dueRaw: string, done: boolean): "over" | "today" | "soon" | "later" {
+    if (done) return "later";
+    const [y, mo, d] = dueRaw.slice(0, 10).split("-").map(Number);
+    if (!y || !mo || !d) return "later";
+    const now = new Date();
+    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const diff = Math.round((new Date(y, mo - 1, d).getTime() - today.getTime()) / 86400000);
+    if (diff < 0) return "over";
+    if (diff === 0) return "today";
+    return diff <= 3 ? "soon" : "later";
+  }
 </script>
 
 <div class="board">
@@ -80,6 +93,7 @@
     <section
       class="bcol"
       class:bcol--over={overCol === col.key}
+      class:bcol--doing={col.key === "doing"}
       class:bcol--done={col.key === "done"}
       role="list"
       ondragover={(e) => {
@@ -119,11 +133,12 @@
               <span class="bcard__title">{t.text}</span>
             </div>
             <div class="bcard__meta">
-              {#if t.recur}<span class="row__recur" title="Recurring task" aria-label="Recurring task">↻</span>{/if}
+              {#if t.recur}<span class="bcard__recur" title="Recurring task" aria-label="Recurring task"><Icon name="repeat" size={12} /></span>{/if}
               {#if t.project}<a class="chip" href={`/search?tag=${encodeURIComponent(t.project)}`}>+{t.project}</a>{/if}
               {#each (t.tags ?? []).slice(0, 3) as tag (tag)}<a class="chip chip--tag" href={`/search?tag=${encodeURIComponent(tag)}`}>@{tag}</a>{/each}
               {#if (t.tags?.length ?? 0) > 3}<span class="chip chip--more">+{(t.tags?.length ?? 0) - 3}</span>{/if}
-              {#if t.due}<span class="row__due" class:row__due--over={dateOf(t.due) < todayISO() && col.key !== "done"}>{fmtDue(t.due)}</span>{/if}
+              {#if t.est && col.key !== "done"}<span class="bcard__est" title={`Estimated ${fmtDuration(t.est)}`}>{fmtDuration(t.est)}</span>{/if}
+              {#if t.due}{@const tier = dueTier(t.due, col.key === "done")}<span class="bcard__due bcard__due--{tier}">{#if tier === "over"}<Icon name="flame" size={10} filled />{/if}{fmtDue(t.due)}</span>{/if}
             </div>
             <div class="bcard__actions">
               <!-- Full-Keyboard-Access move: the board's only way to change a
@@ -173,38 +188,66 @@
     align-items: start;
   }
   .bcol {
-    background: var(--bg-inset);
-    border: 0.5px solid transparent;
-    border-radius: var(--radius);
-    padding: 8px;
+    position: relative;
+    background: color-mix(in srgb, var(--bg-elevated) 64%, transparent);
+    -webkit-backdrop-filter: saturate(var(--glass-saturate)) blur(var(--glass-blur));
+    backdrop-filter: saturate(var(--glass-saturate)) blur(var(--glass-blur));
+    border-radius: var(--radius-lg);
+    padding: 10px 8px;
     min-width: 0;
+    box-shadow: var(--shadow-bento);
     transition:
-      border-color var(--motion-fast) var(--ease),
+      box-shadow var(--motion-fast) var(--ease),
       background var(--motion-fast) var(--ease);
   }
+  /* Drop target: a spectral-tinted glow + accent ring, so the live column reads
+     as "release here" without a jarring dashed box. */
   .bcol--over {
-    border-color: var(--accent-color);
-    border-style: dashed;
-    background: var(--accent-tint);
+    background: color-mix(in srgb, var(--accent-color) 9%, var(--bg-elevated));
+    box-shadow:
+      var(--shadow-bento),
+      inset 0 0 0 1px color-mix(in srgb, var(--accent-color) 55%, transparent),
+      var(--glow-accent);
+  }
+  /* The in-progress column is the board's energetic center — a thin spectral bar
+     along its top edge ties it to the list's "doing" thread. Decorative only
+     (sits above the glass, never under text); the drop-target ring still wins on
+     hover since .bcol--over restyles the whole column. */
+  .bcol--doing::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    left: 14%;
+    right: 14%;
+    height: 2px;
+    border-radius: 0 0 2px 2px;
+    background: var(--grad-spectral);
+    opacity: 0.85;
   }
   .bcol--done {
     opacity: 0.72;
   }
   .bcol__head {
+    font-family: var(--font-mono);
     font-size: var(--text-subhead);
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: var(--tracking-caps);
     color: var(--fg-soft);
-    margin: 2px 4px 8px;
+    margin: 2px 4px 10px;
     display: flex;
     gap: 6px;
-    align-items: baseline;
+    align-items: center;
   }
   .bcol__count {
-    color: var(--muted);
+    color: var(--label-secondary);
     font-family: var(--font-mono);
     font-size: var(--text-footnote);
+    font-variant-numeric: tabular-nums;
+    background: var(--bg-inset);
+    border-radius: 999px;
+    padding: 0 6px;
+    line-height: 1.7;
   }
   .bcol__cards {
     display: flex;
@@ -214,11 +257,14 @@
   }
   .bcol__empty {
     color: var(--muted);
-    font-size: var(--text-callout);
+    font-family: var(--font-mono);
+    font-size: var(--text-footnote);
+    text-transform: uppercase;
+    letter-spacing: var(--tracking-caps);
     text-align: center;
-    padding: 12px 0;
+    padding: 14px 0;
     border: 0.5px dashed var(--separator-strong);
-    border-radius: var(--radius-sm);
+    border-radius: var(--radius-md);
     margin: 0;
   }
   .bcard {
@@ -227,18 +273,20 @@
     border-left: 3px solid var(--separator-strong);
     border-radius: var(--radius-md);
     box-shadow: var(--shadow-card);
-    padding: 8px 10px;
+    padding: 9px 11px;
     cursor: grab;
     transition:
       background var(--motion-fast) var(--ease),
       border-color var(--motion-fast) var(--ease),
       box-shadow var(--motion-fast) var(--ease);
   }
-  /* Hover stays quiet — a faint fill tint + brighter hairline, no lift/translate
-     (cards don't move under the cursor; the drag handle is the whole card). */
+  /* Hover stays quiet — a faint fill tint + a slightly deeper shadow for a touch
+     of lift, no translate (cards don't move under the cursor; the whole card is
+     the drag handle). */
   .bcard:hover {
     background: var(--fill-hover);
     border-color: var(--separator-strong);
+    box-shadow: var(--shadow-bento);
   }
   .bcard--dragging {
     opacity: 0.4;
@@ -271,8 +319,9 @@
     color: var(--pri-fg);
     background: var(--muted);
     border-radius: var(--radius-xs);
-    padding: 0 4px;
-    line-height: 1.4;
+    padding: 0 5px;
+    line-height: 1.5;
+    box-shadow: inset 0 0.5px 0 rgba(255, 255, 255, 0.35);
   }
   .pri-A .bcard__pri {
     background: var(--pri-a);
@@ -299,6 +348,69 @@
     align-items: center;
     gap: 5px;
     margin-top: 7px;
+  }
+  /* Card due chip — the due-temperature language, mirroring the list rows. Mono +
+     tabular; colour on the card surface (AA both themes) with a hairline ring for
+     the active tiers; "later" is a calm bare label. */
+  .bcard__recur {
+    display: inline-flex;
+    align-items: center;
+    color: var(--muted);
+  }
+  /* Estimate chip — a calm, colourless mono pill (mirrors the list row's est) so
+     it never competes with the due temperature; sits inline with the tags while
+     the deadline keeps the trailing edge. A leading dot stands in for a clock. */
+  .bcard__est {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-family: var(--font-mono);
+    font-size: var(--text-footnote);
+    font-variant-numeric: tabular-nums;
+    color: var(--label-secondary);
+    background: var(--bg-inset);
+    border-radius: 999px;
+    padding: 0 6px;
+    white-space: nowrap;
+  }
+  .bcard__est::before {
+    content: "";
+    width: 5px;
+    height: 5px;
+    border-radius: 50%;
+    border: 1px solid currentColor;
+    opacity: 0.7;
+  }
+  .bcard__due {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    margin-left: auto; /* push the deadline to the trailing edge of the meta row */
+    font-family: var(--font-mono);
+    font-size: var(--text-footnote);
+    font-variant-numeric: tabular-nums;
+    color: var(--muted);
+    white-space: nowrap;
+  }
+  .bcard__due--soon {
+    color: var(--teal);
+    padding: 1px 6px;
+    border-radius: 999px;
+    box-shadow: inset 0 0 0 0.5px color-mix(in srgb, var(--teal) 45%, transparent);
+  }
+  .bcard__due--today {
+    color: var(--accent-color);
+    font-weight: 600;
+    padding: 1px 6px;
+    border-radius: 999px;
+    box-shadow: inset 0 0 0 0.5px color-mix(in srgb, var(--accent-color) 50%, transparent);
+  }
+  .bcard__due--over {
+    color: var(--red);
+    font-weight: 600;
+    padding: 1px 6px;
+    border-radius: 999px;
+    box-shadow: inset 0 0 0 0.5px color-mix(in srgb, var(--red) 50%, transparent);
   }
   .bcard__actions {
     display: flex;

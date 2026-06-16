@@ -1,0 +1,580 @@
+<!DOCTYPE html>
+<!--
+  nt — marketing landing page (static, framework-free).
+
+  Preview locally:
+      cd site && python3 -m http.server 8000
+      then open http://localhost:8000
+
+  No build step, no dependencies. Just index.html + styles.css + main.js + assets/.
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>nt — tasks &amp; notes as plain text, durable memory your AI agents can't lose</title>
+    <meta
+      name="description"
+      content="nt is a terminal-first task & note manager that keeps everything as plain text — todo.txt tasks and Markdown notes your editor, grep, git, and AI agents all read and write. One static binary. No database. No cloud."
+    />
+    <meta name="theme-color" content="#0d0d12" />
+    <link rel="icon" type="image/svg+xml" href="assets/favicon.svg" />
+
+    <!-- Open Graph / social -->
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="nt — Agents forget. Your files don't." />
+    <meta
+      property="og:description"
+      content="Tasks & notes as plain text — todo.txt and Markdown your editor, grep, git, and your AI agents all read and write. One static binary. No database. No cloud."
+    />
+    <meta name="twitter:card" content="summary_large_image" />
+
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <a class="skip-link" href="#main">Skip to content</a>
+
+    <!-- Shared SVG defs: spectral gradient for inline feature icons. -->
+    <svg width="0" height="0" aria-hidden="true" focusable="false" style="position: absolute">
+      <defs>
+        <linearGradient id="specStroke" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0" stop-color="#7aa2f7" />
+          <stop offset="0.5" stop-color="#7c6cf0" />
+          <stop offset="1" stop-color="#bb9af7" />
+        </linearGradient>
+      </defs>
+    </svg>
+
+    <!-- ============================ NAV ============================ -->
+    <header class="nav">
+      <div class="wrap nav-inner">
+        <a class="brand" href="#top" aria-label="nt — home">
+          <!-- knowledge-graph brand mark (spectral) -->
+          <svg
+            class="brand-mark"
+            viewBox="0 0 512 512"
+            xmlns="http://www.w3.org/2000/svg"
+            role="img"
+            aria-label="nt logo: a small knowledge graph"
+          >
+            <defs>
+              <linearGradient id="brandbg" x1="0" y1="0" x2="512" y2="512" gradientUnits="userSpaceOnUse">
+                <stop offset="0" stop-color="#7aa2f7" />
+                <stop offset="0.55" stop-color="#7c6cf0" />
+                <stop offset="1" stop-color="#bb9af7" />
+              </linearGradient>
+            </defs>
+            <rect width="512" height="512" rx="116" fill="url(#brandbg)" />
+            <g stroke="#ffffff" stroke-opacity="0.55" stroke-width="14" stroke-linecap="round">
+              <line x1="186" y1="168" x2="342" y2="232" />
+              <line x1="186" y1="168" x2="160" y2="316" />
+              <line x1="160" y1="316" x2="276" y2="372" />
+              <line x1="276" y1="372" x2="342" y2="232" />
+              <line x1="186" y1="168" x2="276" y2="372" />
+            </g>
+            <g fill="#ffffff">
+              <circle cx="186" cy="168" r="40" />
+              <circle cx="342" cy="232" r="30" />
+              <circle cx="160" cy="316" r="26" />
+              <circle cx="276" cy="372" r="34" />
+            </g>
+          </svg>
+          <span>nt</span>
+        </a>
+
+        <nav aria-label="Primary">
+          <ul class="nav-links">
+            <li><a href="#features">Features</a></li>
+            <li><a href="#install">Install</a></li>
+            <li><a href="#showcase">Showcase</a></li>
+            <li><a href="https://github.com/navbytes/nt" rel="noopener">GitHub</a></li>
+          </ul>
+        </nav>
+
+        <div class="nav-actions">
+          <a class="btn btn-ghost btn-sm" href="https://github.com/navbytes/nt" rel="noopener">View source</a>
+          <a
+            class="btn btn-primary btn-sm"
+            href="https://github.com/navbytes/nt/releases/latest"
+            rel="noopener"
+            >Download for macOS</a
+          >
+        </div>
+      </div>
+    </header>
+
+    <main id="main">
+      <span id="top"></span>
+
+      <!-- ============================ HERO ============================ -->
+      <section class="hero" aria-labelledby="hero-title">
+        <div class="wrap hero-grid">
+          <div class="hero-copy">
+            <p class="eyebrow">
+              plain-text <span class="dot">·</span> local-first <span class="dot">·</span> ai-memory
+            </p>
+            <h1 id="hero-title">
+              Agents forget.
+              <span class="line2 spectral-text">Your files don't.</span>
+            </h1>
+            <p class="hero-sub">
+              Tasks &amp; notes as plain text — <strong>todo.txt and Markdown</strong> your editor,
+              grep, git, and your AI agents all read and write. One static binary. No database. No
+              cloud.
+            </p>
+            <div class="hero-ctas">
+              <a class="btn btn-primary" href="https://github.com/navbytes/nt/releases/latest" rel="noopener">
+                <svg viewBox="0 0 24 24" aria-hidden="true" fill="currentColor">
+                  <path
+                    d="M12 3v10.5m0 0 3.5-3.5M12 13.5 8.5 10M5 16.5v2A1.5 1.5 0 0 0 6.5 20h11a1.5 1.5 0 0 0 1.5-1.5v-2"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="1.8"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                  />
+                </svg>
+                Download for macOS
+              </a>
+              <a class="btn btn-ghost" href="https://github.com/navbytes/nt" rel="noopener">
+                <svg viewBox="0 0 24 24" aria-hidden="true" fill="currentColor">
+                  <path
+                    d="M12 2a10 10 0 0 0-3.16 19.49c.5.09.68-.22.68-.48v-1.7c-2.78.6-3.37-1.34-3.37-1.34-.45-1.16-1.11-1.47-1.11-1.47-.91-.62.07-.6.07-.6 1 .07 1.53 1.03 1.53 1.03.89 1.52 2.34 1.08 2.91.83.09-.65.35-1.09.63-1.34-2.22-.25-4.55-1.11-4.55-4.94 0-1.09.39-1.98 1.03-2.68-.1-.25-.45-1.27.1-2.65 0 0 .84-.27 2.75 1.02a9.5 9.5 0 0 1 5 0c1.91-1.29 2.75-1.02 2.75-1.02.55 1.38.2 2.4.1 2.65.64.7 1.03 1.59 1.03 2.68 0 3.84-2.34 4.69-4.57 4.94.36.31.68.92.68 1.85v2.74c0 .27.18.58.69.48A10 10 0 0 0 12 2Z"
+                  />
+                </svg>
+                View source
+              </a>
+            </div>
+            <div class="hero-meta" role="list">
+              <span role="listitem"><span class="tick">✓</span> Single static Go binary</span>
+              <span role="listitem"><span class="tick">✓</span> Works fully offline</span>
+              <span role="listitem"><span class="tick">✓</span> MIT licensed</span>
+            </div>
+          </div>
+
+          <!-- Terminal card -->
+          <div class="terminal reveal" aria-label="Example nt terminal session">
+            <div class="terminal-glow" aria-hidden="true"></div>
+            <div class="term-bar">
+              <span class="term-dot r" aria-hidden="true"></span>
+              <span class="term-dot y" aria-hidden="true"></span>
+              <span class="term-dot g" aria-hidden="true"></span>
+              <span class="term-title">~/work — nt</span>
+              <button
+                type="button"
+                class="copy-btn term-copy"
+                data-copy-target="hero-session"
+                aria-label="Copy the example commands"
+              >
+                <svg class="ico-copy" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                  <rect x="9" y="9" width="11" height="11" rx="2" stroke="currentColor" stroke-width="1.7" />
+                  <path d="M5 15V5a2 2 0 0 1 2-2h10" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" />
+                </svg>
+                <svg class="ico-check" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                  <path d="M5 13l4 4L19 7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+                </svg>
+                <span data-copy-label>Copy</span>
+              </button>
+            </div>
+            <div class="term-body" data-typed>
+              <div class="term-line" data-type><span class="term-prompt">$</span> <span class="term-cmd">nt add "ship v1" </span><span class="term-flag">due:fri @work !high</span></div>
+              <div class="term-line"><span class="term-ok">✓ added</span> <span class="term-muted">task:42</span> <span class="term-pri">(A)</span> ship v1 <span class="term-muted">@work due:Fri</span></div>
+              <div class="term-line gap" aria-hidden="true"></div>
+              <div class="term-line" data-type><span class="term-prompt">$</span> <span class="term-cmd">nt note "Chose flock over SQLite" </span><span class="term-flag">--folder decisions</span></div>
+              <div class="term-line"><span class="term-ok">✓ wrote</span> <span class="term-accent">notes/decisions/chose-flock-over-sqlite.md</span></div>
+              <div class="term-line gap" aria-hidden="true"></div>
+              <div class="term-line" data-type><span class="term-prompt">$</span> <span class="term-cmd">nt recall </span><span class="term-flag">--source claude</span></div>
+              <div class="term-line"><span class="term-muted"># what an agent captured, read straight back —</span></div>
+              <div class="term-line"><span class="term-pri">(A)</span> fix token refresh race <span class="term-muted">@auth</span> <span class="term-accent">[[jwt-expiry]]</span></div>
+              <div class="term-line"><span class="term-muted">·</span> note: "retry budget = 3, backoff 250ms"</div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============================ INSTALL ============================ -->
+      <section id="install" aria-labelledby="install-title">
+        <div class="wrap">
+          <div class="section-head reveal">
+            <p class="eyebrow">// install in seconds</p>
+            <h2 id="install-title">One command. <span class="spectral-text">No runtime.</span></h2>
+            <p>
+              A single static binary for Linux &amp; macOS (amd64 / arm64). No Go toolchain needed
+              for the curl route, no database, nothing to configure.
+            </p>
+          </div>
+
+          <div class="install-grid">
+            <!-- curl -->
+            <div class="install-card reveal">
+              <h3><span class="tag">curl</span> Quick install</h3>
+              <p>Grab the latest release binary straight to <code>~/.local/bin</code>.</p>
+              <div class="code-block">
+                <code id="cmd-curl" data-command="curl -fsSL https://raw.githubusercontent.com/navbytes/nt/main/install.sh | bash"><span class="sigil">$ </span>curl -fsSL https://raw.githubusercontent.com/navbytes/nt/main/install.sh | bash</code>
+                <button type="button" class="copy-btn" data-copy-target="cmd-curl" aria-label="Copy the curl install command">
+                  <svg class="ico-copy" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                    <rect x="9" y="9" width="11" height="11" rx="2" stroke="currentColor" stroke-width="1.7" />
+                    <path d="M5 15V5a2 2 0 0 1 2-2h10" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" />
+                  </svg>
+                  <svg class="ico-check" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                    <path d="M5 13l4 4L19 7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+                  </svg>
+                  <span data-copy-label>Copy</span>
+                </button>
+              </div>
+            </div>
+
+            <!-- go -->
+            <div class="install-card reveal">
+              <h3><span class="tag">go</span> Go install</h3>
+              <p>Already have Go 1.25+? Build from the latest tagged release.</p>
+              <div class="code-block">
+                <code id="cmd-go" data-command="go install github.com/navbytes/nt@latest"><span class="sigil">$ </span>go install github.com/navbytes/nt@latest</code>
+                <button type="button" class="copy-btn" data-copy-target="cmd-go" aria-label="Copy the go install command">
+                  <svg class="ico-copy" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                    <rect x="9" y="9" width="11" height="11" rx="2" stroke="currentColor" stroke-width="1.7" />
+                    <path d="M5 15V5a2 2 0 0 1 2-2h10" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" />
+                  </svg>
+                  <svg class="ico-check" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                    <path d="M5 13l4 4L19 7" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+                  </svg>
+                  <span data-copy-label>Copy</span>
+                </button>
+              </div>
+            </div>
+
+            <!-- desktop -->
+            <div class="install-card reveal">
+              <h3><span class="tag">desktop</span> Native app</h3>
+              <p>
+                macOS universal <code>.zip</code> — signed &amp; notarized. The web UI in a native
+                window, no port opened.
+              </p>
+              <a class="btn btn-ghost" href="https://github.com/navbytes/nt/releases/latest" rel="noopener">
+                <svg viewBox="0 0 24 24" aria-hidden="true" fill="none">
+                  <path d="M4 5.5A1.5 1.5 0 0 1 5.5 4h13A1.5 1.5 0 0 1 20 5.5v9A1.5 1.5 0 0 1 18.5 16h-13A1.5 1.5 0 0 1 4 14.5v-9Z" stroke="currentColor" stroke-width="1.7" />
+                  <path d="M9 20h6M12 16v4" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" />
+                </svg>
+                Get it on GitHub Releases
+              </a>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============================ FEATURES (BENTO) ============================ -->
+      <section id="features" aria-labelledby="features-title">
+        <div class="wrap">
+          <div class="section-head reveal">
+            <p class="eyebrow">// why you'll like it</p>
+            <h2 id="features-title">
+              A terminal-born brain that <span class="spectral-text">refuses lock-in.</span>
+            </h2>
+            <p>
+              Most tools make you choose: a slick app that silos your data, or a pile of text files
+              with no structure. nt gives you both — durable plain files <em>and</em> real
+              structure on top.
+            </p>
+          </div>
+
+          <div class="bento">
+            <!-- Plain-text durable (large) -->
+            <article class="feature reveal w4 lg-w3">
+              <p class="lead-line">durable by default</p>
+              <span class="feature-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24"><path class="gico" d="M6 3h8l4 4v14H6V3Z" /><path class="gico" d="M14 3v4h4M8.5 12h7M8.5 15.5h7M8.5 8.5h3" /></svg>
+              </span>
+              <h3>It's just files</h3>
+              <p>
+                <code>todo.txt</code> tasks + Markdown notes in one folder. Open them in any editor,
+                <code>grep</code> them, <code>git init</code> them. No proprietary database, nothing
+                to export, nothing to lose.
+              </p>
+            </article>
+
+            <!-- Knowledge graph -->
+            <article class="feature reveal w2 lg-w3">
+              <p class="lead-line">link anything</p>
+              <span class="feature-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24">
+                  <circle class="gico" cx="6" cy="7" r="2.3" /><circle class="gico" cx="18" cy="6" r="2.3" />
+                  <circle class="gico" cx="7" cy="18" r="2.3" /><circle class="gico" cx="17" cy="17" r="2.3" />
+                  <path class="gico" d="M8 8l8-1M7.5 9.5 7 15.7M9 17.3l6-.6M16.5 8 16.6 14.8" />
+                </svg>
+              </span>
+              <h3>Knowledge graph</h3>
+              <p>
+                <code>[[wikilink]]</code> any task or note to any other. Backlinks are computed on
+                demand by scanning files — no index to corrupt, and renames rewrite every link.
+              </p>
+            </article>
+
+            <!-- Built for AI memory (wide) -->
+            <article class="feature reveal w6 lg-w4">
+              <p class="lead-line">durable memory for agents</p>
+              <span class="feature-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24">
+                  <path class="gico" d="M9 4.5A2.5 2.5 0 0 1 12 6a2.5 2.5 0 0 1 3-1.5A2.5 2.5 0 0 1 17.5 8a2.5 2.5 0 0 1 .5 4 2.5 2.5 0 0 1-1 4.5A2.5 2.5 0 0 1 14 19a2.5 2.5 0 0 1-4 0 2.5 2.5 0 0 1-3-1.5A2.5 2.5 0 0 1 6 13a2.5 2.5 0 0 1 .5-4A2.5 2.5 0 0 1 7 5a2.5 2.5 0 0 1 2-.5Z" />
+                  <path class="gico" d="M12 6v13M9 9.5h3M12 13h3" />
+                </svg>
+              </span>
+              <h3>Built for AI memory</h3>
+              <p>
+                The action items and notes an agent writes today survive as plain text the next
+                agent — or the next <em>you</em> — reads back tomorrow. Wire it up with a Claude Code
+                hook, the <code>nt mcp</code> server, or just <code>nt recall</code>.
+              </p>
+            </article>
+
+            <!-- Three UIs -->
+            <article class="feature reveal w3 lg-w2">
+              <p class="lead-line">cli · tui · web</p>
+              <span class="feature-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24">
+                  <rect class="gico" x="3" y="5" width="18" height="14" rx="2" />
+                  <path class="gico" d="M6.5 9.5 9 12l-2.5 2.5M11 14.5h4" />
+                </svg>
+              </span>
+              <h3>Three UIs, one store</h3>
+              <p>
+                A scriptable <strong>CLI</strong>, a live <strong>terminal UI</strong>, and an
+                embedded <strong>web app</strong> (plus a native desktop build) — all over the exact
+                same files, always in sync.
+              </p>
+            </article>
+
+            <!-- Obsidian -->
+            <article class="feature reveal w3 lg-w2">
+              <p class="lead-line">bring your own GUI</p>
+              <span class="feature-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24">
+                  <path class="gico" d="M13 3 5 13l4 1 1 4 8.5-11.5L13 3Z" />
+                  <path class="gico" d="M10 18l3-4" />
+                </svg>
+              </span>
+              <h3>Obsidian-compatible</h3>
+              <p>
+                Notes are plain <code>.md</code> + frontmatter + <code>[[wikilinks]]</code>. Point an
+                Obsidian vault at the <code>notes/</code> folder and use it as your GUI while nt owns
+                tasks and the AI loop.
+              </p>
+            </article>
+
+            <!-- Single binary -->
+            <article class="feature reveal w3 lg-w2">
+              <p class="lead-line">pure go, no cgo</p>
+              <span class="feature-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24">
+                  <path class="gico" d="M12 3 4 7v6c0 4.5 3.3 7.3 8 8 4.7-.7 8-3.5 8-8V7l-8-4Z" />
+                  <path class="gico" d="M9.5 12l2 2 3.5-4" />
+                </svg>
+              </span>
+              <h3>Single static binary</h3>
+              <p>
+                No CGo, no system dependencies, no runtime. <code>curl | bash</code> and go. Works
+                fully offline — your notes are never on the network.
+              </p>
+            </article>
+
+            <!-- Git-native (wide) -->
+            <article class="feature reveal w6 lg-w4">
+              <p class="lead-line">safe by construction</p>
+              <span class="feature-icon" aria-hidden="true">
+                <svg viewBox="0 0 24 24">
+                  <circle class="gico" cx="6" cy="6" r="2.2" /><circle class="gico" cx="6" cy="18" r="2.2" />
+                  <circle class="gico" cx="18" cy="9" r="2.2" />
+                  <path class="gico" d="M6 8.2v7.6M8.1 6.6 16 8.6M18 11.2c0 3-2.4 4-5 4" />
+                </svg>
+              </span>
+              <h3>Git-native &amp; lossless</h3>
+              <p>
+                <code>nt git-init</code> sets up <code>merge=union</code> so branches don't conflict
+                on every add, and <code>nt doctor</code> reconciles after a merge. Every write goes
+                through one locking, atomic, ULID-keyed engine with transactional undo/redo — a
+                concurrent AI write is never clobbered.
+              </p>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============================ SHOWCASE ============================ -->
+      <section id="showcase" aria-labelledby="showcase-title">
+        <div class="wrap">
+          <div class="section-head reveal">
+            <p class="eyebrow">// the web face — nt web</p>
+            <h2 id="showcase-title">
+              A fast SPA, <span class="spectral-text">compiled into the binary.</span>
+            </h2>
+            <p>
+              Still one static file, still fully offline. Browse the folder tree, read Markdown with
+              wikilink navigation, and see your links as a constellation — in light or dark Tokyo
+              Night. These screenshots follow your system theme.
+            </p>
+          </div>
+
+          <div class="showcase-grid">
+            <!-- Tasks -->
+            <figure class="showcase-item full reveal">
+              <div class="window">
+                <div class="window-bar">
+                  <span class="term-dot r" aria-hidden="true"></span>
+                  <span class="term-dot y" aria-hidden="true"></span>
+                  <span class="term-dot g" aria-hidden="true"></span>
+                  <span class="window-addr">127.0.0.1:8765 · /tasks</span>
+                </div>
+                <img
+                  class="shot-dark"
+                  src="assets/web-tasks-dark.png"
+                  alt="nt web Tasks agenda in dark theme: colour-coded A/B/C priorities, relative due dates like Today and Tomorrow, an AI-agent badge on captured work, a quick filter, and saved views in the sidebar."
+                  loading="lazy"
+                  width="850"
+                />
+                <img
+                  class="shot-light"
+                  src="assets/web-tasks-light.png"
+                  alt="nt web Tasks agenda in light theme: colour-coded A/B/C priorities, relative due dates, an AI-agent badge, a quick filter, and saved views in the sidebar."
+                  loading="lazy"
+                  width="850"
+                />
+              </div>
+              <figcaption class="showcase-caption">
+                The <code>/tasks</code> agenda — priority chips, relative due dates, the
+                <code>claude</code> badge on agent-captured work, and your saved views.
+              </figcaption>
+            </figure>
+
+            <!-- Note viewer -->
+            <figure class="showcase-item reveal">
+              <div class="window">
+                <div class="window-bar">
+                  <span class="term-dot r" aria-hidden="true"></span>
+                  <span class="term-dot y" aria-hidden="true"></span>
+                  <span class="term-dot g" aria-hidden="true"></span>
+                  <span class="window-addr">127.0.0.1:8765 · /notes</span>
+                </div>
+                <img
+                  class="shot-dark"
+                  src="assets/web-dark.png"
+                  alt="nt web note viewer in dark theme: a Markdown note with tags, a table of contents, backlinks, syntax-highlighted code, and a Mermaid diagram."
+                  loading="lazy"
+                  width="850"
+                />
+                <img
+                  class="shot-light"
+                  src="assets/web-light.png"
+                  alt="nt web note viewer in light theme: a Markdown note with tags, a table of contents, backlinks, syntax-highlighted code, and a Mermaid diagram."
+                  loading="lazy"
+                  width="850"
+                />
+              </div>
+              <figcaption class="showcase-caption">
+                Read Markdown with a TOC, backlinks, highlighted code, and Mermaid diagrams.
+              </figcaption>
+            </figure>
+
+            <!-- Graph -->
+            <figure class="showcase-item reveal">
+              <div class="window">
+                <div class="window-bar">
+                  <span class="term-dot r" aria-hidden="true"></span>
+                  <span class="term-dot y" aria-hidden="true"></span>
+                  <span class="term-dot g" aria-hidden="true"></span>
+                  <span class="window-addr">127.0.0.1:8765 · /graph</span>
+                </div>
+                <img
+                  class="shot-dark"
+                  src="assets/web-graph-dark.png"
+                  alt="nt web graph view in dark theme: notes and their wikilinks drawn as an interactive constellation of connected nodes."
+                  loading="lazy"
+                  width="850"
+                />
+                <img
+                  class="shot-light"
+                  src="assets/web-graph-light.png"
+                  alt="nt web graph view in light theme: notes and their wikilinks drawn as an interactive constellation of connected nodes."
+                  loading="lazy"
+                  width="850"
+                />
+              </div>
+              <figcaption class="showcase-caption">
+                The <code>/graph</code> view — your notes and links as a constellation.
+              </figcaption>
+            </figure>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============================ CLOSING CTA ============================ -->
+      <section class="closing" aria-labelledby="closing-title">
+        <div class="wrap">
+          <div class="closing-card reveal">
+            <p class="eyebrow" style="justify-content: center">// it's all just text you own</p>
+            <h2 id="closing-title">Give your agents a memory<br />they can't lose.</h2>
+            <p>
+              Capture as you work, <code>nt recall</code> when you resume. One static binary, no
+              database, no cloud — just durable plain text.
+            </p>
+            <div class="closing-ctas">
+              <a class="btn btn-primary" href="https://github.com/navbytes/nt/releases/latest" rel="noopener">
+                Download for macOS
+              </a>
+              <a class="btn btn-ghost" href="https://github.com/navbytes/nt" rel="noopener">
+                Star on GitHub
+              </a>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <!-- ============================ FOOTER ============================ -->
+    <footer class="footer">
+      <div class="wrap footer-inner">
+        <div class="footer-brand">
+          <a class="brand" href="#top" aria-label="nt — home">
+            <svg class="brand-mark" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="nt logo">
+              <defs>
+                <linearGradient id="brandbg2" x1="0" y1="0" x2="512" y2="512" gradientUnits="userSpaceOnUse">
+                  <stop offset="0" stop-color="#7aa2f7" />
+                  <stop offset="0.55" stop-color="#7c6cf0" />
+                  <stop offset="1" stop-color="#bb9af7" />
+                </linearGradient>
+              </defs>
+              <rect width="512" height="512" rx="116" fill="url(#brandbg2)" />
+              <g stroke="#ffffff" stroke-opacity="0.55" stroke-width="14" stroke-linecap="round">
+                <line x1="186" y1="168" x2="342" y2="232" />
+                <line x1="186" y1="168" x2="160" y2="316" />
+                <line x1="160" y1="316" x2="276" y2="372" />
+                <line x1="276" y1="372" x2="342" y2="232" />
+                <line x1="186" y1="168" x2="276" y2="372" />
+              </g>
+              <g fill="#ffffff">
+                <circle cx="186" cy="168" r="40" />
+                <circle cx="342" cy="232" r="30" />
+                <circle cx="160" cy="316" r="26" />
+                <circle cx="276" cy="372" r="34" />
+              </g>
+            </svg>
+            <span>nt <span class="tld">· tasks &amp; notes as plain text</span></span>
+          </a>
+          <p class="footer-tag">Built for plain-text durability — memory your AI agents can't lose.</p>
+        </div>
+
+        <nav class="footer-links" aria-label="Footer">
+          <a href="https://github.com/navbytes/nt" rel="noopener">GitHub</a>
+          <a href="https://github.com/navbytes/nt#readme" rel="noopener">README</a>
+          <a href="https://github.com/navbytes/nt/releases/latest" rel="noopener">Releases</a>
+          <a href="https://github.com/navbytes/nt/blob/main/LICENSE" rel="noopener">MIT License</a>
+        </nav>
+      </div>
+
+      <div class="wrap footer-bottom">
+        <span class="mit">MIT © <span id="year">2026</span> navbytes</span>
+        <span>Tokyo Night · plain text · local-first</span>
+      </div>
+    </footer>
+
+    <script src="main.js" defer></script>
+  </body>
+</html>

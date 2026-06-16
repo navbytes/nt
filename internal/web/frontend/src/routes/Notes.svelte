@@ -226,6 +226,15 @@
 
   const total = $derived(filtered.length);
 
+  // "Fresh" = touched within the last 3 days. Drives a subtle spectral pulse on
+  // the card/row so recently-edited notes feel alive (purely a visual cue).
+  const freshUrls = $derived.by(() => {
+    const c = cutoff(3);
+    const s = new Set<string>();
+    for (const n of $gridQ.data?.notes ?? []) if ((n.updated ?? "") >= c) s.add(n.url);
+    return s;
+  });
+
   // Timeline view: notes laid out chronologically, grouped by month. The axis is
   // the date you're sorting by (Created, else Updated/last-touched); the sort
   // direction toggle flips oldest↔newest.
@@ -270,9 +279,12 @@
   });
 </script>
 
-<div class="pagehead">
+<div class="pagehead notes-pagehead">
   <div class="notes-head">
-    <h1>Notes</h1>
+    <div class="notes-head__titles">
+      <p class="notes-eyebrow">Knowledge</p>
+      <h1>Notes</h1>
+    </div>
     <div class="seg" role="group" aria-label="Notes view">
       <button class:seg--on={!daily} aria-pressed={!daily} onclick={() => navigate("/notes")}>All</button>
       <button class:seg--on={daily} aria-pressed={daily} onclick={() => navigate("/journal")}>Daily</button>
@@ -289,7 +301,7 @@
             autocomplete="off"
             disabled={creating}
           />
-          <button type="submit" class="newnote__go" disabled={creating || !newTitle.trim()}>Create</button>
+          <button type="submit" class="btn btn--sm newnote__go" disabled={creating || !newTitle.trim()}>Create</button>
           <button
             type="button"
             class="newnote__x"
@@ -300,7 +312,7 @@
             aria-label="Cancel"><Icon name="close" size={15} /></button>
         </form>
       {:else}
-        <button class="newnote__open" onclick={openNew}><Icon name="plus" size={14} /> New note</button>
+        <button class="btn newnote__open" onclick={openNew}><Icon name="plus" size={14} /> New note</button>
       {/if}
     {/if}
   </div>
@@ -386,7 +398,7 @@
           aria-pressed={favoritesOnly}
           title="Show only starred notes"
           onclick={() => (favoritesOnly = !favoritesOnly)}
-        ><Icon name="star" filled={favoritesOnly} size={14} /> Favorites{#if favoriteCount}<span class="notes-toggle__count"> {favoriteCount}</span>{/if}</button>
+        ><Icon name="star" filled={favoritesOnly} size={14} /> Favorites{#if favoriteCount}<span class="notes-toggle__count">{favoriteCount}</span>{/if}</button>
       {/if}
       <button
         class="notes-toggle"
@@ -394,7 +406,7 @@
         aria-pressed={orphansOnly}
         title="Show only notes with no links in or out"
         onclick={() => (orphansOnly = !orphansOnly)}
-      >Orphans{#if $orphansQ.data?.notes.length}<span class="notes-toggle__count"> {$orphansQ.data.notes.length}</span>{/if}</button>
+      >Orphans{#if $orphansQ.data?.notes.length}<span class="notes-toggle__count">{$orphansQ.data.notes.length}</span>{/if}</button>
       {#if archivedCount > 0 || archivedOnly}
         <button
           class="notes-toggle"
@@ -402,12 +414,13 @@
           aria-pressed={archivedOnly}
           title="Show retired notes (hidden from the sidebar, search, and graph)"
           onclick={() => (archivedOnly = !archivedOnly)}
-        ><Icon name="archive" size={14} /> Archived{#if archivedCount}<span class="notes-toggle__count"> {archivedCount}</span>{/if}</button>
+        ><Icon name="archive" size={14} /> Archived{#if archivedCount}<span class="notes-toggle__count">{archivedCount}</span>{/if}</button>
       {/if}
     </div>
 
     <div class="notes-filterrow">
       <div class="qfilter">
+        <Icon name="search" size={15} />
         <input
           bind:value={q}
           onkeydown={(e) => e.key === "Escape" && (q = "")}
@@ -448,7 +461,8 @@
       <button class="linklike" onclick={clearFilters}>Clear all</button>
     </p>
   {:else}
-    <div class="empty">
+    <div class="empty empty--hero">
+      <span class="empty__art empty__art--onboard"><Icon name="document" size={28} /></span>
       <p class="empty__lead">No notes yet.</p>
       <p class="muted">
         Notes are your durable memory — the “why” behind decisions, shared with your AI agent.
@@ -463,7 +477,7 @@
       <h2 class="notegroup tl__month">{month.label}<span class="notegroup__count">{month.entries.length}</span></h2>
       <div class="tl__rail">
         {#each month.entries as e (e.card.handle)}
-          <div class="tl__entry">
+          <div class="tl__entry" class:tl__entry--fresh={freshUrls.has(e.card.url)} class:tl__entry--orphan={orphanUrls.has(e.card.url)} class:tl__entry--fav={e.card.favorite}>
             <span class="tl__dot" aria-hidden="true"></span>
             <span class="tl__date">{e.date ? e.date.slice(5) : "—"}</span>
             <a class="tl__title" href={e.card.url}
@@ -489,7 +503,7 @@
     {#if layout === "list"}
       <div class="notelist">
         {#each g.cards as n (n.handle)}
-          <div class="noterow">
+          <div class="noterow" class:noterow--fresh={freshUrls.has(n.url)} class:noterow--orphan={orphanUrls.has(n.url)} class:noterow--fav={n.favorite}>
             <a class="noterow__title" href={n.url}
               >{#if n.favorite}<span class="notecard__star" title="Favorite"><Icon name="star" filled size={13} /></span>{/if}{n.title}</a>
             {#if n.folder}<span class="noterow__folder">{n.folder}/</span>{/if}
@@ -507,13 +521,22 @@
     {:else}
       <div class="notegrid" class:notegrid--dense={layout === "compact"}>
         {#each g.cards as n (n.handle)}
-          <div class="notecard">
+          <div
+            class="notecard"
+            class:notecard--fav={n.favorite}
+            class:notecard--fresh={freshUrls.has(n.url)}
+            class:notecard--orphan={orphanUrls.has(n.url)}
+          >
+            {#if n.favorite}<span class="notecard__edge" aria-hidden="true"></span>{/if}
             <div class="notecard__top">
               <a class="notecard__title notecard__link" href={n.url}
                 >{#if n.favorite}<span class="notecard__star" title="Favorite"><Icon name="star" filled size={13} /></span>{/if}{n.title}</a>
+              {#if freshUrls.has(n.url) && !n.archived}<span class="notecard__fresh" title="Recently edited" aria-hidden="true"></span>{/if}
+            </div>
+            <div class="notecard__meta">
+              {#if n.folder}<span class="notecard__folder">{n.folder}/</span>{/if}
               {#if n.updated}<span class="notecard__date">{n.updated}</span>{/if}
             </div>
-            {#if n.folder}<span class="notecard__folder">{n.folder}/</span>{/if}
             {#if layout === "cards" && n.preview}<p class="notecard__preview">{n.preview}</p>{/if}
             {#if n.tags && n.tags.length}
               <div class="notecard__tags">
@@ -531,59 +554,66 @@
 {/if}
 
 <style>
+  /* The pagehead is a column: title row, control row, filter row. */
+  .notes-pagehead {
+    display: block;
+  }
   .notes-head {
     display: flex;
     align-items: center;
-    gap: 16px;
+    gap: var(--space-4);
+    margin-bottom: var(--space-5);
   }
-  /* Primary "New note" action + its inline title field, pushed to the right. */
+  .notes-head__titles {
+    display: flex;
+    flex-direction: column;
+  }
+  /* Mono eyebrow above the serif title — the Home-hero / sidebar language. */
+  .notes-eyebrow {
+    margin: 0 0 2px;
+    font-family: var(--font-mono);
+    font-size: var(--text-subhead);
+    letter-spacing: var(--tracking-caps);
+    text-transform: uppercase;
+    color: var(--accent-color);
+  }
+  .notes-head h1 {
+    margin: 0;
+  }
+  /* "New note" CTA + inline title field, pushed to the right. The button reuses
+     the global .btn (spectral gradient + glow); only layout is set here. */
   .newnote__open {
     margin-left: auto;
     display: inline-flex;
     align-items: center;
-    gap: 4px;
-    padding: 5px 12px;
-    background: var(--accent-fill);
-    color: var(--on-accent);
-    border: 1px solid var(--accent-fill);
-    border-radius: var(--radius-sm);
-    cursor: pointer;
-    font-size: 0.85rem;
-    font-weight: 600;
-  }
-  .newnote__open:hover {
-    filter: brightness(1.06);
+    gap: 5px;
   }
   .newnote {
     margin-left: auto;
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: var(--space-2);
   }
   .newnote input {
     min-width: 220px;
-    padding: 5px 10px;
-    font-size: 0.85rem;
+    padding: 6px 11px;
+    font: inherit;
+    font-size: var(--text-body);
     background: var(--fill);
-    border: 0.5px solid var(--separator);
+    border: 0.5px solid var(--separator-strong);
     border-radius: var(--radius-sm);
     color: var(--fg);
+    transition:
+      border-color var(--motion-fast) var(--ease),
+      box-shadow var(--motion-fast) var(--ease);
   }
   .newnote input:focus {
-    border-color: var(--accent);
+    outline: none;
+    border-color: var(--accent-color);
+    box-shadow: var(--focus-ring-tight);
   }
   .newnote__go {
-    padding: 5px 12px;
-    background: var(--accent-fill);
-    color: var(--on-accent);
-    border: 1px solid var(--accent-fill);
-    border-radius: var(--radius-sm);
-    cursor: pointer;
-    font-size: 0.85rem;
-  }
-  .newnote__go:disabled {
-    opacity: 0.5;
-    cursor: default;
+    flex: none;
   }
   .newnote__x {
     display: inline-flex;
@@ -594,8 +624,9 @@
     color: var(--muted);
     cursor: pointer;
     line-height: 1;
-    padding: 4px 6px;
+    padding: 5px 6px;
     border-radius: var(--radius-xs);
+    transition: color var(--motion-fast) var(--ease);
   }
   .newnote__x:hover {
     color: var(--fg);
@@ -603,33 +634,67 @@
   .notes-controls {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: var(--space-3);
     flex-wrap: wrap;
+  }
+  /* Selects: glassy, hairline-bordered controls that sit beside the segmented
+     control without fighting it. */
+  .notes-controls :global(.select) {
+    background: color-mix(in srgb, var(--bg-elevated) 70%, transparent);
+    -webkit-backdrop-filter: saturate(var(--glass-saturate)) blur(var(--glass-blur));
+    backdrop-filter: saturate(var(--glass-saturate)) blur(var(--glass-blur));
+    border: 0.5px solid var(--separator);
+    box-shadow: var(--glass-hairline);
+    color: var(--label-secondary);
+    transition:
+      border-color var(--motion-fast) var(--ease),
+      color var(--motion-fast) var(--ease);
+  }
+  .notes-controls :global(.select:hover) {
+    color: var(--fg);
+    border-color: var(--separator-strong);
   }
   .notes-filterrow {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: var(--space-3);
     flex-wrap: wrap;
-    margin-top: 8px;
+    margin-top: var(--space-3);
   }
-  /* Quick text filter — mirrors the Tasks page's .qfilter look. */
+  /* Quick text filter — a glass field with a leading search glyph. */
   .qfilter {
     position: relative;
-    flex: 1 1 220px;
+    display: flex;
+    align-items: center;
+    flex: 1 1 240px;
     min-width: 200px;
+  }
+  .qfilter :global(.icon) {
+    position: absolute;
+    left: 10px;
+    color: var(--muted);
+    pointer-events: none;
   }
   .qfilter input {
     width: 100%;
-    padding: 6px 28px 6px 12px;
-    font-size: 0.9rem;
-    background: var(--fill);
+    padding: 7px 28px 7px 32px;
+    font: inherit;
+    font-size: var(--text-body);
+    background: color-mix(in srgb, var(--bg-elevated) 70%, transparent);
+    -webkit-backdrop-filter: saturate(var(--glass-saturate)) blur(var(--glass-blur));
+    backdrop-filter: saturate(var(--glass-saturate)) blur(var(--glass-blur));
     border: 0.5px solid var(--separator);
+    box-shadow: var(--glass-hairline);
     border-radius: var(--radius-sm);
     color: var(--fg);
+    transition:
+      border-color var(--motion-fast) var(--ease),
+      box-shadow var(--motion-fast) var(--ease);
   }
   .qfilter input:focus {
-    border-color: var(--accent);
+    outline: none;
+    border-color: var(--accent-color);
+    box-shadow: var(--focus-ring-tight);
   }
   .qfilter__clear {
     position: absolute;
@@ -646,6 +711,7 @@
     line-height: 1;
     padding: 2px 6px;
     border-radius: var(--radius-xs);
+    transition: color var(--motion-fast) var(--ease);
   }
   .qfilter__clear:hover {
     color: var(--fg);
@@ -653,14 +719,15 @@
   .tagbar {
     display: flex;
     flex-wrap: wrap;
-    gap: 4px;
+    gap: var(--space-2);
   }
   .notes-clear {
     background: none;
     border: none;
-    color: var(--accent);
+    color: var(--accent-color);
     cursor: pointer;
-    font-size: 0.8rem;
+    font-family: var(--font-mono);
+    font-size: var(--text-callout);
     padding: 4px 6px;
   }
   .notes-clear:hover {
@@ -669,68 +736,107 @@
   .linklike {
     background: none;
     border: none;
-    color: var(--accent);
+    color: var(--accent-color);
     cursor: pointer;
     font: inherit;
     padding: 0;
     text-decoration: underline;
   }
-  /* macOS AppKit segmented control: a gray track holding an elevated pill on
-     the selected segment (not a saturated accent fill). */
+  /* Glass segmented control: a translucent track holding an elevated pill on the
+     selected segment, with a hairline spectral underline. Mono microlabels —
+     the shipped sibling language (Tasks/Review). No gradient under label text. */
   .seg {
     display: flex;
     gap: 2px;
-    padding: 2px;
-    background: var(--fill);
-    border: 0.5px solid var(--separator);
+    padding: 3px;
+    background: color-mix(in srgb, var(--bg-elevated) 70%, transparent);
+    -webkit-backdrop-filter: saturate(var(--glass-saturate)) blur(var(--glass-blur));
+    backdrop-filter: saturate(var(--glass-saturate)) blur(var(--glass-blur));
     border-radius: var(--radius-sm);
+    box-shadow: var(--glass-hairline), 0 0 0 0.5px var(--separator);
   }
   .seg button {
-    padding: 4px 12px;
+    position: relative;
+    padding: 4px 13px;
     background: transparent;
     border: none;
     border-radius: calc(var(--radius-sm) - 1px);
-    color: var(--fg-soft);
+    color: var(--label-secondary);
     cursor: pointer;
-    font-size: 0.8rem;
+    font-family: var(--font-mono);
+    font-size: var(--text-subhead);
+    text-transform: uppercase;
+    letter-spacing: var(--tracking-caps);
     transition:
       background var(--motion-fast) var(--ease),
       color var(--motion-fast) var(--ease),
       box-shadow var(--motion-fast) var(--ease);
   }
-  .seg button.seg--on {
+  .seg button:hover:not(.seg--on) {
+    color: var(--fg);
+    background: var(--fill-hover);
+  }
+  .seg--on {
     background: var(--bg-elevated);
     color: var(--fg);
     box-shadow: var(--shadow-control);
+  }
+  /* The short spectral underline anchoring the active segment (decorative). */
+  .seg--on::after {
+    content: "";
+    position: absolute;
+    left: 50%;
+    bottom: 2px;
+    transform: translateX(-50%);
+    width: 16px;
+    height: 2px;
+    border-radius: 2px;
+    background: var(--grad-spectral);
   }
   /* On/off filter toggles: a tinted accent well when active (distinct from the
      neutral segmented track, which only ever switches one exclusive view). */
   .notes-toggle {
     display: inline-flex;
     align-items: center;
-    gap: 4px;
-    padding: 5px 12px;
-    background: var(--fill);
+    gap: 5px;
+    padding: 5px 11px;
+    background: color-mix(in srgb, var(--bg-elevated) 70%, transparent);
+    -webkit-backdrop-filter: saturate(var(--glass-saturate)) blur(var(--glass-blur));
+    backdrop-filter: saturate(var(--glass-saturate)) blur(var(--glass-blur));
     border: 0.5px solid var(--separator);
+    box-shadow: var(--glass-hairline);
     border-radius: var(--radius-sm);
-    color: var(--fg-soft);
+    color: var(--label-secondary);
     cursor: pointer;
-    font-size: 0.8rem;
+    font-family: var(--font-mono);
+    font-size: var(--text-subhead);
+    text-transform: uppercase;
+    letter-spacing: var(--tracking-caps);
+    transition:
+      background var(--motion-fast) var(--ease),
+      color var(--motion-fast) var(--ease),
+      border-color var(--motion-fast) var(--ease);
   }
-  .notes-toggle--on {
-    background: var(--accent-fill);
-    color: var(--on-accent);
-    border-color: var(--accent-fill);
+  .notes-toggle:hover {
+    color: var(--fg);
+    border-color: var(--separator-strong);
+  }
+  .notes-toggle--on,
+  .notes-toggle--on:hover {
+    background: var(--accent-tint);
+    color: var(--accent-color);
+    border-color: color-mix(in srgb, var(--accent-color) 40%, transparent);
   }
   .notes-toggle__count {
-    opacity: 0.8;
+    font-variant-numeric: tabular-nums;
+    opacity: 0.85;
   }
   /* Sort key + direction toggle, joined into one pill. */
   .sortwrap {
     display: flex;
     align-items: stretch;
   }
-  .sortwrap .select {
+  .sortwrap :global(.select) {
     border-top-right-radius: 0;
     border-bottom-right-radius: 0;
   }
@@ -742,35 +848,40 @@
     border-left: none;
     border-top-right-radius: var(--radius-sm);
     border-bottom-right-radius: var(--radius-sm);
-    background: var(--fill);
-    color: var(--fg-soft);
+    background: color-mix(in srgb, var(--bg-elevated) 70%, transparent);
+    -webkit-backdrop-filter: saturate(var(--glass-saturate)) blur(var(--glass-blur));
+    backdrop-filter: saturate(var(--glass-saturate)) blur(var(--glass-blur));
+    color: var(--label-secondary);
     cursor: pointer;
     padding: 0 9px;
+    transition: color var(--motion-fast) var(--ease);
   }
   .dirbtn:hover {
     color: var(--fg);
   }
-  /* Group headers. */
+  /* Group headers — mono uppercase microlabel + a count. */
   .notegroup {
     display: flex;
     align-items: baseline;
-    gap: 8px;
-    margin: 20px 0 8px;
-    font-size: 0.85rem;
-    font-weight: 600;
-    color: var(--fg-soft);
+    gap: var(--space-3);
+    margin: var(--space-7) 0 var(--space-3);
+    font-family: var(--font-mono);
+    font-size: var(--text-subhead);
+    font-weight: 500;
+    color: var(--label-secondary);
     text-transform: uppercase;
-    letter-spacing: 0.04em;
+    letter-spacing: var(--tracking-caps);
   }
   .notegroup__count {
-    font-size: 0.75rem;
+    font-size: var(--text-subhead);
     font-weight: 400;
     color: var(--muted);
+    font-variant-numeric: tabular-nums;
   }
   /* Interactive tag chips (the global .chip is borderless; reset button chrome). */
   .chip {
     border: none;
-    font-family: inherit;
+    font-family: var(--font-mono);
     cursor: pointer;
     line-height: 1.5;
   }
@@ -778,57 +889,112 @@
     background: var(--fill-strong);
   }
   .chip--active {
-    background: var(--accent-fill);
-    color: var(--on-accent);
+    background: var(--accent-tint);
+    color: var(--accent-color);
+    box-shadow: inset 0 0 0 0.5px color-mix(in srgb, var(--accent-color) 40%, transparent);
   }
   .chip--more {
     cursor: default;
   }
-  /* Card grid (unchanged from before, minus the anchor → div for stretched link). */
+
+  /* ── Card grid (glass bento) ─────────────────────────────────────────────
+     Cards are translucent glass panels with the bento depth shadow + radius-lg.
+     A keyed entrance cascade fades them up on load (reduced-motion safe). */
   .notegrid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
-    gap: 12px;
-    margin-top: 16px;
+    grid-template-columns: repeat(auto-fill, minmax(248px, 1fr));
+    gap: var(--space-4);
+    margin-top: var(--space-5);
   }
   .notegrid--dense {
-    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-    gap: 8px;
+    grid-template-columns: repeat(auto-fill, minmax(184px, 1fr));
+    gap: var(--space-3);
   }
   .notecard {
     position: relative;
     display: block;
-    padding: 12px 14px;
-    border: 0.5px solid var(--separator);
-    border-radius: var(--radius);
-    background: var(--bg-elevated);
+    padding: var(--space-5);
+    border-radius: var(--radius-lg);
+    background: color-mix(in srgb, var(--bg-elevated) 82%, transparent);
+    -webkit-backdrop-filter: saturate(var(--glass-saturate)) blur(var(--glass-blur));
+    backdrop-filter: saturate(var(--glass-saturate)) blur(var(--glass-blur));
     color: var(--fg);
-    box-shadow: var(--shadow-card);
+    box-shadow: var(--shadow-bento);
+    overflow: hidden;
+    animation: row-in var(--motion) var(--ease-out) both;
     transition:
-      border-color var(--motion-fast) var(--ease),
-      box-shadow var(--motion-fast) var(--ease),
-      transform var(--motion-fast) var(--ease);
+      box-shadow var(--motion) var(--ease),
+      transform var(--motion) var(--ease);
+  }
+  /* Stagger the first few cards; later ones share the last delay (matches the
+     shipped .rows cascade). Keyed {#each} means this fires once, not on refetch. */
+  .notegrid .notecard:nth-child(2) {
+    animation-delay: 28ms;
+  }
+  .notegrid .notecard:nth-child(3) {
+    animation-delay: 56ms;
+  }
+  .notegrid .notecard:nth-child(4) {
+    animation-delay: 84ms;
+  }
+  .notegrid .notecard:nth-child(5) {
+    animation-delay: 112ms;
+  }
+  .notegrid .notecard:nth-child(n + 6) {
+    animation-delay: 140ms;
   }
   .notecard:hover {
-    border-color: var(--accent);
-    transform: translateY(-1px);
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-float);
   }
   .notegrid--dense .notecard {
-    padding: 8px 10px;
+    padding: var(--space-4);
+    border-radius: var(--radius-md);
+  }
+  /* Starred/pinned: a spectral edge ribbon down the left + a faint glow. */
+  .notecard--fav {
+    box-shadow: var(--shadow-bento), var(--glow-spectral);
+  }
+  .notecard__edge {
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 3px;
+    background: var(--grad-spectral-160);
+  }
+  /* Orphan (no links in or out): gently dimmed — present but quieter. */
+  .notecard--orphan {
+    opacity: 0.62;
+  }
+  .notecard--orphan:hover {
+    opacity: 1;
   }
   .notecard__top {
     display: flex;
-    align-items: baseline;
+    align-items: flex-start;
     justify-content: space-between;
-    gap: 8px;
+    gap: var(--space-3);
   }
+  /* Serif card title — editorial, confident; clamps to two lines. */
   .notecard__title {
+    font-family: var(--font-serif);
+    font-size: var(--text-title2);
     font-weight: 600;
-    color: var(--fg);
+    letter-spacing: -0.01em;
+    line-height: var(--leading-tight);
+    color: var(--label-primary);
     text-decoration: none;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    -webkit-box-orient: vertical;
     overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+  }
+  .notegrid--dense .notecard__title {
+    font-size: var(--text-body);
+    -webkit-line-clamp: 1;
+    line-clamp: 1;
   }
   /* Stretched link: the title anchor covers the whole card so the card is
      clickable, while tag buttons (z-indexed above) stay independently clickable. */
@@ -841,25 +1007,56 @@
     display: inline-flex;
     align-items: center;
     color: var(--pri-b);
-    margin-right: 4px;
+    margin-right: 5px;
+    vertical-align: -0.1em;
+  }
+  /* Fresh dot — a spectral pip that pulses for recently-edited notes. */
+  .notecard__fresh {
+    flex: none;
+    margin-top: 5px;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--grad-spectral);
+    box-shadow: 0 0 0 0 var(--spectral-glow);
+    animation: fresh-pulse 2.6s var(--ease) infinite;
+  }
+  @keyframes fresh-pulse {
+    0%,
+    100% {
+      box-shadow: 0 0 0 0 color-mix(in srgb, var(--spectral-2) 50%, transparent);
+    }
+    50% {
+      box-shadow: 0 0 0 4px color-mix(in srgb, var(--spectral-2) 0%, transparent);
+    }
+  }
+  .notecard__meta {
+    display: flex;
+    align-items: baseline;
+    flex-wrap: wrap;
+    gap: var(--space-3);
+    margin-top: var(--space-2);
   }
   .notecard__date {
     flex: 0 0 auto;
-    font-size: 0.7rem;
+    font-size: var(--text-subhead);
     color: var(--muted);
     font-family: var(--font-mono);
+    letter-spacing: var(--tracking-caps);
+    font-variant-numeric: tabular-nums;
   }
   .notecard__folder {
-    display: block;
-    font-size: 0.72rem;
+    font-size: var(--text-subhead);
     color: var(--muted);
     font-family: var(--font-mono);
+    text-transform: uppercase;
+    letter-spacing: var(--tracking-caps);
   }
   .notecard__preview {
-    margin: 6px 0 0;
-    font-size: 0.82rem;
-    color: var(--fg-soft);
-    line-height: 1.5;
+    margin: var(--space-3) 0 0;
+    font-size: var(--text-callout);
+    color: var(--label-secondary);
+    line-height: 1.55;
     display: -webkit-box;
     -webkit-line-clamp: 3;
     line-clamp: 3;
@@ -871,24 +1068,45 @@
     z-index: 1;
     display: flex;
     flex-wrap: wrap;
-    gap: 4px;
-    margin-top: 8px;
+    gap: var(--space-2);
+    margin-top: var(--space-3);
   }
-  /* List layout: dense one-line rows, scannable. */
+
+  /* ── List layout: dense one-line rows, scannable ─────────────────────────── */
   .notelist {
-    margin-top: 14px;
+    margin-top: var(--space-4);
     border-top: 0.5px solid var(--separator);
   }
   .noterow {
     position: relative;
     display: flex;
     align-items: baseline;
-    gap: 10px;
-    padding: 7px 10px;
+    gap: var(--space-4);
+    padding: 8px 10px;
     border-bottom: 0.5px solid var(--separator);
+    transition: background var(--motion-fast) var(--ease);
+  }
+  .noterow::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 6px;
+    bottom: 6px;
+    width: 2px;
+    border-radius: 2px;
+    background: transparent;
+  }
+  .noterow--fav::before {
+    background: var(--grad-spectral-160);
   }
   .noterow:hover {
-    background: var(--fill);
+    background: var(--fill-hover);
+  }
+  .noterow--orphan {
+    opacity: 0.6;
+  }
+  .noterow--orphan:hover {
+    opacity: 1;
   }
   .noterow__title {
     flex: 1 1 auto;
@@ -899,6 +1117,9 @@
     text-overflow: ellipsis;
     white-space: nowrap;
   }
+  .noterow--fresh .noterow__title {
+    color: var(--label-primary);
+  }
   .noterow__title::after {
     content: "";
     position: absolute;
@@ -906,65 +1127,100 @@
   }
   .noterow__folder {
     flex: 0 0 auto;
-    font-size: 0.72rem;
+    font-size: var(--text-subhead);
     color: var(--muted);
     font-family: var(--font-mono);
+    text-transform: uppercase;
+    letter-spacing: var(--tracking-caps);
   }
   .noterow__tags {
     position: relative;
     z-index: 1;
     display: flex;
-    gap: 4px;
+    gap: var(--space-2);
     flex: 0 0 auto;
     max-width: 40%;
     overflow: hidden;
   }
   .noterow__date {
     flex: 0 0 auto;
-    font-size: 0.7rem;
+    font-size: var(--text-subhead);
     color: var(--muted);
     font-family: var(--font-mono);
+    letter-spacing: var(--tracking-caps);
+    font-variant-numeric: tabular-nums;
   }
-  /* Timeline layout: a vertical rail with month sections and dated entries. */
+
+  /* ── Timeline: a vertical rail with month sections + spectral dots ───────── */
   .timeline {
-    margin-top: 4px;
+    margin-top: var(--space-2);
   }
   .tl__month {
-    margin-top: 22px;
+    margin-top: var(--space-7);
   }
+  /* The spine is a spectral gradient thread (a positioned bar, so no gradient
+     ever sits behind the entry text). */
   .tl__rail {
     position: relative;
-    margin: 4px 0 0 8px;
-    padding-left: 18px;
-    border-left: 2px solid var(--separator-strong);
+    margin: var(--space-2) 0 0 8px;
+    padding-left: 20px;
+  }
+  .tl__rail::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 2px;
+    border-radius: 2px;
+    background: var(--grad-spectral-160);
+    opacity: 0.55;
   }
   .tl__entry {
     position: relative;
     display: flex;
     align-items: baseline;
-    gap: 10px;
+    gap: var(--space-3);
     padding: 6px 8px;
     border-radius: var(--radius-sm);
+    transition: background var(--motion-fast) var(--ease);
   }
   .tl__entry:hover {
-    background: var(--fill);
+    background: var(--fill-hover);
   }
+  .tl__entry--orphan {
+    opacity: 0.6;
+  }
+  .tl__entry--orphan:hover {
+    opacity: 1;
+  }
+  /* Dated dot — spectral gradient, ringed by the page bg so it punches the rail. */
   .tl__dot {
     position: absolute;
-    left: -21px;
-    top: 0.6em;
-    width: 8px;
-    height: 8px;
+    left: -23px;
+    top: 0.55em;
+    width: 9px;
+    height: 9px;
     border-radius: 50%;
-    background: var(--accent);
-    box-shadow: 0 0 0 3px var(--bg);
+    background: var(--grad-spectral);
+    box-shadow: 0 0 0 3px var(--bg-content);
+  }
+  .tl__entry--fresh .tl__dot {
+    animation: fresh-pulse 2.6s var(--ease) infinite;
+  }
+  .tl__entry--fav .tl__dot {
+    box-shadow:
+      0 0 0 3px var(--bg-content),
+      var(--glow-spectral);
   }
   .tl__date {
     flex: 0 0 auto;
     min-width: 3.4em;
-    font-size: 0.7rem;
+    font-size: var(--text-subhead);
     color: var(--muted);
     font-family: var(--font-mono);
+    letter-spacing: var(--tracking-caps);
+    font-variant-numeric: tabular-nums;
   }
   .tl__title {
     flex: 1 1 auto;
@@ -979,5 +1235,28 @@
     content: "";
     position: absolute;
     inset: 0;
+  }
+
+  /* The fresh-pulse glow is ambient/infinite; silence it under reduced-motion
+     (the global rule covers transitions, but belt-and-braces for the loop). */
+  @media (prefers-reduced-motion: reduce) {
+    .notecard__fresh,
+    .tl__entry--fresh .tl__dot {
+      animation: none;
+    }
+  }
+
+  /* Narrow viewports: stack the title row so the New-note control wraps cleanly. */
+  @media (max-width: 640px) {
+    .notes-head {
+      flex-wrap: wrap;
+    }
+    .newnote,
+    .newnote__open {
+      margin-left: 0;
+    }
+    .noterow__tags {
+      display: none;
+    }
   }
 </style>

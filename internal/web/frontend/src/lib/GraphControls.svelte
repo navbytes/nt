@@ -92,9 +92,10 @@
 <div class="gctl" class:gctl--open={open}>
   <div class="gctl__bar">
     <button class="gctl__toggle" onclick={() => (open = !open)} aria-expanded={open} title="Toggle controls">
-      <span class="gctl__chev" class:gctl__chev--open={open}><Icon name="chevron-right" size={14} /></span> Graph
+      <span class="gctl__chev" class:gctl__chev--open={open}><Icon name="chevron-right" size={14} /></span>
+      <span class="gctl__brand">Graph</span>
     </button>
-    <button class="icon-btn" title="Fit to view (f)" aria-label="Fit graph to view" onclick={onFit}><Icon name="focus" /></button>
+    <button class="icon-btn gctl__fit" title="Fit to view (f)" aria-label="Fit graph to view" onclick={onFit}><Icon name="focus" /></button>
   </div>
 
   {#if open}
@@ -135,7 +136,8 @@
       {/if}
 
       <!-- Search -->
-      <div class="gctl__row">
+      <div class="gctl__row gctl__search-row">
+        <span class="gctl__search-ico" aria-hidden="true"><Icon name="search" size={14} /></span>
         <input
           id="graph-search"
           class="gctl__search"
@@ -278,72 +280,112 @@
 
       <!-- Legend -->
       {#if legend.length > 1}
-        <div class="gctl__legend" aria-label="Color legend (click to filter)">
-          {#each legend as e (e.value)}
-            <button class="legend-item" class:on={legendActive(e.value)}
-              disabled={view.colorBy === "none"} onclick={() => legendClick(e.value)}>
-              <span class="legend-dot" style="background:{e.color}"></span>{e.label}
-            </button>
-          {/each}
+        <div class="gctl__legendgroup">
+          <p class="gctl__legendhead">{view.colorBy}</p>
+          <div class="gctl__legend" aria-label="Color legend (click to filter)">
+            {#each legend as e (e.value)}
+              <button class="legend-item" class:on={legendActive(e.value)}
+                disabled={view.colorBy === "none"} onclick={() => legendClick(e.value)}>
+                <span class="legend-dot" style="background:{e.color}"></span>{e.label}
+              </button>
+            {/each}
+          </div>
         </div>
       {/if}
 
       <!-- Shape legend (what the node shapes mean) -->
       {#if shapeLegend.length > 1}
-        <div class="gctl__legend gctl__shapelegend" aria-label="Shape legend">
-          {#each shapeLegend as e (e.value)}
-            <span class="shape-legend-item"><ShapeGlyph kind={e.shape} /> {e.label}</span>
-          {/each}
+        <div class="gctl__legendgroup">
+          <p class="gctl__legendhead">Shapes</p>
+          <div class="gctl__legend gctl__shapelegend" aria-label="Shape legend">
+            {#each shapeLegend as e (e.value)}
+              <span class="shape-legend-item"><ShapeGlyph kind={e.shape} /> {e.label}</span>
+            {/each}
+          </div>
         </div>
       {/if}
 
       <!-- Edge legend (relationship colors) — only when coloring edges by type -->
       {#if view.colorLinksByType && edgeLegend.length}
-        <div class="gctl__legend" aria-label="Edge type legend">
-          {#each edgeLegend as e (e.value)}
-            <span class="legend-item">
-              <span class="legend-line" style="background:{e.color}"></span>{e.label}
-            </span>
-          {/each}
+        <div class="gctl__legendgroup">
+          <p class="gctl__legendhead">Edges</p>
+          <div class="gctl__legend" aria-label="Edge type legend">
+            {#each edgeLegend as e (e.value)}
+              <span class="legend-item">
+                <span class="legend-line" style="background:{e.color}"></span>{e.label}
+              </span>
+            {/each}
+          </div>
         </div>
       {/if}
 
       <div class="gctl__stats">
-        {visibleCount}/{nodeCount} notes · {linkCount} links{#if view.mode === "local"} · local depth {view.depth}{/if}
+        <span class="gctl__stat"><strong>{visibleCount}</strong>/{nodeCount} notes</span>
+        <span class="gctl__stat-sep">·</span>
+        <span class="gctl__stat"><strong>{linkCount}</strong> links</span>
+        {#if view.mode === "local"}<span class="gctl__stat-sep">·</span><span class="gctl__stat">depth {view.depth}</span>{/if}
       </div>
     </div>
   {/if}
 </div>
 
 <style>
+  /* Glass floating control panel — the graph's "cockpit". Translucent over the
+     canvas with the spatial float shadow + top light-catch hairline, and a
+     spectral hairline along the very top edge for brand identity. */
   .gctl {
     position: absolute;
     top: 12px;
     left: 12px;
     z-index: 20;
-    width: 232px;
-    background: var(--bg-elevated);
+    width: 236px;
+    background: color-mix(in srgb, var(--bg-elevated) 86%, transparent);
+    -webkit-backdrop-filter: saturate(var(--glass-saturate)) blur(var(--glass-blur));
+    backdrop-filter: saturate(var(--glass-saturate)) blur(var(--glass-blur));
     border: 0.5px solid var(--separator);
     border-radius: var(--radius-popover);
-    box-shadow: var(--shadow-popover);
-    font-size: 0.82rem;
+    box-shadow: var(--shadow-float), var(--glass-hairline);
+    font-size: var(--text-body);
+    overflow: hidden;
+  }
+  .gctl::before {
+    content: "";
+    position: absolute;
+    inset: 0 0 auto 0;
+    height: 2px;
+    background: var(--grad-spectral);
+    opacity: 0.85;
+    pointer-events: none;
   }
   .gctl__bar {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 6px 8px 6px 4px;
+    padding: var(--space-2) var(--space-2) var(--space-2) var(--space-1);
   }
   .gctl__toggle {
     background: none;
     border: none;
     color: var(--fg);
-    font-weight: 600;
     cursor: pointer;
-    font-size: 0.85rem;
     display: flex;
     align-items: center;
-    gap: 4px;
+    gap: var(--space-1);
+    padding: 4px;
+  }
+  /* mono wordmark — echoes the sidebar brand + the cockpit microlabel voice */
+  .gctl__brand {
+    font-family: var(--font-mono);
+    font-size: var(--text-callout);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: var(--tracking-caps);
+  }
+  .gctl__fit {
+    min-width: 26px;
+    min-height: 26px;
+    border-color: transparent;
+    background: transparent;
   }
   /* Disclosure chevron: points right when closed, rotates down when open
      (the global reduced-motion rule neutralizes the spin). */
@@ -356,24 +398,28 @@
     transform: rotate(90deg);
   }
   .gctl__body {
-    padding: 4px 10px 10px;
+    padding: var(--space-1) var(--space-4) var(--space-4);
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: var(--space-3);
     max-height: calc(100vh - 140px);
     overflow-y: auto;
   }
   .gctl__row {
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: var(--space-2);
   }
   .gctl__field,
   .gctl__depth {
     flex-direction: row;
     align-items: center;
     justify-content: space-between;
-    gap: 8px;
+    gap: var(--space-3);
+  }
+  .gctl__field label,
+  .gctl__depth label {
+    color: var(--label-secondary);
   }
   .gctl__depth input,
   .gctl__slider input {
@@ -383,8 +429,25 @@
     display: flex;
     flex-direction: row;
     align-items: center;
-    gap: 12px;
+    gap: var(--space-4);
     flex-wrap: wrap;
+    color: var(--label-secondary);
+  }
+  /* Search field with a leading glyph (NSSearchField feel). */
+  .gctl__search-row {
+    position: relative;
+    flex-direction: row;
+    align-items: center;
+  }
+  .gctl__search-ico {
+    position: absolute;
+    left: 8px;
+    display: inline-flex;
+    color: var(--muted);
+    pointer-events: none;
+  }
+  .gctl__search-row .gctl__search {
+    padding-left: 28px;
   }
   .gctl__search,
   .gctl select {
@@ -394,7 +457,7 @@
     border-radius: var(--radius-sm);
     background: var(--fill);
     color: var(--fg);
-    font-size: 0.82rem;
+    font-size: var(--text-body);
     transition:
       border-color var(--motion-fast) var(--ease),
       box-shadow var(--motion-fast) var(--ease);
@@ -403,7 +466,7 @@
     width: auto;
   }
   /* macOS segmented control: a gray hairline track holds equal segments; the
-     selected one lifts onto an elevated pill (NSSegmentedControl). */
+     selected one lifts onto a spectral-tinted pill (NSSegmentedControl). */
   .seg {
     display: flex;
     width: 100%;
@@ -421,7 +484,7 @@
     border-radius: var(--radius-xs);
     color: var(--fg-soft);
     cursor: pointer;
-    font-size: 0.8rem;
+    font-size: var(--text-callout);
     transition:
       background var(--motion-fast) var(--ease),
       color var(--motion-fast) var(--ease),
@@ -434,12 +497,18 @@
     opacity: 0.5;
     cursor: not-allowed;
   }
+  /* active segment — elevated pill washed with a soft spectral tint + accent text */
   .seg--on {
-    background: var(--bg-elevated);
-    border-color: var(--separator);
+    background:
+      linear-gradient(
+        135deg,
+        color-mix(in srgb, var(--spectral-1) 22%, var(--bg-elevated)),
+        color-mix(in srgb, var(--spectral-3) 22%, var(--bg-elevated))
+      );
+    border-color: color-mix(in srgb, var(--spectral-2) 45%, transparent);
     box-shadow: var(--shadow-control);
     color: var(--fg);
-    font-weight: 550;
+    font-weight: 600;
   }
   .gctl__chips,
   .gctl__filtersel {
@@ -462,7 +531,7 @@
     background: var(--fill);
     color: var(--fg-soft);
     cursor: pointer;
-    font-size: 0.75rem;
+    font-size: var(--text-callout);
     transition:
       background var(--motion-fast) var(--ease),
       color var(--motion-fast) var(--ease),
@@ -472,14 +541,15 @@
     color: var(--fg);
     border-color: var(--fg-soft);
   }
+  /* active filter chip — spectral wash (calm; never carries the label colour) */
   .chip-toggle.on {
-    background: var(--accent-fill);
-    border-color: var(--accent-fill);
-    color: var(--on-accent);
+    background: color-mix(in srgb, var(--spectral-2) 18%, transparent);
+    border-color: color-mix(in srgb, var(--spectral-2) 45%, transparent);
+    color: var(--fg);
   }
   .chip-toggle.on:hover {
-    color: var(--on-accent);
-    border-color: var(--accent-fill);
+    color: var(--fg);
+    border-color: color-mix(in srgb, var(--spectral-2) 70%, transparent);
   }
   .gctl__adv {
     background: none;
@@ -488,7 +558,13 @@
     cursor: pointer;
     text-align: left;
     padding: 2px 0;
-    font-size: 0.8rem;
+    font-family: var(--font-mono);
+    font-size: var(--text-subhead);
+    text-transform: uppercase;
+    letter-spacing: var(--tracking-caps);
+    display: flex;
+    align-items: center;
+    gap: var(--space-1);
   }
   .gctl__adv-body {
     display: flex;
@@ -496,46 +572,65 @@
     gap: 7px;
     padding: 2px 0 4px;
     border-left: 0.5px solid var(--separator);
-    padding-left: 8px;
+    padding-left: var(--space-3);
+    color: var(--label-secondary);
   }
   .gctl__slider {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: var(--space-3);
   }
   .gctl__slider label {
     min-width: 78px;
     color: var(--muted);
-    font-size: 0.75rem;
+    font-size: var(--text-callout);
+  }
+  /* Each legend is a titled group: a mono microlabel header over the swatches. */
+  .gctl__legendgroup {
+    border-top: 0.5px solid var(--separator);
+    padding-top: var(--space-3);
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+  }
+  .gctl__legendhead {
+    margin: 0;
+    font-family: var(--font-mono);
+    font-size: var(--text-footnote);
+    text-transform: uppercase;
+    letter-spacing: var(--tracking-caps);
+    color: var(--muted);
   }
   .gctl__legend {
     display: flex;
     flex-wrap: wrap;
     gap: 4px 8px;
-    border-top: 0.5px solid var(--separator);
-    padding-top: 8px;
   }
   .legend-item {
     display: flex;
     align-items: center;
-    gap: 4px;
+    gap: 5px;
     background: none;
-    border: none;
-    color: var(--muted);
+    border: 0.5px solid transparent;
+    color: var(--label-secondary);
     cursor: pointer;
-    font-size: 0.75rem;
-    padding: 1px 3px;
-    border-radius: var(--radius-sm);
+    font-size: var(--text-callout);
+    padding: 2px 7px;
+    border-radius: 999px;
     transition:
       background var(--motion-fast) var(--ease),
-      color var(--motion-fast) var(--ease);
+      color var(--motion-fast) var(--ease),
+      border-color var(--motion-fast) var(--ease);
   }
   .legend-item:hover:not(:disabled) {
     color: var(--fg);
+    background: var(--fill);
   }
+  /* active legend filter — spectral ring, matching the filter chips */
   .legend-item.on {
     color: var(--fg);
-    background: var(--fill);
+    background: color-mix(in srgb, var(--spectral-2) 16%, transparent);
+    border-color: color-mix(in srgb, var(--spectral-2) 42%, transparent);
   }
   .legend-item:disabled {
     cursor: default;
@@ -546,6 +641,7 @@
     border-radius: 50%;
     display: inline-block;
     flex: none;
+    box-shadow: 0 0 0 0.5px rgba(0, 0, 0, 0.15);
   }
   .legend-line {
     width: 14px;
@@ -557,29 +653,42 @@
   .gctl__hint {
     margin: 0;
     color: var(--muted);
-    font-size: 0.72rem;
+    font-size: var(--text-callout);
     line-height: 1.35;
   }
   .shape-legend-item {
     display: flex;
     align-items: center;
-    gap: 4px;
-    color: var(--fg-soft);
-    font-size: 0.75rem;
-    padding: 1px 3px;
+    gap: 5px;
+    color: var(--label-secondary);
+    font-size: var(--text-callout);
+    padding: 2px 3px;
   }
   .gctl__stats {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 5px;
     color: var(--muted);
-    font-size: 0.73rem;
+    font-family: var(--font-mono);
+    font-size: var(--text-subhead);
     border-top: 0.5px solid var(--separator);
-    padding-top: 6px;
+    padding-top: var(--space-2);
+    font-variant-numeric: tabular-nums;
+  }
+  .gctl__stat strong {
+    color: var(--label-secondary);
+    font-weight: 600;
+  }
+  .gctl__stat-sep {
+    color: var(--separator-strong);
   }
   .linklike {
     background: none;
     border: none;
     color: var(--accent-color);
     cursor: pointer;
-    font-size: 0.78rem;
+    font-size: var(--text-callout);
     padding: 0;
   }
 </style>

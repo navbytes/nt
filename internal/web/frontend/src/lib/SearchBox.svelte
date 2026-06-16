@@ -88,9 +88,14 @@
       e.preventDefault();
       choose(active >= 0 ? results[active] : undefined);
     } else if (e.key === "Escape") {
+      // Esc: dismiss the dropdown if open, otherwise clear the field (a second
+      // press, or Esc on an already-closed list, empties it — NSSearchField feel).
+      e.preventDefault();
       if (showDrop) {
-        e.preventDefault();
         open = false;
+      } else if (q) {
+        q = "";
+        active = -1;
       }
     }
   }
@@ -171,25 +176,38 @@
     flex: 1;
     max-width: 420px;
   }
-  /* NSSearchField: pill-ish filled field with a leading magnifier. The glyph is
-     an inline SVG using a neutral stroke (#6e6e73) that reads in both themes. */
+  /* NSSearchField: a fully-rounded, glassy pill with a leading magnifier. The
+     glyph is an inline SVG using a neutral stroke (#6e6e73) that reads in both
+     themes. backdrop-filter lets the toolbar vibrancy show through the fill. */
   .sbox input {
     width: 100%;
-    padding: 6px 12px 6px 30px;
-    background-color: var(--fill);
+    padding: 6px 14px 6px 32px;
+    background-color: color-mix(in srgb, var(--fill) 80%, transparent);
     background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%236e6e73' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='11' cy='11' r='7'/%3E%3Cpath d='m20 20-3.6-3.6'/%3E%3C/svg%3E");
     background-repeat: no-repeat;
-    background-position: 9px center;
+    background-position: 11px center;
     background-size: 14px;
+    -webkit-backdrop-filter: saturate(var(--glass-saturate)) blur(8px);
+    backdrop-filter: saturate(var(--glass-saturate)) blur(8px);
     border: 0.5px solid var(--separator);
-    border-radius: var(--radius-sm);
+    border-radius: 999px;
     color: var(--fg);
     font-size: 0.9rem;
+    transition:
+      border-color var(--motion-fast) var(--ease),
+      background-color var(--motion-fast) var(--ease),
+      box-shadow var(--motion-fast) var(--ease);
   }
-  /* Drop the bare outline:none so the global :focus-visible halo shows; keep the
-     accent border swap. */
+  .sbox input:hover {
+    background-color: var(--fill);
+  }
+  /* Drop the bare outline:none so the global :focus-visible halo shows; on focus
+     swap to the accent border + a faint spectral ring (mouse focus too). */
   .sbox input:focus {
     border-color: var(--accent);
+  }
+  .sbox input:focus-visible {
+    background-color: var(--bg-elevated);
   }
   .sbox__list {
     position: absolute;

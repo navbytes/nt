@@ -142,6 +142,16 @@
       d="M12 3s5 3.6 5 8.5a5 5 0 0 1-10 0c0-1.6.7-2.9 1.5-3.8C9 9 10 10 10 10s-.5-3 2-7Z"
       fill={filled ? "currentColor" : "none"}
     />
+  {:else if name === "graph"}
+    <!-- knowledge-graph: linked nodes -->
+    <circle cx="6" cy="7" r="2.4" fill={filled ? "currentColor" : "none"} />
+    <circle cx="18" cy="6" r="2.4" fill={filled ? "currentColor" : "none"} />
+    <circle cx="8" cy="18" r="2.4" fill={filled ? "currentColor" : "none"} />
+    <circle cx="17.5" cy="17" r="2.4" fill={filled ? "currentColor" : "none"} />
+    <path d="M7.7 8.7 6.3 15.6M8.1 6.6l7.6-.4M8.2 16.5l7-9.2M10.2 18.4l5.1-1" />
+  {:else if name === "activity"}
+    <!-- pulse / activity feed -->
+    <path d="M3.5 12h3.5l2-6 4 13 2.5-7H21" />
   {:else}
     <circle cx="12" cy="12" r="2" fill="currentColor" stroke="none" />
   {/if}

@@ -172,8 +172,10 @@ describe("CommandPalette", () => {
 describe("Tags", () => {
   it("renders tags with counts linking to tag search", async () => {
     render(Harness, { props: { comp: Tags } });
-    const chip = await screen.findByText("#spec", { exact: false });
-    expect(chip.closest("a")?.getAttribute("href")).toBe("/search?tag=spec");
+    // The tag chip renders the label as separate "#" + name spans, so match
+    // the name node and assert it links to the tag search with its count.
+    const name = await screen.findByText("spec", { exact: false });
+    expect(name.closest("a")?.getAttribute("href")).toBe("/search?tag=spec");
     expect(screen.getByText("3")).toBeInTheDocument();
   });
 });
