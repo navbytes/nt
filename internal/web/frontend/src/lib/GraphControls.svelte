@@ -231,6 +231,7 @@
             <label><input type="checkbox" bind:checked={view.showLabels} /> Labels</label>
             <label><input type="checkbox" bind:checked={view.showArrows} /> Arrows</label>
             <label><input type="checkbox" bind:checked={view.particles} /> Flow</label>
+            <label title="Soft spectral halos behind colour clusters"><input type="checkbox" bind:checked={view.hulls} /> Halos</label>
           </div>
           <div class="gctl__field">
             <label for="g-effects">Effects</label>

@@ -53,6 +53,7 @@
   let bloomPass: any = null; // three UnrealBloomPass (3D only)
   let three3d: any = null; // the lazy-loaded THREE namespace (3D only)
   let SpriteText3d: any = null; // lazy-loaded three-spritetext ctor (3D labels)
+  let glowTex: any = null; // shared additive corona texture for 3D nodes (lazy)
   const BG3D = "#05060d"; // deep-space background — bloom needs near-black
 
   const reduce =
@@ -87,6 +88,9 @@
   let dofStart = 0;
   const DOF_MS = 180;
   const DIM = 0.15; // dimmed-node alpha (matches the original base + "26")
+  // One-shot expanding ring on fresh selection (free-runs alongside the DOF tween).
+  let pulseStart = 0;
+  let pulseRAF = 0;
 
   // Pre-rendered glow sprites (graphSprites). Style is set from theme in readTheme.
   const sprites = new SpriteCache({ theme: "dark", glowAlpha: 0.6, glowBlur: 10 });
@@ -97,6 +101,12 @@
   let cssBg = "#16161e";
   let cssAccent = "#7aa2f7";
   let cssGraphEdge = "rgba(0,0,0,0.5)";
+  // Spectral identity (Aurora) — cached for the ambient canvas wash + focused edges.
+  let cssSpectral1 = "#7aa2f7";
+  let cssSpectral3 = "#bb9af7";
+  let graphDark = true;
+  let cssChip = "#2c2c31"; // --bg-elevated (glass label chip fill, hex → alpha-able)
+  let cssSep = "rgba(255,255,255,0.11)"; // --separator (already rgba)
   function isDarkHex(hex: string): boolean {
     const h = hex.replace("#", "");
     if (h.length < 6) return false;
@@ -110,9 +120,14 @@
     cssBg = cs.getPropertyValue("--bg").trim() || cssBg;
     cssAccent = cs.getPropertyValue("--accent").trim() || cssAccent;
     cssGraphEdge = cs.getPropertyValue("--graph-bg-edge").trim() || cssGraphEdge;
+    cssSpectral1 = cs.getPropertyValue("--spectral-1").trim() || cssSpectral1;
+    cssSpectral3 = cs.getPropertyValue("--spectral-3").trim() || cssSpectral3;
+    cssChip = cs.getPropertyValue("--bg-elevated").trim() || cssChip;
+    cssSep = cs.getPropertyValue("--separator").trim() || cssSep;
     // theme is derived from the resolved bg luminance — covers the media-query
     // and [data-theme] paths uniformly without re-deriving the CSS selectors.
     const theme = isDarkHex(cssBg) ? "dark" : "light";
+    graphDark = theme === "dark";
     const glowAlpha = parseFloat(cs.getPropertyValue("--graph-glow-alpha")) || 0.4;
     const glowBlur = parseFloat(cs.getPropertyValue("--graph-glow-blur")) || 8;
     sprites.setStyle({ theme, glowAlpha, glowBlur });
@@ -185,7 +200,10 @@
     R = { color, pass, shape };
     visibleCount = pass.size;
     refreshFx(); // pass-size may cross a perf threshold
-    if (built3d) refresh3dColors();
+    if (built3d) {
+      refresh3dColors();
+      refresh3dObjects(); // rebuild coronas/labels with fresh colors + filter state
+    }
     repaint();
   }
 
@@ -243,6 +261,31 @@
     fxLevel = computeFx();
   }
 
+  // Rounded-rect path (manual — avoids relying on ctx.roundRect availability).
+  function roundRect(
+    ctx: CanvasRenderingContext2D,
+    x: number,
+    y: number,
+    w: number,
+    h: number,
+    r: number,
+  ) {
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.arcTo(x + w, y, x + w, y + h, r);
+    ctx.arcTo(x + w, y + h, x, y + h, r);
+    ctx.arcTo(x, y + h, x, y, r);
+    ctx.arcTo(x, y, x + w, y, r);
+    ctx.closePath();
+  }
+  // Source→target gradient edges are the calm default whenever effects are on and
+  // the graph isn't huge — flat grey is only the >2.5k / "off" perf fallback. This
+  // keeps edges "living" even under the reduced-motion downgrade (a static gradient
+  // isn't motion; only the animated depth-of-field is dropped there).
+  function gradientLinks(): boolean {
+    return view.colorLinks && !view.colorLinksByType && fxLevel !== "off" && R.pass.size <= 2500;
+  }
+
   function drawNode(n: FGNode, ctx: CanvasRenderingContext2D, scale: number) {
     const x = n.x ?? 0;
     const y = n.y ?? 0;
@@ -257,6 +300,15 @@
       ctx.beginPath();
       ctx.arc(x, y, r + 3, 0, 2 * Math.PI);
       ctx.strokeStyle = cssAccent;
+      ctx.lineWidth = 1.5 / scale;
+      ctx.stroke();
+    }
+    // one-shot expanding ring pulse on fresh selection (reduced-motion: skipped)
+    if (n.id === view.selectedId && pulseRAF) {
+      const pp = Math.min(1, (performance.now() - pulseStart) / 600);
+      ctx.beginPath();
+      ctx.arc(x, y, r + 3 + pp * 15, 0, 2 * Math.PI);
+      ctx.strokeStyle = withAlpha(cssAccent, (1 - pp) * 0.5);
       ctx.lineWidth = 1.5 / scale;
       ctx.stroke();
     }
@@ -302,19 +354,26 @@
       (scale > view.labelThreshold || n.id === hoveredId || n.id === view.selectedId || n.deg >= 5);
     if (show) {
       const fontPx = Math.max(3.2, Math.min(6, 13 / scale));
-      ctx.font = `${fontPx}px sans-serif`;
+      ctx.font = `${fontPx}px ui-sans-serif, -apple-system, sans-serif`;
       ctx.textAlign = "center";
-      ctx.textBaseline = "top";
-      const ty = y + r + 2 / scale;
+      ctx.textBaseline = "middle";
       // Long task labels (an agent's whole sentence) sprawl across the canvas —
       // draw a short title; the full text stays in the hover tooltip (nodeLabel).
       const label = displayTitle(n.title, 20);
-      // halo for legibility over links/nodes
-      ctx.lineWidth = 3 / scale;
-      ctx.strokeStyle = cssBg;
-      ctx.strokeText(label, x, ty);
+      // glass chip behind the label — a translucent elevated pill + hairline (on
+      // brand + more legible over links/halos than the old stroke halo).
+      const padX = 5 / scale;
+      const chipH = fontPx + 5 / scale;
+      const chipW = ctx.measureText(label).width + padX * 2;
+      const cy = y + r + 3 / scale + chipH / 2;
+      roundRect(ctx, x - chipW / 2, cy - chipH / 2, chipW, chipH, Math.min(chipH / 2, 4 / scale));
+      ctx.fillStyle = withAlpha(cssChip, 0.72);
+      ctx.fill();
+      ctx.lineWidth = 0.5 / scale;
+      ctx.strokeStyle = cssSep;
+      ctx.stroke();
       ctx.fillStyle = cssFg;
-      ctx.fillText(label, x, ty);
+      ctx.fillText(label, x, cy);
     }
   }
 
@@ -342,7 +401,7 @@
   function drawLink(l: any, ctx: CanvasRenderingContext2D, scale: number) {
     // The node-color gradient painter is idle when edges are colored by type
     // (a typed edge is one flat color, painted by the linkColor accessor instead).
-    if (!(view.colorLinks && !view.colorLinksByType && fxLevel === "full")) return;
+    if (!gradientLinks()) return;
     const s = l.source;
     const t = l.target;
     if (!s || !t || s.x == null || t.x == null) return;
@@ -373,6 +432,21 @@
     const h = container.clientHeight;
     ctx.save();
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    // Aurora wash — two soft spectral glows pooled in opposite corners, matching
+    // the app's ambient aurora. Screen-fixed, painted under the graph; kept subtle
+    // (fainter in light mode) so nodes + labels stay legible.
+    const aa = graphDark ? 0.13 : 0.06;
+    const reach = Math.max(w, h) * 0.55;
+    const a1 = ctx.createRadialGradient(w * 0.82, h * 0.12, 0, w * 0.82, h * 0.12, reach);
+    a1.addColorStop(0, withAlpha(cssSpectral1, aa));
+    a1.addColorStop(1, withAlpha(cssSpectral1, 0));
+    ctx.fillStyle = a1;
+    ctx.fillRect(0, 0, w, h);
+    const a2 = ctx.createRadialGradient(w * 0.14, h * 0.94, 0, w * 0.14, h * 0.94, reach);
+    a2.addColorStop(0, withAlpha(cssSpectral3, aa));
+    a2.addColorStop(1, withAlpha(cssSpectral3, 0));
+    ctx.fillStyle = a2;
+    ctx.fillRect(0, 0, w, h);
     const g = ctx.createRadialGradient(
       w / 2,
       h / 2,
@@ -388,11 +462,84 @@
     ctx.restore();
   }
 
+  // ---- cluster halos (community hulls) ----
+  // Soft spectral blobs pooled behind same-colour clusters so structure reads at a
+  // glance (the "hull" technique). Computed from live node positions — cheap and
+  // throttled, never the full per-frame cost — and painted in world coords so each
+  // halo pans/zooms with its cluster.
+  let halos: { x: number; y: number; r: number; color: string }[] = [];
+  let haloTick = 0;
+  function refreshHalos() {
+    if (!view.hulls || view.colorBy === "none" || fxLevel === "off" || !graph) {
+      halos = [];
+      return;
+    }
+    const nodes = graph.graphData?.().nodes ?? [];
+    const groups = new Map<string, { sx: number; sy: number; n: number; pts: [number, number][] }>();
+    for (const n of nodes) {
+      if (!R.pass.has(n.id)) continue;
+      const c = R.color.get(n.id);
+      if (!c) continue;
+      const x = n.x ?? 0;
+      const y = n.y ?? 0;
+      let g = groups.get(c);
+      if (!g) {
+        g = { sx: 0, sy: 0, n: 0, pts: [] };
+        groups.set(c, g);
+      }
+      g.sx += x;
+      g.sy += y;
+      g.n++;
+      g.pts.push([x, y]);
+    }
+    const next: typeof halos = [];
+    for (const [color, g] of groups) {
+      if (g.n < 2) continue; // a lone node isn't a community
+      const cx = g.sx / g.n;
+      const cy = g.sy / g.n;
+      // mean (not max) distance → the blob hugs the cluster's dense core instead of
+      // ballooning to a single far outlier (force layout spreads same-colour nodes).
+      let sumd = 0;
+      for (const [x, y] of g.pts) sumd += Math.hypot(x - cx, y - cy);
+      const r = Math.max(60, Math.min((sumd / g.n) * 1.9 + 40, 520));
+      next.push({ x: cx, y: cy, color, r });
+    }
+    halos = next;
+  }
+  // Recompute when the cache is cold or the layout is still moving; otherwise reuse
+  // (positions are static once cooled). Bounds the per-frame cost on big graphs.
+  function maybeRefreshHalos() {
+    if (!view.hulls || view.colorBy === "none" || fxLevel === "off") {
+      halos = [];
+      return;
+    }
+    haloTick++;
+    if (!halos.length || engineRunning || haloTick % 6 === 0) refreshHalos();
+  }
+  function drawHalos(ctx: CanvasRenderingContext2D) {
+    if (!halos.length) return;
+    const fade = focusSet ? 0.45 : 1; // recede while a node's web is in focus
+    const base = (graphDark ? 0.24 : 0.13) * fade;
+    for (const h of halos) {
+      const g = ctx.createRadialGradient(h.x, h.y, 0, h.x, h.y, h.r);
+      g.addColorStop(0, withAlpha(h.color, base));
+      g.addColorStop(0.55, withAlpha(h.color, base * 0.5));
+      g.addColorStop(1, withAlpha(h.color, 0));
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.arc(h.x, h.y, h.r, 0, 2 * Math.PI);
+      ctx.fill();
+    }
+  }
+
   // ---- depth-of-field: animate the hover focus fade in/out ----
   function startDof(active: boolean) {
     if (built3d) return; // 3D conveys focus via depth/parallax, not canvas dimming
-    if (active && hoveredId && adjacency.has(hoveredId)) {
-      focusSet = new Set<string>([hoveredId, ...(adjacency.get(hoveredId) ?? [])]);
+    // Focus the hovered node, or — when nothing is hovered — the selected node, so
+    // clicking a node "lights its web": its ego-network brightens, the rest dims.
+    const fid = hoveredId ?? view.selectedId;
+    if (active && fid && adjacency.has(fid)) {
+      focusSet = new Set<string>([fid, ...(adjacency.get(fid) ?? [])]);
     }
     const target = active ? 1 : 0;
     if (reduce || fxLevel !== "full") {
@@ -415,12 +562,50 @@
         } else {
           dofRAF = 0;
           if (dofTo === 0) focusSet = null;
-          graph?.autoPauseRedraw?.(true);
+          if (!pulseRAF) graph?.autoPauseRedraw?.(true);
           repaint();
         }
       };
       dofRAF = requestAnimationFrame(step);
     }
+  }
+
+  // A one-shot expanding ring on the selected node — a small "you picked this"
+  // reward. Free-runs the rAF for ~600ms; coordinates autoPause with the DOF tween.
+  function pulseSelect() {
+    if (reduce || built3d) return;
+    pulseStart = performance.now();
+    if (pulseRAF) return;
+    graph?.autoPauseRedraw?.(false);
+    const step = () => {
+      if (performance.now() - pulseStart < 600) {
+        pulseRAF = requestAnimationFrame(step);
+      } else {
+        pulseRAF = 0;
+        if (!dofRAF) graph?.autoPauseRedraw?.(true);
+        repaint();
+      }
+    };
+    pulseRAF = requestAnimationFrame(step);
+  }
+
+  // Particles flow only along the focused node's web (selecting/hovering "lights it
+  // up"); with no focus, honour the global Flow toggle. 3D keeps the simple flow.
+  function applyParticles() {
+    if (!graph) return;
+    if (built3d) {
+      graph.linkDirectionalParticles(view.particles && !reduce ? 2 : 0);
+      return;
+    }
+    graph.linkDirectionalParticles((l: any) => {
+      if (reduce) return 0;
+      if (focusSet && fxLevel === "full") {
+        const s = linkEndId(l.source);
+        const t = linkEndId(l.target);
+        return focusSet.has(s) && focusSet.has(t) ? 3 : 0;
+      }
+      return view.particles ? 2 : 0;
+    });
   }
 
   // ---- selection / navigation ----
@@ -429,7 +614,12 @@
     if (built3d) {
       focusCamera3d(n);
     } else if (n.x != null && n.y != null) {
-      graph?.centerAt(n.x, n.y, reduce ? 0 : 450);
+      const dur = reduce ? 0 : 450;
+      pulseSelect();
+      graph?.centerAt(n.x, n.y, dur);
+      // gently zoom in to frame the node's neighborhood (never zoom back out)
+      const cur = graph?.zoom?.() ?? 1;
+      if (cur < 1.6) graph?.zoom(1.6, dur);
     }
   }
 
@@ -619,12 +809,44 @@
   function node3dRadius(n: FGNode): number {
     return 4 * Math.cbrt(node3dVal(n));
   }
-  // node3dObject adds (on top of the default sphere) a text label for hubs /
-  // selected / pinned nodes and a translucent halo for the selected node, so the
-  // 3D view gains the readability + selection cues the 2D canvas already has.
+  // Shared soft-dot texture for the additive node "corona" (built once, lazily).
+  function glowTexture(): any {
+    if (glowTex || !three3d) return glowTex;
+    const c = document.createElement("canvas");
+    c.width = c.height = 64;
+    const g = c.getContext("2d");
+    if (!g) return null;
+    const rad = g.createRadialGradient(32, 32, 0, 32, 32, 32);
+    rad.addColorStop(0, "rgba(255,255,255,1)");
+    rad.addColorStop(0.4, "rgba(255,255,255,0.5)");
+    rad.addColorStop(1, "rgba(255,255,255,0)");
+    g.fillStyle = rad;
+    g.fillRect(0, 0, 64, 64);
+    glowTex = new three3d.CanvasTexture(c);
+    return glowTex;
+  }
+  // node3dObject builds each node's extras on top of the default sphere: an additive
+  // glow corona (so the bloom pass renders nodes as luminous "stars"), a text label
+  // for hubs / selected / pinned, and a translucent halo for the selected node.
   function node3dObject(n: FGNode): any {
     if (!three3d) return undefined;
     const group = new three3d.Group();
+    // glowing corona — additive sprite the UnrealBloomPass blooms into a star
+    if (view.effects !== "off") {
+      const spr = new three3d.Sprite(
+        new three3d.SpriteMaterial({
+          map: glowTexture(),
+          color: R.color.get(n.id) ?? cssAccent,
+          transparent: true,
+          opacity: R.pass.has(n.id) ? 0.85 : 0.12,
+          blending: three3d.AdditiveBlending,
+          depthWrite: false,
+        }),
+      );
+      const s = node3dRadius(n) * 2.6;
+      spr.scale.set(s, s, 1);
+      group.add(spr);
+    }
     const labelOn =
       view.showLabels && (n.deg >= 5 || n.id === view.selectedId || pinned.has(n.id));
     if (labelOn && SpriteText3d) {
@@ -653,7 +875,7 @@
     graph.nodeThreeObject((n: FGNode) => node3dObject(n));
   }
   function bloomStrength(): number {
-    return view.effects === "off" ? 0 : view.effects === "subtle" ? 1.1 : 2.0;
+    return view.effects === "off" ? 0 : view.effects === "subtle" ? 1.0 : 1.6;
   }
   // 3D: re-set the color accessors with fresh closures so three rebuilds the
   // materials after a filter / colorBy change (2D just repaints).
@@ -826,12 +1048,14 @@
         // Gradient painter replaces the stroke only in "full" + colorLinks mode
         // (mode "after" elsewhere → drawLink no-ops and the flat stroke shows).
         .linkCanvasObject(drawLink)
-        .linkCanvasObjectMode(() =>
-          view.colorLinks && !view.colorLinksByType && fxLevel === "full" ? "replace" : "after",
-        )
+        .linkCanvasObjectMode(() => (gradientLinks() ? "replace" : "after"))
         .nodeCanvasObject(drawNode)
         .onRenderFramePre((ctx: CanvasRenderingContext2D) => {
-          if (fxLevel !== "off") vignette(ctx);
+          if (fxLevel !== "off") {
+            vignette(ctx); // screen-fixed aurora wash + edge falloff (restores transform)
+            maybeRefreshHalos();
+            drawHalos(ctx); // world coords — over the aurora, behind the nodes/links
+          }
         })
         .nodePointerAreaPaint((n: FGNode, color: string, ctx: CanvasRenderingContext2D) => {
           ctx.beginPath();
@@ -976,11 +1200,15 @@
 
   // ---- depth-of-field: hover drives the focus fade (selection keeps its ring) ----
   $effect(() => {
-    void hoveredId;
+    void [hoveredId, view.selectedId];
     // 3D: re-tint node/link materials for the hover neighborhood highlight.
-    // 2D: animate the canvas depth-of-field.
+    // 2D: animate the depth-of-field for the hovered OR selected node's web, and
+    // re-scope the flow particles to that web.
     if (built3d) refresh3dColors();
-    else startDof(hoveredId !== null);
+    else {
+      startDof((hoveredId ?? view.selectedId) != null);
+      applyParticles();
+    }
   });
 
   // ---- keep the effective level current on effects-pref / layout change ----
@@ -1082,12 +1310,13 @@
     if (!graph) return;
     graph.linkDirectionalArrowLength(view.showArrows ? 3.5 : 0);
     graph.linkDirectionalArrowRelPos(0.9);
-    graph.linkDirectionalParticles(view.particles && !reduce ? 2 : 0);
+    void view.particles; // re-apply when the global Flow toggle changes
+    applyParticles();
   });
 
   // ---- redraw on label-pref change (matters when the sim is frozen) ----
   $effect(() => {
-    void [view.showLabels, view.labelThreshold, pinned];
+    void [view.showLabels, view.labelThreshold, view.hulls, pinned];
     repaint();
   });
 
@@ -1112,6 +1341,7 @@
       view.layout,
       view.sizeBy,
       view.autoRotate,
+      view.hulls,
     ];
     savePersisted();
   });
