@@ -1276,6 +1276,14 @@
         .linkCurvature(view.linkStyle === "curved" ? 0.18 : 0)
         .backgroundColor(BG3D)
         .showNavInfo(false)
+        // Disable 3D node-drag. On drag-end — which an ordinary click often registers
+        // as a micro-drag — 3d-force-graph dispatches a synthetic touch `pointerup` to
+        // stop the orbit controls "taking over", and three 0.184's OrbitControls throws
+        // on it (reads _pointerPositions for an untracked pointer → "Cannot read
+        // properties of undefined (reading 'x')"). We don't use 3D drag (only the 2D
+        // branch has an onNodeDragEnd handler), so turning it off removes the crash with
+        // zero feature loss — orbit, click, and hover all still work.
+        .enableNodeDrag(false)
         // Pre-spread the layout off-screen before the first paint, then settle
         // briefly and stop. The 3D engine otherwise inflates from the origin for
         // ~15s of charge repulsion; framing that growing cloud each tick dollied

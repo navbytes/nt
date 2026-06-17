@@ -24,10 +24,18 @@
     onClose: () => void;
   } = $props();
 
+  // Only notes have a fetchable body + backlinks. Task nodes are NOT notes, so
+  // api.note(taskId) 404s — that was the console 404 when a task was selected in the
+  // graph. Gate the fetch on kind so tasks never hit /api/notes.
+  const isNote = $derived(node.kind !== "task");
   // Lazily fetch the note for the preview + backlink count. Keyed on the node id
   // so selecting a different node refetches; reuses the same cache as NoteView.
   const noteQ = $derived(
-    createQuery({ queryKey: ["note", node.id], queryFn: () => api.note(node.id) }),
+    createQuery({
+      queryKey: ["note", node.id],
+      queryFn: () => api.note(node.id),
+      enabled: isNote,
+    }),
   );
 
   // Plain-text preview from the server-rendered HTML (strips tags, drops a
@@ -61,7 +69,7 @@
     </div>
   {/if}
 
-  {#if $noteQ.isPending}
+  {#if $noteQ.isLoading}
     <p class="muted small">Loading preview…</p>
   {:else if $noteQ.data}
     <p class="gdetails__preview">{preview($noteQ.data.bodyHTML)}</p>

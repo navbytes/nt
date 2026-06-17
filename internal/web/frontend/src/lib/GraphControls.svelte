@@ -443,6 +443,10 @@
   .gctl__depth input,
   .gctl__slider input {
     flex: 1;
+    /* Range inputs default to min-width:auto (their ~130px intrinsic width), so as
+       flex items they refuse to shrink and overflow the panel — clipped on the right
+       by .gctl overflow:hidden. min-width:0 lets them shrink to the available space. */
+    min-width: 0;
   }
   .gctl__inline {
     display: flex;
@@ -516,15 +520,18 @@
     opacity: 0.5;
     cursor: not-allowed;
   }
-  /* active segment — elevated pill washed with a soft spectral tint + accent text */
+  /* active segment — elevated pill washed with a spectral tint + accent text. The
+     mix is deliberately strong: the track (--fill) and panel (--bg-elevated) are
+     near-identical greys, and the glass blur washes the pill out further, so a faint
+     tint reads as "nothing selected". */
   .seg--on {
     background:
       linear-gradient(
         135deg,
-        color-mix(in srgb, var(--spectral-1) 22%, var(--bg-elevated)),
-        color-mix(in srgb, var(--spectral-3) 22%, var(--bg-elevated))
+        color-mix(in srgb, var(--spectral-1) 46%, var(--bg-elevated)),
+        color-mix(in srgb, var(--spectral-3) 46%, var(--bg-elevated))
       );
-    border-color: color-mix(in srgb, var(--spectral-2) 45%, transparent);
+    border-color: color-mix(in srgb, var(--spectral-2) 70%, transparent);
     box-shadow: var(--shadow-control);
     color: var(--fg);
     font-weight: 600;
