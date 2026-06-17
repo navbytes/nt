@@ -96,6 +96,23 @@
   // Pre-rendered glow sprites (graphSprites). Style is set from theme in readTheme.
   const sprites = new SpriteCache({ theme: "dark", glowAlpha: 0.6, glowBlur: 10 });
 
+  // Label width cache. Canvas text width scales linearly with font size, so we
+  // measure each label once at 1px and multiply — keeping ctx.measureText (a
+  // layout op) out of the per-node, per-frame draw loop. Keyed by the displayed
+  // label string; the set of short titles is small and stable per dataset.
+  const labelW1 = new Map<string, number>();
+  function labelWidth(ctx: CanvasRenderingContext2D, label: string, fontPx: number): number {
+    let w = labelW1.get(label);
+    if (w === undefined) {
+      const prev = ctx.font;
+      ctx.font = "1px ui-sans-serif, -apple-system, sans-serif";
+      w = ctx.measureText(label).width;
+      ctx.font = prev;
+      labelW1.set(label, w);
+    }
+    return w * fontPx;
+  }
+
   // Cached theme colors (refreshed on theme change) so the draw loop doesn't hit
   // getComputedStyle every frame.
   let cssFg = "#c0caf5";
@@ -371,7 +388,7 @@
       // brand + more legible over links/halos than the old stroke halo).
       const padX = 5 / scale;
       const chipH = fontPx + 5 / scale;
-      const chipW = ctx.measureText(label).width + padX * 2;
+      const chipW = labelWidth(ctx, label, fontPx) + padX * 2;
       const cy = y + r + 3 / scale + chipH / 2;
       roundRect(ctx, x - chipW / 2, cy - chipH / 2, chipW, chipH, Math.min(chipH / 2, 4 / scale));
       ctx.fillStyle = withAlpha(cssChip, 0.72);
@@ -416,9 +433,24 @@
     const tid = linkEndId(t);
     const hov = hoveredId === sid || hoveredId === tid;
     const a = hov ? 0.85 : linkAlpha(sid, tid);
-    const grad = ctx.createLinearGradient(s.x, s.y, t.x, t.y);
-    grad.addColorStop(0, withAlpha(R.color.get(sid) ?? cssAccent, a));
-    grad.addColorStop(1, withAlpha(R.color.get(tid) ?? cssAccent, a));
+    const csrc = R.color.get(sid) ?? cssAccent;
+    const ctgt = R.color.get(tid) ?? cssAccent;
+    // Cache the gradient on the link: building it (createLinearGradient + two
+    // withAlpha color-parses) is the per-link, per-frame cost that made the 2D
+    // view burn CPU while a node was selected (flow particles force a continuous
+    // 60fps redraw of a static layout). Gradients are interpreted in user space at
+    // paint time, so a cached one stays correct across pan/zoom — only endpoint
+    // motion, colour, or alpha changes invalidate it. Links are rebuilt on data
+    // change, so the cache can't outlive its dataset.
+    const key = `${s.x},${s.y},${t.x},${t.y},${csrc},${ctgt},${a}`;
+    let grad: CanvasGradient = l.__grad;
+    if (l.__gradKey !== key) {
+      grad = ctx.createLinearGradient(s.x, s.y, t.x, t.y);
+      grad.addColorStop(0, withAlpha(csrc, a));
+      grad.addColorStop(1, withAlpha(ctgt, a));
+      l.__grad = grad;
+      l.__gradKey = key;
+    }
     ctx.strokeStyle = grad;
     ctx.lineWidth = (hov ? 2 : 1) / scale;
     ctx.beginPath();
@@ -432,6 +464,11 @@
 
   // Radial vignette painted under the graph each frame for depth. The frame ctx is
   // in world coords (zoom×dpr), so reset to CSS pixels to keep it screen-fixed.
+  // The three gradients are screen-fixed (independent of pan/zoom), so they only
+  // change on resize or theme — cache them rather than rebuilding three radial
+  // gradients on every frame of the continuous (particle-driven) redraw.
+  let vigKey = "";
+  let vigGrads: [CanvasGradient, CanvasGradient, CanvasGradient] | null = null;
   function vignette(ctx: CanvasRenderingContext2D) {
     if (!container) return;
     const dpr = window.devicePixelRatio || 1;
@@ -442,30 +479,33 @@
     // Aurora wash — two soft spectral glows pooled in opposite corners, matching
     // the app's ambient aurora. Screen-fixed, painted under the graph; kept subtle
     // (fainter in light mode) so nodes + labels stay legible.
-    const aa = graphDark ? 0.13 : 0.06;
-    const reach = Math.max(w, h) * 0.55;
-    const a1 = ctx.createRadialGradient(w * 0.82, h * 0.12, 0, w * 0.82, h * 0.12, reach);
-    a1.addColorStop(0, withAlpha(cssSpectral1, aa));
-    a1.addColorStop(1, withAlpha(cssSpectral1, 0));
-    ctx.fillStyle = a1;
-    ctx.fillRect(0, 0, w, h);
-    const a2 = ctx.createRadialGradient(w * 0.14, h * 0.94, 0, w * 0.14, h * 0.94, reach);
-    a2.addColorStop(0, withAlpha(cssSpectral3, aa));
-    a2.addColorStop(1, withAlpha(cssSpectral3, 0));
-    ctx.fillStyle = a2;
-    ctx.fillRect(0, 0, w, h);
-    const g = ctx.createRadialGradient(
-      w / 2,
-      h / 2,
-      Math.min(w, h) * 0.25,
-      w / 2,
-      h / 2,
-      Math.hypot(w, h) / 2,
-    );
-    g.addColorStop(0, "rgba(0,0,0,0)");
-    g.addColorStop(1, cssGraphEdge);
-    ctx.fillStyle = g;
-    ctx.fillRect(0, 0, w, h);
+    const key = `${w}x${h}:${graphDark}:${cssSpectral1}:${cssSpectral3}:${cssGraphEdge}`;
+    if (vigKey !== key || !vigGrads) {
+      const aa = graphDark ? 0.13 : 0.06;
+      const reach = Math.max(w, h) * 0.55;
+      const a1 = ctx.createRadialGradient(w * 0.82, h * 0.12, 0, w * 0.82, h * 0.12, reach);
+      a1.addColorStop(0, withAlpha(cssSpectral1, aa));
+      a1.addColorStop(1, withAlpha(cssSpectral1, 0));
+      const a2 = ctx.createRadialGradient(w * 0.14, h * 0.94, 0, w * 0.14, h * 0.94, reach);
+      a2.addColorStop(0, withAlpha(cssSpectral3, aa));
+      a2.addColorStop(1, withAlpha(cssSpectral3, 0));
+      const g = ctx.createRadialGradient(
+        w / 2,
+        h / 2,
+        Math.min(w, h) * 0.25,
+        w / 2,
+        h / 2,
+        Math.hypot(w, h) / 2,
+      );
+      g.addColorStop(0, "rgba(0,0,0,0)");
+      g.addColorStop(1, cssGraphEdge);
+      vigGrads = [a1, a2, g];
+      vigKey = key;
+    }
+    for (const grad of vigGrads) {
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 0, w, h);
+    }
     ctx.restore();
   }
 
@@ -521,7 +561,11 @@
       return;
     }
     haloTick++;
-    if (!halos.length || engineRunning || haloTick % 6 === 0) refreshHalos();
+    // Recompute only while the layout is actually moving (throttled), or when the
+    // cache is cold. Once the engine stops, node positions are fixed, so the hulls
+    // are constant — recomputing them every few frames during the particle-driven
+    // continuous redraw was pure waste (an O(n) hypot pass per cluster).
+    if (!halos.length || (engineRunning && haloTick % 4 === 0)) refreshHalos();
   }
   function drawHalos(ctx: CanvasRenderingContext2D) {
     if (!halos.length) return;
@@ -1132,6 +1176,9 @@
         })
         .onEngineStop(() => {
           engineRunning = false;
+          // Capture the hulls against the settled positions: maybeRefreshHalos no
+          // longer recomputes once the engine is idle, so refresh once here.
+          refreshHalos();
           if (fitPending) {
             fitPending = false;
             fit();
