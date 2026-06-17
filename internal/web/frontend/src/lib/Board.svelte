@@ -2,7 +2,7 @@
   import { createQuery, createMutation, useQueryClient } from "@tanstack/svelte-query";
   import { api, type TaskGroup, type Task } from "./api";
   import { showToast } from "./toast.svelte";
-  import { displayTitle, fmtDuration } from "./text";
+  import { displayTitle, fmtDuration, dueTier } from "./text";
   import Icon from "./Icon.svelte";
 
   const qc = useQueryClient();
@@ -73,19 +73,10 @@
   const fmtDue = (due: string) => (due.includes("T") ? due.replace("T", " ") : due);
 
   // Due-date "temperature" for a card's due chip — the same tiers the list rows
-  // speak (overdue→hot, today→accent, soon→teal, later→muted). Date-only diff so
-  // a task due today isn't overdue; Done cards never run hot. Local, no API change.
-  function dueTier(dueRaw: string, done: boolean): "over" | "today" | "soon" | "later" {
-    if (done) return "later";
-    const [y, mo, d] = dueRaw.slice(0, 10).split("-").map(Number);
-    if (!y || !mo || !d) return "later";
-    const now = new Date();
-    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    const diff = Math.round((new Date(y, mo - 1, d).getTime() - today.getTime()) / 86400000);
-    if (diff < 0) return "over";
-    if (diff === 0) return "today";
-    return diff <= 3 ? "soon" : "later";
-  }
+  // speak (overdue→hot, today→accent, soon→teal, later→muted), via the shared
+  // dueTier() (soon ≤3d) so the board can never drift from the row/agenda. Done
+  // cards never run hot.
+  const cardTier = (dueRaw: string, done: boolean) => (done ? "later" : dueTier(dueRaw, 3));
 </script>
 
 <div class="board">
@@ -138,7 +129,7 @@
               {#each (t.tags ?? []).slice(0, 3) as tag (tag)}<a class="chip chip--tag" href={`/search?tag=${encodeURIComponent(tag)}`}>@{tag}</a>{/each}
               {#if (t.tags?.length ?? 0) > 3}<span class="chip chip--more">+{(t.tags?.length ?? 0) - 3}</span>{/if}
               {#if t.est && col.key !== "done"}<span class="bcard__est" title={`Estimated ${fmtDuration(t.est)}`}>{fmtDuration(t.est)}</span>{/if}
-              {#if t.due}{@const tier = dueTier(t.due, col.key === "done")}<span class="bcard__due bcard__due--{tier}">{#if tier === "over"}<Icon name="flame" size={10} filled />{/if}{fmtDue(t.due)}</span>{/if}
+              {#if t.due}{@const tier = cardTier(t.due, col.key === "done")}<span class="bcard__due bcard__due--{tier}">{#if tier === "over"}<Icon name="flame" size={10} filled />{/if}{fmtDue(t.due)}</span>{/if}
             </div>
             <div class="bcard__actions">
               <!-- Full-Keyboard-Access move: the board's only way to change a
@@ -186,6 +177,14 @@
     gap: 12px;
     margin-top: 16px;
     align-items: start;
+  }
+  /* Tablet reflow (finding 13): the Board only renders above 640px (it falls back
+     to the Status list below that). Between 641-900px four columns squeeze the
+     cards badly, so step down to a 2-column grid for that band. */
+  @media (max-width: 900px) {
+    .board {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
   }
   .bcol {
     position: relative;
@@ -392,25 +391,27 @@
     color: var(--muted);
     white-space: nowrap;
   }
+  /* Ring alpha raised to clear the 3:1 non-text threshold so the pill shape is a
+     real cue, not just hue+weight — kept in lockstep with TaskRow's .row__due. */
   .bcard__due--soon {
     color: var(--teal);
     padding: 1px 6px;
     border-radius: 999px;
-    box-shadow: inset 0 0 0 0.5px color-mix(in srgb, var(--teal) 45%, transparent);
+    box-shadow: inset 0 0 0 0.5px color-mix(in srgb, var(--teal) 70%, transparent);
   }
   .bcard__due--today {
     color: var(--accent-color);
     font-weight: 600;
     padding: 1px 6px;
     border-radius: 999px;
-    box-shadow: inset 0 0 0 0.5px color-mix(in srgb, var(--accent-color) 50%, transparent);
+    box-shadow: inset 0 0 0 0.5px color-mix(in srgb, var(--accent-color) 70%, transparent);
   }
   .bcard__due--over {
     color: var(--red);
     font-weight: 600;
     padding: 1px 6px;
     border-radius: 999px;
-    box-shadow: inset 0 0 0 0.5px color-mix(in srgb, var(--red) 50%, transparent);
+    box-shadow: inset 0 0 0 0.5px color-mix(in srgb, var(--red) 70%, transparent);
   }
   .bcard__actions {
     display: flex;

@@ -40,6 +40,12 @@
   let seededText = $state("");
   const dirty = $derived(loaded && buffer !== seededText);
 
+  // Mobile pane toggle (finding 4): below 760px the global stylesheet collapses
+  // the split to a single pane. Rather than silently dropping the preview, we
+  // expose a source/preview switch; scoped styles below honour `mobilePane` to
+  // decide which pane shows on a narrow viewport (desktop split is untouched).
+  let mobilePane = $state<"src" | "preview">("src");
+
   // Publish open/dirty state so SSE skips clobbering our ["raw"] cache, and the
   // router leave guard + beforeunload can confirm before discarding edits (W1/W2).
   $effect(() => {
@@ -262,6 +268,24 @@
       <button class="pillbar__btn" onclick={requestClose}>Cancel</button>
     </div>
     <span class="kbd">⌘/Ctrl+S</span>
+    <!-- Narrow-viewport source/preview switch (finding 4): only shown when the
+         split collapses to one pane, so the preview is never silently dropped. -->
+    <div class="paneswitch" role="group" aria-label="Editor pane">
+      <button
+        type="button"
+        class="paneswitch__btn"
+        class:paneswitch__btn--on={mobilePane === "src"}
+        aria-pressed={mobilePane === "src"}
+        onclick={() => (mobilePane = "src")}>Source</button
+      >
+      <button
+        type="button"
+        class="paneswitch__btn"
+        class:paneswitch__btn--on={mobilePane === "preview"}
+        aria-pressed={mobilePane === "preview"}
+        onclick={() => (mobilePane = "preview")}>Preview</button
+      >
+    </div>
     <!-- Status + errors announced to assistive tech (W16). -->
     <span class="editor__status" aria-live="polite">
       {#if savedFlash}Saved{:else if dirty}Unsaved changes{/if}
@@ -329,7 +353,7 @@
   {:else if $rawQ.error}
     <p class="error">Couldn't open this note for editing.</p>
   {:else}
-    <div class="editor__panes">
+    <div class="editor__panes" data-pane={mobilePane}>
       {#if loaded}
         <div class="editor__src">
           <CodeMirror
@@ -345,3 +369,97 @@
     </div>
   {/if}
 </div>
+
+<style>
+  /* Finding 5: let the editor flex within its column instead of relying on the
+     magic calc(100vh - 140px) as a *fixed* height. With conflict/on-disk banners
+     + the tag bar + backlinks on a short viewport the fixed height (plus the
+     min-height floor) squeezed/overflowed the CodeMirror pane. We keep the
+     viewport sizing as the *preferred* basis (desktop feel unchanged) but let it
+     shrink (min-height:0) and grow to fill a flex parent — and the panes already
+     flex:1, so the chrome above them eats from the panes, never overflows. */
+  .editor {
+    /* Flex into a flex-column parent when there is one; otherwise fall back to a
+       viewport-relative *definite* height (dvh tracks mobile browser chrome) so
+       the panes below still have something to flex against. Crucially we drop the
+       global min-height:420px floor — that floor is what overflowed short
+       viewports — and allow shrink via min-height:0. */
+    flex: 1 1 auto;
+    min-height: 0;
+    height: calc(100dvh - 140px);
+  }
+  .editor__panes {
+    /* Claim the leftover space below the (variable-height) banners/tag bar so
+       reducing the available height squeezes the panes rather than overflowing. */
+    flex: 1 1 auto;
+    min-height: 0;
+  }
+
+  /* Finding 3: the save-status microlabel sits on the editor fill where --muted
+     is sub-AA; lift it to --fg-soft (the placeholder uses the same surface). */
+  .editor :global(.editor__status) {
+    color: var(--fg-soft);
+  }
+
+  /* Finding 15: the tag-remove × is a ~14px target — too small for touch. Give it
+     a ≥24px hit area without changing its visual weight. */
+  .editor :global(.tagchip__x) {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 24px;
+    min-height: 24px;
+    margin: -4px -6px -4px 0; /* absorb the padding so the chip doesn't grow */
+  }
+
+  /* Finding 4: source/preview switch. Hidden on the desktop split (both panes
+     visible); revealed only where the global stylesheet collapses to one pane. */
+  .paneswitch {
+    display: none;
+    gap: 2px;
+    padding: 2px;
+    margin-left: auto;
+    background: color-mix(in srgb, var(--bg-elevated) 70%, transparent);
+    border-radius: var(--radius-sm);
+    box-shadow: 0 0 0 0.5px var(--separator);
+  }
+  .paneswitch__btn {
+    padding: 3px 10px;
+    background: transparent;
+    border: none;
+    border-radius: calc(var(--radius-sm) - 1px);
+    color: var(--label-secondary);
+    cursor: pointer;
+    font-family: var(--font-mono);
+    font-size: var(--text-subhead);
+    text-transform: uppercase;
+    letter-spacing: var(--tracking-caps);
+  }
+  .paneswitch__btn--on {
+    background: var(--bg-elevated);
+    color: var(--fg);
+    box-shadow: var(--shadow-control);
+  }
+
+  @media (max-width: 760px) {
+    .paneswitch {
+      display: inline-flex;
+    }
+    /* The aria-live status would push the switch off the row; let it wrap. */
+    .editor :global(.editor__status) {
+      flex-basis: 100%;
+      order: 5;
+    }
+    /* Show exactly the chosen pane (overriding app.css's blanket preview hide),
+       and let it fill the collapsed single column. */
+    .editor__panes[data-pane="src"] :global(.editor__preview) {
+      display: none;
+    }
+    .editor__panes[data-pane="preview"] :global(.editor__preview) {
+      display: block;
+    }
+    .editor__panes[data-pane="preview"] .editor__src {
+      display: none;
+    }
+  }
+</style>

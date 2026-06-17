@@ -27,12 +27,17 @@
   /* ---- label hierarchy (primary/secondary/tertiary all AA on white + fill) ---- */
   --label-primary: #1d1d1f; /* ~16:1 */
   --label-secondary: #424245; /* ~9:1 */
-  --label-tertiary: #6e6e73; /* ~5.0:1 — lightest text that still clears AA */
+  /* Darkened from #6e6e73 (~4.25:1 on --fill #f0f0f3) to clear AA 4.5:1 on the
+     tinted/inset surfaces it's used on, not just white (finding 5). */
+  --label-tertiary: #65656a; /* ~5.0:1 on white, ~4.6:1 on #f0f0f3 */
   --label-quaternary: #aeaeb2; /* decorative / disabled only (sub-AA) */
 
   /* ---- hairline separators ---- */
   --separator: rgba(0, 0, 0, 0.1);
   --separator-strong: rgba(0, 0, 0, 0.16);
+  /* Functional control edge — meets the 3:1 non-text/UI boundary ratio, unlike
+     the decorative hairline separators above (finding 6). */
+  --control-border: rgba(0, 0, 0, 0.28);
 
   /* ---- accent (system blue, AA-tuned: white-on-fill and accent-on-white both ≥5:1) ---- */
   --accent-color: #0066e0; /* text / links / selection / icons */
@@ -42,7 +47,11 @@
   --on-accent: #ffffff;
   --accent-tint: rgba(0, 102, 224, 0.12); /* selection wells */
   --accent-tint-strong: rgba(0, 102, 224, 0.16);
+  /* Accessible active text on accent-tint wells — replaces spectral-as-text
+     which failed AA on the tint (finding 4). ~7:1 on white, ~6:1 on tint. */
+  --accent-on-tint: #0a52b8;
   --teal: #176574; /* secondary accent (due dates) — 6.2:1 */
+  --orange: #a8620a; /* warning amber — ~4.6:1 on white (finding spec) */
 
   /* signature gradients — vibrant, modern energy. --grad-accent is button-safe
      (white text clears AA at both stops); --grad-vivid is brighter, for
@@ -104,7 +113,7 @@
   /* ---- focus halo + scrim ---- */
   --focus-ring: 0 0 0 3.5px rgba(0, 102, 224, 0.4);
   --focus-ring-tight: 0 0 0 2px rgba(0, 102, 224, 0.45);
-  --scrim: rgba(0, 0, 0, 0.18);
+  --scrim: rgba(0, 0, 0, 0.3); /* raised from 0.18 — too weak behind full modals (finding 8) */
 
   /* ---- radii (continuous-corner feel) ---- */
   --radius-xs: 5px;
@@ -193,147 +202,199 @@
 }
 
 /* Dark: override the raw tokens only — the legacy aliases above resolve to
-   these automatically since CSS custom properties are evaluated lazily. */
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme="light"]) {
-    color-scheme: dark;
+   these automatically since CSS custom properties are evaluated lazily.
 
-    /* Dark elevation ramp — window (sidebar/topbar vibrancy) sits darkest, the
-       content pane steps up so it separates from the chrome, cards/popovers
-       step up again. Without this spread everything reads as one flat black. */
-    --bg-window: #161618;
-    --bg-content: #202024;
-    --bg-elevated: #2c2c31;
-    --bg-topbar: rgba(26, 26, 30, 0.72);
-    --bg-sidebar: rgba(26, 26, 30, 0.62);
+   SINGLE SOURCE OF TRUTH (finding 1): the dark token values live in exactly one
+   place — the `--D-*` staging vars in :root below. Both dark contexts (OS dark
+   with no explicit override, and the in-app toggle writing data-theme="dark")
+   just *assign* those staging vars to the live tokens, so the two selectors can
+   never drift. Edit a dark value once, in the staging block. */
+:root {
+  --D-color-scheme: dark;
+  /* Dark elevation ramp — window (sidebar/topbar vibrancy) sits darkest, the
+     content pane steps up so it separates from the chrome, cards/popovers
+     step up again. Without this spread everything reads as one flat black. */
+  --D-bg-window: #161618;
+  --D-bg-content: #202024;
+  --D-bg-elevated: #2c2c31;
+  --D-bg-topbar: rgba(26, 26, 30, 0.72);
+  --D-bg-sidebar: rgba(26, 26, 30, 0.62);
 
-    --fill: #2c2c30;
-    --fill-strong: #3a3a3f;
-    --fill-hover: rgba(255, 255, 255, 0.07);
-    --fill-active: rgba(255, 255, 255, 0.12);
+  --D-fill: #2c2c30;
+  --D-fill-strong: #3a3a3f;
+  --D-fill-hover: rgba(255, 255, 255, 0.07);
+  --D-fill-active: rgba(255, 255, 255, 0.12);
 
-    --label-primary: #f5f5f7;
-    --label-secondary: #c7c7cc;
-    --label-tertiary: #9a9aa0; /* ~5.3:1 on content */
-    --label-quaternary: #6c6c70;
+  --D-label-primary: #f5f5f7;
+  --D-label-secondary: #c7c7cc;
+  --D-label-tertiary: #a3a3a9; /* ~5.6:1 on content (finding 5) */
+  --D-label-quaternary: #6c6c70;
 
-    --separator: rgba(255, 255, 255, 0.11);
-    --separator-strong: rgba(255, 255, 255, 0.17);
+  --D-separator: rgba(255, 255, 255, 0.11);
+  --D-separator-strong: rgba(255, 255, 255, 0.17);
+  --D-control-border: rgba(255, 255, 255, 0.24); /* finding 6 */
 
-    --accent-color: #339dff; /* legible on dark — ~5.4:1 */
-    --accent-fill: #0a6fe0; /* white text 4.7:1 */
-    --accent-hover: #1e7fe6;
-    --accent-active: #0a6fe0;
-    --on-accent: #ffffff;
-    --accent-tint: rgba(51, 157, 255, 0.18);
-    --accent-tint-strong: rgba(51, 157, 255, 0.26);
-    --teal: #64d2ff;
-    --aurora-1: rgba(40, 150, 255, 0.16);
-    --aurora-2: rgba(150, 108, 255, 0.14);
+  --D-accent-color: #339dff; /* legible on dark — ~5.4:1 */
+  --D-accent-fill: #0a6fe0; /* white text 4.7:1 */
+  --D-accent-hover: #1e7fe6;
+  --D-accent-active: #0a6fe0;
+  --D-accent-on-tint: #9cc4ff; /* finding 4 — active text on accent-tint */
+  --D-on-accent: #ffffff;
+  --D-accent-tint: rgba(51, 157, 255, 0.18);
+  --D-accent-tint-strong: rgba(51, 157, 255, 0.26);
+  --D-teal: #64d2ff;
+  --D-orange: #e0af68; /* finding spec — warning amber */
+  --D-aurora-1: rgba(40, 150, 255, 0.16);
+  --D-aurora-2: rgba(150, 108, 255, 0.14);
 
-    --spectral-1: #8ab4ff;
-    --spectral-2: #9a86ff;
-    --spectral-3: #cba6ff;
-    --spectral-glow: rgba(138, 116, 255, 0.55);
-    --glass-hairline: inset 0 0.5px 0 rgba(255, 255, 255, 0.1);
-    --shadow-bento: 0 1px 2px rgba(0, 0, 0, 0.4), 0 12px 30px -14px rgba(0, 0, 0, 0.6),
-      0 0 0 0.5px rgba(0, 0, 0, 0.5), inset 0 0.5px 0 rgba(255, 255, 255, 0.05);
-    --shadow-float: 0 2px 8px rgba(0, 0, 0, 0.5), 0 24px 56px -18px rgba(0, 0, 0, 0.7),
-      0 0 0 0.5px rgba(0, 0, 0, 0.55), inset 0 0.5px 0 rgba(255, 255, 255, 0.06);
-    --viz-track: rgba(255, 255, 255, 0.1);
-    --viz-grid: rgba(255, 255, 255, 0.08);
-
-    --green-color: #30d158;
-    --red-color: #ff453a;
-
-    --pri-a: #f7768e;
-    --pri-b: #e0af68;
-    --pri-c: #7aa2f7;
-    --pri-fg: #16161e;
-
-    --focus-ring: 0 0 0 3.5px rgba(51, 157, 255, 0.5);
-    --focus-ring-tight: 0 0 0 2px rgba(51, 157, 255, 0.55);
-    --scrim: rgba(0, 0, 0, 0.5);
-
-    --shadow-control: 0 0.5px 1px rgba(0, 0, 0, 0.4);
-    --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.4), 0 0 0 0.5px rgba(0, 0, 0, 0.5),
-      inset 0 0.5px 0 rgba(255, 255, 255, 0.06);
-    --shadow-popover: 0 0 0 0.5px rgba(0, 0, 0, 0.6), 0 16px 40px -8px rgba(0, 0, 0, 0.6),
-      0 4px 12px -4px rgba(0, 0, 0, 0.45), inset 0 0.5px 0 rgba(255, 255, 255, 0.08);
-
-    --graph-bg-edge: rgba(0, 0, 0, 0.5);
-    --graph-glow-alpha: 0.6;
-    --graph-glow-blur: 10;
-  }
-}
-
-/* Explicit dark (theme toggle writes data-theme="dark") — mirrors the @media. */
-[data-theme="dark"] {
-  color-scheme: dark;
-
-  --bg-window: #161618;
-  --bg-content: #202024;
-  --bg-elevated: #2c2c31;
-  --bg-topbar: rgba(26, 26, 30, 0.72);
-  --bg-sidebar: rgba(26, 26, 30, 0.62);
-
-  --fill: #2c2c30;
-  --fill-strong: #3a3a3f;
-  --fill-hover: rgba(255, 255, 255, 0.07);
-  --fill-active: rgba(255, 255, 255, 0.12);
-
-  --label-primary: #f5f5f7;
-  --label-secondary: #c7c7cc;
-  --label-tertiary: #9a9aa0;
-  --label-quaternary: #6c6c70;
-
-  --separator: rgba(255, 255, 255, 0.11);
-  --separator-strong: rgba(255, 255, 255, 0.17);
-
-  --accent-color: #339dff;
-  --accent-fill: #0a6fe0;
-  --accent-hover: #1e7fe6;
-  --accent-active: #0a6fe0;
-  --on-accent: #ffffff;
-  --accent-tint: rgba(51, 157, 255, 0.18);
-  --accent-tint-strong: rgba(51, 157, 255, 0.26);
-  --teal: #64d2ff;
-  --aurora-1: rgba(40, 150, 255, 0.16);
-  --aurora-2: rgba(150, 108, 255, 0.14);
-
-  --spectral-1: #8ab4ff;
-  --spectral-2: #9a86ff;
-  --spectral-3: #cba6ff;
-  --spectral-glow: rgba(138, 116, 255, 0.55);
-  --glass-hairline: inset 0 0.5px 0 rgba(255, 255, 255, 0.1);
-  --shadow-bento: 0 1px 2px rgba(0, 0, 0, 0.4), 0 12px 30px -14px rgba(0, 0, 0, 0.6),
+  --D-spectral-1: #8ab4ff;
+  --D-spectral-2: #9a86ff;
+  --D-spectral-3: #cba6ff;
+  --D-spectral-glow: rgba(138, 116, 255, 0.55);
+  --D-glass-hairline: inset 0 0.5px 0 rgba(255, 255, 255, 0.1);
+  --D-shadow-bento: 0 1px 2px rgba(0, 0, 0, 0.4), 0 12px 30px -14px rgba(0, 0, 0, 0.6),
     0 0 0 0.5px rgba(0, 0, 0, 0.5), inset 0 0.5px 0 rgba(255, 255, 255, 0.05);
-  --shadow-float: 0 2px 8px rgba(0, 0, 0, 0.5), 0 24px 56px -18px rgba(0, 0, 0, 0.7),
+  --D-shadow-float: 0 2px 8px rgba(0, 0, 0, 0.5), 0 24px 56px -18px rgba(0, 0, 0, 0.7),
     0 0 0 0.5px rgba(0, 0, 0, 0.55), inset 0 0.5px 0 rgba(255, 255, 255, 0.06);
-  --viz-track: rgba(255, 255, 255, 0.1);
-  --viz-grid: rgba(255, 255, 255, 0.08);
+  --D-viz-track: rgba(255, 255, 255, 0.1);
+  --D-viz-grid: rgba(255, 255, 255, 0.08);
 
-  --green-color: #30d158;
-  --red-color: #ff453a;
+  --D-green-color: #30d158;
+  --D-red-color: #ff453a;
 
-  --pri-a: #f7768e;
-  --pri-b: #e0af68;
-  --pri-c: #7aa2f7;
-  --pri-fg: #16161e;
+  --D-pri-a: #f7768e;
+  --D-pri-b: #e0af68;
+  --D-pri-c: #7aa2f7;
+  --D-pri-fg: #16161e;
 
-  --focus-ring: 0 0 0 3.5px rgba(51, 157, 255, 0.5);
-  --focus-ring-tight: 0 0 0 2px rgba(51, 157, 255, 0.55);
-  --scrim: rgba(0, 0, 0, 0.5);
+  --D-focus-ring: 0 0 0 3.5px rgba(51, 157, 255, 0.5);
+  --D-focus-ring-tight: 0 0 0 2px rgba(51, 157, 255, 0.55);
+  --D-scrim: rgba(0, 0, 0, 0.5);
 
-  --shadow-control: 0 0.5px 1px rgba(0, 0, 0, 0.4);
-  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.4), 0 0 0 0.5px rgba(0, 0, 0, 0.5),
+  --D-shadow-control: 0 0.5px 1px rgba(0, 0, 0, 0.4);
+  --D-shadow-card: 0 1px 2px rgba(0, 0, 0, 0.4), 0 0 0 0.5px rgba(0, 0, 0, 0.5),
     inset 0 0.5px 0 rgba(255, 255, 255, 0.06);
-  --shadow-popover: 0 0 0 0.5px rgba(0, 0, 0, 0.6), 0 16px 40px -8px rgba(0, 0, 0, 0.6),
+  --D-shadow-popover: 0 0 0 0.5px rgba(0, 0, 0, 0.6), 0 16px 40px -8px rgba(0, 0, 0, 0.6),
     0 4px 12px -4px rgba(0, 0, 0, 0.45), inset 0 0.5px 0 rgba(255, 255, 255, 0.08);
 
-  --graph-bg-edge: rgba(0, 0, 0, 0.5);
-  --graph-glow-alpha: 0.6;
-  --graph-glow-blur: 10;
+  --D-graph-bg-edge: rgba(0, 0, 0, 0.5);
+  --D-graph-glow-alpha: 0.6;
+  --D-graph-glow-blur: 10;
+}
+
+/* The single shared dark assignment: applied identically to the OS-dark path and
+   the explicit-toggle path, so they cannot drift (finding 1). */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: var(--D-color-scheme);
+    --bg-window: var(--D-bg-window);
+    --bg-content: var(--D-bg-content);
+    --bg-elevated: var(--D-bg-elevated);
+    --bg-topbar: var(--D-bg-topbar);
+    --bg-sidebar: var(--D-bg-sidebar);
+    --fill: var(--D-fill);
+    --fill-strong: var(--D-fill-strong);
+    --fill-hover: var(--D-fill-hover);
+    --fill-active: var(--D-fill-active);
+    --label-primary: var(--D-label-primary);
+    --label-secondary: var(--D-label-secondary);
+    --label-tertiary: var(--D-label-tertiary);
+    --label-quaternary: var(--D-label-quaternary);
+    --separator: var(--D-separator);
+    --separator-strong: var(--D-separator-strong);
+    --control-border: var(--D-control-border);
+    --accent-color: var(--D-accent-color);
+    --accent-fill: var(--D-accent-fill);
+    --accent-hover: var(--D-accent-hover);
+    --accent-active: var(--D-accent-active);
+    --accent-on-tint: var(--D-accent-on-tint);
+    --on-accent: var(--D-on-accent);
+    --accent-tint: var(--D-accent-tint);
+    --accent-tint-strong: var(--D-accent-tint-strong);
+    --teal: var(--D-teal);
+    --orange: var(--D-orange);
+    --aurora-1: var(--D-aurora-1);
+    --aurora-2: var(--D-aurora-2);
+    --spectral-1: var(--D-spectral-1);
+    --spectral-2: var(--D-spectral-2);
+    --spectral-3: var(--D-spectral-3);
+    --spectral-glow: var(--D-spectral-glow);
+    --glass-hairline: var(--D-glass-hairline);
+    --shadow-bento: var(--D-shadow-bento);
+    --shadow-float: var(--D-shadow-float);
+    --viz-track: var(--D-viz-track);
+    --viz-grid: var(--D-viz-grid);
+    --green-color: var(--D-green-color);
+    --red-color: var(--D-red-color);
+    --pri-a: var(--D-pri-a);
+    --pri-b: var(--D-pri-b);
+    --pri-c: var(--D-pri-c);
+    --pri-fg: var(--D-pri-fg);
+    --focus-ring: var(--D-focus-ring);
+    --focus-ring-tight: var(--D-focus-ring-tight);
+    --scrim: var(--D-scrim);
+    --shadow-control: var(--D-shadow-control);
+    --shadow-card: var(--D-shadow-card);
+    --shadow-popover: var(--D-shadow-popover);
+    --graph-bg-edge: var(--D-graph-bg-edge);
+    --graph-glow-alpha: var(--D-graph-glow-alpha);
+    --graph-glow-blur: var(--D-graph-glow-blur);
+  }
+}
+[data-theme="dark"] {
+  color-scheme: var(--D-color-scheme);
+  --bg-window: var(--D-bg-window);
+  --bg-content: var(--D-bg-content);
+  --bg-elevated: var(--D-bg-elevated);
+  --bg-topbar: var(--D-bg-topbar);
+  --bg-sidebar: var(--D-bg-sidebar);
+  --fill: var(--D-fill);
+  --fill-strong: var(--D-fill-strong);
+  --fill-hover: var(--D-fill-hover);
+  --fill-active: var(--D-fill-active);
+  --label-primary: var(--D-label-primary);
+  --label-secondary: var(--D-label-secondary);
+  --label-tertiary: var(--D-label-tertiary);
+  --label-quaternary: var(--D-label-quaternary);
+  --separator: var(--D-separator);
+  --separator-strong: var(--D-separator-strong);
+  --control-border: var(--D-control-border);
+  --accent-color: var(--D-accent-color);
+  --accent-fill: var(--D-accent-fill);
+  --accent-hover: var(--D-accent-hover);
+  --accent-active: var(--D-accent-active);
+  --accent-on-tint: var(--D-accent-on-tint);
+  --on-accent: var(--D-on-accent);
+  --accent-tint: var(--D-accent-tint);
+  --accent-tint-strong: var(--D-accent-tint-strong);
+  --teal: var(--D-teal);
+  --orange: var(--D-orange);
+  --aurora-1: var(--D-aurora-1);
+  --aurora-2: var(--D-aurora-2);
+  --spectral-1: var(--D-spectral-1);
+  --spectral-2: var(--D-spectral-2);
+  --spectral-3: var(--D-spectral-3);
+  --spectral-glow: var(--D-spectral-glow);
+  --glass-hairline: var(--D-glass-hairline);
+  --shadow-bento: var(--D-shadow-bento);
+  --shadow-float: var(--D-shadow-float);
+  --viz-track: var(--D-viz-track);
+  --viz-grid: var(--D-viz-grid);
+  --green-color: var(--D-green-color);
+  --red-color: var(--D-red-color);
+  --pri-a: var(--D-pri-a);
+  --pri-b: var(--D-pri-b);
+  --pri-c: var(--D-pri-c);
+  --pri-fg: var(--D-pri-fg);
+  --focus-ring: var(--D-focus-ring);
+  --focus-ring-tight: var(--D-focus-ring-tight);
+  --scrim: var(--D-scrim);
+  --shadow-control: var(--D-shadow-control);
+  --shadow-card: var(--D-shadow-card);
+  --shadow-popover: var(--D-shadow-popover);
+  --graph-bg-edge: var(--D-graph-bg-edge);
+  --graph-glow-alpha: var(--D-graph-glow-alpha);
+  --graph-glow-blur: var(--D-graph-glow-blur);
 }
 
 * {
@@ -387,10 +448,11 @@ body::after {
   content: "";
   position: fixed;
   inset: 0;
-  /* Below all interactive chrome (topbar 5, menus 40+, palette 90, toast 70) —
-     a purely decorative texture must never sit above dialogs/menus (W30). It's
-     pointer-events:none so it never intercepted clicks, but it could tint the
-     glass of overlays; keep it at the very bottom of the fixed layer. */
+  /* z-index scale (finding 14): grain 1 · topbar 5 · resizer 6 · drawer-scrim 25
+     · drawer 30 · fab 40 · search-drop 50 · dialogs 60 · toast 65 · palette 90.
+     Grain sits at the very bottom — a purely decorative texture must never sit
+     above dialogs/menus (W30). It's pointer-events:none so it never intercepted
+     clicks, but it could tint the glass of overlays. */
   z-index: 1;
   pointer-events: none;
   opacity: var(--grain, 0.025);
@@ -517,6 +579,10 @@ code {
     outline-offset: -1px;
   }
 }
+/* Dark-correct high-contrast label/separator values, applied to BOTH dark paths:
+   OS dark, and the in-app toggle (data-theme="dark") even when the OS is light +
+   increased-contrast — otherwise that user gets near-black text on dark surfaces
+   (finding 3). Kept as a shared declaration via the grouped selector list. */
 @media (prefers-contrast: more) and (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
     --separator: rgba(255, 255, 255, 0.32);
@@ -525,9 +591,23 @@ code {
     --label-tertiary: #c2c2c8;
   }
 }
+/* In-app toggle to dark while the OS is light + increased-contrast: the @media
+   above won't match (OS is light), so mirror the dark-correct values here so
+   text stays light on dark surfaces (finding 3). */
+@media (prefers-contrast: more) {
+  [data-theme="dark"] {
+    --separator: rgba(255, 255, 255, 0.32);
+    --separator-strong: rgba(255, 255, 255, 0.5);
+    --label-secondary: #f0f0f5;
+    --label-tertiary: #c2c2c8;
+  }
+}
 .sidebar {
-  width: var(--sidebar-w);
-  flex: 0 0 var(--sidebar-w);
+  /* Clamp the persisted desktop width (up to 480px) to a share of the viewport
+     so ~768px tablets aren't cramped before the 760px mobile drawer kicks in
+     (finding 10). The mobile drawer overrides this with its own min(300px,84vw). */
+  width: min(var(--sidebar-w), 38vw);
+  flex: 0 0 min(var(--sidebar-w), 38vw);
   border-right: 0.5px solid var(--separator);
   background: var(--bg-sidebar); /* translucent — reveals native window vibrancy */
   -webkit-backdrop-filter: saturate(var(--glass-saturate)) blur(var(--glass-blur));
@@ -583,6 +663,10 @@ body.resizing {
 }
 .main {
   width: 100%;
+  /* Cap the content measure on very wide screens so layouts don't sprawl
+     edge-to-edge (finding 13); centered within the pane. */
+  max-width: 1320px;
+  margin: 0 auto;
   padding: var(--space-7) var(--space-8) var(--space-10);
 }
 
@@ -645,13 +729,21 @@ body.resizing {
 .stat strong {
   color: var(--fg);
 }
+/* The counts crowd the topbar in the ~600–760 band (before mobile rules apply),
+   pushing the search + palette button to overflow; hide them earlier (finding
+   12). The dashboard surfaces the same counts. */
+@media (max-width: 900px) {
+  .topbar .stat {
+    display: none;
+  }
+}
 .badge {
   font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.04em;
   color: var(--green);
   border: 1px solid var(--green);
-  border-radius: 4px;
+  border-radius: var(--radius-xs); /* finding 16 */
   padding: 1px 6px;
 }
 .icon-btn {
@@ -772,57 +864,12 @@ body.resizing {
   background: var(--separator-strong);
 }
 
-/* ---- sidebar nav + tree ---- */
-.brand {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-family: var(--font-mono); /* terminal-style wordmark — nt is a CLI tool at heart */
-  font-weight: 600;
-  font-size: 0.95rem;
-  letter-spacing: 0;
-  margin: 4px 8px 18px;
-  color: var(--fg);
-}
-.nav {
-  display: grid;
-  gap: 2px;
-  margin-bottom: 18px;
-}
-.nav__link {
-  padding: var(--space-2) var(--space-3);
-  border-radius: var(--radius-sm);
-  color: var(--fg-soft);
-  transition:
-    background var(--motion-fast) var(--ease),
-    color var(--motion-fast) var(--ease);
-}
-.nav__link:hover {
-  background: var(--fill-hover);
-  text-decoration: none;
-}
-.nav__link.active {
-  background: var(--accent-tint);
-  color: var(--accent-color);
-  font-weight: 600;
-}
-.nav__label {
-  font-family: var(--font-mono);
-  font-size: 10px;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--muted);
-  padding: 4px 10px;
-  margin-top: 8px;
-}
-.tree__head {
-  font-family: var(--font-mono);
-  font-size: 10px;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--muted);
-  padding: 4px 10px;
-}
+/* ---- sidebar nav + tree ----
+   The .brand / .nav / .nav__link / .nav__label / .tree__head / .tree__caret /
+   .tree__children rules that used to live here were dead: Sidebar.svelte and
+   TreeItem.svelte fully redefine them (scoped) and had drifted in margin/padding
+   (finding 15). The .tree__note / .tree__toggle base below is intentionally kept
+   — TreeItem.svelte relies on it for the row layout/colour it doesn't restate. */
 .tree__note,
 .tree__toggle {
   display: block;
@@ -850,16 +897,6 @@ body.resizing {
   background: var(--accent-tint);
   color: var(--accent-color);
   font-weight: 600;
-}
-.tree__caret {
-  display: inline-block;
-  width: 14px;
-  color: var(--muted);
-}
-.tree__children {
-  margin-left: 12px;
-  border-left: 1px solid var(--border-soft);
-  padding-left: 2px;
 }
 
 /* ---- tasks + rows ---- */
@@ -1195,7 +1232,7 @@ body.resizing {
   font-size: 0.85em;
   background: var(--bg-inset);
   padding: 1px 5px;
-  border-radius: 4px;
+  border-radius: var(--radius-xs); /* finding 16 */
 }
 .src,
 .kind {
@@ -1304,7 +1341,7 @@ body.resizing {
   text-transform: uppercase;
   letter-spacing: 0.03em;
   padding: 1px 6px;
-  border-radius: 4px;
+  border-radius: var(--radius-xs); /* finding 16 */
   background: var(--bg-inset);
   color: var(--muted);
 }
@@ -1442,6 +1479,21 @@ body.resizing {
   font-size: var(--text-prose);
   line-height: var(--leading-prose);
   letter-spacing: 0;
+  /* A readable measure so note bodies don't run edge-to-edge on wide screens
+     (finding 13). pre/table opt back out below to use the full column width. */
+  max-width: 72ch;
+  /* Long unbroken tokens (URLs, hashes) wrap instead of overflowing on mobile. */
+  overflow-wrap: anywhere;
+}
+/* Wide content opts out of the 72ch cap and scrolls/wraps within the column. */
+.prose :global(pre),
+.prose :global(table) {
+  max-width: 100%;
+}
+/* Tables scroll horizontally rather than overflow the viewport on mobile. */
+.prose :global(table) {
+  display: block;
+  overflow-x: auto;
 }
 .prose :global(h1),
 .prose :global(h2),
@@ -1592,7 +1644,10 @@ body.resizing {
   display: flex;
   justify-content: center;
   align-items: flex-start;
-  padding-top: 12vh;
+  /* Pull the palette up on short viewports but never flush to the top edge
+     (finding 11). */
+  padding-top: max(8vh, 32px);
+  padding-bottom: 16px;
   /* Clearly above the search dropdown (z-index 50) so the palette is never
      occluded by an open search results panel (W30). */
   z-index: 90;
@@ -1600,10 +1655,15 @@ body.resizing {
 }
 .palette {
   width: min(560px, 92vw);
+  /* Flex column capped at 80vh so the whole palette fits short viewports; the
+     list (below) is the scrolling child while the input + hint stay pinned. */
+  display: flex;
+  flex-direction: column;
+  max-height: 80vh;
   background: color-mix(in srgb, var(--bg-elevated) 90%, transparent);
   -webkit-backdrop-filter: blur(20px) saturate(170%);
   backdrop-filter: blur(20px) saturate(170%);
-  border: 0.5px solid var(--separator);
+  border: 1px solid var(--control-border); /* finding 6 — modal edge over a blur */
   border-radius: var(--radius-popover);
   box-shadow: var(--shadow-popover);
   overflow: hidden;
@@ -1644,7 +1704,10 @@ body.resizing {
   list-style: none;
   margin: 0;
   padding: 6px;
-  max-height: 50vh;
+  /* The scrolling child of the flex-column .palette (finding 11): it absorbs the
+     remaining height and scrolls, while the input + hint stay pinned. */
+  flex: 1 1 auto;
+  min-height: 0;
   overflow-y: auto;
 }
 .palette__item {
@@ -1835,7 +1898,7 @@ body.resizing {
     position: fixed;
     inset: 0;
     z-index: 25;
-    background: rgba(0, 0, 0, 0.45);
+    background: var(--scrim); /* finding 7 — was hardcoded rgba(0,0,0,0.45) */
   }
   .hamburger {
     display: inline-flex !important;
@@ -1869,6 +1932,9 @@ body.resizing {
   display: none;
   align-items: center;
   justify-content: center;
+  /* Comfortable tap target (finding 16). */
+  min-width: 28px;
+  min-height: 28px;
   background: transparent;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
@@ -1877,11 +1943,22 @@ body.resizing {
   font-size: 1.1rem;
   padding: 3px 9px;
 }
+/* The hamburger is the primary mobile nav affordance — give it the full 44px
+   touch target there (finding 16). */
+@media (max-width: 760px) {
+  .hamburger {
+    min-width: 44px;
+    min-height: 44px;
+  }
+}
 /* Desktop-only sidebar collapse toggle (mobile uses the hamburger drawer). */
 .collapse-btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  /* Comfortable tap target (finding 16). */
+  min-width: 28px;
+  min-height: 28px;
   background: transparent;
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);

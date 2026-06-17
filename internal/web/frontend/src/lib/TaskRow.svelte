@@ -6,7 +6,7 @@
   // activity) so every surface stays consistent from a single click.
   import { createMutation, useQueryClient } from "@tanstack/svelte-query";
   import { api, type Task, type TaskGroup } from "./api";
-  import { priorityClass, relativeDue, meaningfulSource, displayTitle, fmtDuration } from "./text";
+  import { priorityClass, relativeDue, meaningfulSource, displayTitle, fmtDuration, dueTier } from "./text";
   import { showToast, clearUndoToast } from "./toast.svelte";
   import { navigate } from "./router.svelte";
   import { isTextEntry } from "./keys.svelte";
@@ -155,21 +155,9 @@
   // Due-date urgency "temperature": a single tier that paints the due chip so the
   // pressure of a deadline reads at a glance — overdue runs hot (red), today is
   // the accent, the next few days are cool teal, anything further out stays muted.
-  // Done tasks never carry urgency. Date-only diff (a task due *today* isn't yet
-  // overdue), so it agrees with relativeDue()/the agenda buckets — no API change.
-  type Urgency = "over" | "today" | "soon" | "later";
-  function dueUrgency(dueRaw: string): Urgency {
-    const [y, mo, d] = dueRaw.slice(0, 10).split("-").map(Number);
-    if (!y || !mo || !d) return "later";
-    const now = new Date();
-    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    const diff = Math.round((new Date(y, mo - 1, d).getTime() - today.getTime()) / 86400000);
-    if (diff < 0) return "over";
-    if (diff === 0) return "today";
-    if (diff <= 3) return "soon"; // within the working horizon — worth a cue
-    return "later";
-  }
-  const urgency = $derived(t.due && t.status !== "done" ? dueUrgency(t.due) : null);
+  // Done tasks never carry urgency. Shared dueTier() (soon ≤3d here) keeps this in
+  // lockstep with the board card and the agenda buckets — see lib/text.ts.
+  const urgency = $derived(t.due && t.status !== "done" ? dueTier(t.due, 3) : null);
 
   function toggleDoing() {
     $statusMut.mutate({ id: t.id, status: t.status === "doing" ? "open" : "doing" });
@@ -398,8 +386,22 @@
     background: var(--accent-tint);
     border-radius: var(--radius-sm);
   }
+  /* Finding 14: on the accent-tint well, --muted metadata drops below AA
+     (~4.27-4.41:1). Lift the muted metadata (due "later", est, source) to
+     --label-secondary so it clears AA on the tint. */
+  .row--selected .row__due--later,
+  .row--selected .row__est {
+    color: var(--label-secondary);
+  }
   .selbox {
     flex: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    /* A proper ≥24px touch target (finding 15) so bulk-select is reachable on
+       coarse pointers, where there's no hover to reveal it. */
+    min-width: 24px;
+    min-height: 24px;
     background: none;
     border: none;
     color: var(--muted);
@@ -414,6 +416,16 @@
   .row:focus .selbox,
   .selbox--on {
     opacity: 1;
+  }
+  /* Touch/coarse pointers never hover, so keep the select affordance visible —
+     a calm, low-emphasis presence until the row is actually selected. */
+  @media (pointer: coarse) {
+    .selbox {
+      opacity: 0.55;
+    }
+    .selbox--on {
+      opacity: 1;
+    }
   }
   .selbox--on {
     color: var(--accent-color);
@@ -621,25 +633,28 @@
   .row__due--later {
     color: var(--muted);
   }
+  /* The pill ring is now a load-bearing shape cue (not just hue+weight), so its
+     alpha is raised to clear the 3:1 non-text threshold — kept in lockstep with
+     Board's .bcard__due rings. */
   .row__due--soon {
     color: var(--teal);
     padding: 1px 7px;
     border-radius: 999px;
-    box-shadow: inset 0 0 0 0.5px color-mix(in srgb, var(--teal) 45%, transparent);
+    box-shadow: inset 0 0 0 0.5px color-mix(in srgb, var(--teal) 70%, transparent);
   }
   .row__due--today {
     color: var(--accent-color);
     font-weight: 600;
     padding: 1px 7px;
     border-radius: 999px;
-    box-shadow: inset 0 0 0 0.5px color-mix(in srgb, var(--accent-color) 50%, transparent);
+    box-shadow: inset 0 0 0 0.5px color-mix(in srgb, var(--accent-color) 70%, transparent);
   }
   .row__due--over {
     color: var(--red);
     font-weight: 600;
     padding: 1px 7px;
     border-radius: 999px;
-    box-shadow: inset 0 0 0 0.5px color-mix(in srgb, var(--red) 50%, transparent);
+    box-shadow: inset 0 0 0 0.5px color-mix(in srgb, var(--red) 70%, transparent);
   }
   /* Quick-reschedule popover: a small anchored menu of due presets. The fixed
      transparent backdrop makes any outside click dismiss it. */

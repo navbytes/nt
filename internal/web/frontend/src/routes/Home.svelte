@@ -22,6 +22,25 @@
   const openCount = $derived($stateQ.data?.openCount ?? 0);
   const noteCount = $derived($stateQ.data?.noteCount ?? 0);
 
+  // Activity is conveyed by a dot HUE alone, which fails colour-blind users and
+  // screen readers (the verb was hover-only/aria-hidden). Pair each action with a
+  // glyph (a second, non-colour cue) and a spoken verb (finding 11).
+  function actionIcon(action: string): string {
+    if (action === "added" || action === "created") return "plus";
+    if (action === "completed") return "check";
+    if (action === "archived" || action === "deleted") return "archive";
+    return "edit"; // updated / anything else
+  }
+  function actionVerb(action: string): string {
+    if (action === "added") return "Added";
+    if (action === "created") return "Created";
+    if (action === "completed") return "Completed";
+    if (action === "updated") return "Updated";
+    if (action === "archived") return "Archived";
+    if (action === "deleted") return "Deleted";
+    return action ? action[0]!.toUpperCase() + action.slice(1) : "Changed";
+  }
+
   // ── today's plan: overdue + due-today, open — the same buckets the FOCUS
   //    card renders. Reuses the ["tasks"] cache TaskRows fills. ───────────────
   function todayISO(d = new Date()): string {
@@ -235,7 +254,9 @@
       <ul class="feed">
         {#each (day.events ?? []).slice(0, 9) as ev (ev.when + ev.title)}
           <li class="feed__item">
-            <span class="feed__dot feed__dot--{ev.action}" title={ev.action} aria-hidden="true"></span>
+            <span class="feed__glyph feed__glyph--{ev.action}" title={actionVerb(ev.action)} aria-hidden="true"><Icon name={actionIcon(ev.action)} size={11} /></span>
+            <!-- Spoken verb so the action isn't carried by colour alone (finding 11). -->
+            <span class="feed__verb">{actionVerb(ev.action)}:</span>
             {#if ev.url}<a class="feed__title" href={ev.url}>{ev.title}</a>{:else}<span class="feed__title">{ev.title}</span>{/if}
             <span class="feed__when">{relDay(ev.when)}</span>
           </li>
@@ -489,27 +510,39 @@
   .feed__item:last-child {
     border-bottom: 0;
   }
-  .feed__dot {
+  /* Action glyph: a per-action icon (a non-colour cue) tinted by the same hue the
+     old dot used, so the action reads for colour-blind users too (finding 11). */
+  .feed__glyph {
     flex: none;
     align-self: center;
-    width: 6px;
-    height: 6px;
-    border-radius: 50%;
-    background: var(--muted);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--muted);
   }
-  .feed__dot--added,
-  .feed__dot--created {
-    background: var(--green);
+  .feed__glyph--added,
+  .feed__glyph--created {
+    color: var(--green);
   }
-  .feed__dot--completed {
-    background: var(--accent-color);
+  .feed__glyph--completed {
+    color: var(--accent-color);
   }
-  .feed__dot--updated {
-    background: var(--teal);
+  .feed__glyph--updated {
+    color: var(--teal);
   }
-  .feed__dot--archived,
-  .feed__dot--deleted {
-    background: var(--label-quaternary);
+  .feed__glyph--archived,
+  .feed__glyph--deleted {
+    color: var(--label-quaternary);
+  }
+  /* Spoken verb — present for assistive tech and as a calm inline label so the
+     action never relies on colour alone. */
+  .feed__verb {
+    flex: none;
+    font-family: var(--font-mono);
+    font-size: var(--text-subhead);
+    text-transform: uppercase;
+    letter-spacing: var(--tracking-caps);
+    color: var(--muted);
   }
   .feed__title {
     flex: 1;

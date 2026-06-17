@@ -28,17 +28,30 @@
     onClose: () => void;
   } = $props();
 
-  // Keep the menu inside the viewport.
-  const left = $derived(Math.min(x, window.innerWidth - 210));
-  const top = $derived(Math.min(y, window.innerHeight - 250));
+  // Keep the menu inside the viewport. Clamp BOTH axes from the element's actual
+  // measured size (not magic numbers), so a long title can't overflow the right
+  // edge and the menu never spills off the bottom (audit #11). Falls back to the
+  // requested position until the element is measured on mount.
+  let menuEl: HTMLDivElement | undefined = $state();
+  let elemW = $state(0);
+  let elemH = $state(0);
+  function clamp(pos: number, viewport: number, elem: number): number {
+    return Math.max(8, Math.min(pos, viewport - elem - 8));
+  }
+  const left = $derived(elemW ? clamp(x, window.innerWidth, elemW) : x);
+  const top = $derived(elemH ? clamp(y, window.innerHeight, elemH) : y);
 
   // Keyboard accessibility: focus the first item on mount, restore focus to the
   // previously-focused element when the menu is destroyed, and provide roving
   // arrow-key navigation between the menuitem buttons.
-  let menuEl: HTMLDivElement | undefined = $state();
   $effect(() => {
     const restore = document.activeElement as HTMLElement | null;
     queueMicrotask(() => {
+      if (menuEl) {
+        const r = menuEl.getBoundingClientRect();
+        elemW = r.width;
+        elemH = r.height;
+      }
       const first = menuEl?.querySelector<HTMLButtonElement>('button[role="menuitem"]');
       first?.focus();
     });

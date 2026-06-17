@@ -11,7 +11,9 @@
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
     <link rel="icon" href="/favicon-32.png" sizes="32x32" />
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
-    <meta name="theme-color" content="#ffffff" />
+    <!-- Light chrome (topbar/window surface), not pure white; reconciled with the
+         dark window color below + in the bootstrap script (finding 2). -->
+    <meta name="theme-color" content="#f6f6f8" />
     <link rel="stylesheet" href="/static/highlight.css" />
     <script>
       // Apply persisted theme + detect the native desktop shell before paint
@@ -30,11 +32,13 @@
           t === "dark" ||
           (!t && window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches);
         var m = document.querySelector('meta[name="theme-color"]');
-        if (m) m.setAttribute("content", dark ? "#1e1e20" : "#ffffff");
+        // One consistent dark value (--bg-window dark = #161618); light uses the
+        // topbar/window chrome surface, not pure white (finding 2).
+        if (m) m.setAttribute("content", dark ? "#161618" : "#f6f6f8");
       } catch (e) {}
     </script>
-    <script type="module" crossorigin src="/assets/index-BWteE_ZW.js"></script>
-    <link rel="stylesheet" crossorigin href="/assets/index-B5etzQG7.css">
+    <script type="module" crossorigin src="/assets/index-CVXkMhpg.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-WSddlfAM.css">
   <link rel="manifest" href="/manifest.webmanifest"><script id="vite-plugin-pwa:register-sw" src="/registerSW.js"></script></head>
   <body>
     <div id="app"></div>

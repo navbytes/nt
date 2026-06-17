@@ -137,10 +137,11 @@
   .tree__toggle:hover .tree__caret {
     color: var(--label-secondary);
   }
-  /* Active note: accent tint + a spectral-tinted label, matching the nav. */
+  /* Active note: accent tint + an AA-legible accent label (finding 4 — the old
+     --spectral-2 failed AA on the tint). */
   .tree__note.active {
     background: var(--accent-tint);
-    color: var(--spectral-2);
+    color: var(--accent-on-tint);
     font-weight: 600;
   }
 

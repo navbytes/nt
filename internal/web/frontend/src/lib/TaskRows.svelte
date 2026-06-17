@@ -3,7 +3,7 @@
   import { api, type TaskGroup, type Task } from "./api";
   import TaskRow from "./TaskRow.svelte";
   import Icon from "./Icon.svelte";
-  import { priorityRank, priorityClass } from "./text";
+  import { priorityRank, priorityClass, dueTier } from "./text";
   import { parseQuickAdd } from "./quickparse";
   import { taskMatcher } from "./taskfilter";
   import { stepId } from "./listnav";
@@ -103,23 +103,15 @@
   // Status view: the raw groups, optionally filtered to a status set.
   const statusGroups = $derived(allGroups.filter((g) => !statuses || statuses.includes(g.status)));
 
-  function todayISO(): string {
-    const d = new Date();
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-  }
-  function plusDaysISO(n: number): string {
-    const d = new Date();
-    d.setDate(d.getDate() + n);
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-  }
   // A due value may carry a time-of-day ("2026-06-08T17:00"); dateOf gives the
   // date part for bucketing into the agenda groups below.
   const dateOf = (due?: string) => (due ? due.slice(0, 10) : "");
 
-  // Agenda view: re-bucket every task by its due date (the planner layout).
+  // Agenda view: re-bucket every task by its due date (the planner layout). The
+  // over/today/soon/later split comes from the SHARED dueTier() (week horizon =
+  // 7d here) so the agenda can never drift from the row/board temperature — see
+  // lib/text.ts (finding 16). Same semantics as the old inline comparison.
   const agendaGroups = $derived.by((): TaskGroup[] => {
-    const today = todayISO();
-    const weekEnd = plusDaysISO(7);
     const buckets = {
       Overdue: [] as Task[],
       Today: [] as Task[],
@@ -128,15 +120,13 @@
       "No date": [] as Task[],
       Done: [] as Task[],
     };
+    const TIER_BUCKET = { over: "Overdue", today: "Today", soon: "This week", later: "Later" } as const;
     for (const g of allGroups) {
       for (const t of g.tasks) {
         const due = dateOf(t.due); // YYYY-MM-DD, ignoring any time-of-day suffix
         if (t.status === "done") buckets.Done.push(t);
         else if (!due) buckets["No date"].push(t);
-        else if (due < today) buckets.Overdue.push(t);
-        else if (due === today) buckets.Today.push(t);
-        else if (due <= weekEnd) buckets["This week"].push(t);
-        else buckets.Later.push(t);
+        else buckets[TIER_BUCKET[dueTier(due, 7)]].push(t);
       }
     }
     return (Object.entries(buckets) as [string, Task[]][])
@@ -504,6 +494,8 @@
     z-index: 30;
     display: flex;
     align-items: center;
+    flex-wrap: wrap; /* finding 8: never overflow on a narrow viewport */
+    max-width: 100%;
     gap: 8px;
     margin-top: 16px;
     padding: 8px 12px;
@@ -512,6 +504,28 @@
     backdrop-filter: saturate(var(--glass-saturate)) blur(var(--glass-blur));
     border-radius: var(--radius);
     box-shadow: var(--shadow-float), var(--glass-hairline);
+  }
+  /* Finding 8: under ~640px the count + four buttons overflow ~375px screens.
+     Wrapping (above) handles the worst case; here we also tighten the buttons so
+     the bar usually still fits one row, and flip the Reschedule popover to the
+     right edge so it can't clip off-screen. */
+  @media (max-width: 640px) {
+    .bulk {
+      gap: 6px;
+    }
+    .bulk__count {
+      flex-basis: 100%; /* count on its own line; the actions share the next */
+      margin-right: 0;
+    }
+    .bulk__btn {
+      padding: 4px 9px;
+      font-size: 0.8rem;
+    }
+    .bulk__menu {
+      left: auto;
+      right: 0;
+      transform-origin: bottom right;
+    }
   }
   .bulk__count {
     font-family: var(--font-mono);
@@ -662,9 +676,12 @@
   .qa__chip--tag {
     color: var(--accent-2);
   }
-  /* A recognised key typed with no value yet — a quiet amber nudge, not an error. */
+  /* A recognised key typed with no value yet — a quiet amber nudge, not an error.
+     The fallback is a real warning amber (not --accent-2 teal) so the warning
+     reads even before the --orange token lands, and stays distinct from the teal
+     due/tag chips (finding 9). */
   .qa__chip--hint {
-    color: var(--orange, var(--accent-2));
+    color: var(--orange, #a8620a);
     border-color: color-mix(in srgb, currentColor 45%, transparent);
   }
 </style>

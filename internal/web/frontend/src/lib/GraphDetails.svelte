@@ -225,4 +225,23 @@
   .gdetails__chev--open {
     transform: rotate(90deg);
   }
+
+  /* Mobile: the fixed 300px/40vw top-right panel overlaps the controls and
+     sandwiches the canvas. Dock it as a full-width bottom sheet instead (audit
+     #8) — full width, no max-width cap, pinned to the bottom edge, capped height
+     with internal scroll. Sits above the controls bar (higher z-index). */
+  @media (max-width: 640px) {
+    .gdetails {
+      top: auto;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      width: auto;
+      max-width: none;
+      z-index: 22;
+      border-radius: var(--radius-popover) var(--radius-popover) 0 0;
+      max-height: 60dvh;
+      overflow-y: auto;
+    }
+  }
 </style>

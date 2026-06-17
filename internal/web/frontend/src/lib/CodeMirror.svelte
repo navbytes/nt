@@ -44,19 +44,39 @@
     ".cm-scroller": { fontFamily: "var(--font-mono)", fontSize: "13px", lineHeight: "1.6" },
     ".cm-content": { caretColor: "var(--accent)", padding: "8px 0" },
     ".cm-cursor, .cm-dropCursor": { borderLeftColor: "var(--accent)" },
+    // A visible tinted well so selected text reads clearly in both themes — the
+    // editor surface is --bg-inset, so a selection painted in --bg-inset was
+    // invisible (1:1). The accent tint sits above it with a clear contrast step.
     "&.cm-focused .cm-selectionBackground, .cm-selectionBackground, ::selection": {
-      backgroundColor: "var(--bg-inset)",
+      backgroundColor: "var(--accent-tint-strong)",
     },
     ".cm-activeLine": { backgroundColor: "color-mix(in srgb, var(--accent) 7%, transparent)" },
+    // Cap the completion tooltip so long wikilink paths (detail:n.path) can't run
+    // off-screen — clip + ellipsis the label/detail rows instead.
     ".cm-tooltip": {
       backgroundColor: "var(--bg-elev)",
       border: "1px solid var(--border)",
       borderRadius: "var(--radius-sm)",
       color: "var(--fg)",
+      maxWidth: "min(360px, 90vw)",
+      overflowX: "hidden",
     },
+    ".cm-tooltip-autocomplete ul li": {
+      overflowX: "hidden",
+      textOverflow: "ellipsis",
+      whiteSpace: "nowrap",
+    },
+    ".cm-completionLabel, .cm-completionDetail": {
+      overflow: "hidden",
+      textOverflow: "ellipsis",
+      whiteSpace: "nowrap",
+    },
+    // Selected completion: a solid accent surface needs the paired on-accent text
+    // token so it clears AA in both themes (white on the light-blue dark --accent
+    // was ~2.83:1).
     ".cm-tooltip-autocomplete ul li[aria-selected]": {
-      backgroundColor: "var(--accent)",
-      color: "#fff",
+      backgroundColor: "var(--accent-fill)",
+      color: "var(--on-accent)",
     },
   });
 
@@ -66,9 +86,9 @@
     { tag: t.emphasis, fontStyle: "italic" },
     { tag: [t.link, t.url], color: "var(--accent-2)" },
     { tag: t.monospace, color: "var(--green)" },
-    { tag: t.quote, color: "var(--muted)" },
+    { tag: t.quote, color: "var(--fg-soft)" },
     { tag: [t.list, t.processingInstruction], color: "var(--fg-soft)" },
-    { tag: t.strikethrough, textDecoration: "line-through", color: "var(--muted)" },
+    { tag: t.strikethrough, textDecoration: "line-through", color: "var(--fg-soft)" },
   ]);
 
   const wikilinkSource = makeWikilinkSource(() => latest.getNotes());

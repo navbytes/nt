@@ -632,7 +632,9 @@
       background var(--motion-fast) var(--ease);
   }
   .toc__link.active {
-    color: var(--spectral-2);
+    /* The active label needs AA on the content surface (spectral-2 was ~3.99:1);
+       the spectral hue stays as the left-border accent. */
+    color: var(--accent-on-tint, #0a52b8);
     border-left-color: var(--spectral-2);
     font-weight: 600;
   }

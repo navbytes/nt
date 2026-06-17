@@ -326,7 +326,7 @@
     font-weight: 600;
   }
   .nav__link.active :global(.icon) {
-    color: var(--spectral-2);
+    color: var(--accent-on-tint); /* finding 4 — AA-legible on the tint well */
   }
   .nav__link.active .nav__bar {
     height: 17px;
@@ -347,7 +347,7 @@
     font-size: var(--text-callout);
     color: var(--label-secondary);
     background: var(--fill);
-    border: 0.5px solid var(--separator);
+    border: 1px solid var(--control-border); /* finding 6 — the pill edge is the only affordance */
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -358,13 +358,13 @@
   }
   .nav__pill:hover {
     color: var(--label-primary);
-    border-color: var(--separator-strong);
+    border-color: color-mix(in srgb, var(--control-border) 60%, var(--label-primary));
     text-decoration: none;
   }
   .nav__pill.active {
-    color: var(--spectral-2);
+    color: var(--accent-on-tint); /* finding 4 — AA-legible active label on tint */
     background: var(--accent-tint);
-    border-color: color-mix(in srgb, var(--spectral-2) 45%, transparent);
+    border-color: color-mix(in srgb, var(--accent-on-tint) 45%, transparent);
     font-weight: 500;
   }
 

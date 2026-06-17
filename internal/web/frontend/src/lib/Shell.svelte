@@ -118,10 +118,11 @@
     root.setAttribute("data-theme", next);
     localStorage.setItem("nt-theme", next);
     isDark = next === "dark";
-    // keep the PWA/status-bar tint in sync
+    // keep the PWA/status-bar tint in sync — same values as index.html (finding 2):
+    // dark = --bg-window (#161618), light = topbar/window chrome surface (#f6f6f8).
     document
       .querySelector('meta[name="theme-color"]')
-      ?.setAttribute("content", next === "dark" ? "#1e1e20" : "#ffffff");
+      ?.setAttribute("content", next === "dark" ? "#161618" : "#f6f6f8");
   }
 
 </script>
