@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { toast, showToast, dismissToast } from "../lib/toast.svelte";
+import { toast, showToast, dismissToast, clearUndoToast } from "../lib/toast.svelte";
 
 describe("toast store", () => {
   beforeEach(() => {
@@ -29,6 +29,18 @@ describe("toast store", () => {
     expect(toast.current).not.toBeNull();
     vi.advanceTimersByTime(1);
     expect(toast.current).toBeNull();
+  });
+
+  it("clearUndoToast drops a toast that carries an Undo (a fresh write landed)", () => {
+    showToast("Completed “x”", vi.fn());
+    clearUndoToast();
+    expect(toast.current).toBeNull();
+  });
+
+  it("clearUndoToast leaves a plain confirmation toast alone", () => {
+    showToast("Saved"); // no undo handler
+    clearUndoToast();
+    expect(toast.current?.message).toBe("Saved");
   });
 
   it("dismisses on demand and cancels the timer", () => {

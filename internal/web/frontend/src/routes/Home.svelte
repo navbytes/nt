@@ -101,8 +101,12 @@
     " · " +
     now.toLocaleDateString(undefined, { month: "long", day: "numeric" });
 
-  // The day is "clear" only once tasks have loaded and nothing is due/overdue.
-  const dayClear = $derived(!$tasksQ.isPending && focusCount === 0);
+  // A failed tasks/activity fetch must NOT read as "all clear" (W7) — branch on
+  // the error so the hero shows a load-failure state instead of false calm.
+  const loadFailed = $derived(!!$tasksQ.error || !!$activityQ.error);
+  // The day is "clear" only once tasks have loaded WITHOUT error and nothing is
+  // due/overdue.
+  const dayClear = $derived(!$tasksQ.isPending && !loadFailed && focusCount === 0);
 </script>
 
 <div class="hero">
@@ -119,21 +123,35 @@
   <section class="card card--focus" class:card--clear={dayClear} aria-labelledby="focus-h">
     <div class="card__head">
       <h2 class="card__label" id="focus-h">Focus</h2>
-      {#if !$tasksQ.isPending}
+      {#if !$tasksQ.isPending && !loadFailed}
         <span class="card__count">{focusCount} {focusCount === 1 ? "task" : "tasks"}</span>
       {/if}
     </div>
 
-    <TaskRows
-      view="agenda"
-      buckets={["Overdue", "Today"]}
-      showAdd={true}
-      emptyText="Nothing overdue or due today — you're all clear."
-    />
+    {#if loadFailed}
+      <!-- A failed fetch must read as a problem, never as "all clear" (W7). -->
+      <div class="loaderr" role="alert">
+        <p class="loaderr__msg">Couldn't load your day. Check your connection and retry.</p>
+        <button
+          class="btn btn--ghost btn--sm"
+          onclick={() => {
+            $tasksQ.refetch();
+            $activityQ.refetch();
+          }}>Try again</button
+        >
+      </div>
+    {:else}
+      <TaskRows
+        view="agenda"
+        buckets={["Overdue", "Today"]}
+        showAdd={true}
+        emptyText="Nothing overdue or due today — you're all clear."
+      />
 
-    <p class="card__hint">
-      <kbd>c</kbd> to capture · <kbd>⌘K</kbd> for commands
-    </p>
+      <p class="card__hint">
+        <kbd>c</kbd> to capture · <kbd>⌘K</kbd> for commands
+      </p>
+    {/if}
   </section>
 
   <!-- ── CAPACITY RING: planned est: vs daily budget (capacity.ts math) ───── -->
@@ -230,6 +248,19 @@
 </div>
 
 <style>
+  /* Friendly load-failure state inside the Focus card (W7) — never expose the
+     raw error object; offer a retry. */
+  .loaderr {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin: 12px 0;
+  }
+  .loaderr__msg {
+    margin: 0;
+    color: var(--fg-soft);
+  }
+
   /* ── hero ──────────────────────────────────────────────────────────────── */
   .hero {
     margin-bottom: var(--space-7);

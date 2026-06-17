@@ -31,9 +31,51 @@
   // Keep the menu inside the viewport.
   const left = $derived(Math.min(x, window.innerWidth - 210));
   const top = $derived(Math.min(y, window.innerHeight - 250));
+
+  // Keyboard accessibility: focus the first item on mount, restore focus to the
+  // previously-focused element when the menu is destroyed, and provide roving
+  // arrow-key navigation between the menuitem buttons.
+  let menuEl: HTMLDivElement | undefined = $state();
+  $effect(() => {
+    const restore = document.activeElement as HTMLElement | null;
+    queueMicrotask(() => {
+      const first = menuEl?.querySelector<HTMLButtonElement>('button[role="menuitem"]');
+      first?.focus();
+    });
+    return () => restore?.focus?.();
+  });
+
+  function items(): HTMLButtonElement[] {
+    return menuEl
+      ? Array.from(menuEl.querySelectorAll<HTMLButtonElement>('button[role="menuitem"]'))
+      : [];
+  }
+  function onMenuKey(e: KeyboardEvent) {
+    if (e.key === "ArrowDown" || e.key === "ArrowUp" || e.key === "Home" || e.key === "End") {
+      e.preventDefault();
+      e.stopPropagation();
+      const list = items();
+      if (!list.length) return;
+      const cur = list.indexOf(document.activeElement as HTMLButtonElement);
+      let next: number;
+      if (e.key === "Home") next = 0;
+      else if (e.key === "End") next = list.length - 1;
+      else if (e.key === "ArrowDown") next = cur < 0 ? 0 : (cur + 1) % list.length;
+      else next = cur <= 0 ? list.length - 1 : cur - 1;
+      list[next]?.focus();
+    }
+  }
 </script>
 
-<svelte:window onkeydown={(e) => e.key === "Escape" && onClose()} />
+<svelte:window
+  onkeydown={(e) => {
+    if (e.key === "Escape") {
+      e.preventDefault();
+      e.stopPropagation();
+      onClose();
+    }
+  }}
+/>
 
 <!-- Backdrop swallows the next click to dismiss. -->
 <div
@@ -46,7 +88,14 @@
   }}
 ></div>
 
-<div class="ctx-menu" style="left:{left}px; top:{top}px" role="menu">
+<div
+  class="ctx-menu"
+  style="left:{left}px; top:{top}px"
+  role="menu"
+  tabindex="-1"
+  bind:this={menuEl}
+  onkeydown={onMenuKey}
+>
   <div class="ctx-title" title={node.title}>{node.title}</div>
   <button role="menuitem" onclick={onOpen}><Icon name="arrow-right" size={14} /> Open note</button>
   <button role="menuitem" onclick={onOpenNewTab}><Icon name="document" size={14} /> Open in new tab</button>

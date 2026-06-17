@@ -5,7 +5,7 @@
   import { history, historyKeymap, defaultKeymap, indentWithTab } from "@codemirror/commands";
   import { markdown } from "@codemirror/lang-markdown";
   import { syntaxHighlighting, HighlightStyle } from "@codemirror/language";
-  import { autocompletion, completionKeymap } from "@codemirror/autocomplete";
+  import { autocompletion, completionKeymap, completionStatus } from "@codemirror/autocomplete";
   import { tags as t } from "@lezer/highlight";
   import { makeWikilinkSource } from "./cmWikilink";
   import { slashSource } from "./cmSlash";
@@ -95,7 +95,17 @@
           theme,
           keymap.of([
             { key: "Mod-s", preventDefault: true, run: () => (latest.onSave(), true) },
-            { key: "Escape", run: () => (latest.onEscape(), true) },
+            // Escape closes the editor — but ONLY when no completion popup is open,
+            // so the first Escape dismisses the popup (handled by completionKeymap
+            // below) and a second Escape closes the editor.
+            {
+              key: "Escape",
+              run: (v) => {
+                if (completionStatus(v.state) !== null) return false; // let completionKeymap close the popup
+                latest.onEscape();
+                return true;
+              },
+            },
             ...completionKeymap,
             indentWithTab,
             ...historyKeymap,

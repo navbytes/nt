@@ -9,7 +9,7 @@
   import { stepId } from "./listnav";
   import { palette } from "./palette.svelte";
   import { shortcuts, isTextEntry } from "./keys.svelte";
-  import { showToast } from "./toast.svelte";
+  import { showToast, clearUndoToast } from "./toast.svelte";
 
   // Within a bucket, float the most important work up: priority first (A→Z, then
   // unprioritised), then the earliest due date. Done stays in store order (most
@@ -60,7 +60,16 @@
   // Per-row writes (done/reopen/status/delete) live in TaskRow; this component
   // owns only the add form. They share the ["tasks"] cache, so both stay in sync.
   const set = (d: { groups: TaskGroup[] }) => qc.setQueryData(["tasks"], d);
-  const addMut = createMutation({ mutationFn: api.taskNew, onSuccess: set });
+  const addMut = createMutation({
+    mutationFn: api.taskNew,
+    // A new task is a fresh write — a stale Undo from a prior op would now revert
+    // the wrong thing, so clear it (W10).
+    onSuccess: (d) => {
+      clearUndoToast();
+      set(d);
+    },
+    onError: (e) => showToast(`Couldn't add task: ${String(e)}`),
+  });
 
   let newText = $state("");
   // Live "here's what I understood" preview of the todo.txt shorthand, so the
@@ -75,7 +84,8 @@
         !!preview.est ||
         !!preview.project ||
         preview.tags.length > 0 ||
-        preview.links.length > 0),
+        preview.links.length > 0 ||
+        preview.emptyKeys.length > 0),
   );
 
   // The live quick-filter (W12): client-side, same shorthand as quick-add
@@ -158,6 +168,25 @@
     el?.focus();
     el?.scrollIntoView({ block: "nearest" });
   }
+  // After a row leaves the list (completed/deleted), move roving focus to the row
+  // that took its slot — the next sibling in the OLD order, or the previous one if
+  // it was last (W12). Captured from flatIds *before* the write, so we know who
+  // followed; deferred a microtask so the post-write re-render has settled.
+  function focusSibling(removedId: string) {
+    const idx = flatIds.indexOf(removedId);
+    const after = flatIds.slice(idx + 1);
+    const before = flatIds.slice(0, idx).reverse();
+    queueMicrotask(() => {
+      for (const id of [...after, ...before]) {
+        const el = document.getElementById(`trow-${id}`);
+        if (el) {
+          el.focus();
+          el.scrollIntoView({ block: "nearest" });
+          return;
+        }
+      }
+    });
+  }
   function onListKey(e: KeyboardEvent) {
     // Don't steal j/k while typing or when a modal owns the keyboard.
     if (e.metaKey || e.ctrlKey || e.altKey || isTextEntry(e.target) || palette.open || shortcuts.open)
@@ -189,6 +218,13 @@
   }
   const visibleIds = $derived(new Set(flatIds));
   const selCount = $derived(selected.filter((id) => visibleIds.has(id)).length);
+  // Prune the selection to what's still visible whenever the list changes (filter
+  // edit / SSE refetch), so the bar's count and any action never reference a row
+  // that scrolled out of the current view (W18). Only writes when it shrinks.
+  $effect(() => {
+    const pruned = selected.filter((id) => visibleIds.has(id));
+    if (pruned.length !== selected.length) selected = pruned;
+  });
   let bulkBusy = $state(false);
   let rescheduling = $state(false);
   let bulkMenuEl: HTMLElement | undefined = $state();
@@ -242,6 +278,7 @@
     const n = ids.length;
     try {
       await api.taskBulk(action, ids, due);
+      clearUndoToast(); // fresh write — drop any stale single-level Undo (W10)
       showToast(`${verb} ${n} task${n > 1 ? "s" : ""}`, async () => {
         try {
           await api.undo();
@@ -308,6 +345,7 @@
       {#if preview.project}<span class="qa__chip qa__chip--proj">+{preview.project}</span>{/if}
       {#each preview.tags as tag (tag)}<span class="qa__chip qa__chip--tag">@{tag}</span>{/each}
       {#each preview.links as link (link)}<span class="qa__chip qa__chip--link">[[{link}]]</span>{/each}
+      {#each preview.emptyKeys as k (k)}<span class="qa__chip qa__chip--hint" title="This key needs a value">{k}: needs a value</span>{/each}
     </div>
   {/if}
 {/if}
@@ -333,6 +371,7 @@
             {t}
             selected={selected.includes(t.id)}
             onToggleSelect={() => toggleSel(t.id)}
+            {focusSibling}
           />
         {/each}
       </ul>
@@ -622,5 +661,10 @@
   }
   .qa__chip--tag {
     color: var(--accent-2);
+  }
+  /* A recognised key typed with no value yet — a quiet amber nudge, not an error. */
+  .qa__chip--hint {
+    color: var(--orange, var(--accent-2));
+    border-color: color-mix(in srgb, currentColor 45%, transparent);
   }
 </style>

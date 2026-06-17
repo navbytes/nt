@@ -23,6 +23,7 @@
   import { nodeShape, tracePath, shapeLegendEntries, type ShapeKind } from "../lib/graphShapes";
   import { SpriteCache, drawRadius, type SpriteVariant } from "../lib/graphSprites";
   import { view, savePersisted, enterLocal, exitLocal, type Effects } from "../lib/graphView.svelte";
+  import { showToast } from "../lib/toast.svelte";
   import GraphControls from "../lib/GraphControls.svelte";
   import GraphDetails from "../lib/GraphDetails.svelte";
   import GraphContextMenu from "../lib/GraphContextMenu.svelte";
@@ -56,9 +57,13 @@
   let glowTex: any = null; // shared additive corona texture for 3D nodes (lazy)
   const BG3D = "#05060d"; // deep-space background — bloom needs near-black
 
-  const reduce =
+  // Reduced-motion preference, kept live: read once for the initial value, then
+  // updated by a matchMedia change listener (audit #27). Reads at imperative call
+  // sites are non-reactive, but new calls pick up the current value.
+  let reduce = $state(
     typeof window !== "undefined" &&
-    window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+      (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false),
+  );
 
   // ---- precomputed render state (rebuilt on data/filter change, read as O(1)
   // lookups by the per-frame canvas accessors — never recomputed per frame).
@@ -87,7 +92,7 @@
   let dofTo = 0;
   let dofStart = 0;
   const DOF_MS = 180;
-  const DIM = 0.15; // dimmed-node alpha (matches the original base + "26")
+  const DIM = 0.3; // dimmed-node alpha (raised for contrast — audit #20)
   // One-shot expanding ring on fresh selection (free-runs alongside the DOF tween).
   let pulseStart = 0;
   let pulseRAF = 0;
@@ -248,12 +253,12 @@
     return 1;
   }
   const LINK_BRIGHT = "rgba(128,128,128,0.5)";
-  const LINK_DIM = "rgba(128,128,128,0.08)";
+  const LINK_DIM = "rgba(128,128,128,0.18)";
   const LINK_HOVER = "rgba(128,128,128,0.85)";
   // linkAlpha mirrors nodeAlpha for edges (used by the gradient painter).
   function linkAlpha(s: string, t: string): number {
-    if (!R.pass.has(s) || !R.pass.has(t)) return 0.08;
-    if (focusSet && !(focusSet.has(s) && focusSet.has(t))) return 0.08 + 0.42 * (1 - dofT);
+    if (!R.pass.has(s) || !R.pass.has(t)) return 0.18;
+    if (focusSet && !(focusSet.has(s) && focusSet.has(t))) return 0.18 + 0.32 * (1 - dofT);
     return 0.5;
   }
 
@@ -676,6 +681,12 @@
   let clickTO: ReturnType<typeof setTimeout> | undefined;
   function onNodeClick(n: FGNode, evt: MouseEvent) {
     closeMenu();
+    // Cmd/Ctrl-click opens the note in a new tab (the web convention).
+    if (evt?.metaKey || evt?.ctrlKey) {
+      if (clickTO) clearTimeout(clickTO);
+      window.open(n.url, "_blank", "noopener");
+      return;
+    }
     // Shift/Alt-click reveals a node's neighbors (incremental exploration) rather
     // than selecting it. Roots a local view first if we're still global.
     if (evt?.shiftKey || evt?.altKey) {
@@ -750,12 +761,40 @@
     if (menu) togglePin(menu.node.id);
     closeMenu();
   }
+  // Copy with toast feedback + an insecure-context fallback (navigator.clipboard
+  // is undefined off https/localhost, so the optional-chained writeText silently
+  // no-op'd before — audit #25).
+  async function copyText(text: string, label: string) {
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text);
+        showToast(`Copied ${label}`);
+        return;
+      }
+      throw new Error("clipboard unavailable");
+    } catch {
+      try {
+        const ta = document.createElement("textarea");
+        ta.value = text;
+        ta.style.position = "fixed";
+        ta.style.opacity = "0";
+        document.body.appendChild(ta);
+        ta.focus();
+        ta.select();
+        const ok = document.execCommand("copy");
+        document.body.removeChild(ta);
+        showToast(ok ? `Copied ${label}` : `Couldn't copy ${label}`);
+      } catch {
+        showToast(`Couldn't copy ${label}`);
+      }
+    }
+  }
   function ctxCopyLink() {
-    if (menu) navigator.clipboard?.writeText(`[[${menu.node.title}]]`);
+    if (menu) void copyText(`[[${menu.node.title}]]`, "wikilink");
     closeMenu();
   }
   function ctxCopyPath() {
-    if (menu) navigator.clipboard?.writeText(menu.node.url);
+    if (menu) void copyText(menu.node.url, "note path");
     closeMenu();
   }
 
@@ -791,10 +830,24 @@
       return;
     }
     if (e.key === "Escape") {
-      if (menu) return closeMenu();
+      // Menu owns its own Escape dismissal (GraphContextMenu's window handler), so
+      // it's not handled here — see audit #34.
       if (typing && view.search) return (view.search = "");
       if (view.selectedId) return (view.selectedId = null);
       if (view.mode === "local") return exitLocal();
+      return;
+    }
+    // Keyboard entry to the context menu for the selected node (ContextMenu key or
+    // Shift+F10). Positioned at the canvas centre.
+    if (!typing && !menu && (e.key === "ContextMenu" || (e.shiftKey && e.key === "F10"))) {
+      const sel = selectedNode;
+      if (sel) {
+        e.preventDefault();
+        const rect = container?.getBoundingClientRect();
+        const x = rect ? rect.left + rect.width / 2 : window.innerWidth / 2;
+        const y = rect ? rect.top + rect.height / 2 : window.innerHeight / 2;
+        menu = { x, y, node: sel };
+      }
       return;
     }
     if (!typing && (e.key === "f" || e.key === "F")) {
@@ -802,9 +855,39 @@
       fit();
       return;
     }
-    if (!typing && view.selectedId && e.key.startsWith("Arrow")) {
+    // Enter opens the selected node (keyboard activation from the focused canvas).
+    if (!typing && e.key === "Enter" && selectedNode) {
       e.preventDefault();
+      navigate(selectedNode.url);
+      return;
+    }
+    if (!typing && e.key.startsWith("Arrow")) {
+      e.preventDefault();
+      // No selection yet → seed one at the most-connected visible node so arrow
+      // navigation has a starting point (audit #5).
+      if (!view.selectedId) {
+        const def = defaultNode();
+        if (def) selectNode(def);
+        return;
+      }
       moveSelection(e.key);
+    }
+  }
+
+  // Highest-degree visible node — the sensible default selection when the canvas
+  // is focused or an arrow is pressed with nothing selected.
+  function defaultNode(): FGNode | null {
+    let best: FGNode | null = null;
+    for (const n of allNodes) {
+      if (!R.pass.has(n.id)) continue;
+      if (!best || n.deg > best.deg) best = n;
+    }
+    return best;
+  }
+  function onCanvasFocus() {
+    if (!view.selectedId) {
+      const def = defaultNode();
+      if (def) selectNode(def);
     }
   }
 
@@ -827,23 +910,23 @@
     const base = R.color.get(n.id) ?? cssAccent;
     if (hoveredId) {
       const near = n.id === hoveredId || (adjacency.get(hoveredId)?.has(n.id) ?? false);
-      return near ? base : withAlpha(base, 0.05);
+      return near ? base : withAlpha(base, 0.3);
     }
-    return R.pass.has(n.id) ? base : withAlpha(base, 0.1); // dimmed = recede
+    return R.pass.has(n.id) ? base : withAlpha(base, 0.3); // dimmed = recede
   }
   function link3dColor(l: any): string {
     const s = linkEndId(l.source);
     const t = linkEndId(l.target);
     if (hoveredId) {
-      if (s !== hoveredId && t !== hoveredId) return "rgba(160,166,190,0.03)";
+      if (s !== hoveredId && t !== hoveredId) return "rgba(160,166,190,0.15)";
       if (view.colorLinksByType) return withAlpha(linkKindColor(l.kind), 0.9);
       if (view.colorLinks) return withAlpha(R.color.get(s) ?? cssAccent, 0.85);
       return "rgba(190,196,220,0.85)";
     }
     const bright = R.pass.has(s) && R.pass.has(t);
-    if (view.colorLinksByType) return withAlpha(linkKindColor(l.kind), bright ? 0.7 : 0.08);
-    if (view.colorLinks) return withAlpha(R.color.get(s) ?? cssAccent, bright ? 0.6 : 0.08);
-    return bright ? "rgba(160,166,190,0.5)" : "rgba(160,166,190,0.08)";
+    if (view.colorLinksByType) return withAlpha(linkKindColor(l.kind), bright ? 0.7 : 0.18);
+    if (view.colorLinks) return withAlpha(R.color.get(s) ?? cssAccent, bright ? 0.6 : 0.18);
+    return bright ? "rgba(160,166,190,0.5)" : "rgba(160,166,190,0.18)";
   }
   // node3dVal drives the sphere volume. Honors the "Size by" pref so centrality
   // (PageRank) hubs read bigger in 3D too, matching the 2D radius logic.
@@ -1290,6 +1373,29 @@
     repaint();
   });
 
+  // ---- clear a selection that's been filtered out of the visible graph (audit
+  // #17). Selecting a node and then narrowing the filters (or leaving local scope)
+  // could leave view.selectedId pointing at a node that's no longer shown. Read the
+  // filter fields + visibleCount so this re-runs after recompute rebuilds R.pass. ----
+  $effect(() => {
+    void [
+      view.search,
+      view.filterFolders,
+      view.filterTags,
+      view.filterSources,
+      view.hideOrphans,
+      view.mode,
+      view.depth,
+      view.rootId,
+      visibleCount,
+    ];
+    const id = view.selectedId;
+    if (!id) return;
+    const node = allNodes.find((n) => n.id === id);
+    // Gone from the dataset entirely, or present but no longer in scope/passing.
+    if (!node || !R.pass.has(id)) view.selectedId = null;
+  });
+
   // ---- node sizing pref → repaint (matters when the sim is frozen) ----
   $effect(() => {
     void view.sizeBy;
@@ -1444,6 +1550,19 @@
     savePersisted();
   });
 
+  // ---- reduced-motion preference: keep `reduce` live (audit #27) ----
+  $effect(() => {
+    const mq = window.matchMedia?.("(prefers-reduced-motion: reduce)");
+    if (!mq) return;
+    const onChange = () => {
+      reduce = mq.matches;
+      refreshFx(); // reduced-motion downgrades the effective fx level
+      repaint();
+    };
+    mq.addEventListener?.("change", onChange);
+    return () => mq.removeEventListener?.("change", onChange);
+  });
+
   // ---- theme changes: refresh cached colors + canvas bg ----
   $effect(() => {
     if (typeof MutationObserver === "undefined") return;
@@ -1553,7 +1672,15 @@
     {/if}
   {/if}
 
-  <div class="graph-canvas" bind:this={container}></div>
+  <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+  <div
+    class="graph-canvas"
+    bind:this={container}
+    tabindex="0"
+    role="application"
+    aria-label="Knowledge graph. Use arrow keys to move between connected notes, Enter to open."
+    onfocus={onCanvasFocus}
+  ></div>
 
   <!-- Screen-reader live region + structured fallback (canvas is invisible to AT). -->
   <div class="sr-only" aria-live="polite">{announce}</div>

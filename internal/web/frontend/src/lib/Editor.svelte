@@ -1,8 +1,16 @@
 <script lang="ts">
   import { createQuery, useQueryClient } from "@tanstack/svelte-query";
   import { api, SaveConflict } from "./api";
+  import { registerLeaveGuard } from "./router.svelte";
   import CodeMirror from "./CodeMirror.svelte";
   import { renderMermaidIn, observeTheme } from "./mermaid";
+  import {
+    openEditor,
+    closeEditor,
+    setEditorDirty,
+    editorState,
+    clearChangedOnDisk,
+  } from "./editorState.svelte";
 
   let { handle, onClose }: { handle: string; onClose: () => void } = $props();
 
@@ -20,11 +28,49 @@
   let previewHTML = $state("");
   let saving = $state(false);
   let error = $state("");
+  // Conflict (409) state: when set, the bar offers Reload (discard buffer) vs
+  // Overwrite (re-save over the on-disk version) instead of silently losing edits.
+  let conflict = $state(false);
+  // Transient "Saved" confirmation after an in-place save (W8).
+  let savedFlash = $state(false);
+  let savedTimer: ReturnType<typeof setTimeout> | undefined;
 
   // The last text we seeded the buffer with (on load or after a tag edit), so we
   // can tell whether the body has unsaved edits.
   let seededText = $state("");
   const dirty = $derived(loaded && buffer !== seededText);
+
+  // Publish open/dirty state so SSE skips clobbering our ["raw"] cache, and the
+  // router leave guard + beforeunload can confirm before discarding edits (W1/W2).
+  $effect(() => {
+    openEditor(handle);
+    const unguard = registerLeaveGuard(() => !dirty || confirm("Discard unsaved changes?"));
+    return () => {
+      unguard();
+      closeEditor();
+    };
+  });
+  $effect(() => {
+    setEditorDirty(dirty);
+  });
+  // The SSE bridge flags this when the note changed on disk while we're editing.
+  const changedOnDisk = $derived(editorState.changedOnDisk);
+
+  // Pull the latest on-disk version into the buffer (reload-to-merge). Discards
+  // any unsaved buffer edits, so it's only offered as an explicit action.
+  async function reloadFromDisk() {
+    try {
+      const r = await api.raw(handle);
+      buffer = r.text;
+      etag = r.etag;
+      seededText = r.text;
+      conflict = false;
+      error = "";
+      clearChangedOnDisk();
+    } catch (e) {
+      error = `Couldn't reload: ${String(e)}`;
+    }
+  }
 
   // Seed the buffer once the raw note loads (don't clobber later edits).
   $effect(() => {
@@ -37,17 +83,23 @@
   });
 
   // Debounced live preview through the same goldmark path the note page uses.
+  // Each run aborts the previous in-flight request so a slow earlier response can
+  // never overwrite a newer one (W23).
   $effect(() => {
     const text = buffer;
     if (!loaded) return;
+    const ctrl = new AbortController();
     const id = setTimeout(async () => {
       try {
-        previewHTML = await api.preview(text);
+        previewHTML = await api.preview(text, ctrl.signal);
       } catch {
-        /* transient; keep last good preview */
+        /* aborted or transient; keep last good preview */
       }
     }, 250);
-    return () => clearTimeout(id);
+    return () => {
+      clearTimeout(id);
+      ctrl.abort();
+    };
   });
 
   // The preview is server-rendered HTML, so ```mermaid``` fences arrive as
@@ -74,8 +126,8 @@
   let newTag = $state("");
   let tagBusy = $state(false);
   const tags = $derived($noteQ.data?.tags ?? []);
-  async function editTags(add: string, remove = "") {
-    if (tagBusy) return;
+  async function editTags(add: string, remove = ""): Promise<boolean> {
+    if (tagBusy) return false;
     tagBusy = true;
     try {
       await api.noteTags(handle, add, remove);
@@ -88,54 +140,147 @@
       buffer = r.text;
       etag = r.etag;
       seededText = r.text;
+      return true;
     } catch (e) {
       error = String(e);
+      return false;
     } finally {
       tagBusy = false;
     }
   }
-  function addTag(e: SubmitEvent) {
+  async function addTag(e: SubmitEvent) {
     e.preventDefault();
     const t = newTag.trim().replace(/^@/, "");
-    if (t) {
-      newTag = "";
-      void editTags(t);
-    }
+    if (!t) return;
+    // Clear the field only once the add succeeds, so a failed request doesn't
+    // lose what the user typed (W21).
+    if (await editTags(t)) newTag = "";
   }
 
-  async function save() {
+  // Persist the buffer WITHOUT closing (Cmd/Ctrl+S or the Save button). On success
+  // the etag is refreshed so subsequent saves don't 409, and a brief "Saved" flag
+  // confirms it; the editor stays open (W8). Returns whether the save succeeded so
+  // done() can decide whether to close.
+  async function saveInPlace(): Promise<boolean> {
+    if (saving) return false;
     saving = true;
     error = "";
     try {
       await api.save(handle, buffer, etag);
-      qc.invalidateQueries({ queryKey: ["note", handle] });
+      // Re-fetch the fresh etag so an in-place save can be repeated, and reseed
+      // the dirty baseline. Await the note invalidation before any close so the
+      // note view doesn't flash stale content (W22).
+      const r = await api.raw(handle);
+      etag = r.etag;
+      seededText = buffer;
+      conflict = false;
+      clearChangedOnDisk();
+      await qc.invalidateQueries({ queryKey: ["note", handle] });
       qc.invalidateQueries({ queryKey: ["raw", handle] });
       qc.invalidateQueries({ queryKey: ["notes"] });
-      onClose();
+      savedFlash = true;
+      clearTimeout(savedTimer);
+      savedTimer = setTimeout(() => (savedFlash = false), 1800);
+      return true;
     } catch (e) {
-      error =
-        e instanceof SaveConflict
-          ? "This note changed on disk since you opened it — close and reopen to merge."
-          : String(e);
+      if (e instanceof SaveConflict) {
+        // Don't lose the buffer: offer Reload (take disk) vs Overwrite (W19).
+        conflict = true;
+        error = "This note changed on disk since you opened it.";
+      } else {
+        error = String(e);
+      }
+      return false;
     } finally {
       saving = false;
     }
   }
+
+  // Overwrite the on-disk version with the current buffer after a conflict:
+  // re-fetch the latest etag, then save against it (the user chose to keep their
+  // edits over what landed on disk). The buffer is never discarded (W19).
+  async function overwrite() {
+    if (saving) return;
+    saving = true;
+    error = "";
+    try {
+      const r = await api.raw(handle);
+      etag = r.etag;
+      await api.save(handle, buffer, etag);
+      const fresh = await api.raw(handle);
+      etag = fresh.etag;
+      seededText = buffer;
+      conflict = false;
+      clearChangedOnDisk();
+      await qc.invalidateQueries({ queryKey: ["note", handle] });
+      qc.invalidateQueries({ queryKey: ["raw", handle] });
+      qc.invalidateQueries({ queryKey: ["notes"] });
+      savedFlash = true;
+      clearTimeout(savedTimer);
+      savedTimer = setTimeout(() => (savedFlash = false), 1800);
+    } catch (e) {
+      error = `Couldn't overwrite: ${String(e)}`;
+    } finally {
+      saving = false;
+    }
+  }
+
+  // Done = save then close (only closes if the save succeeded, so a conflict
+  // keeps you in the editor with your buffer intact).
+  async function done() {
+    if (await saveInPlace()) onClose();
+  }
+
+  // Close, confirming first if there are unsaved edits (Cancel / Escape) (W2).
+  function requestClose() {
+    if (dirty && !confirm("Discard unsaved changes?")) return;
+    onClose();
+  }
+
+  // Guard a hard reload / tab close while dirty (W2).
+  $effect(() => {
+    function beforeUnload(e: BeforeUnloadEvent) {
+      if (dirty) {
+        e.preventDefault();
+        e.returnValue = ""; // required by some browsers to trigger the prompt
+      }
+    }
+    window.addEventListener("beforeunload", beforeUnload);
+    return () => window.removeEventListener("beforeunload", beforeUnload);
+  });
 
 </script>
 
 <div class="editor">
   <div class="editor__bar">
     <div class="pillbar">
-      <button class="pillbar__btn pillbar__btn--accent" onclick={save} disabled={saving || !loaded}>
+      <button class="pillbar__btn pillbar__btn--accent" onclick={saveInPlace} disabled={saving || !loaded}>
         {saving ? "Saving…" : "Save"}
       </button>
+      <button class="pillbar__btn" onclick={done} disabled={saving || !loaded}>Done</button>
       <span class="pillbar__sep"></span>
-      <button class="pillbar__btn" onclick={onClose}>Cancel</button>
+      <button class="pillbar__btn" onclick={requestClose}>Cancel</button>
     </div>
     <span class="kbd">⌘/Ctrl+S</span>
-    {#if error}<span class="error">{error}</span>{/if}
+    <!-- Status + errors announced to assistive tech (W16). -->
+    <span class="editor__status" aria-live="polite">
+      {#if savedFlash}Saved{:else if dirty}Unsaved changes{/if}
+    </span>
+    {#if error}<span class="error" role="alert">{error}</span>{/if}
   </div>
+
+  {#if conflict}
+    <div class="editor__banner editor__banner--warn" role="alert">
+      <span>This note changed on disk since you opened it.</span>
+      <button class="pillbar__btn" onclick={reloadFromDisk} disabled={saving}>Reload (discard my edits)</button>
+      <button class="pillbar__btn pillbar__btn--accent" onclick={overwrite} disabled={saving}>Overwrite with my edits</button>
+    </div>
+  {:else if changedOnDisk}
+    <div class="editor__banner" role="status">
+      <span>Changed on disk — reload to merge.</span>
+      <button class="pillbar__btn" onclick={reloadFromDisk} disabled={saving || dirty} title={dirty ? "Save or discard your edits first" : "Reload from disk"}>Reload</button>
+    </div>
+  {/if}
 
   {#if $noteQ.data}
     <div class="editor__context editor__tags">
@@ -190,8 +335,8 @@
           <CodeMirror
             value={buffer}
             onChange={(v) => (buffer = v)}
-            onSave={save}
-            onEscape={onClose}
+            onSave={saveInPlace}
+            onEscape={requestClose}
             getNotes={() => $notesQ.data?.index ?? []}
           />
         </div>

@@ -7,6 +7,7 @@ vi.mock("../lib/router.svelte", () => ({
   navigate: vi.fn(),
   loc: { path: "/", query: new URLSearchParams() },
   initRouter: () => () => {},
+  registerLeaveGuard: () => () => {},
 }));
 
 // Mock the API client so components render against fixtures, no server needed.
@@ -131,7 +132,7 @@ describe("NoteView", () => {
 });
 
 describe("Editor", () => {
-  it("loads raw text and saves with the captured etag, then closes", async () => {
+  it("Save persists with the captured etag but keeps the editor open (W8)", async () => {
     const onClose = vi.fn();
     render(Harness, { props: { comp: Editor, props: { handle: "def", onClose } } });
 
@@ -145,6 +146,20 @@ describe("Editor", () => {
     expect(call?.[0]).toBe("def");
     expect(call?.[1]).toContain("the body"); // the loaded buffer was saved back
     expect(call?.[2]).toBe('"e1"');
+    // Save-in-place must NOT close the editor; that's reserved for Done/Cancel.
+    await vi.waitFor(() => expect(api.save).toHaveBeenCalled());
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it("Done saves then closes the editor (W8)", async () => {
+    const onClose = vi.fn();
+    render(Harness, { props: { comp: Editor, props: { handle: "def", onClose } } });
+
+    const doneBtn = (await screen.findByText("Done")) as HTMLButtonElement;
+    await vi.waitFor(() => expect(doneBtn.disabled).toBe(false));
+
+    await fireEvent.click(doneBtn);
+    expect(api.save).toHaveBeenCalledOnce();
     await vi.waitFor(() => expect(onClose).toHaveBeenCalled());
   });
 });

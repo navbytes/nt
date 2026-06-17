@@ -8,9 +8,18 @@ const NOTES: NoteLink[] = [
   { url: "/n/c", title: "Meeting Notes", path: "meeting.md" },
 ];
 
-// A minimal CompletionContext: only matchBefore is used by the source.
-function ctx(textBeforeCursor: string) {
+// A minimal CompletionContext: matchBefore + pos + state.sliceDoc are used by the
+// source. `after` is the text immediately following the cursor (for the existing
+// `]`/`]]` closer detection).
+function ctx(textBeforeCursor: string, after = "") {
+  const full = textBeforeCursor + after;
   return {
+    pos: textBeforeCursor.length,
+    state: {
+      sliceDoc(from: number, to: number) {
+        return full.slice(from, to);
+      },
+    },
     matchBefore(re: RegExp) {
       const m = textBeforeCursor.match(re);
       if (!m) return null;
@@ -46,5 +55,22 @@ describe("makeWikilinkSource", () => {
 
   it("lists all notes for an empty query right after [[", () => {
     expect(source(ctx("[["))!.options).toHaveLength(NOTES.length);
+  });
+
+  it("does not double the closer when ]] already follows the cursor", () => {
+    const res = source(ctx("see [[Arch", "]]"));
+    expect(res!.options.find((o) => o.label === "Architecture")!.apply).toBe("Architecture");
+  });
+
+  it("appends only one ] when a single ] already follows", () => {
+    const res = source(ctx("see [[Arch", "]"));
+    expect(res!.options.find((o) => o.label === "Architecture")!.apply).toBe("Architecture]");
+  });
+
+  it("returns a disabled hint instead of null when nothing matches", () => {
+    const res = source(ctx("[[zzzznope"));
+    expect(res).not.toBeNull();
+    expect(res!.options).toHaveLength(1);
+    expect(res!.options[0]!.label).toBe("No matching notes");
   });
 });

@@ -24,7 +24,14 @@ export interface QuickAdd {
   tags: string[];
   /** [[wikilink]] targets. */
   links: string[];
+  /** Recognised keys typed with no value yet (e.g. "due:" while still typing) —
+   *  surfaced so the preview can hint "due needs a value" instead of silently
+   *  dropping the token into the title. */
+  emptyKeys: string[];
 }
+
+// The recognised value-keys (and their aliases) the quick-add grammar resolves.
+const VALUE_KEYS = new Set(["due", "t", "rec", "est"]);
 
 const PRI_WORDS: Record<string, string> = {
   high: "A",
@@ -46,7 +53,7 @@ function priFromWord(w: string): string | null {
 }
 
 export function parseQuickAdd(text: string): QuickAdd {
-  const out: QuickAdd = { title: "", tags: [], links: [] };
+  const out: QuickAdd = { title: "", tags: [], links: [], emptyKeys: [] };
   let s = text.trim();
 
   // A leading (A)–(Z) is a literal todo.txt priority. Only UPPERCASE counts —
@@ -81,6 +88,14 @@ export function parseQuickAdd(text: string): QuickAdd {
     if (w.length > 1 && w[0] === "@") {
       const tag = w.slice(1);
       if (!out.tags.includes(tag)) out.tags.push(tag);
+      continue;
+    }
+    // A recognised value-key with nothing after the colon ("due:") is mid-type —
+    // surface it as a hint rather than dropping the token into the title.
+    const bare = /^([a-zA-Z][\w-]*):$/.exec(w);
+    if (bare && VALUE_KEYS.has(bare[1]!.toLowerCase())) {
+      const k = bare[1]!.toLowerCase();
+      if (!out.emptyKeys.includes(k)) out.emptyKeys.push(k);
       continue;
     }
     // Mirror task.go's splitKV: a value starting with "/" (URL-ish) is NOT a

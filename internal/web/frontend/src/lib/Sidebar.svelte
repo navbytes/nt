@@ -172,10 +172,13 @@
     {#if $notesQ.isPending}
       <p class="muted small">Loading…</p>
     {:else if $notesQ.data}
-      {#each $notesQ.data.tree as node (node.path + node.url)}
-        <TreeItem {node} {path} />
-      {/each}
-      {#if $notesQ.data.tree.length === 0}
+      {#if $notesQ.data.tree.length > 0}
+        <div role="tree" aria-label="Notes">
+          {#each $notesQ.data.tree as node, i (node.path + node.url)}
+            <TreeItem {node} {path} isFirst={i === 0} />
+          {/each}
+        </div>
+      {:else}
         <p class="muted small">No notes yet.</p>
       {/if}
     {/if}

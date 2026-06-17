@@ -15,6 +15,9 @@
 
   let editing = $state(false);
   let activeId = $state("");
+  // Ref to the rendered note body, so Mermaid renders into THIS note's prose and
+  // not the editor preview's also-".prose" pane (W33).
+  let bodyEl: HTMLElement | undefined = $state();
 
   // ---- move to folder (the note keeps its id/URL; links are rewritten) ----
   let moving = $state(false);
@@ -197,7 +200,10 @@
     if (!html) return;
     let cancelled = false;
     const render = () => {
-      const el = document.querySelector<HTMLElement>(".prose");
+      // Scope to THIS note's body via a ref — the global ".prose" selector also
+      // matches the editor's live-preview pane, so the first match could be the
+      // wrong element (W33).
+      const el = bodyEl;
       if (el && !cancelled) void renderMermaidIn(el);
     };
     const id = setTimeout(render, 0); // defer so the DOM is updated first
@@ -272,7 +278,7 @@
             <button class="btn btn--sm btn--danger" onclick={() => doDelete("")} disabled={deleteBusy}>Delete</button>
           {/if}
           <button class="btn btn--ghost btn--sm" onclick={() => (confirmingDelete = false)}>Cancel</button>
-          {#if deleteErr}<span class="error small">{deleteErr}</span>{/if}
+          {#if deleteErr}<span class="error small" role="alert">{deleteErr}</span>{/if}
         </div>
       {/if}
       {#if addingTask}
@@ -286,7 +292,7 @@
           />
           <button class="btn btn--sm" onclick={doAddTask} disabled={taskBusy}>{taskBusy ? "Adding…" : "Add task"}</button>
           <button class="btn btn--ghost btn--sm" onclick={() => (addingTask = false)}>Cancel</button>
-          {#if taskErr}<span class="error small">{taskErr}</span>{/if}
+          {#if taskErr}<span class="error small" role="alert">{taskErr}</span>{/if}
         </div>
       {/if}
       {#if moving}
@@ -304,7 +310,7 @@
           </datalist>
           <button class="btn btn--sm" onclick={doMove} disabled={moveBusy}>{moveBusy ? "Moving…" : "Move"}</button>
           <button class="btn btn--ghost btn--sm" onclick={() => (moving = false)}>Cancel</button>
-          {#if moveErr}<span class="error small">{moveErr}</span>{/if}
+          {#if moveErr}<span class="error small" role="alert">{moveErr}</span>{/if}
         </div>
       {/if}
       {#if n.archived}
@@ -327,7 +333,7 @@
       </div>
 
       <!-- bodyHTML is rendered server-side by goldmark (safe mode, escaped). -->
-      <div class="prose">{@html n.bodyHTML}</div>
+      <div class="prose" bind:this={bodyEl}>{@html n.bodyHTML}</div>
 
       {#if n.taskRefs.length}
         <section class="panel">

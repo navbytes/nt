@@ -14,8 +14,23 @@ function sync(): void {
   loc.query = new URLSearchParams(window.location.search);
 }
 
+// SPA leave guards (W2): the open editor registers a guard that confirms before
+// navigating away with unsaved edits. Kept as a generic list so other views can
+// opt in later without coupling the router to the editor.
+type LeaveGuard = () => boolean; // return false to block navigation
+const leaveGuards = new Set<LeaveGuard>();
+export function registerLeaveGuard(g: LeaveGuard): () => void {
+  leaveGuards.add(g);
+  return () => leaveGuards.delete(g);
+}
+function canLeave(): boolean {
+  for (const g of leaveGuards) if (!g()) return false;
+  return true;
+}
+
 export function navigate(to: string): void {
   if (to === loc.path + (loc.query.toString() ? `?${loc.query}` : "")) return;
+  if (!canLeave()) return;
   history.pushState({}, "", to);
   sync();
   window.scrollTo(0, 0);
