@@ -1455,11 +1455,6 @@ body.resizing {
   border-left: 3px solid var(--accent-2);
   border-radius: var(--radius-sm);
 }
-.crumbs span::after {
-  content: "/";
-  margin-left: 6px;
-  color: var(--border);
-}
 .crumbs__file::after,
 .crumbs .spacer::after {
   content: "";

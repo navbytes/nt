@@ -61,7 +61,7 @@ web: build ## Serve the web UI in the background, editing on (stop with: make we
 	./$(BINARY) web -detach
 
 web-stop: build ## Stop the backgrounded web UI
-	./$(BINARY) web --stop
+	./$(BINARY) web -stop
 
 ##@ Desktop app (Wails — a separate nested module under desktop/)
 # desktop/ keeps its Wails/CGO/WebKit deps out of the CLI's go.mod, so

@@ -55,6 +55,13 @@
   let three3d: any = null; // the lazy-loaded THREE namespace (3D only)
   let SpriteText3d: any = null; // lazy-loaded three-spritetext ctor (3D labels)
   let glowTex: any = null; // shared additive corona texture for 3D nodes (lazy)
+  // Camera-adaptive glow (3D): the additive coronas are sized in WORLD space and the
+  // fog fades by absolute distance, so the apparent glow swings from white-out (zoomed
+  // in) to black-out (zoomed out). We counter-scale bloom strength + fog density by how
+  // far the camera sits from the framed "neutral" distance to keep glow ~constant.
+  const FOG_NEUTRAL = 0.00045; // fog density at the framed distance (was a flat 0.0009)
+  let camRefDist = 0; // camera distance when the graph was first framed (neutral point)
+  let camRefTO: ReturnType<typeof setTimeout> | undefined; // locks camRefDist post-fit
   // 3D is INTENTIONALLY a dark "deep space" field in BOTH themes — the
   // UnrealBloomPass + additive coronas only read as luminous stars against a
   // near-black background, so we don't follow the page theme here (audit #5).
@@ -1140,6 +1147,31 @@
   function bloomStrength(): number {
     return view.effects === "off" ? 0 : view.effects === "subtle" ? 1.0 : 1.6;
   }
+  // Keep the 3D glow legible across the whole zoom range. The bloom + additive coronas
+  // read as a white-out when the camera is close (world-sized coronas flood the frame)
+  // and the distance fog blacks everything out when it pulls back — both scale with
+  // camera distance, so we counter-scale bloom strength and fog density against the
+  // framed "neutral" distance. Cheap (a few math ops) → safe to run on every
+  // OrbitControls change. Until the opening fit locks camRefDist we apply the base look.
+  function tuneGlowForCamera() {
+    if (!graph || !built3d) return;
+    const base = bloomStrength();
+    const cam = graph.camera?.();
+    const fog = graph.scene?.()?.fog;
+    if (!cam || !camRefDist) {
+      if (bloomPass) bloomPass.strength = base;
+      if (fog) fog.density = FOG_NEUTRAL;
+      return;
+    }
+    const d = Math.hypot(cam.position.x, cam.position.y, cam.position.z);
+    const rel = (d || camRefDist) / camRefDist; // >1 zoomed out, <1 zoomed in
+    // Damp the bloom as you approach (kills the white-out), restore it — capped — as
+    // you pull back so distant nodes still read as luminous stars.
+    if (bloomPass) bloomPass.strength = base * Math.min(1.4, Math.max(0.3, rel));
+    // Fog as a RELATIVE depth cue: track the zoom so the near side stays crisp and only
+    // the far side hazes, instead of the whole field fading to the background (black-out).
+    if (fog) fog.density = FOG_NEUTRAL * Math.min(1.8, Math.max(0.45, 1 / rel));
+  }
   // 3D: re-set the color accessors with fresh closures so three rebuilds the
   // materials after a filter / colorBy / hover change (2D just repaints). Coalesced
   // through schedule3d so a burst of hover events collapses to one digest per frame.
@@ -1207,6 +1239,11 @@
     if (raf3d) cancelAnimationFrame(raf3d);
     raf3d = 0;
     pending3d = 0;
+    // Drop the camera-adaptive-glow state from the old renderer (the 2D⟷3D swap and
+    // data reloads reframe the graph, so the neutral distance must be re-locked).
+    if (camRefTO) clearTimeout(camRefTO);
+    camRefTO = undefined;
+    camRefDist = 0;
     try {
       graph?._destructor?.();
     } catch {
@@ -1270,6 +1307,14 @@
           if (fitPending) {
             fitPending = false;
             graph?.zoomToFit?.(reduce ? 0 : 400, 60);
+            // Lock the neutral glow distance once the fit tween settles, then tune so
+            // the adaptive bloom/fog measure zoom relative to the framed view.
+            if (camRefTO) clearTimeout(camRefTO);
+            camRefTO = setTimeout(() => {
+              const cam = graph?.camera?.();
+              if (cam) camRefDist = Math.hypot(cam.position.x, cam.position.y, cam.position.z);
+              tuneGlowForCamera();
+            }, reduce ? 0 : 450);
           }
         })
         .onEngineStop(() => {
@@ -1291,7 +1336,7 @@
       // big constellations (skipped in the flat "Effects: off" look).
       if (view.effects !== "off") {
         try {
-          g.scene().fog = new THREE.FogExp2(BG3D, 0.0009);
+          g.scene().fog = new THREE.FogExp2(BG3D, FOG_NEUTRAL);
         } catch (e) {
           console.warn("3D fog unavailable:", e);
         }
@@ -1302,6 +1347,8 @@
         if (ctrls) {
           ctrls.autoRotate = view.autoRotate;
           ctrls.autoRotateSpeed = 0.6;
+          // Re-tune the glow whenever the camera zooms/orbits (fires on every move).
+          ctrls.addEventListener?.("change", tuneGlowForCamera);
         }
       } catch {
         /* controls not ready — the effect below re-applies */
@@ -1413,6 +1460,7 @@
       destroyed = true;
       if (clickTO) clearTimeout(clickTO);
       if (lpTimer) clearTimeout(lpTimer);
+      if (camRefTO) clearTimeout(camRefTO);
       if (dofRAF) cancelAnimationFrame(dofRAF);
       if (pulseRAF) cancelAnimationFrame(pulseRAF);
       if (raf3d) cancelAnimationFrame(raf3d);
@@ -1539,7 +1587,7 @@
   $effect(() => {
     void [view.effects, view.colorLinks, view.colorLinksByType, view.linkStyle, view.dim];
     if (!graph || !built3d) return;
-    if (bloomPass) bloomPass.strength = bloomStrength();
+    tuneGlowForCamera(); // bloom strength scaled to the current zoom (not just base)
     graph.linkColor((l: any) => link3dColor(l));
     graph.linkCurvature(view.linkStyle === "curved" ? 0.18 : 0);
   });
