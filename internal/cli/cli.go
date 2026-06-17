@@ -87,6 +87,8 @@ func Run(args []string) int {
 		return cmdDoctor(rest)
 	case "git-init":
 		return cmdGitInit(rest)
+	case "migrate-task-notes":
+		return cmdMigrateTaskNotes(rest)
 	case "hook":
 		return cmdHook(rest)
 	case "mcp":
@@ -309,6 +311,7 @@ USAGE
   nt version                  print the nt version (alias: -v, --version)
   nt git-init                 set up the store for git (union-merge + .gitignore)
   nt doctor [--check]         reconcile tasks.txt (dedup ids) after a git merge
+  nt migrate-task-notes [--apply]  move legacy notes/tasks/ task notes to notes/__tasks__/
   nt hook                     sync a Claude Code TodoWrite event (PostToolUse hook)
   nt mcp                      run the MCP server (stdio) — typed tools for agents
   nt mcp install [--client]   register nt with an AI client (claude-code|claude-desktop)

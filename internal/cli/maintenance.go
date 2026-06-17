@@ -326,6 +326,96 @@ func cmdGitInit(args []string) int {
 	return 0
 }
 
+// cmdMigrateTaskNotes is a one-off migration: it moves auto-created task-detail
+// notes that still live under the legacy notes/tasks/ folder into the new
+// reserved notes/__tasks__/ folder (note.TaskNoteFolder), so they stop mixing
+// with a user's own "tasks" notes. Only notes that are (a) directly under tasks/
+// AND (b) linked from a task line are moved; hand-written notes are left
+// untouched. Dry-run by default — pass --apply to perform the moves. The move is
+// pure (same basename), so [[links]] keep resolving by path-suffix/title.
+func cmdMigrateTaskNotes(args []string) int {
+	fs := flag.NewFlagSet("migrate-task-notes", flag.ContinueOnError)
+	apply := fs.Bool("apply", false, "perform the moves (default is a dry-run preview)")
+	flags, _ := splitArgs(args, map[string]bool{"apply": true})
+	if err := fs.Parse(flags); err != nil {
+		return 2
+	}
+	e, ok := engine()
+	if !ok {
+		return 1
+	}
+	const legacy = "tasks"
+	dest := note.TaskNoteFolder
+	if dest == legacy {
+		fmt.Printf("nothing to do: the task-note folder is already %q\n", legacy)
+		return 0
+	}
+
+	notes, _ := note.List(e.S)
+	var move []*note.Note
+	skippedUnlinked := 0
+	for _, n := range notes {
+		if filepath.Dir(n.Rel) != legacy { // only files directly under notes/tasks/
+			continue
+		}
+		// Only auto task notes — i.e. ones a task line links to. A note that merely
+		// happens to live in tasks/ (and isn't referenced by any task) is the user's
+		// own and is left alone.
+		linkedFromTask := false
+		for _, h := range links.Backlinks(e.S, "", n.Rel) {
+			if h.Path == e.S.TasksFile() {
+				linkedFromTask = true
+				break
+			}
+		}
+		if !linkedFromTask {
+			skippedUnlinked++
+			continue
+		}
+		move = append(move, n)
+	}
+
+	if len(move) == 0 {
+		fmt.Printf("no task notes to migrate under notes/%s/", legacy)
+		if skippedUnlinked > 0 {
+			fmt.Printf(" (%d unlinked note(s) there left untouched)", skippedUnlinked)
+		}
+		fmt.Println()
+		return 0
+	}
+
+	if !*apply {
+		fmt.Printf("would move %d task note(s): notes/%s/ → notes/%s/\n", len(move), legacy, dest)
+		for _, n := range move {
+			fmt.Printf("  %s  →  %s/%s.md\n", n.Rel, dest, noteBase(n.Rel))
+		}
+		if skippedUnlinked > 0 {
+			fmt.Printf("(%d unlinked note(s) under notes/%s/ left untouched)\n", skippedUnlinked, legacy)
+		}
+		fmt.Println("re-run with --apply to perform the move")
+		return 0
+	}
+
+	moved := 0
+	for _, n := range move {
+		if _, _, err := e.RenameNote(n, notes, dest+"/"+noteBase(n.Rel)); err != nil {
+			fmt.Fprintf(os.Stderr, "  skip %s: %v\n", n.Rel, err)
+			continue
+		}
+		moved++
+	}
+	fmt.Printf("moved %d task note(s) → notes/%s/\n", moved, dest)
+	if skippedUnlinked > 0 {
+		fmt.Printf("left %d unlinked note(s) under notes/%s/ untouched\n", skippedUnlinked, legacy)
+	}
+	return 0
+}
+
+// noteBase returns a note's filename (slug) without its folder or .md suffix.
+func noteBase(rel string) string {
+	return strings.TrimSuffix(filepath.Base(rel), ".md")
+}
+
 // cmdHook reads a Claude Code PostToolUse JSON event from stdin and syncs the
 // session's TodoWrite list into nt (SPEC §8). It is deliberately silent and
 // always exits 0 — a hook must never break or slow the Claude session.
