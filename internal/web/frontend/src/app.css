@@ -663,10 +663,6 @@ body.resizing {
 }
 .main {
   width: 100%;
-  /* Cap the content measure on very wide screens so layouts don't sprawl
-     edge-to-edge (finding 13); centered within the pane. */
-  max-width: 1320px;
-  margin: 0 auto;
   padding: var(--space-7) var(--space-8) var(--space-10);
 }
 

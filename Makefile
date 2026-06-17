@@ -58,7 +58,7 @@ web-types: ## Regenerate the SPA's TS types from the Go wire contract (commit th
 ##@ Run the local web UI (over your real store, $NT_DIR)
 
 web: build ## Serve the web UI in the background, editing on (stop with: make web-stop)
-	./$(BINARY) web --edit --detach
+	./$(BINARY) web -detach
 
 web-stop: build ## Stop the backgrounded web UI
 	./$(BINARY) web --stop
