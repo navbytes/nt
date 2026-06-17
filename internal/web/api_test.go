@@ -192,6 +192,7 @@ func TestAPINoteCreate(t *testing.T) {
 	}
 	if found == nil {
 		t.Fatalf("created note not found among %d notes", len(notes))
+		return
 	}
 	if !strings.HasPrefix(found.Rel, "work/") {
 		t.Errorf("note should be filed under work/, got rel %q", found.Rel)
@@ -354,6 +355,7 @@ func TestAPISearchIncludesTasks(t *testing.T) {
 	}
 	if taskHit == nil {
 		t.Fatalf("a matching task should appear in search results: %s", body)
+		return
 	}
 	if taskHit.URL != "/tasks" {
 		t.Errorf("task result should link to /tasks, got %q", taskHit.URL)

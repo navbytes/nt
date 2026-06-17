@@ -17,3 +17,7 @@ jobs:
       - uses: golangci/golangci-lint-action@v9
         with:
           version: v2.12.2
+          # Don't reuse the action's analysis cache: a stale cache was pinning
+          # SA5011 false positives that a fresh run (and local v2.12.2) doesn't
+          # report. Re-analyze each run for correct, reproducible results.
+          skip-cache: true

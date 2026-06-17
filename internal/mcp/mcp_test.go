@@ -387,6 +387,7 @@ func TestMCPAddWithBody(t *testing.T) {
 	}
 	if body == nil {
 		t.Fatalf("body note should be filed under %s/; rels=%v", note.TaskNoteFolder, relsOf(notes))
+		return
 	}
 	if !strings.Contains(body.Body, "single-flight guard") {
 		t.Errorf("note should hold the body text, got %q", body.Body)

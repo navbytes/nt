@@ -99,3 +99,23 @@ export function toggleFolder(path: string): void {
     /* ignore */
   }
 }
+
+export function expandFolder(path: string): void {
+  if (treeCollapsed.paths[path]) toggleFolder(path);
+}
+
+export function collapseFolder(path: string): void {
+  if (!treeCollapsed.paths[path]) toggleFolder(path);
+}
+
+// ---- roving tabindex for the notes tree (W15) ---------------------------------
+// The whole tree is ONE tab stop: exactly one treeitem carries tabindex=0 (the
+// "active" roving item), all others -1. Focus moving between items updates which
+// key is active, so Tab always returns to wherever the user last was. The key is
+// the node's url (notes) or path (folders) — stable across SSE refetches. null
+// means "not yet set"; TreeItem falls back to the active-note / first-item rule.
+export const treeRoving = $state<{ key: string | null }>({ key: null });
+
+export function setRovingItem(key: string): void {
+  treeRoving.key = key;
+}

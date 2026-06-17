@@ -365,7 +365,7 @@ func (s *server) add(a map[string]any) (string, error) {
 	}
 
 	// A task's detail belongs in a linked note ("body"). Three ways here, all
-	// filing the note under notes/tasks/ so these machine-made notes don't clutter
+	// filing the note under notes/__tasks__/ so these machine-made notes don't clutter
 	// a human's folders:
 	//   1. an explicit `body` → keep the short title on the task, body in the note;
 	//   2. else a paragraph-length title → split a short clause title off, full
@@ -426,9 +426,9 @@ func (s *server) add(a map[string]any) (string, error) {
 		return "", err
 	}
 	if splitNote != "" {
-		hint := "detail saved as the task's linked note under notes/tasks/ — following the task opens it."
+		hint := "detail saved as the task's linked note under notes/__tasks__/ — following the task opens it."
 		if strings.TrimSpace(str(a, "body")) == "" {
-			hint = "text was long, so it was split: a short title on the task, the full text in a linked note (notes/tasks/). Prefer a short text + a separate body next time."
+			hint = "text was long, so it was split: a short title on the task, the full text in a linked note (notes/__tasks__/). Prefer a short text + a separate body next time."
 		}
 		return jsonText(map[string]any{
 			"task": taskToOut(created),

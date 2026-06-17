@@ -135,6 +135,10 @@
 </div>
 
 <div class="bento">
+  <!-- ── MAIN COLUMN: the prominent Focus card, then the Recent-activity feed
+          stacked directly beneath it. A self-contained flex stack, so it never
+          shares grid rows with the rail (which is what created the voids). ──── -->
+  <div class="bento__col bento__col--main">
   <!-- ── FOCUS (largest): overdue + due-today agenda, rendered by the shared
           TaskRow/TaskRows. Quick Capture is TaskRows' own add form (live parse
           preview); when the plan is empty TaskRows draws the .empty--hero
@@ -173,6 +177,34 @@
     {/if}
   </section>
 
+  <!-- ── RECENT ACTIVITY: existing feed (dots + hairlines), stacked under
+          Focus in the main column. ──────────────────────────────────────── -->
+  <section class="card card--feed" aria-labelledby="act-h">
+    <div class="card__head">
+      <h2 class="card__label" id="act-h">Recent activity</h2>
+      <a class="card__all" href="/activity">View all <Icon name="arrow-right" size={13} /></a>
+    </div>
+    {#each recent as day (day.date)}
+      <ul class="feed">
+        {#each (day.events ?? []).slice(0, 9) as ev (ev.when + ev.title)}
+          <li class="feed__item">
+            <span class="feed__glyph feed__glyph--{ev.action}" title={actionVerb(ev.action)} aria-hidden="true"><Icon name={actionIcon(ev.action)} size={11} /></span>
+            <!-- Spoken verb so the action isn't carried by colour alone (finding 11). -->
+            <span class="feed__verb">{actionVerb(ev.action)}:</span>
+            {#if ev.url}<a class="feed__title" href={ev.url}>{ev.title}</a>{:else}<span class="feed__title">{ev.title}</span>{/if}
+            <span class="feed__when">{relDay(ev.when)}</span>
+          </li>
+        {/each}
+      </ul>
+    {:else}
+      <p class="card__blank muted">No activity yet — your adds and completions land here.</p>
+    {/each}
+  </section>
+  </div>
+
+  <!-- ── RAIL COLUMN: capacity → momentum → this-week, a 1fr flex stack that
+          keeps its own rows independent of the main column. ───────────────── -->
+  <div class="bento__col bento__col--rail">
   <!-- ── CAPACITY RING: planned est: vs daily budget (capacity.ts math) ───── -->
   <section class="card card--capacity" aria-labelledby="cap-h">
     <div class="card__head">
@@ -243,29 +275,7 @@
       <p class="card__foot muted small">Tasks completed · last 7 days</p>
     </section>
   {/if}
-
-  <!-- ── RECENT ACTIVITY: existing feed, restyled (dots + hairlines) ─────── -->
-  <section class="card card--feed" aria-labelledby="act-h">
-    <div class="card__head">
-      <h2 class="card__label" id="act-h">Recent activity</h2>
-      <a class="card__all" href="/activity">View all <Icon name="arrow-right" size={13} /></a>
-    </div>
-    {#each recent as day (day.date)}
-      <ul class="feed">
-        {#each (day.events ?? []).slice(0, 9) as ev (ev.when + ev.title)}
-          <li class="feed__item">
-            <span class="feed__glyph feed__glyph--{ev.action}" title={actionVerb(ev.action)} aria-hidden="true"><Icon name={actionIcon(ev.action)} size={11} /></span>
-            <!-- Spoken verb so the action isn't carried by colour alone (finding 11). -->
-            <span class="feed__verb">{actionVerb(ev.action)}:</span>
-            {#if ev.url}<a class="feed__title" href={ev.url}>{ev.title}</a>{:else}<span class="feed__title">{ev.title}</span>{/if}
-            <span class="feed__when">{relDay(ev.when)}</span>
-          </li>
-        {/each}
-      </ul>
-    {:else}
-      <p class="card__blank muted">No activity yet — your adds and completions land here.</p>
-    {/each}
-  </section>
+  </div>
 </div>
 
 <style>
@@ -310,34 +320,27 @@
   }
 
   /* ── bento grid ────────────────────────────────────────────────────────── */
+  /* Two INDEPENDENT column stacks (not a shared cell grid): a wider main column
+     and a narrower rail. Because each column is its own flex stack, the columns
+     never share grid rows, so a short Focus card can't leave a void beside the
+     rail (nor the feed strand off to the bottom-left). */
   .bento {
     display: grid;
-    grid-template-columns: repeat(6, 1fr);
+    grid-template-columns: 2fr 1fr;
     gap: var(--space-5);
     align-items: start;
   }
-  /* Asymmetric, varied-weight placement. FOCUS spans the left two-thirds and
-     three rows; the right rail stacks capacity → momentum → trend → feed. */
-  .card--focus {
-    grid-column: span 4;
-    grid-row: span 3;
+  /* main: Focus → Recent activity.  rail: Capacity → Momentum → This week. */
+  .bento__col {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-5);
+    min-width: 0;
   }
   /* On a clear day TaskRows draws its own centered "all clear" hero; the keycap
      hint below would just be noise under it, so hide it. */
   .card--clear .card__hint {
     display: none;
-  }
-  .card--capacity {
-    grid-column: span 2;
-  }
-  .card--stats {
-    grid-column: span 2;
-  }
-  .card--trend {
-    grid-column: span 2;
-  }
-  .card--feed {
-    grid-column: span 2;
   }
 
   /* ── card shell (glass bento) ──────────────────────────────────────────── */
@@ -566,32 +569,31 @@
     font-variant-numeric: tabular-nums;
   }
 
-  /* ── responsive: collapse the bento toward a single column ─────────────── */
+  /* ── responsive: collapse to a single column with a sensible reading order ─ */
+  /* Below 1040px the two columns dissolve (display:contents) so all five cards
+     flow in one column; `order` interleaves them as Focus → Capacity → Momentum
+     → This week → Recent activity. */
   @media (max-width: 1040px) {
-    .bento {
-      grid-template-columns: repeat(2, 1fr);
-    }
-    .card--focus {
-      grid-column: span 2;
-      grid-row: auto;
-    }
-    .card--capacity,
-    .card--stats,
-    .card--trend,
-    .card--feed {
-      grid-column: span 1;
-    }
-  }
-  @media (max-width: 640px) {
     .bento {
       grid-template-columns: 1fr;
     }
-    .card--focus,
-    .card--capacity,
-    .card--stats,
-    .card--trend,
+    .bento__col {
+      display: contents;
+    }
+    .card--focus {
+      order: 1;
+    }
+    .card--capacity {
+      order: 2;
+    }
+    .card--stats {
+      order: 3;
+    }
+    .card--trend {
+      order: 4;
+    }
     .card--feed {
-      grid-column: span 1;
+      order: 5;
     }
   }
 </style>

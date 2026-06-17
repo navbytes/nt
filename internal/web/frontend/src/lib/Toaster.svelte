@@ -1,13 +1,16 @@
 <script lang="ts">
-  // Renders the single app toast (see toast.svelte.ts). Mounted once in Shell.
-  import { toast, dismissToast } from "./toast.svelte";
+  // Renders the app toast STACK (see toast.svelte.ts). Mounted once in Shell.
+  // Informational toasts stack (newest at the visible bottom edge); the Undo
+  // affordance stays single-flight via clearUndoToast in the callers.
+  import { toast, dismissToast, type Toast } from "./toast.svelte";
   import Icon from "./Icon.svelte";
   import { fly } from "svelte/transition";
+  import { flip } from "svelte/animate";
   import { cubicOut } from "svelte/easing";
 
-  async function runUndo() {
-    const u = toast.current?.undo;
-    dismissToast();
+  async function runUndo(t: Toast) {
+    const u = t.undo;
+    dismissToast(t.id);
     await u?.();
   }
 
@@ -15,23 +18,22 @@
   // rule, so gate the duration ourselves: 0ms = snap in/out, no slide.
   const reduceMotion =
     typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-  const flyArgs = { y: 10, duration: reduceMotion ? 0 : 200, easing: cubicOut };
+  const dur = reduceMotion ? 0 : 200;
+  const flyArgs = { y: 10, duration: dur, easing: cubicOut };
 </script>
 
-<div class="toastwrap" aria-live="polite" aria-atomic="true">
-  {#if toast.current}
-    {#key toast.current.id}
-      <div class="toast" transition:fly={flyArgs}>
-        <span class="toast__msg">{toast.current.message}</span>
-        {#if toast.current.undo}
-          <button class="toast__undo" onclick={runUndo}>Undo</button>
-        {/if}
-        <button class="toast__close" aria-label="Dismiss" onclick={dismissToast}>
-          <Icon name="close" size={14} />
-        </button>
-      </div>
-    {/key}
-  {/if}
+<div class="toastwrap" aria-live="polite" aria-atomic="false">
+  {#each toast.items as t (t.id)}
+    <div class="toast" transition:fly={flyArgs} animate:flip={{ duration: dur }}>
+      <span class="toast__msg">{t.message}</span>
+      {#if t.undo}
+        <button class="toast__undo" onclick={() => runUndo(t)}>Undo</button>
+      {/if}
+      <button class="toast__close" aria-label="Dismiss" onclick={() => dismissToast(t.id)}>
+        <Icon name="close" size={14} />
+      </button>
+    </div>
+  {/each}
 </div>
 
 <style>
@@ -46,6 +48,10 @@
        70, which painted over About/Shortcuts). */
     z-index: 65;
     pointer-events: none; /* the empty live region must never block clicks */
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px; /* stacked toasts: newest at the bottom edge (DOM order) */
   }
   .toast {
     pointer-events: auto;
