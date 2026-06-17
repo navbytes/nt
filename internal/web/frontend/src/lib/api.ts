@@ -142,8 +142,13 @@ export const api = {
   // ---- editor ----
   raw: (handle: string) => getJSON<RawNote>(`/api/notes/${encodeURIComponent(handle)}/raw`),
 
-  preview: async (text: string): Promise<string> => {
-    const r = await fetch("/api/preview", { method: "POST", headers: { "X-CSRF": csrf }, body: text });
+  preview: async (text: string, signal?: AbortSignal): Promise<string> => {
+    const r = await fetch("/api/preview", {
+      method: "POST",
+      headers: { "X-CSRF": csrf },
+      body: text,
+      signal,
+    });
     if (!r.ok) throw new Error(`preview → ${r.status}`);
     return r.text();
   },

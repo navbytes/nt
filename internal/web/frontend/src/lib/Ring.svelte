@@ -50,7 +50,7 @@
     <linearGradient id={gradientId} x1="0%" y1="0%" x2="100%" y2="100%">
       {#if over}
         <stop offset="0%" stop-color="var(--red)" />
-        <stop offset="100%" stop-color="color-mix(in srgb, var(--red) 60%, #ff8c00)" />
+        <stop offset="100%" stop-color="color-mix(in srgb, var(--red) 60%, var(--orange, #a8620a))" />
       {:else}
         <stop offset="0%" stop-color="var(--spectral-1)" />
         <stop offset="52%" stop-color="var(--spectral-2)" />

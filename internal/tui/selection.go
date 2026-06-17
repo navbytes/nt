@@ -9,7 +9,7 @@ type confirmState struct {
 	prompt  string
 	action  func()
 	choices map[string]func()
-	hint    string // key hint rendered in the status bar (defaults to "(y/n)")
+	hint    string // key hint rendered in the status bar (defaults to "(y/n/⏎)")
 }
 
 // askConfirm arms a y/n confirmation; the next y/enter runs action, anything

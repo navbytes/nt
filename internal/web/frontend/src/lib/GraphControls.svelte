@@ -81,6 +81,13 @@
     else if (view.colorBy === "source") view.filterSources = toggleIn(view.filterSources, value);
   }
 
+  // When the colour dimension isn't mirrored by shape, categories differ by hue
+  // ALONE — a problem for colour-blind users. Flag it under the legend so the
+  // shape control is the obvious remedy (audit #6).
+  const colorOnly = $derived(
+    view.colorBy !== "none" && legend.length > 1 && view.shapeBy !== view.colorBy,
+  );
+
   function legendActive(value: string): boolean {
     if (view.colorBy === "folder") return view.filterFolders.includes(value);
     if (view.colorBy === "tag") return view.filterTags.includes(value);
@@ -291,6 +298,9 @@
               </button>
             {/each}
           </div>
+          {#if colorOnly}
+            <p class="gctl__hint">Distinguished by colour only. Set <strong>Shape by</strong> to {view.colorBy} to also separate by shape.</p>
+          {/if}
         </div>
       {/if}
 
@@ -340,6 +350,12 @@
     left: 12px;
     z-index: 20;
     width: 236px;
+    /* Cap to the stage (the positioned ancestor), not the viewport, so the
+       panel can never grow past the stage and get clipped by its overflow.
+       The body flex-scrolls within whatever height remains. */
+    max-height: calc(100% - 24px);
+    display: flex;
+    flex-direction: column;
     background: color-mix(in srgb, var(--bg-elevated) 86%, transparent);
     -webkit-backdrop-filter: saturate(var(--glass-saturate)) blur(var(--glass-blur));
     backdrop-filter: saturate(var(--glass-saturate)) blur(var(--glass-blur));
@@ -359,6 +375,7 @@
     pointer-events: none;
   }
   .gctl__bar {
+    flex: 0 0 auto;
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -399,11 +416,12 @@
     transform: rotate(90deg);
   }
   .gctl__body {
+    flex: 1 1 auto;
+    min-height: 0;
     padding: var(--space-1) var(--space-4) var(--space-4);
     display: flex;
     flex-direction: column;
     gap: var(--space-3);
-    max-height: calc(100vh - 140px);
     overflow-y: auto;
   }
   .gctl__row {
@@ -642,7 +660,9 @@
     border-radius: 50%;
     display: inline-block;
     flex: none;
-    box-shadow: 0 0 0 0.5px rgba(0, 0, 0, 0.15);
+    /* Theme-aware contrast ring so the swatch reads on both light and dark panels
+       (the old hard-coded rgba(0,0,0,.15) vanished in dark) — audit #13. */
+    box-shadow: 0 0 0 0.5px color-mix(in srgb, var(--fg) 28%, transparent);
   }
   .legend-line {
     width: 14px;
@@ -691,5 +711,24 @@
     cursor: pointer;
     font-size: var(--text-callout);
     padding: 0;
+  }
+
+  /* Mobile: the fixed 236px top/left panel collides with the details panel and
+     squeezes the canvas. Dock it as a full-width bar / collapsible bottom sheet
+     along the bottom edge instead (audit #8). */
+  @media (max-width: 640px) {
+    .gctl {
+      top: auto;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      width: auto;
+      border-radius: var(--radius-popover) var(--radius-popover) 0 0;
+    }
+    /* spectral identity rule moves to the top edge of the sheet (still inset 0) */
+    .gctl__body {
+      /* cap the sheet so it never swallows the whole canvas; scroll within */
+      max-height: 52dvh;
+    }
   }
 </style>

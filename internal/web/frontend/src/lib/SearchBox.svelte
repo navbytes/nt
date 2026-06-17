@@ -111,6 +111,7 @@
 </script>
 
 <div class="sbox" bind:this={boxEl}>
+  <Icon name="search" size={14} />
   <input
     bind:this={inputEl}
     bind:value={q}
@@ -176,20 +177,26 @@
     flex: 1;
     max-width: 420px;
   }
-  /* NSSearchField: a fully-rounded, glassy pill with a leading magnifier. The
-     glyph is an inline SVG using a neutral stroke (#6e6e73) that reads in both
-     themes. backdrop-filter lets the toolbar vibrancy show through the fill. */
+  /* Leading magnifier: a real <Icon> so it inherits currentColor and stays
+     visible in both themes (finding 9 — the old data-URI baked in #6e6e73,
+     near-invisible on dark). Positioned absolutely over the padded input. */
+  .sbox :global(.icon) {
+    position: absolute;
+    left: 11px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: var(--muted);
+    pointer-events: none;
+  }
+  /* NSSearchField: a fully-rounded, glassy pill with a leading magnifier.
+     backdrop-filter lets the toolbar vibrancy show through the fill. */
   .sbox input {
     width: 100%;
     padding: 6px 14px 6px 32px;
     background-color: color-mix(in srgb, var(--fill) 80%, transparent);
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%236e6e73' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='11' cy='11' r='7'/%3E%3Cpath d='m20 20-3.6-3.6'/%3E%3C/svg%3E");
-    background-repeat: no-repeat;
-    background-position: 11px center;
-    background-size: 14px;
     -webkit-backdrop-filter: saturate(var(--glass-saturate)) blur(8px);
     backdrop-filter: saturate(var(--glass-saturate)) blur(8px);
-    border: 0.5px solid var(--separator);
+    border: 1px solid var(--control-border); /* finding 6 — input edge is the only affordance */
     border-radius: 999px;
     color: var(--fg);
     font-size: 0.9rem;
@@ -223,7 +230,7 @@
     background: color-mix(in srgb, var(--bg-elevated) 90%, transparent);
     -webkit-backdrop-filter: blur(20px) saturate(170%);
     backdrop-filter: blur(20px) saturate(170%);
-    border: 0.5px solid var(--separator);
+    border: 1px solid var(--control-border); /* finding 6 — dropdown edge is the only affordance */
     border-radius: var(--radius-md);
     box-shadow: var(--shadow-popover);
   }
@@ -242,7 +249,7 @@
     border: none;
     color: var(--fg);
     padding: 6px 10px;
-    border-radius: 4px;
+    border-radius: var(--radius-xs); /* finding 16 — was literal 4px */
     cursor: pointer;
     font-size: 0.88rem;
   }

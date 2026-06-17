@@ -25,9 +25,12 @@ import (
 )
 
 // Layout breakpoints (terminal columns), per SPEC §12.
+//   - <= compactMax (40): compact monitoring strip
+//   - 41..wideMin-1     : standard single-column list (covers the old dead band)
+//   - >= wideMin (120)  : split list + detail
 const (
 	wideMin    = 120 // split list + detail
-	compactMax = 55  // monitoring strip
+	compactMax = 40  // monitoring strip
 )
 
 type tab int
@@ -99,29 +102,35 @@ type Model struct {
 	blocked   map[string]bool // task ULIDs blocked by an open dependency
 	lastSig   uint64          // content signature of the last rebuilt store (F4: skip redundant reloads)
 
-	groups    []group      // tasks tab, current grouping
-	flat      []*task.Task // selectable tasks in display order
-	logGroups []group      // logbook tab: done tasks grouped by completion date
-	logFlat   []*task.Task // logbook tab: selectable done tasks in display order
-	cursor    int          // index into flat (tasks) or notes (notes tab)
-	offset    int          // first visible line (scroll position)
-	hitLines  []hitLine    // per-line click map from the last list render (mouse)
-	tabHits   []tabHit     // clickable tab-label ranges from the last header render
+	groups    []group       // tasks tab, current grouping
+	flat      []*task.Task  // selectable tasks in display order
+	logGroups []group       // logbook tab: done tasks grouped by completion date
+	logFlat   []*task.Task  // logbook tab: selectable done tasks in display order
+	cursor    int           // index into flat (tasks) or notes (notes tab)
+	offset    int           // first visible line (scroll position)
+	tabCursor [tabCount]int // saved cursor per tab, so a round-trip keeps your place
+	tabOffset [tabCount]int // saved scroll offset per tab
+	hitLines  []hitLine     // per-line click map from the last list render (mouse)
+	tabHits   []tabHit      // clickable tab-label ranges from the last header render
 
-	filter        string
-	filterBefore  string // filter value before opening the filter prompt, for Esc-to-cancel
-	scopeTag      string // active @tag scope (filters the list); "" = none
-	scopeProject  string // active +project scope; "" = none
-	viewName      string // active saved smart view (nt view); "" = none
-	viewSpec      view.Spec
-	detailFocus   bool // detail pane is focused: j/k scroll the body, not the list
-	detailScroll  int  // scroll offset within the focused detail pane
-	splitPct      int  // wide-mode list width as a % of the terminal (resizable)
-	draggingSplit bool // a mouse drag on the divider is in progress
-	locked        bool // read-only lock: mutating keys are swallowed (ctrl+l)
-	help          bool
-	helpScroll    int  // scroll offset within the help overlay
-	ready         bool // gates key input until startup terminal-query noise settles
+	filter          string
+	filterBefore    string // filter value before opening the filter prompt, for Esc-to-cancel
+	filterSelBefore string // selected ID before the filter prompt opened, for Esc-to-cancel
+	filterOffBefore int    // scroll offset before the filter prompt opened
+	scopeTag        string // active @tag scope (filters the list); "" = none
+	scopeProject    string // active +project scope; "" = none
+	viewName        string // active saved smart view (nt view); "" = none
+	viewSpec        view.Spec
+	viewPrevDone    bool // showDone before applyView forced it on (restored on clearView)
+	viewPrevBlock   bool // showBlocked before applyView forced it on (restored on clearView)
+	detailFocus     bool // detail pane is focused: j/k scroll the body, not the list
+	detailScroll    int  // scroll offset within the focused detail pane
+	splitPct        int  // wide-mode list width as a % of the terminal (resizable)
+	draggingSplit   bool // a mouse drag on the divider is in progress
+	locked          bool // read-only lock: mutating keys are swallowed (ctrl+l)
+	help            bool
+	helpScroll      int  // scroll offset within the help overlay
+	ready           bool // gates key input until startup terminal-query noise settles
 
 	followMode    bool           // hint mode: tokens are labeled for keyboard activation
 	followTargets []followTarget // labeled actionable tokens (links/tags/projects)
@@ -132,11 +141,12 @@ type Model struct {
 	confirm      *confirmState   // pending y/n confirmation for a destructive action
 	yankPending  bool            // 'y' pressed, awaiting the chord target (y/l/t)
 
-	input  textinput.Model
-	ik     inputKind
-	pendD  bool   // first 'd' of a 'dd'
-	count  int    // vim repeat-count prefix being typed (0 = none)
-	status string // transient status line
+	input     textinput.Model
+	ik        inputKind
+	pendD     bool   // first 'd' of a 'dd'
+	count     int    // vim repeat-count prefix being typed (0 = none)
+	status    string // transient status line
+	statusGen int    // bumped on every setStatus; a stale auto-clear tick is ignored
 
 	bodyEdit   bool           // in-TUI note-body capture is active (U4)
 	bodyArea   textarea.Model // multi-line body editor for fast capture
@@ -381,6 +391,19 @@ func noteMatches(n *note.Note, needle string) bool {
 	return strings.Contains(hay, needle)
 }
 
+// switchTab changes the active tab, preserving each tab's cursor/offset across
+// round-trips instead of snapping back to the top every time. The restored
+// cursor is clamped to the destination tab's current length.
+func (m *Model) switchTab(dst tab) {
+	if dst == m.tab {
+		return
+	}
+	m.tabCursor[m.tab], m.tabOffset[m.tab] = m.cursor, m.offset
+	m.tab = dst
+	m.cursor, m.offset = m.tabCursor[dst], m.tabOffset[dst]
+	m.clampCursor()
+}
+
 func (m *Model) clampCursor() {
 	n := m.selectableLen()
 	if m.cursor >= n {
@@ -432,7 +455,10 @@ func (m *Model) selectedNote() *note.Note {
 	return m.notesView[m.cursor]
 }
 
-func (m *Model) setStatus(s string) { m.status = s }
+func (m *Model) setStatus(s string) {
+	m.status = s
+	m.statusGen++
+}
 
 // effStatus / icon account for dependency blocking when displaying a task.
 func (m *Model) effStatus(t *task.Task) string {
@@ -453,25 +479,37 @@ var (
 	// terminal background (Tokyo Night Storm / Tokyo Night Day). `NT_THEME=
 	// light|dark` forces it (see Run). All styles below reference these vars, so
 	// both themes flow through without per-style changes.
-	cFg      = lipgloss.AdaptiveColor{Dark: "#c0caf5", Light: "#3760bf"}
-	cDim     = lipgloss.AdaptiveColor{Dark: "#565f89", Light: "#848cb5"}
-	cMuted   = lipgloss.AdaptiveColor{Dark: "#787c99", Light: "#9aa0c2"}
-	cRed     = lipgloss.AdaptiveColor{Dark: "#f7768e", Light: "#f52a65"}
-	cOrange  = lipgloss.AdaptiveColor{Dark: "#ff9e64", Light: "#b15c00"}
-	cYellow  = lipgloss.AdaptiveColor{Dark: "#e0af68", Light: "#8c6c3e"}
+	cFg = lipgloss.AdaptiveColor{Dark: "#c0caf5", Light: "#3760bf"}
+	// cDim is the readable "secondary" grey for LIVE text (group counts, scroll
+	// indicators, inactive tabs, palette rows, dim labels). Raised to clear WCAG
+	// AA (~4.5:1) on the theme backgrounds — the old value was ~2.2-2.5:1.
+	cDim = lipgloss.AdaptiveColor{Dark: "#8b92be", Light: "#5c6285"}
+	// cFaint is the deliberately fainter grey used ONLY for struck-through "done"
+	// text (stDone), where a recessed look is intentional and the strikethrough
+	// itself carries the meaning. Not for live, must-read text.
+	cFaint   = lipgloss.AdaptiveColor{Dark: "#565f89", Light: "#9aa0c2"}
+	cMuted   = lipgloss.AdaptiveColor{Dark: "#8a90b3", Light: "#54597d"}
+	cRed     = lipgloss.AdaptiveColor{Dark: "#f7768e", Light: "#bb0f44"}
+	cOrange  = lipgloss.AdaptiveColor{Dark: "#ff9e64", Light: "#8f4a00"}
+	cYellow  = lipgloss.AdaptiveColor{Dark: "#e0af68", Light: "#7a5e2e"}
 	cGreen   = lipgloss.AdaptiveColor{Dark: "#9ece6a", Light: "#587539"}
 	cCyan    = lipgloss.AdaptiveColor{Dark: "#7dcfff", Light: "#007197"}
-	cBlue    = lipgloss.AdaptiveColor{Dark: "#7aa2f7", Light: "#2e7de9"}
-	cMagenta = lipgloss.AdaptiveColor{Dark: "#bb9af7", Light: "#9854f1"}
+	cBlue    = lipgloss.AdaptiveColor{Dark: "#7aa2f7", Light: "#2961c9"}
+	cMagenta = lipgloss.AdaptiveColor{Dark: "#bb9af7", Light: "#8a44e0"}
 	cBorder  = lipgloss.AdaptiveColor{Dark: "#3b4261", Light: "#a8aecb"}
-	cSelBg   = lipgloss.AdaptiveColor{Dark: "#283457", Light: "#b7c1e3"}
-	cBarBg   = lipgloss.AdaptiveColor{Dark: "#1f2335", Light: "#d0d5e3"}
+	// cSelBg is the selection background. The light variant was lightened (not
+	// darkened) so the dark-blue cFg.Light selected text clears AA on it.
+	cSelBg = lipgloss.AdaptiveColor{Dark: "#283457", Light: "#dde3f6"}
+	// cAccent is the selection accent bar (▌) — a darker blue in light mode so the
+	// bar stays clearly visible against the light selection background.
+	cAccent = lipgloss.AdaptiveColor{Dark: "#7aa2f7", Light: "#2e5fb0"}
+	cBarBg  = lipgloss.AdaptiveColor{Dark: "#1f2335", Light: "#d0d5e3"}
 
 	stBrand      = lipgloss.NewStyle().Foreground(cMagenta).Bold(true).Background(cBarBg)
 	stTabOn      = lipgloss.NewStyle().Foreground(cFg).Bold(true).Background(cBarBg)
-	stTabOff     = lipgloss.NewStyle().Foreground(cDim).Background(cBarBg)
+	stTabOff     = lipgloss.NewStyle().Foreground(cMuted).Background(cBarBg)
 	stBarBg      = lipgloss.NewStyle().Foreground(cMuted).Background(cBarBg)
-	stHeader     = lipgloss.NewStyle().Background(cBarBg)
+	stHeader     = lipgloss.NewStyle().Foreground(cFg).Background(cBarBg)
 	stRule       = lipgloss.NewStyle().Foreground(cBorder)
 	stGroup      = lipgloss.NewStyle().Foreground(cBlue).Bold(true)
 	stDim        = lipgloss.NewStyle().Foreground(cDim)
@@ -484,7 +522,7 @@ var (
 	stLink       = lipgloss.NewStyle().Foreground(cCyan)
 	stLinkU      = lipgloss.NewStyle().Foreground(cCyan).Underline(true) // followable [[link]]
 	stWarn       = lipgloss.NewStyle().Foreground(cYellow)               // unresolved / attention
-	stDone       = lipgloss.NewStyle().Foreground(cDim).Strikethrough(true)
+	stDone       = lipgloss.NewStyle().Foreground(cFaint).Strikethrough(true)
 	stGreen      = lipgloss.NewStyle().Foreground(cGreen)
 	stPanel      = lipgloss.NewStyle().Border(lipgloss.NormalBorder(), false, false, false, true).BorderForeground(cBorder).Padding(0, 2)
 	stPanelFocus = lipgloss.NewStyle().Border(lipgloss.NormalBorder(), false, false, false, true).BorderForeground(cBlue).Padding(0, 2)

@@ -172,10 +172,13 @@
     {#if $notesQ.isPending}
       <p class="muted small">Loading…</p>
     {:else if $notesQ.data}
-      {#each $notesQ.data.tree as node (node.path + node.url)}
-        <TreeItem {node} {path} />
-      {/each}
-      {#if $notesQ.data.tree.length === 0}
+      {#if $notesQ.data.tree.length > 0}
+        <div role="tree" aria-label="Notes">
+          {#each $notesQ.data.tree as node, i (node.path + node.url)}
+            <TreeItem {node} {path} isFirst={i === 0} />
+          {/each}
+        </div>
+      {:else}
         <p class="muted small">No notes yet.</p>
       {/if}
     {/if}
@@ -323,7 +326,7 @@
     font-weight: 600;
   }
   .nav__link.active :global(.icon) {
-    color: var(--spectral-2);
+    color: var(--accent-on-tint); /* finding 4 — AA-legible on the tint well */
   }
   .nav__link.active .nav__bar {
     height: 17px;
@@ -344,7 +347,7 @@
     font-size: var(--text-callout);
     color: var(--label-secondary);
     background: var(--fill);
-    border: 0.5px solid var(--separator);
+    border: 1px solid var(--control-border); /* finding 6 — the pill edge is the only affordance */
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -355,13 +358,13 @@
   }
   .nav__pill:hover {
     color: var(--label-primary);
-    border-color: var(--separator-strong);
+    border-color: color-mix(in srgb, var(--control-border) 60%, var(--label-primary));
     text-decoration: none;
   }
   .nav__pill.active {
-    color: var(--spectral-2);
+    color: var(--accent-on-tint); /* finding 4 — AA-legible active label on tint */
     background: var(--accent-tint);
-    border-color: color-mix(in srgb, var(--spectral-2) 45%, transparent);
+    border-color: color-mix(in srgb, var(--accent-on-tint) 45%, transparent);
     font-weight: 500;
   }
 

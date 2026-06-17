@@ -188,7 +188,9 @@
     border-radius: 999px;
   }
   .result__kind--note {
-    color: var(--spectral-2);
+    /* The spectral tint stays as the background, but the 10px uppercase label
+       needs an accessible foreground on it (spectral-2 was ~3.38:1). */
+    color: var(--accent-on-tint, #0a52b8);
     background: color-mix(in srgb, var(--spectral-2) 14%, transparent);
   }
   .result__kind--task {

@@ -58,3 +58,44 @@ export function toggleCollapsed(): void {
     /* ignore */
   }
 }
+
+// ---- per-folder open/collapse state (W31) -------------------------------------
+// The notes tree refetches on every store change (SSE); folder open/collapse used
+// to live in each TreeItem's local state, so it reset on every refetch. Persist it
+// here (keyed by folder path) so a user's expanded branches survive refetches and
+// reloads. Folders default to OPEN unless explicitly collapsed.
+const FKEY = "nt-tree-collapsed";
+
+function loadCollapsedFolders(): Set<string> {
+  try {
+    const raw = localStorage.getItem(FKEY);
+    if (raw) return new Set(JSON.parse(raw) as string[]);
+  } catch {
+    /* ignore */
+  }
+  return new Set();
+}
+
+// A reactive record so dependents re-render when a folder toggles. We mirror the
+// Set into this $state object (path → collapsed?) keyed by folder path.
+export const treeCollapsed = $state<{ paths: Record<string, true> }>({
+  paths: Object.fromEntries([...loadCollapsedFolders()].map((p) => [p, true as const])),
+});
+
+export function isFolderOpen(path: string): boolean {
+  return !treeCollapsed.paths[path];
+}
+
+export function toggleFolder(path: string): void {
+  if (treeCollapsed.paths[path]) {
+    const { [path]: _drop, ...rest } = treeCollapsed.paths;
+    treeCollapsed.paths = rest;
+  } else {
+    treeCollapsed.paths = { ...treeCollapsed.paths, [path]: true };
+  }
+  try {
+    localStorage.setItem(FKEY, JSON.stringify(Object.keys(treeCollapsed.paths)));
+  } catch {
+    /* ignore */
+  }
+}

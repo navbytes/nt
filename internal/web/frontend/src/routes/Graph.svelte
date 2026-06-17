@@ -23,6 +23,7 @@
   import { nodeShape, tracePath, shapeLegendEntries, type ShapeKind } from "../lib/graphShapes";
   import { SpriteCache, drawRadius, type SpriteVariant } from "../lib/graphSprites";
   import { view, savePersisted, enterLocal, exitLocal, type Effects } from "../lib/graphView.svelte";
+  import { showToast } from "../lib/toast.svelte";
   import GraphControls from "../lib/GraphControls.svelte";
   import GraphDetails from "../lib/GraphDetails.svelte";
   import GraphContextMenu from "../lib/GraphContextMenu.svelte";
@@ -54,11 +55,19 @@
   let three3d: any = null; // the lazy-loaded THREE namespace (3D only)
   let SpriteText3d: any = null; // lazy-loaded three-spritetext ctor (3D labels)
   let glowTex: any = null; // shared additive corona texture for 3D nodes (lazy)
-  const BG3D = "#05060d"; // deep-space background — bloom needs near-black
+  // 3D is INTENTIONALLY a dark "deep space" field in BOTH themes — the
+  // UnrealBloomPass + additive coronas only read as luminous stars against a
+  // near-black background, so we don't follow the page theme here (audit #5).
+  const BG3D = "#05060d";
+  const LABEL3D = "#e6e9f5"; // 3D labels are always light (legible on BG3D)
 
-  const reduce =
+  // Reduced-motion preference, kept live: read once for the initial value, then
+  // updated by a matchMedia change listener (audit #27). Reads at imperative call
+  // sites are non-reactive, but new calls pick up the current value.
+  let reduce = $state(
     typeof window !== "undefined" &&
-    window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+      (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false),
+  );
 
   // ---- precomputed render state (rebuilt on data/filter change, read as O(1)
   // lookups by the per-frame canvas accessors — never recomputed per frame).
@@ -87,7 +96,11 @@
   let dofTo = 0;
   let dofStart = 0;
   const DOF_MS = 180;
-  const DIM = 0.15; // dimmed-node alpha (matches the original base + "26")
+  // Dimmed-node fill alpha. A faint fill alone can't clear 3:1 vs the canvas
+  // (even at 0.55 it's ~1.9–2.4:1), so de-emphasis is intentionally sub-threshold
+  // here and dimmed nodes instead carry a thin FULL-strength outline (drawNode),
+  // which keeps a ≥3:1 EDGE so they stay locatable (audit #4, approach a).
+  const DIM = 0.38;
   // One-shot expanding ring on fresh selection (free-runs alongside the DOF tween).
   let pulseStart = 0;
   let pulseRAF = 0;
@@ -121,7 +134,10 @@
   // Spectral identity (Aurora) — cached for the ambient canvas wash + focused edges.
   let cssSpectral1 = "#7aa2f7";
   let cssSpectral3 = "#bb9af7";
-  let graphDark = true;
+  // Reactive so the derived legends + colour recompute re-run on a theme switch
+  // (the canvas draw loop reads it non-reactively, which is fine — repaint() is
+  // pumped by the theme observer).
+  let graphDark = $state(true);
   let cssChip = "#2c2c31"; // --bg-elevated (glass label chip fill, hex → alpha-able)
   let cssSep = "rgba(255,255,255,0.11)"; // --separator (already rgba)
   function isDarkHex(hex: string): boolean {
@@ -155,10 +171,10 @@
   const folders = $derived([...new Set(allNodes.map((n) => n.folder).filter(Boolean))].sort());
   const tags = $derived([...new Set(allNodes.flatMap((n) => n.tags ?? []))].sort());
   const sources = $derived([...new Set(allNodes.map((n) => n.source).filter(Boolean))].sort());
-  const legend = $derived(legendEntries(allNodes, view.colorBy));
+  const legend = $derived(legendEntries(allNodes, view.colorBy, graphDark));
   const shapeLegend = $derived(shapeLegendEntries(allNodes, view.shapeBy));
   const edgeLegend = $derived(
-    $graphQ.data ? linkKindLegend(($graphQ.data.links ?? []).map((l) => l.kind)) : [],
+    $graphQ.data ? linkKindLegend(($graphQ.data.links ?? []).map((l) => l.kind), graphDark) : [],
   );
   const selectedNode = $derived(allNodes.find((n) => n.id === view.selectedId) ?? null);
   // id → title lookup so the screen-reader fallback below can resolve neighbour
@@ -216,7 +232,9 @@
     const shape = new Map<string, ShapeKind>();
     const pass = new Set<string>();
     for (const n of nodes) {
-      color.set(n.id, colorOfNode(n, view.colorBy));
+      // 3D always renders on a near-black field (BG3D) with bloom, so it always
+      // wants the DARK (bright) palette regardless of the page theme (audit #5).
+      color.set(n.id, colorOfNode(n, view.colorBy, built3d || graphDark));
       shape.set(n.id, nodeShape(n, view.shapeBy));
       if (passes(n)) pass.add(n.id);
     }
@@ -247,14 +265,27 @@
     if (focusSet && !focusSet.has(id)) return 1 - (1 - DIM) * dofT;
     return 1;
   }
-  const LINK_BRIGHT = "rgba(128,128,128,0.5)";
-  const LINK_DIM = "rgba(128,128,128,0.08)";
-  const LINK_HOVER = "rgba(128,128,128,0.85)";
+  // Link base grey is theme-aware: a dark grey on the light canvas, a light grey
+  // on the dark canvas, both at an alpha high enough to clear ~2.5–3:1 vs the
+  // canvas at rest (audit #3). #555 @0.7 ≈ 3.5:1 on white; #cfcfcf @0.7 ≈ 5.8:1
+  // on #202024.
+  function linkGrey(): string {
+    return graphDark ? "207,207,207" : "85,85,85";
+  }
+  function linkBright(): string {
+    return `rgba(${linkGrey()},0.7)`;
+  }
+  function linkDim(): string {
+    return `rgba(${linkGrey()},0.32)`;
+  }
+  function linkHover(): string {
+    return `rgba(${linkGrey()},0.95)`;
+  }
   // linkAlpha mirrors nodeAlpha for edges (used by the gradient painter).
   function linkAlpha(s: string, t: string): number {
-    if (!R.pass.has(s) || !R.pass.has(t)) return 0.08;
-    if (focusSet && !(focusSet.has(s) && focusSet.has(t))) return 0.08 + 0.42 * (1 - dofT);
-    return 0.5;
+    if (!R.pass.has(s) || !R.pass.has(t)) return 0.32;
+    if (focusSet && !(focusSet.has(s) && focusSet.has(t))) return 0.32 + 0.38 * (1 - dofT);
+    return 0.7;
   }
 
   // force-graph v1.51 exposes no refresh(), and re-setting a style prop to its
@@ -352,11 +383,21 @@
       ctx.fillStyle = dim ? withAlpha(base, alpha) : base;
       ctx.fill();
     }
-    // orphans (no links) read as a hollow outline so they stand out
+    // Dimmed nodes carry a thin FULL-strength outline so they keep a ≥3:1 edge
+    // against the canvas even though their fill is intentionally faint (audit #4).
+    // (Orphans below draw their own outline; skip the double-stroke for them.)
+    if (dim && n.deg !== 0) {
+      tracePath(ctx, shape, x, y, r);
+      ctx.lineWidth = 1 / scale;
+      ctx.strokeStyle = base;
+      ctx.stroke();
+    }
+    // orphans (no links) read as a hollow outline so they stand out — kept full
+    // strength when dimmed too, for the same ≥3:1 edge.
     if (n.deg === 0) {
       tracePath(ctx, shape, x, y, r);
       ctx.lineWidth = 1 / scale;
-      ctx.strokeStyle = withAlpha(base, dim ? 0.33 : 1);
+      ctx.strokeStyle = base;
       ctx.stroke();
     }
     // pinned indicator
@@ -371,10 +412,13 @@
     }
 
     // label: past the zoom threshold, or always for hovered / selected / hubs.
+    // Hub labels (deg ≥ 5) are always-on, but only once moderately zoomed in —
+    // at far-out scales every hub label fires at once and they pile up (audit #12).
+    const hubLabel = n.deg >= 5 && scale > view.labelThreshold * 0.5;
     const show =
       view.showLabels &&
       !dim &&
-      (scale > view.labelThreshold || n.id === hoveredId || n.id === view.selectedId || n.deg >= 5);
+      (scale > view.labelThreshold || n.id === hoveredId || n.id === view.selectedId || hubLabel);
     if (show) {
       const fontPx = Math.max(3.2, Math.min(6, 13 / scale));
       ctx.font = `${fontPx}px ui-sans-serif, -apple-system, sans-serif`;
@@ -406,16 +450,16 @@
   function linkColorAccessor(l: any): string {
     const s = linkEndId(l.source);
     const t = linkEndId(l.target);
-    if (hoveredId && (s === hoveredId || t === hoveredId)) return LINK_HOVER;
-    const bright = linkAlpha(s, t) >= 0.5;
+    if (hoveredId && (s === hoveredId || t === hoveredId)) return linkHover();
+    const bright = linkAlpha(s, t) >= 0.7;
     // Relationship-type coloring wins over node-color when enabled.
     if (view.colorLinksByType) {
-      return withAlpha(linkKindColor(l.kind), bright ? 0.7 : 0.12);
+      return withAlpha(linkKindColor(l.kind, graphDark), bright ? 0.85 : 0.18);
     }
     if (view.colorLinks && fxLevel !== "off") {
-      return withAlpha(R.color.get(s) ?? cssAccent, bright ? 0.55 : 0.12);
+      return withAlpha(R.color.get(s) ?? cssAccent, bright ? 0.7 : 0.18);
     }
-    return bright ? LINK_BRIGHT : LINK_DIM;
+    return bright ? linkBright() : linkDim();
   }
 
   // Gradient painter — replaces the link stroke only in "full" + colorLinks mode.
@@ -676,6 +720,12 @@
   let clickTO: ReturnType<typeof setTimeout> | undefined;
   function onNodeClick(n: FGNode, evt: MouseEvent) {
     closeMenu();
+    // Cmd/Ctrl-click opens the note in a new tab (the web convention).
+    if (evt?.metaKey || evt?.ctrlKey) {
+      if (clickTO) clearTimeout(clickTO);
+      window.open(n.url, "_blank", "noopener");
+      return;
+    }
     // Shift/Alt-click reveals a node's neighbors (incremental exploration) rather
     // than selecting it. Roots a local view first if we're still global.
     if (evt?.shiftKey || evt?.altKey) {
@@ -706,6 +756,71 @@
 
   function closeMenu() {
     menu = null;
+  }
+
+  // ---- touch long-press → context menu (audit #10) ----
+  // Touch/tablet users have no right-click, so a ~500ms press on a node opens the
+  // same menu at the touch point. force-graph has no "node at point" API, so we
+  // map the touch to graph coords and hit-test node positions by radius.
+  let lpTimer: ReturnType<typeof setTimeout> | undefined;
+  let lpStart: { x: number; y: number } | null = null;
+  const LONG_PRESS_MS = 500;
+  const LONG_PRESS_MOVE = 12; // px of drift that cancels the press (it's a pan)
+
+  // Nearest node within its hit radius to a client (screen) point, or null.
+  function nodeAtClient(clientX: number, clientY: number): FGNode | null {
+    if (!graph || built3d || !container) return null;
+    const rect = container.getBoundingClientRect();
+    const sx = clientX - rect.left;
+    const sy = clientY - rect.top;
+    const gp = graph.screen2GraphCoords?.(sx, sy);
+    if (!gp) return null;
+    const nodes: FGNode[] = graph.graphData?.().nodes ?? [];
+    let best: FGNode | null = null;
+    let bestD = Infinity;
+    for (const n of nodes) {
+      if (n.x == null || n.y == null) continue;
+      const r = nodeRadius(n) + 4; // small touch slop
+      const d = Math.hypot(n.x - gp.x, n.y - gp.y);
+      if (d <= r && d < bestD) {
+        bestD = d;
+        best = n;
+      }
+    }
+    return best;
+  }
+  function cancelLongPress() {
+    if (lpTimer) clearTimeout(lpTimer);
+    lpTimer = undefined;
+    lpStart = null;
+  }
+  function onTouchStart(e: TouchEvent) {
+    if (e.touches.length !== 1) return cancelLongPress();
+    const t = e.touches[0]!;
+    lpStart = { x: t.clientX, y: t.clientY };
+    cancelLongPressTimerOnly();
+    lpTimer = setTimeout(() => {
+      lpTimer = undefined;
+      const start = lpStart;
+      if (!start) return;
+      const node = nodeAtClient(start.x, start.y);
+      if (node) menu = { x: start.x, y: start.y, node };
+    }, LONG_PRESS_MS);
+  }
+  function cancelLongPressTimerOnly() {
+    if (lpTimer) clearTimeout(lpTimer);
+    lpTimer = undefined;
+  }
+  function onTouchMove(e: TouchEvent) {
+    if (!lpStart) return;
+    const t = e.touches[0];
+    if (!t) return;
+    if (Math.hypot(t.clientX - lpStart.x, t.clientY - lpStart.y) > LONG_PRESS_MOVE) {
+      cancelLongPress();
+    }
+  }
+  function onTouchEnd() {
+    cancelLongPress();
   }
 
   // ---- pinning ----
@@ -750,12 +865,40 @@
     if (menu) togglePin(menu.node.id);
     closeMenu();
   }
+  // Copy with toast feedback + an insecure-context fallback (navigator.clipboard
+  // is undefined off https/localhost, so the optional-chained writeText silently
+  // no-op'd before — audit #25).
+  async function copyText(text: string, label: string) {
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text);
+        showToast(`Copied ${label}`);
+        return;
+      }
+      throw new Error("clipboard unavailable");
+    } catch {
+      try {
+        const ta = document.createElement("textarea");
+        ta.value = text;
+        ta.style.position = "fixed";
+        ta.style.opacity = "0";
+        document.body.appendChild(ta);
+        ta.focus();
+        ta.select();
+        const ok = document.execCommand("copy");
+        document.body.removeChild(ta);
+        showToast(ok ? `Copied ${label}` : `Couldn't copy ${label}`);
+      } catch {
+        showToast(`Couldn't copy ${label}`);
+      }
+    }
+  }
   function ctxCopyLink() {
-    if (menu) navigator.clipboard?.writeText(`[[${menu.node.title}]]`);
+    if (menu) void copyText(`[[${menu.node.title}]]`, "wikilink");
     closeMenu();
   }
   function ctxCopyPath() {
-    if (menu) navigator.clipboard?.writeText(menu.node.url);
+    if (menu) void copyText(menu.node.url, "note path");
     closeMenu();
   }
 
@@ -791,10 +934,24 @@
       return;
     }
     if (e.key === "Escape") {
-      if (menu) return closeMenu();
+      // Menu owns its own Escape dismissal (GraphContextMenu's window handler), so
+      // it's not handled here — see audit #34.
       if (typing && view.search) return (view.search = "");
       if (view.selectedId) return (view.selectedId = null);
       if (view.mode === "local") return exitLocal();
+      return;
+    }
+    // Keyboard entry to the context menu for the selected node (ContextMenu key or
+    // Shift+F10). Positioned at the canvas centre.
+    if (!typing && !menu && (e.key === "ContextMenu" || (e.shiftKey && e.key === "F10"))) {
+      const sel = selectedNode;
+      if (sel) {
+        e.preventDefault();
+        const rect = container?.getBoundingClientRect();
+        const x = rect ? rect.left + rect.width / 2 : window.innerWidth / 2;
+        const y = rect ? rect.top + rect.height / 2 : window.innerHeight / 2;
+        menu = { x, y, node: sel };
+      }
       return;
     }
     if (!typing && (e.key === "f" || e.key === "F")) {
@@ -802,9 +959,39 @@
       fit();
       return;
     }
-    if (!typing && view.selectedId && e.key.startsWith("Arrow")) {
+    // Enter opens the selected node (keyboard activation from the focused canvas).
+    if (!typing && e.key === "Enter" && selectedNode) {
       e.preventDefault();
+      navigate(selectedNode.url);
+      return;
+    }
+    if (!typing && e.key.startsWith("Arrow")) {
+      e.preventDefault();
+      // No selection yet → seed one at the most-connected visible node so arrow
+      // navigation has a starting point (audit #5).
+      if (!view.selectedId) {
+        const def = defaultNode();
+        if (def) selectNode(def);
+        return;
+      }
       moveSelection(e.key);
+    }
+  }
+
+  // Highest-degree visible node — the sensible default selection when the canvas
+  // is focused or an arrow is pressed with nothing selected.
+  function defaultNode(): FGNode | null {
+    let best: FGNode | null = null;
+    for (const n of allNodes) {
+      if (!R.pass.has(n.id)) continue;
+      if (!best || n.deg > best.deg) best = n;
+    }
+    return best;
+  }
+  function onCanvasFocus() {
+    if (!view.selectedId) {
+      const def = defaultNode();
+      if (def) selectNode(def);
     }
   }
 
@@ -827,23 +1014,23 @@
     const base = R.color.get(n.id) ?? cssAccent;
     if (hoveredId) {
       const near = n.id === hoveredId || (adjacency.get(hoveredId)?.has(n.id) ?? false);
-      return near ? base : withAlpha(base, 0.05);
+      return near ? base : withAlpha(base, 0.3);
     }
-    return R.pass.has(n.id) ? base : withAlpha(base, 0.1); // dimmed = recede
+    return R.pass.has(n.id) ? base : withAlpha(base, 0.3); // dimmed = recede
   }
   function link3dColor(l: any): string {
     const s = linkEndId(l.source);
     const t = linkEndId(l.target);
     if (hoveredId) {
-      if (s !== hoveredId && t !== hoveredId) return "rgba(160,166,190,0.03)";
-      if (view.colorLinksByType) return withAlpha(linkKindColor(l.kind), 0.9);
+      if (s !== hoveredId && t !== hoveredId) return "rgba(160,166,190,0.15)";
+      if (view.colorLinksByType) return withAlpha(linkKindColor(l.kind, graphDark), 0.9);
       if (view.colorLinks) return withAlpha(R.color.get(s) ?? cssAccent, 0.85);
       return "rgba(190,196,220,0.85)";
     }
     const bright = R.pass.has(s) && R.pass.has(t);
-    if (view.colorLinksByType) return withAlpha(linkKindColor(l.kind), bright ? 0.7 : 0.08);
-    if (view.colorLinks) return withAlpha(R.color.get(s) ?? cssAccent, bright ? 0.6 : 0.08);
-    return bright ? "rgba(160,166,190,0.5)" : "rgba(160,166,190,0.08)";
+    if (view.colorLinksByType) return withAlpha(linkKindColor(l.kind, graphDark), bright ? 0.7 : 0.18);
+    if (view.colorLinks) return withAlpha(R.color.get(s) ?? cssAccent, bright ? 0.6 : 0.18);
+    return bright ? "rgba(160,166,190,0.5)" : "rgba(160,166,190,0.18)";
   }
   // node3dVal drives the sphere volume. Honors the "Size by" pref so centrality
   // (PageRank) hubs read bigger in 3D too, matching the 2D radius logic.
@@ -901,7 +1088,7 @@
       view.showLabels && (n.deg >= 5 || n.id === view.selectedId || pinned.has(n.id));
     if (labelOn && SpriteText3d) {
       const s = new SpriteText3d(displayTitle(n.title, 24));
-      s.color = cssFg;
+      s.color = LABEL3D; // always light — cssFg is near-black in light mode (audit #5)
       s.backgroundColor = false;
       s.textHeight = 5;
       s.position.y = node3dRadius(n) + 6;
@@ -1225,6 +1412,7 @@
     return () => {
       destroyed = true;
       if (clickTO) clearTimeout(clickTO);
+      if (lpTimer) clearTimeout(lpTimer);
       if (dofRAF) cancelAnimationFrame(dofRAF);
       if (pulseRAF) cancelAnimationFrame(pulseRAF);
       if (raf3d) cancelAnimationFrame(raf3d);
@@ -1278,6 +1466,7 @@
       view.mode,
       view.depth,
       view.rootId,
+      graphDark, // re-resolve the theme-correct palette on a theme switch (audit #1)
     ];
     recompute();
   });
@@ -1288,6 +1477,29 @@
     prMap = pageRank(adjacency);
     prMax = prMap.size ? Math.max(...prMap.values()) : 1;
     repaint();
+  });
+
+  // ---- clear a selection that's been filtered out of the visible graph (audit
+  // #17). Selecting a node and then narrowing the filters (or leaving local scope)
+  // could leave view.selectedId pointing at a node that's no longer shown. Read the
+  // filter fields + visibleCount so this re-runs after recompute rebuilds R.pass. ----
+  $effect(() => {
+    void [
+      view.search,
+      view.filterFolders,
+      view.filterTags,
+      view.filterSources,
+      view.hideOrphans,
+      view.mode,
+      view.depth,
+      view.rootId,
+      visibleCount,
+    ];
+    const id = view.selectedId;
+    if (!id) return;
+    const node = allNodes.find((n) => n.id === id);
+    // Gone from the dataset entirely, or present but no longer in scope/passing.
+    if (!node || !R.pass.has(id)) view.selectedId = null;
   });
 
   // ---- node sizing pref → repaint (matters when the sim is frozen) ----
@@ -1444,6 +1656,19 @@
     savePersisted();
   });
 
+  // ---- reduced-motion preference: keep `reduce` live (audit #27) ----
+  $effect(() => {
+    const mq = window.matchMedia?.("(prefers-reduced-motion: reduce)");
+    if (!mq) return;
+    const onChange = () => {
+      reduce = mq.matches;
+      refreshFx(); // reduced-motion downgrades the effective fx level
+      repaint();
+    };
+    mq.addEventListener?.("change", onChange);
+    return () => mq.removeEventListener?.("change", onChange);
+  });
+
   // ---- theme changes: refresh cached colors + canvas bg ----
   $effect(() => {
     if (typeof MutationObserver === "undefined") return;
@@ -1553,7 +1778,19 @@
     {/if}
   {/if}
 
-  <div class="graph-canvas" bind:this={container}></div>
+  <!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+  <div
+    class="graph-canvas"
+    bind:this={container}
+    tabindex="0"
+    role="application"
+    aria-label="Knowledge graph. Use arrow keys to move between connected notes, Enter to open."
+    onfocus={onCanvasFocus}
+    ontouchstart={onTouchStart}
+    ontouchmove={onTouchMove}
+    ontouchend={onTouchEnd}
+    ontouchcancel={onTouchEnd}
+  ></div>
 
   <!-- Screen-reader live region + structured fallback (canvas is invisible to AT). -->
   <div class="sr-only" aria-live="polite">{announce}</div>
@@ -1578,13 +1815,30 @@
   .graph-stage {
     position: relative;
     margin: -28px -36px -64px;
-    height: calc(100vh - 58px);
+    /* 100dvh follows mobile browser chrome (toolbars) where 100vh overshoots
+       (audit #9). Desktop layout is unchanged (dvh == vh with no dynamic chrome). */
+    height: calc(100dvh - 58px);
     overflow: hidden;
-    background: var(--bg-inset);
+    /* Unify the wrapper background with the token force-graph paints into the
+       canvas (cssBg = --bg = --bg-content), so there's ONE background — the CSS
+       fill no longer differs from the painted canvas (audit #7). */
+    background: var(--bg-content);
   }
   .graph-canvas {
     position: absolute;
     inset: 0;
+    background: var(--bg-content);
+  }
+  /* Mobile: the desktop negative margins assume the desktop .main padding; on
+     small screens .main uses smaller padding, so the bleed mismatches and the
+     stage over/under-hangs. Neutralise the horizontal/bottom bleed and recompute
+     the height against the mobile chrome (audit #9). Desktop is untouched. */
+  @media (max-width: 760px) {
+    .graph-stage {
+      /* match the mobile .main padding (20px 16px 56px) so the bleed is exact */
+      margin: -20px -16px -56px;
+      height: calc(100dvh - 50px);
+    }
   }
   .graph-overlay {
     position: absolute;

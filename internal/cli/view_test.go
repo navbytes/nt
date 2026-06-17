@@ -15,7 +15,7 @@ func TestViewSaveListRecallRemove(t *testing.T) {
 		t.Errorf("fresh store should have no views, got: %s", out)
 	}
 
-	if out := captureRun(t, "view", "save", "work", "--project", "work", "--sort", "urgency"); !strings.Contains(out, "Saved view") {
+	if out := captureRun(t, "view", "save", "work", "--project", "work", "--sort", "urgency"); !strings.Contains(out, "saved view") {
 		t.Errorf("save output: %s", out)
 	}
 	if out := captureRun(t, "view", "list"); !strings.Contains(out, "work") || !strings.Contains(out, "--project work") {
@@ -33,7 +33,7 @@ func TestViewSaveListRecallRemove(t *testing.T) {
 	}
 
 	// Re-saving updates in place (no duplicate).
-	if out := captureRun(t, "view", "save", "work", "--project", "work"); !strings.Contains(out, "Updated view") {
+	if out := captureRun(t, "view", "save", "work", "--project", "work"); !strings.Contains(out, "updated view") {
 		t.Errorf("re-save should report Updated, got: %s", out)
 	}
 

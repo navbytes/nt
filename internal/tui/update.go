@@ -18,6 +18,23 @@ import (
 
 type editFinishedMsg struct{ err error }
 
+// statusClearMsg fires a few seconds after a status was set; it clears the line
+// only if no newer status replaced it in the meantime (gen still matches).
+type statusClearMsg struct{ gen int }
+
+// statusClearDelay is how long transient status feedback lingers before it
+// auto-clears, so stale messages don't sit in the footer indefinitely.
+const statusClearDelay = 4 * time.Second
+
+// scheduleStatusClear returns a command that clears the current status after a
+// delay, tagged with the current generation so a later status cancels it.
+func (m *Model) scheduleStatusClear() tea.Cmd {
+	gen := m.statusGen
+	return tea.Tick(statusClearDelay, func(time.Time) tea.Msg {
+		return statusClearMsg{gen: gen}
+	})
+}
+
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
@@ -32,6 +49,11 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case readyMsg:
 		m.ready = true
 		return m, nil
+	case statusClearMsg:
+		if msg.gen == m.statusGen {
+			m.status = ""
+		}
+		return m, nil
 	case tea.MouseMsg:
 		if m.ready {
 			m.handleMouse(msg)
@@ -41,16 +63,27 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if !m.ready {
 			return m, nil // drop startup terminal-query noise
 		}
-		if m.bodyEdit {
-			return m.updateBodyEdit(msg)
+		genBefore := m.statusGen
+		var (
+			mod tea.Model
+			cmd tea.Cmd
+		)
+		switch {
+		case m.bodyEdit:
+			mod, cmd = m.updateBodyEdit(msg)
+		case m.palette:
+			mod, cmd = m.updatePalette(msg)
+		case m.ik != inNone:
+			mod, cmd = m.updateInput(msg)
+		default:
+			mod, cmd = m.updateNormal(msg)
 		}
-		if m.palette {
-			return m.updatePalette(msg)
+		// If this key set a fresh, non-empty status, schedule its auto-clear so
+		// stale transient feedback doesn't linger in the footer.
+		if m.statusGen != genBefore && m.status != "" {
+			cmd = tea.Batch(cmd, m.scheduleStatusClear())
 		}
-		if m.ik != inNone {
-			return m.updateInput(msg)
-		}
-		return m.updateNormal(msg)
+		return mod, cmd
 	}
 	return m, nil
 }
@@ -184,15 +217,16 @@ func (m *Model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.clampCursor()
 		}
 	case "]": // next tab (digits 1-3 freed for vim counts)
-		m.tab = (m.tab + 1) % tabCount
-		m.cursor, m.offset = 0, 0
+		m.switchTab((m.tab + 1) % tabCount)
 	case "[", "shift+tab": // previous tab
-		m.tab = (m.tab + tabCount - 1) % tabCount
-		m.cursor, m.offset = 0, 0
+		m.switchTab((m.tab + tabCount - 1) % tabCount)
 	case "tab":
-		m.tab = (m.tab + 1) % tabCount
-		m.cursor, m.offset = 0, 0
+		m.switchTab((m.tab + 1) % tabCount)
 	case "v":
+		if m.tab != tabTasks {
+			m.setStatus("not available here")
+			break
+		}
 		m.grp = (m.grp + 1) % 3
 		m.rebuild()
 		m.setStatus("group: " + m.grp.String())
@@ -210,6 +244,10 @@ func (m *Model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.rebuild()
 		}
 	case "b":
+		if m.tab != tabTasks {
+			m.setStatus("not available here")
+			break
+		}
 		m.showBlocked = !m.showBlocked
 		m.rebuild()
 		m.setStatus("blocked: " + onOff(m.showBlocked))
@@ -219,6 +257,8 @@ func (m *Model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.detailScroll = 0
 		if m.detailFocus {
 			m.setStatus("detail focused — j/k scroll · esc back")
+		} else {
+			m.status = "" // un-focus clears the hint, matching esc
 		}
 	case "esc":
 		m.backOut()
@@ -276,7 +316,11 @@ func (m *Model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "A":
 		return m, m.startInput(inAddNote, "", "new note title")
 	case "/":
-		m.filterBefore = m.filter // remember, so Esc can cancel a live edit
+		// Remember the filter and the cursor/scroll position, so Esc can cancel a
+		// live edit and restore exactly where you were.
+		m.filterBefore = m.filter
+		m.filterSelBefore = m.selectedID()
+		m.filterOffBefore = m.offset
 		return m, m.startInput(inFilter, m.filter, "filter")
 	case "r":
 		if m.tab == tabNotes {
@@ -294,13 +338,20 @@ func (m *Model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if t := m.selectedTask(); t != nil {
 			return m, m.startInput(inDue, t.Due(), "due (today, fri, +3d, YYYY-MM-DD)")
 		}
+		m.setStatus("not available here")
 	case "t":
 		if m.selectedTask() != nil {
 			return m, m.startInput(inTag, "", "add tag")
 		}
+		m.setStatus("not available here")
 	case "T":
-		if t := m.selectedTask(); t != nil && len(t.Tags()) > 0 {
-			return m, m.startInput(inUntag, "", "remove tag: "+strings.Join(t.Tags(), " "))
+		if t := m.selectedTask(); t != nil {
+			if len(t.Tags()) > 0 {
+				return m, m.startInput(inUntag, "", "remove tag: "+strings.Join(t.Tags(), " "))
+			}
+			m.setStatus("no tags to remove")
+		} else {
+			m.setStatus("not available here")
 		}
 	case "l":
 		if m.tab == tabNotes {
@@ -321,10 +372,13 @@ func (m *Model) move(d int) {
 	if n == 0 {
 		return
 	}
+	before := m.cursor
 	m.cursor += d
 	m.clampCursor()
-	m.detailScroll = 0 // new selection → reset the detail pane scroll
-	m.paintVisual()    // extend the V range as the cursor moves
+	if m.cursor != before {
+		m.detailScroll = 0 // new selection → reset the detail pane scroll
+	}
+	m.paintVisual() // extend the V range as the cursor moves
 }
 
 func (m *Model) startInput(ik inputKind, initial, placeholder string) tea.Cmd {
@@ -343,8 +397,13 @@ func (m *Model) updateInput(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// the prompt opened (search-as-you-type otherwise leaves it applied).
 		if m.ik == inFilter && m.filter != m.filterBefore {
 			m.filter = m.filterBefore
-			m.offset = 0
 			m.rebuild()
+			// Restore the cursor/scroll position the live filter shifted.
+			if m.filterSelBefore != "" {
+				m.selectByID(m.filterSelBefore)
+			}
+			m.offset = m.filterOffBefore
+			m.clampCursor()
 		}
 		m.ik = inNone
 		m.input.Blur()
@@ -452,6 +511,7 @@ func (m *Model) addTask(text string) {
 func (m *Model) toggleDoing() {
 	t := m.selectedTask()
 	if t == nil {
+		m.setStatus("not available here")
 		return
 	}
 	id := t.ID()
@@ -497,6 +557,9 @@ func (m *Model) toggleDone() {
 		m.mutate("reopen", id, func(tk *task.Task) { tk.SetDone(false, "") })
 		return
 	}
+	// A recurring task spawns its next occurrence on completion — note that now
+	// so the spawn isn't silent (the bulk path confirms; this is the single path).
+	recurring := t.Recur() != ""
 	// Completing may spawn a recurrence; do it as one transaction (SPEC §9).
 	_ = m.eng.Apply("done", func(d *task.Doc, rec *mutate.Recorder) error {
 		if tk := d.FindByID(id); tk != nil {
@@ -506,6 +569,11 @@ func (m *Model) toggleDone() {
 	})
 	m.reload()
 	m.selectTaskByID(id)
+	if recurring {
+		m.setStatus("done — spawned next occurrence")
+	} else {
+		m.setStatus("done")
+	}
 }
 
 func (m *Model) cyclePriority() {
@@ -515,6 +583,21 @@ func (m *Model) cyclePriority() {
 	}
 	id, next := t.ID(), nextPri(t.Priority)
 	m.mutate("priority", id, func(tk *task.Task) { tk.SetPriority(next) })
+	m.setStatus("priority: " + priLabel(next))
+}
+
+// priLabel names a priority byte for status feedback (none/high/med/low).
+func priLabel(p byte) string {
+	switch p {
+	case 'A':
+		return "high (A)"
+	case 'B':
+		return "med (B)"
+	case 'C':
+		return "low (C)"
+	default:
+		return "none"
+	}
 }
 
 func (m *Model) rename(text string) {
@@ -551,16 +634,24 @@ func (m *Model) setDue(val string) {
 		m.setStatus("invalid date")
 		return
 	}
-	if n := m.applyToTargets("due", func(tk *task.Task) { tk.SetKey("due", d) }); n > 1 {
-		m.setStatus(fmt.Sprintf("due set on %d", n))
+	if n := m.applyToTargets("due", func(tk *task.Task) bool { tk.SetKey("due", d); return true }); n > 0 {
+		if n == 1 {
+			m.setStatus("due set")
+		} else {
+			m.setStatus(fmt.Sprintf("due set on %d", n))
+		}
 	}
 }
 
 // setPriority sets an absolute priority on the marked set (bulk `p` prompts a
 // letter; single `p` cycles via cyclePriority).
 func (m *Model) setPriority(p byte) {
-	if n := m.applyToTargets("priority", func(tk *task.Task) { tk.SetPriority(p) }); n > 1 {
-		m.setStatus(fmt.Sprintf("priority set on %d", n))
+	if n := m.applyToTargets("priority", func(tk *task.Task) bool { tk.SetPriority(p); return true }); n > 0 {
+		if n == 1 {
+			m.setStatus("priority: " + priLabel(p))
+		} else {
+			m.setStatus(fmt.Sprintf("priority set on %d", n))
+		}
 	}
 }
 
@@ -569,27 +660,50 @@ func (m *Model) addTag(tag string) {
 	if tag == "" {
 		return
 	}
-	if n := m.applyToTargets("tag", func(tk *task.Task) {
-		if !contains(tk.Tags(), tag) {
-			tk.SetText(tk.Text + " @" + tag)
+	n := m.applyToTargets("tag", func(tk *task.Task) bool {
+		if contains(tk.Tags(), tag) {
+			return false // already tagged — no-op, don't count it
 		}
-	}); n > 1 {
+		tk.SetText(tk.Text + " @" + tag)
+		return true
+	})
+	switch {
+	case n == 1:
+		m.setStatus("tagged @" + tag)
+	case n > 1:
 		m.setStatus(fmt.Sprintf("tagged %d", n))
+	default:
+		m.setStatus("already tagged @" + tag)
 	}
 }
 
 func (m *Model) removeTag(tag string) {
 	tag = strings.TrimPrefix(tag, "@")
-	m.applyToTargets("untag", func(tk *task.Task) {
+	n := m.applyToTargets("untag", func(tk *task.Task) bool {
 		words := strings.Fields(tk.Text)
 		out := words[:0]
+		removed := false
 		for _, w := range words {
-			if w != "@"+tag {
-				out = append(out, w)
+			if w == "@"+tag {
+				removed = true
+				continue
 			}
+			out = append(out, w)
+		}
+		if !removed {
+			return false
 		}
 		tk.SetText(strings.Join(out, " "))
+		return true
 	})
+	switch {
+	case n == 1:
+		m.setStatus("removed @" + tag)
+	case n > 1:
+		m.setStatus(fmt.Sprintf("removed @%s from %d", tag, n))
+	default:
+		m.setStatus("no @" + tag + " to remove")
+	}
 }
 
 // writeKeys are the keys that mutate the store; the read-only lock swallows them.

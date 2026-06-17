@@ -25,6 +25,7 @@ func cmdList(args []string) int {
 	status := fs.String("status", "", "open|doing|blocked|done")
 	tag := fs.String("tag", "", "filter by tag")
 	project := fs.String("project", "", "filter by project")
+	source := fs.String("source", "", "filter by source (e.g. claude)")
 	sortBy := fs.String("sort", "", "urgency|due|created")
 	all := fs.Bool("all", false, "include done tasks")
 	showBlocked := fs.Bool("show-blocked", false, "include dependency-blocked tasks")
@@ -35,7 +36,7 @@ func cmdList(args []string) int {
 	if err := fs.Parse(flags); err != nil {
 		return 2
 	}
-	return runList(view.Spec{
+	return runListSource(view.Spec{
 		Status:      *status,
 		Tag:         *tag,
 		Project:     *project,
@@ -43,14 +44,19 @@ func cmdList(args []string) int {
 		All:         *all,
 		ShowBlocked: *showBlocked,
 		Tree:        *tree,
-	}, *asJSON)
+	}, *source, *asJSON)
 }
 
 // runList renders the task list selected by spec — the shared core behind both
 // `nt list` and `nt view recall`, so a saved view filters/sorts exactly as the
 // equivalent flags would. asJSON is a recall-time output choice, kept out of the
 // saved Spec.
-func runList(spec view.Spec, asJSON bool) int {
+func runList(spec view.Spec, asJSON bool) int { return runListSource(spec, "", asJSON) }
+
+// runListSource is runList with an extra source filter applied after view.Apply
+// (view.Spec has no Source field, so the CLI filters it here for parity with
+// ready/agenda/recall/log).
+func runListSource(spec view.Spec, source string, asJSON bool) int {
 	e, ok := engine()
 	if !ok {
 		return 1
@@ -63,6 +69,15 @@ func runList(spec view.Spec, asJSON bool) int {
 	idx := indexMap(all3)
 	blocked := task.BlockedIDs(all3)
 	rows := view.Apply(all3, spec, blocked)
+	if source != "" {
+		kept := rows[:0]
+		for _, t := range rows {
+			if t.Source() == source {
+				kept = append(kept, t)
+			}
+		}
+		rows = kept
+	}
 
 	if asJSON {
 		return printJSON(tasksToJSON(rows, idx))
@@ -364,7 +379,7 @@ func cmdRecall(args []string) int {
 		fmt.Println(formatRow(t, idx[t], blocked[t.ID()]))
 	}
 	for _, n := range notes {
-		fmt.Printf("   ▤ %s  %s\n", shortID(n.ID), n.Title)
+		fmt.Printf("   ▤ %s  %s  %s\n", shortID(n.ID), n.Rel, n.Title)
 	}
 	return 0
 }
@@ -464,7 +479,7 @@ func cmdSearch(args []string) int {
 	}
 	query := strings.Join(positional, " ")
 	if query == "" && len(tags) == 0 {
-		return fail(fmt.Errorf("search: need a query or --tag"))
+		return usageErr(fmt.Errorf("search: need a query or --tag"))
 	}
 	e, ok := engine()
 	if !ok {
@@ -545,9 +560,9 @@ func cmdSearch(args []string) int {
 	found := 0
 	for _, h := range noteHits {
 		if h.snippet != "" && h.snippet != h.n.Title {
-			fmt.Printf("note  %s  %s — %s\n", h.n.Rel, h.n.Title, h.snippet)
+			fmt.Printf("note  %s  %s  %s — %s\n", shortID(h.n.ID), h.n.Rel, h.n.Title, h.snippet)
 		} else {
-			fmt.Printf("note  %s  %s\n", h.n.Rel, h.n.Title)
+			fmt.Printf("note  %s  %s  %s\n", shortID(h.n.ID), h.n.Rel, h.n.Title)
 		}
 		found++
 	}
@@ -635,7 +650,7 @@ func cmdLinks(args []string) int {
 		return 0
 	}
 	if len(positional) == 0 {
-		return fail(fmt.Errorf("links: need an id (or note:slug), or --orphans"))
+		return usageErr(fmt.Errorf("links: need an id (or note:slug), or --orphans"))
 	}
 	handle := positional[0]
 	d, err := e.Read()

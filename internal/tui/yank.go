@@ -19,7 +19,7 @@ func (m *Model) startYank() {
 func (m *Model) handleYankKey(key string) {
 	m.yankPending = false
 	switch key {
-	case "y", "i":
+	case "y":
 		m.yank("id")
 	case "l":
 		m.yank("line")

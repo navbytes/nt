@@ -82,12 +82,21 @@ func buildText(title string, tags []string, project, noteSlug string) string {
 }
 
 func cmdAdd(args []string) int {
+	// Config [defaults] priority/source set the flag defaults; explicit flags win.
+	cfg := loadConfig()
+	defPri, defSource := "", "cli"
+	if cfg.DefaultPriority != "" {
+		defPri = cfg.DefaultPriority
+	}
+	if cfg.DefaultSource != "" {
+		defSource = cfg.DefaultSource
+	}
 	fs := flag.NewFlagSet("add", flag.ContinueOnError)
 	var tags stringSlice
-	pri := fs.String("pri", "", "priority high|med|low")
+	pri := fs.String("pri", defPri, "priority high|med|low")
 	due := fs.String("due", "", "due date")
 	project := fs.String("project", "", "project")
-	source := fs.String("source", "cli", "origin")
+	source := fs.String("source", defSource, "origin")
 	parent := fs.String("parent", "", "parent task id")
 	blocks := fs.String("blocks", "", "blocks task id")
 	discovered := fs.String("discovered-from", "", "task this was discovered while working on")
@@ -102,21 +111,29 @@ func cmdAdd(args []string) int {
 	}
 	title := strings.Join(positional, " ")
 	if strings.TrimSpace(title) == "" {
-		return fail(fmt.Errorf("add: a title is required"))
+		return usageErr(fmt.Errorf("add: a title is required"))
 	}
-	p, ok := parsePriority(*pri)
-	if !ok {
-		return fail(fmt.Errorf("add: invalid priority %q", *pri))
+	var p byte
+	if *pri != "" {
+		b, ok := parsePriority(*pri)
+		if !ok {
+			return usageErr(fmt.Errorf("add: invalid priority %q", *pri))
+		}
+		p = b
 	}
-	dueVal, ok := parseDate(*due)
-	if !ok {
-		return fail(fmt.Errorf("add: invalid due date %q", *due))
+	var dueVal string
+	if *due != "" {
+		v, ok := parseDate(*due)
+		if !ok {
+			return usageErr(fmt.Errorf("add: invalid due date %q", *due))
+		}
+		dueVal = v
 	}
 	estVal := ""
 	if *est != "" {
 		m, ok := dateparse.Duration(*est)
 		if !ok {
-			return fail(fmt.Errorf("add: invalid estimate %q", *est))
+			return usageErr(fmt.Errorf("add: invalid estimate %q", *est))
 		}
 		estVal = dateparse.FmtDuration(m)
 	}
@@ -168,19 +185,36 @@ func cmdAdd(args []string) int {
 	return 0
 }
 
+// recurNote renders the "next occurrence" suffix for a completion line when a
+// recurring task spawned a fresh occurrence (nil ⇒ empty string, no suffix).
+func recurNote(spawned *task.Task) string {
+	if spawned == nil {
+		return ""
+	}
+	if due := spawned.Due(); due != "" {
+		return fmt.Sprintf(" — next occurrence %s due:%s", shortID(spawned.ID()), due)
+	}
+	return fmt.Sprintf(" — next occurrence %s", shortID(spawned.ID()))
+}
+
 // cmdSkip advances one or more recurring tasks to their next occurrence without
 // completing them — "not this time, but keep the cadence."
 func cmdSkip(args []string) int {
-	if len(args) == 0 {
-		return fail(fmt.Errorf("skip: need a task id"))
+	handles, herr := handleArgs("skip", args)
+	if herr != nil {
+		return usageErr(herr)
+	}
+	if len(handles) == 0 {
+		return usageErr(fmt.Errorf("skip: need a task id"))
 	}
 	e, ok := engine()
 	if !ok {
 		return 1
 	}
-	moved := 0
+	var lines []string
 	err := e.Apply("skip", func(d *task.Doc, rec *mutate.Recorder) error {
-		for _, h := range args {
+		lines = nil
+		for _, h := range handles {
 			t, err := resolveHandle(d, h)
 			if err != nil {
 				return fmt.Errorf("skip: %w", err)
@@ -194,38 +228,56 @@ func cmdSkip(args []string) int {
 			}
 			rec.Before(t)
 			t.SetKey("due", next)
-			moved++
+			lines = append(lines, fmt.Sprintf("skipped %s  %s  due:%s", shortID(t.ID()), t.Text, next))
 		}
 		return nil
 	})
 	if err != nil {
 		return fail(err)
 	}
-	fmt.Printf("skipped to next occurrence (%d)\n", moved)
+	if len(lines) == 1 {
+		fmt.Println(lines[0])
+	} else {
+		for _, l := range lines {
+			fmt.Println(l)
+		}
+		fmt.Printf("skipped %d\n", len(lines))
+	}
 	return 0
 }
 
 // cmdStart begins time-tracking a task: stamps started: (now, unix seconds) and
 // sets s:doing. Pair with `nt stop` to log the elapsed time into spent: (T6).
 func cmdStart(args []string) int {
-	if len(args) == 0 {
-		return fail(fmt.Errorf("start: need a task id"))
+	handles, herr := handleArgs("start", args)
+	if herr != nil {
+		return usageErr(herr)
+	}
+	if len(handles) == 0 {
+		return usageErr(fmt.Errorf("start: need a task id"))
 	}
 	e, ok := engine()
 	if !ok {
 		return 1
 	}
 	now := strconv.FormatInt(time.Now().Unix(), 10)
+	var single string
 	n := 0
 	err := e.Apply("start", func(d *task.Doc, rec *mutate.Recorder) error {
-		for _, h := range args {
+		n, single = 0, ""
+		for _, h := range handles {
 			t, err := resolveHandle(d, h)
 			if err != nil {
 				return fmt.Errorf("start: %w", err)
 			}
+			// Remember the pre-start state so `nt stop` can restore it (T6).
 			rec.Before(t)
+			if prev := t.Status(); prev != "" && prev != "doing" {
+				t.SetKey("prestart", prev)
+			}
 			t.SetKey("started", now)
 			t.SetState("doing")
+			single = fmt.Sprintf("started %s  %s — `nt stop` to log the time", shortID(t.ID()), t.Text)
 			n++
 		}
 		return nil
@@ -233,24 +285,33 @@ func cmdStart(args []string) int {
 	if err != nil {
 		return fail(err)
 	}
-	fmt.Printf("started %d task(s) — `nt stop` to log the time\n", n)
+	if n == 1 {
+		fmt.Println(single)
+	} else {
+		fmt.Printf("started %d — `nt stop` to log the time\n", n)
+	}
 	return 0
 }
 
 // cmdStop ends time-tracking: adds the elapsed time since started: into spent:,
 // clears started:, and returns the task to s:open (T6).
 func cmdStop(args []string) int {
-	if len(args) == 0 {
-		return fail(fmt.Errorf("stop: need a task id"))
+	handles, herr := handleArgs("stop", args)
+	if herr != nil {
+		return usageErr(herr)
+	}
+	if len(handles) == 0 {
+		return usageErr(fmt.Errorf("stop: need a task id"))
 	}
 	e, ok := engine()
 	if !ok {
 		return 1
 	}
 	now := time.Now().Unix()
-	var summary string
+	var lines []string
 	err := e.Apply("stop", func(d *task.Doc, rec *mutate.Recorder) error {
-		for _, h := range args {
+		lines = nil
+		for _, h := range handles {
 			t, err := resolveHandle(d, h)
 			if err != nil {
 				return fmt.Errorf("stop: %w", err)
@@ -269,16 +330,25 @@ func cmdStop(args []string) int {
 			rec.Before(t)
 			t.SetKey("spent", dateparse.FmtDuration(total))
 			t.SetKey("started", "") // clear the running timer
-			t.SetState("open")
-			summary = fmt.Sprintf("stopped %s — logged %s (total spent %s)",
-				shortID(t.ID()), dateparse.FmtDuration(elapsed), dateparse.FmtDuration(total))
+			// Restore the state the task was in before `nt start` set it to doing;
+			// default to open when there's nothing recorded.
+			restore := t.Key("prestart")
+			if restore == "" {
+				restore = "open"
+			}
+			t.SetKey("prestart", "")
+			t.SetState(restore)
+			lines = append(lines, fmt.Sprintf("stopped %s — logged %s (total spent %s)",
+				shortID(t.ID()), dateparse.FmtDuration(elapsed), dateparse.FmtDuration(total)))
 		}
 		return nil
 	})
 	if err != nil {
 		return fail(err)
 	}
-	fmt.Println(summary)
+	for _, l := range lines {
+		fmt.Println(l)
+	}
 	return 0
 }
 
@@ -307,7 +377,7 @@ func cmdNote(args []string) int {
 		}
 	}
 	if strings.TrimSpace(title) == "" {
-		return fail(fmt.Errorf("note: a title is required"))
+		return usageErr(fmt.Errorf("note: a title is required"))
 	}
 	e, ok := engine()
 	if !ok {
@@ -321,7 +391,7 @@ func cmdNote(args []string) int {
 		for _, f := range fields {
 			k, v, found := strings.Cut(f, "=")
 			if !found || strings.TrimSpace(k) == "" {
-				return fail(fmt.Errorf("note: --field must be key=value, got %q", f))
+				return usageErr(fmt.Errorf("note: --field must be key=value, got %q", f))
 			}
 			n.Extra = append(n.Extra, strings.TrimSpace(k)+": "+strings.TrimSpace(v))
 		}
@@ -347,7 +417,7 @@ func cmdJournal(args []string) int {
 	if *dateFlag != "" {
 		d, ok := parseDate(*dateFlag)
 		if !ok || d == "" {
-			return fail(fmt.Errorf("journal: invalid date %q", *dateFlag))
+			return usageErr(fmt.Errorf("journal: invalid date %q", *dateFlag))
 		}
 		date = dateparse.DatePart(d) // ignore any time-of-day
 	}
@@ -371,21 +441,28 @@ func cmdJournal(args []string) int {
 }
 
 func cmdDone(args []string) int {
-	if len(args) == 0 {
-		return fail(fmt.Errorf("done: need a task id"))
+	handles, herr := handleArgs("done", args)
+	if herr != nil {
+		return usageErr(herr)
+	}
+	if len(handles) == 0 {
+		return usageErr(fmt.Errorf("done: need a task id"))
 	}
 	e, ok := engine()
 	if !ok {
 		return 1
 	}
+	var single string
 	count := 0
 	err := e.Apply("done", func(d *task.Doc, rec *mutate.Recorder) error {
-		for _, h := range args {
+		count, single = 0, ""
+		for _, h := range handles {
 			t, err := resolveHandle(d, h)
 			if err != nil {
 				return fmt.Errorf("done: %w", err)
 			}
-			mutate.Complete(d, rec, t, mutate.Today()) // spawns next if recurring
+			spawned := completeAndSpawn(d, rec, t) // spawns next if recurring
+			single = fmt.Sprintf("done %s  %s%s", shortID(t.ID()), t.Text, recurNote(spawned))
 			count++
 		}
 		return nil
@@ -393,8 +470,29 @@ func cmdDone(args []string) int {
 	if err != nil {
 		return fail(err)
 	}
-	fmt.Printf("done (%d)\n", count)
+	if count == 1 {
+		fmt.Println(single)
+	} else {
+		fmt.Printf("done %d\n", count)
+	}
 	return 0
+}
+
+// completeAndSpawn completes t and returns the recurrence occurrence that
+// mutate.Complete appended (nil when none). It detects the spawn by diffing the
+// doc's task ids around the call, since mutate.Complete itself returns nothing.
+func completeAndSpawn(d *task.Doc, rec *mutate.Recorder, t *task.Task) *task.Task {
+	before := make(map[string]bool)
+	for _, x := range d.Tasks() {
+		before[x.ID()] = true
+	}
+	mutate.Complete(d, rec, t, mutate.Today())
+	for _, x := range d.Tasks() {
+		if !before[x.ID()] {
+			return x
+		}
+	}
+	return nil
 }
 
 func cmdUpdate(args []string) int {
@@ -408,6 +506,7 @@ func cmdUpdate(args []string) int {
 	est := fs.String("est", "", "time estimate (90m, 2h; 'none' clears)")
 	title := fs.String("title", "", "replace the task's description (keeps tags/project/links)")
 	project := fs.String("project", "", "set the +project ('none' clears)")
+	source := fs.String("source", "", "set the task's source ('none' clears)")
 	var addTags, rmTags stringSlice
 	fs.Var(&addTags, "tag", "add an @tag (repeatable)")
 	fs.Var(&rmTags, "untag", "remove an @tag (repeatable)")
@@ -417,7 +516,7 @@ func cmdUpdate(args []string) int {
 		return 2
 	}
 	if len(positional) == 0 {
-		return fail(fmt.Errorf("update: need a task id"))
+		return usageErr(fmt.Errorf("update: need a task id"))
 	}
 	handles := positional // bulk: apply the same changes to every id given
 
@@ -426,7 +525,7 @@ func cmdUpdate(args []string) int {
 	if *pri != "" {
 		b, ok := parsePriority(*pri)
 		if !ok {
-			return fail(fmt.Errorf("update: invalid priority %q", *pri))
+			return usageErr(fmt.Errorf("update: invalid priority %q", *pri))
 		}
 		priByte = b
 	}
@@ -434,7 +533,7 @@ func cmdUpdate(args []string) int {
 	if *due != "" {
 		v, ok := parseDate(*due)
 		if !ok {
-			return fail(fmt.Errorf("update: invalid due %q", *due))
+			return usageErr(fmt.Errorf("update: invalid due %q", *due))
 		}
 		dueVal = v
 	}
@@ -444,10 +543,16 @@ func cmdUpdate(args []string) int {
 		if *est != "none" && *est != "-" {
 			m, ok := dateparse.Duration(*est)
 			if !ok {
-				return fail(fmt.Errorf("update: invalid estimate %q", *est))
+				return usageErr(fmt.Errorf("update: invalid estimate %q", *est))
 			}
 			estVal = dateparse.FmtDuration(m)
 		}
+	}
+
+	switch *status {
+	case "", "done", "open", "doing", "blocked":
+	default:
+		return usageErr(fmt.Errorf("update: invalid status %q", *status))
 	}
 
 	e, ok := engine()
@@ -455,7 +560,9 @@ func cmdUpdate(args []string) int {
 		return 1
 	}
 	count := 0
+	var single, recurMsg string
 	err := e.Apply("update", func(d *task.Doc, rec *mutate.Recorder) error {
+		count, single, recurMsg = 0, "", ""
 		for _, handle := range handles {
 			t, err := resolveHandle(d, handle)
 			if err != nil {
@@ -465,7 +572,7 @@ func cmdUpdate(args []string) int {
 			switch *status {
 			case "":
 			case "done":
-				mutate.Complete(d, rec, t, mutate.Today()) // spawns next if recurring
+				recurMsg = recurNote(completeAndSpawn(d, rec, t)) // spawns next if recurring
 			case "open":
 				t.SetDone(false, "")
 				t.SetState("open")
@@ -506,12 +613,20 @@ func cmdUpdate(args []string) int {
 					t.SetProject(*project)
 				}
 			}
+			if *source != "" {
+				if *source == "none" || *source == "-" {
+					t.SetKey("src", "")
+				} else {
+					t.SetKey("src", *source)
+				}
+			}
 			for _, tg := range addTags {
 				t.AddTag(tg)
 			}
 			for _, tg := range rmTags {
 				t.RemoveTag(tg)
 			}
+			single = fmt.Sprintf("updated %s  %s", shortID(t.ID()), t.Text)
 			count++
 		}
 		return nil
@@ -520,9 +635,9 @@ func cmdUpdate(args []string) int {
 		return fail(err)
 	}
 	if count == 1 {
-		fmt.Println("updated")
+		fmt.Println(single + recurMsg)
 	} else {
-		fmt.Printf("updated %d\n", count)
+		fmt.Printf("updated %d%s\n", count, recurMsg)
 	}
 	return 0
 }
@@ -542,30 +657,59 @@ func cmdRm(args []string) int {
 		return 2
 	}
 	if len(positional) == 0 {
-		return fail(fmt.Errorf("rm: need a task id or note handle"))
+		return usageErr(fmt.Errorf("rm: need a task id or note handle"))
 	}
 	e, ok := engine()
 	if !ok {
 		return 1
 	}
-	// Notes delete via the trash; the rest fall through to the task engine.
+	// Resolve and classify EVERY handle up front (note vs task vs unknown) before
+	// mutating anything, so a later invalid handle never leaves earlier notes
+	// trashed (the deletion is otherwise non-atomic across the two stores).
 	notes, _ := note.List(e.S)
-	var taskHandles []string
+	d, derr := e.Read()
+	if derr != nil {
+		return fail(derr)
+	}
+	var noteTargets []*note.Note
+	var taskHandles, unknown []string
 	for _, h := range positional {
 		if n, err := resolveNote(notes, h); err == nil {
-			if code := rmNote(e, n, *force, *unlink, *yes); code != 0 {
-				return code
-			}
-		} else {
+			noteTargets = append(noteTargets, n)
+			continue
+		}
+		if _, terr := resolveHandle(d, h); terr == nil {
 			taskHandles = append(taskHandles, h)
+		} else if task.IsPositional(h) && !interactive() {
+			// Surface the stable-id guidance directly rather than burying it as a
+			// generic "unknown handle".
+			return fail(fmt.Errorf("rm: %w", terr))
+		} else {
+			unknown = append(unknown, h)
+		}
+	}
+	if len(unknown) > 0 {
+		return fail(fmt.Errorf("rm: no task or note: %s", strings.Join(unknown, ", ")))
+	}
+
+	// Destructive deletes must be explicit for non-interactive callers: require
+	// --yes (matching the cautious note-with-backlinks behavior) so an agent or
+	// script can't silently wipe tasks it merely listed.
+	if len(taskHandles) > 0 && !interactive() && !*yes {
+		return fail(fmt.Errorf("rm: refusing to delete %d task(s) non-interactively — pass --yes to confirm", len(taskHandles)))
+	}
+
+	// Notes delete via the trash; the rest fall through to the task engine.
+	for _, n := range noteTargets {
+		if code := rmNote(e, n, *force, *unlink, *yes); code != 0 {
+			return code
 		}
 	}
 	if len(taskHandles) == 0 {
 		return 0
 	}
 
-	// Confirm task deletion interactively (agents/scripts proceed unprompted, as
-	// before; the delete is undoable regardless).
+	// Confirm task deletion interactively (the delete is undoable regardless).
 	if interactive() && !*yes {
 		label := fmt.Sprintf("Delete %d task(s)?", len(taskHandles))
 		if len(taskHandles) == 1 {
@@ -578,13 +722,16 @@ func cmdRm(args []string) int {
 	}
 
 	count := 0
+	var single string
 	err := e.Apply("delete", func(d *task.Doc, rec *mutate.Recorder) error {
+		count, single = 0, ""
 		for _, h := range taskHandles {
 			t, err := resolveHandle(d, h)
 			if err != nil {
 				return fmt.Errorf("rm: %w", err)
 			}
 			before := t.Line()
+			single = fmt.Sprintf("removed %s  %s (nt undo to restore)", shortID(t.ID()), t.Text)
 			d.Remove(t.ID())
 			rec.Removed(t.ID(), before)
 			count++
@@ -594,7 +741,11 @@ func cmdRm(args []string) int {
 	if err != nil {
 		return fail(err)
 	}
-	fmt.Printf("removed %d (nt undo to restore)\n", count)
+	if count == 1 {
+		fmt.Println(single)
+	} else {
+		fmt.Printf("removed %d (nt undo to restore)\n", count)
+	}
 	return 0
 }
 

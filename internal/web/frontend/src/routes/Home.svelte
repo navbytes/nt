@@ -22,6 +22,25 @@
   const openCount = $derived($stateQ.data?.openCount ?? 0);
   const noteCount = $derived($stateQ.data?.noteCount ?? 0);
 
+  // Activity is conveyed by a dot HUE alone, which fails colour-blind users and
+  // screen readers (the verb was hover-only/aria-hidden). Pair each action with a
+  // glyph (a second, non-colour cue) and a spoken verb (finding 11).
+  function actionIcon(action: string): string {
+    if (action === "added" || action === "created") return "plus";
+    if (action === "completed") return "check";
+    if (action === "archived" || action === "deleted") return "archive";
+    return "edit"; // updated / anything else
+  }
+  function actionVerb(action: string): string {
+    if (action === "added") return "Added";
+    if (action === "created") return "Created";
+    if (action === "completed") return "Completed";
+    if (action === "updated") return "Updated";
+    if (action === "archived") return "Archived";
+    if (action === "deleted") return "Deleted";
+    return action ? action[0]!.toUpperCase() + action.slice(1) : "Changed";
+  }
+
   // ── today's plan: overdue + due-today, open — the same buckets the FOCUS
   //    card renders. Reuses the ["tasks"] cache TaskRows fills. ───────────────
   function todayISO(d = new Date()): string {
@@ -101,8 +120,12 @@
     " · " +
     now.toLocaleDateString(undefined, { month: "long", day: "numeric" });
 
-  // The day is "clear" only once tasks have loaded and nothing is due/overdue.
-  const dayClear = $derived(!$tasksQ.isPending && focusCount === 0);
+  // A failed tasks/activity fetch must NOT read as "all clear" (W7) — branch on
+  // the error so the hero shows a load-failure state instead of false calm.
+  const loadFailed = $derived(!!$tasksQ.error || !!$activityQ.error);
+  // The day is "clear" only once tasks have loaded WITHOUT error and nothing is
+  // due/overdue.
+  const dayClear = $derived(!$tasksQ.isPending && !loadFailed && focusCount === 0);
 </script>
 
 <div class="hero">
@@ -119,21 +142,35 @@
   <section class="card card--focus" class:card--clear={dayClear} aria-labelledby="focus-h">
     <div class="card__head">
       <h2 class="card__label" id="focus-h">Focus</h2>
-      {#if !$tasksQ.isPending}
+      {#if !$tasksQ.isPending && !loadFailed}
         <span class="card__count">{focusCount} {focusCount === 1 ? "task" : "tasks"}</span>
       {/if}
     </div>
 
-    <TaskRows
-      view="agenda"
-      buckets={["Overdue", "Today"]}
-      showAdd={true}
-      emptyText="Nothing overdue or due today — you're all clear."
-    />
+    {#if loadFailed}
+      <!-- A failed fetch must read as a problem, never as "all clear" (W7). -->
+      <div class="loaderr" role="alert">
+        <p class="loaderr__msg">Couldn't load your day. Check your connection and retry.</p>
+        <button
+          class="btn btn--ghost btn--sm"
+          onclick={() => {
+            $tasksQ.refetch();
+            $activityQ.refetch();
+          }}>Try again</button
+        >
+      </div>
+    {:else}
+      <TaskRows
+        view="agenda"
+        buckets={["Overdue", "Today"]}
+        showAdd={true}
+        emptyText="Nothing overdue or due today — you're all clear."
+      />
 
-    <p class="card__hint">
-      <kbd>c</kbd> to capture · <kbd>⌘K</kbd> for commands
-    </p>
+      <p class="card__hint">
+        <kbd>c</kbd> to capture · <kbd>⌘K</kbd> for commands
+      </p>
+    {/if}
   </section>
 
   <!-- ── CAPACITY RING: planned est: vs daily budget (capacity.ts math) ───── -->
@@ -217,7 +254,9 @@
       <ul class="feed">
         {#each (day.events ?? []).slice(0, 9) as ev (ev.when + ev.title)}
           <li class="feed__item">
-            <span class="feed__dot feed__dot--{ev.action}" title={ev.action} aria-hidden="true"></span>
+            <span class="feed__glyph feed__glyph--{ev.action}" title={actionVerb(ev.action)} aria-hidden="true"><Icon name={actionIcon(ev.action)} size={11} /></span>
+            <!-- Spoken verb so the action isn't carried by colour alone (finding 11). -->
+            <span class="feed__verb">{actionVerb(ev.action)}:</span>
             {#if ev.url}<a class="feed__title" href={ev.url}>{ev.title}</a>{:else}<span class="feed__title">{ev.title}</span>{/if}
             <span class="feed__when">{relDay(ev.when)}</span>
           </li>
@@ -230,6 +269,19 @@
 </div>
 
 <style>
+  /* Friendly load-failure state inside the Focus card (W7) — never expose the
+     raw error object; offer a retry. */
+  .loaderr {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin: 12px 0;
+  }
+  .loaderr__msg {
+    margin: 0;
+    color: var(--fg-soft);
+  }
+
   /* ── hero ──────────────────────────────────────────────────────────────── */
   .hero {
     margin-bottom: var(--space-7);
@@ -458,27 +510,39 @@
   .feed__item:last-child {
     border-bottom: 0;
   }
-  .feed__dot {
+  /* Action glyph: a per-action icon (a non-colour cue) tinted by the same hue the
+     old dot used, so the action reads for colour-blind users too (finding 11). */
+  .feed__glyph {
     flex: none;
     align-self: center;
-    width: 6px;
-    height: 6px;
-    border-radius: 50%;
-    background: var(--muted);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--muted);
   }
-  .feed__dot--added,
-  .feed__dot--created {
-    background: var(--green);
+  .feed__glyph--added,
+  .feed__glyph--created {
+    color: var(--green);
   }
-  .feed__dot--completed {
-    background: var(--accent-color);
+  .feed__glyph--completed {
+    color: var(--accent-color);
   }
-  .feed__dot--updated {
-    background: var(--teal);
+  .feed__glyph--updated {
+    color: var(--teal);
   }
-  .feed__dot--archived,
-  .feed__dot--deleted {
-    background: var(--label-quaternary);
+  .feed__glyph--archived,
+  .feed__glyph--deleted {
+    color: var(--label-quaternary);
+  }
+  /* Spoken verb — present for assistive tech and as a calm inline label so the
+     action never relies on colour alone. */
+  .feed__verb {
+    flex: none;
+    font-family: var(--font-mono);
+    font-size: var(--text-subhead);
+    text-transform: uppercase;
+    letter-spacing: var(--tracking-caps);
+    color: var(--muted);
   }
   .feed__title {
     flex: 1;

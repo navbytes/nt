@@ -72,5 +72,19 @@ describe("parseQuickAdd", () => {
     expect(r.title).toBe("");
     expect(r.tags).toEqual([]);
     expect(r.links).toEqual([]);
+    expect(r.emptyKeys).toEqual([]);
+  });
+
+  it("flags a recognised key typed with no value yet (hint, not title text)", () => {
+    const r = parseQuickAdd("pay rent due:");
+    expect(r.emptyKeys).toEqual(["due"]);
+    expect(r.due).toBeUndefined();
+    expect(r.title).toBe("pay rent"); // the bare "due:" is not dropped into the title
+  });
+
+  it("does not flag an unrecognised bare key (kept as title text)", () => {
+    const r = parseQuickAdd("see src:");
+    expect(r.emptyKeys).toEqual([]);
+    expect(r.title).toContain("src:");
   });
 });

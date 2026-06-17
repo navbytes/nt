@@ -175,6 +175,29 @@ func TestDetailScroll(t *testing.T) {
 	}
 }
 
+// TestScrollDetailLastLineReachable: at max scroll the final body line is in the
+// window and the down-indicator reads 0 (U1 — off-by-one windowing/clamp fix).
+func TestScrollDetailLastLineReachable(t *testing.T) {
+	m := testModel(t)
+	m.width, m.height = 100, 24
+	var lines []string
+	for i := 0; i < 40; i++ {
+		lines = append(lines, "line-"+string(rune('A'+i)))
+	}
+	content := strings.Join(lines, "\n")
+	h := 10
+
+	m.detailScroll = 1 << 20 // ask for the very bottom; render clamps it
+	out := m.scrollDetail(content, h)
+	last := "line-" + string(rune('A'+39))
+	if !strings.Contains(out, last) {
+		t.Fatalf("the last body line (%s) should be reachable at max scroll:\n%s", last, out)
+	}
+	if !strings.Contains(out, "↓0") {
+		t.Fatalf("the down indicator should read 0 at the bottom:\n%s", out)
+	}
+}
+
 // TestFollowLink: L on a task with a [[note]] link jumps to that note.
 func TestFollowLink(t *testing.T) {
 	m := testModel(t)
@@ -453,19 +476,19 @@ func TestQuitBacksOutFirst(t *testing.T) {
 	m.width, m.height = 100, 24
 	q := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")}
 
-	// q while a filter is active clears the filter instead of quitting.
+	// q while a filter is active clears the filter instead of quitting. (A
+	// back-out may return a status auto-clear cmd, so assert via state, not cmd.)
 	m.filter = "auth"
 	m.rebuild()
-	if _, cmd := m.Update(q); cmd != nil {
-		t.Fatal("q should back out of the filter, not quit")
-	}
+	m.Update(q)
 	if m.filter != "" {
-		t.Fatal("q should have cleared the filter")
+		t.Fatal("q should have cleared the filter, not quit")
 	}
 
 	// q while detail is focused unfocuses it.
 	m.detailFocus = true
-	if _, cmd := m.Update(q); cmd != nil || m.detailFocus {
+	m.Update(q)
+	if m.detailFocus {
 		t.Fatal("q should unfocus the detail pane, not quit")
 	}
 

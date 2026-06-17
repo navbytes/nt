@@ -8,6 +8,7 @@ import {
   meaningfulSource,
   fmtDuration,
   highlightParts,
+  dueTier,
 } from "../lib/text";
 
 describe("displayTitle", () => {
@@ -143,5 +144,35 @@ describe("highlightParts", () => {
   });
   it("no match → one plain part", () => {
     expect(highlightParts("hello", "zzz")).toEqual([{ text: "hello", hit: false }]);
+  });
+});
+
+describe("dueTier", () => {
+  // Pin "now" so the tiers are deterministic regardless of when the suite runs.
+  const now = new Date(2026, 5, 17); // 2026-06-17 (local)
+
+  it("classifies past/today/soon/later by date only", () => {
+    expect(dueTier("2026-06-16", 3, now)).toBe("over");
+    expect(dueTier("2026-06-17", 3, now)).toBe("today");
+    expect(dueTier("2026-06-18", 3, now)).toBe("soon");
+    expect(dueTier("2026-06-20", 3, now)).toBe("soon"); // +3d = edge of horizon
+    expect(dueTier("2026-06-21", 3, now)).toBe("later"); // +4d falls out
+  });
+
+  it("a same-day time-of-day is still 'today' (not overdue)", () => {
+    expect(dueTier("2026-06-17T09:00", 3, now)).toBe("today");
+  });
+
+  it("honours the per-call soon horizon (agenda uses 7 days)", () => {
+    // +5d: 'later' under the 3-day row horizon, 'soon' under the 7-day agenda one.
+    expect(dueTier("2026-06-22", 3, now)).toBe("later");
+    expect(dueTier("2026-06-22", 7, now)).toBe("soon");
+    expect(dueTier("2026-06-24", 7, now)).toBe("soon"); // +7d edge
+    expect(dueTier("2026-06-25", 7, now)).toBe("later"); // +8d out
+  });
+
+  it("unparseable due → 'later'", () => {
+    expect(dueTier("", 3, now)).toBe("later");
+    expect(dueTier("not-a-date", 3, now)).toBe("later");
   });
 });

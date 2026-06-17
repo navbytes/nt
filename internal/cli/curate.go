@@ -46,7 +46,7 @@ func cmdShow(args []string) int {
 		}
 	}
 	if len(positional) == 0 {
-		return fail(fmt.Errorf("show: need a note handle (slug/title/id)"))
+		return usageErr(fmt.Errorf("show: need a note handle (slug/title/id)"))
 	}
 	e, ok := engine()
 	if !ok {
@@ -118,7 +118,7 @@ func cmdNotes(args []string) int {
 		return 0
 	}
 	for _, n := range out {
-		line := fmt.Sprintf("%s  %s", n.Rel, n.Title)
+		line := fmt.Sprintf("%s  %s  %s", shortID(n.ID), n.Rel, n.Title)
 		if len(n.Tags) > 0 {
 			line += "  @" + strings.Join(n.Tags, " @")
 		}
@@ -127,9 +127,21 @@ func cmdNotes(args []string) int {
 	return 0
 }
 
+// tagCount is one row of the tag vocabulary (for --json).
+type tagCount struct {
+	Tag   string `json:"tag"`
+	Count int    `json:"count"`
+}
+
 // cmdTags enumerates the tag vocabulary (notes + tasks) with counts — helps keep
 // a controlled vocabulary clean.
 func cmdTags(args []string) int {
+	fs := flag.NewFlagSet("tags", flag.ContinueOnError)
+	asJSON := fs.Bool("json", false, "machine-readable output")
+	flags, _ := splitArgs(args, map[string]bool{"json": true})
+	if err := fs.Parse(flags); err != nil {
+		return 2
+	}
 	e, ok := engine()
 	if !ok {
 		return 1
@@ -148,17 +160,33 @@ func cmdTags(args []string) int {
 			}
 		}
 	}
-	if len(counts) == 0 {
-		fmt.Println("no tags")
-		return 0
-	}
 	keys := make([]string, 0, len(counts))
 	for k := range counts {
 		keys = append(keys, k)
 	}
 	sort.Strings(keys)
+
+	if *asJSON {
+		out := make([]tagCount, 0, len(keys))
+		for _, k := range keys {
+			out = append(out, tagCount{Tag: k, Count: counts[k]})
+		}
+		return printJSON(out)
+	}
+	if len(counts) == 0 {
+		fmt.Println("no tags")
+		return 0
+	}
+	// Align counts to the widest tag rather than a fixed width that truncates long
+	// tags into the count column.
+	width := 0
 	for _, k := range keys {
-		fmt.Printf("%-20s %d\n", "@"+k, counts[k])
+		if n := len(k) + 1; n > width { // +1 for the leading @
+			width = n
+		}
+	}
+	for _, k := range keys {
+		fmt.Printf("%-*s %d\n", width, "@"+k, counts[k])
 	}
 	return 0
 }
@@ -177,7 +205,7 @@ func cmdTag(args []string) int {
 		}
 	}
 	if len(handles) == 0 || len(ops) == 0 {
-		return fail(fmt.Errorf("tag: usage: nt tag <note…> +add -remove …"))
+		return usageErr(fmt.Errorf("tag: usage: nt tag <note…> +add -remove …"))
 	}
 	e, ok := engine()
 	if !ok {

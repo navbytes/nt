@@ -101,6 +101,28 @@ export function relativeDue(due: string, now: Date = new Date()): DueInfo {
   return { label, overdue: diff < 0, soon: diff >= 0 && diff <= 1 };
 }
 
+// ---- due temperature -----------------------------------------------------
+
+/** A single "how much pressure" tier shared by the task row, the board card, and
+ *  (via {@link dueBucket}) the agenda bucketing — derived once so the three
+ *  surfaces can never drift. */
+export type DueTier = "over" | "today" | "soon" | "later";
+
+// dueTier maps a raw ISO due value to a temperature tier relative to `now`,
+// date-only (a task due *today* isn't yet overdue), matching relativeDue() and
+// the agenda buckets. `soonDays` is the horizon that still counts as "soon": the
+// list rows + board use 3 days; the agenda's "This week" uses 7 — each call site
+// passes its own threshold so semantics are preserved, never silently changed.
+export function dueTier(dueRaw: string, soonDays = 3, now: Date = new Date()): DueTier {
+  const [y, mo, d] = dueRaw.slice(0, 10).split("-").map(Number);
+  if (!y || !mo || !d) return "later";
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const diff = Math.round((new Date(y, mo - 1, d).getTime() - today.getTime()) / 86400000);
+  if (diff < 0) return "over";
+  if (diff === 0) return "today";
+  return diff <= soonDays ? "soon" : "later";
+}
+
 // ---- task source ---------------------------------------------------------
 
 // Default origins (you, at a keyboard) are noise on every row. We only surface a

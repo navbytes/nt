@@ -102,7 +102,10 @@
     border-radius: var(--radius-popover);
     box-shadow: var(--shadow-float), var(--glass-hairline);
     padding: var(--space-4) var(--space-5) var(--space-5);
-    overflow: hidden;
+    /* Cap to the stage (the positioned ancestor) and scroll within, so long
+       note details can't grow past the stage and get clipped by its overflow. */
+    max-height: calc(100% - 24px);
+    overflow: hidden auto;
     animation: gdetails-in var(--motion) var(--ease-out);
   }
   /* spectral hairline along the top edge — the panel's identity cue */
@@ -224,5 +227,24 @@
   }
   .gdetails__chev--open {
     transform: rotate(90deg);
+  }
+
+  /* Mobile: the fixed 300px/40vw top-right panel overlaps the controls and
+     sandwiches the canvas. Dock it as a full-width bottom sheet instead (audit
+     #8) — full width, no max-width cap, pinned to the bottom edge, capped height
+     with internal scroll. Sits above the controls bar (higher z-index). */
+  @media (max-width: 640px) {
+    .gdetails {
+      top: auto;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      width: auto;
+      max-width: none;
+      z-index: 22;
+      border-radius: var(--radius-popover) var(--radius-popover) 0 0;
+      max-height: 60dvh;
+      overflow-y: auto;
+    }
   }
 </style>

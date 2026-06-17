@@ -8,8 +8,10 @@ import (
 )
 
 // applyToTargets applies fn to every target task (marked set or current) in one
-// undo transaction, then clears marks and reloads. Returns the count changed.
-func (m *Model) applyToTargets(op string, fn func(*task.Task)) int {
+// undo transaction, then clears marks and reloads. fn reports whether it actually
+// mutated the task; the returned count is the number of real changes (so a no-op,
+// e.g. adding a duplicate tag, isn't counted).
+func (m *Model) applyToTargets(op string, fn func(*task.Task) bool) int {
 	ids := m.targets()
 	if len(ids) == 0 {
 		return 0
@@ -20,8 +22,9 @@ func (m *Model) applyToTargets(op string, fn func(*task.Task)) int {
 		for _, id := range ids {
 			if tk := d.FindByID(id); tk != nil {
 				rec.Before(tk)
-				fn(tk)
-				n++
+				if fn(tk) {
+					n++
+				}
 			}
 		}
 		return nil

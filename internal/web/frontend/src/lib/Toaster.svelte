@@ -40,7 +40,11 @@
     left: 50%;
     bottom: 22px;
     transform: translateX(-50%);
-    z-index: 70;
+    /* z-scale (finding 14): grain 1 · topbar 5 · resizer 6 · drawer-scrim 25 ·
+       drawer 30 · fab 40 · search-drop 50 · dialogs 60 · toast 65 · palette 90.
+       65 keeps toasts above page chrome but BELOW the modal dialogs (60 → was
+       70, which painted over About/Shortcuts). */
+    z-index: 65;
     pointer-events: none; /* the empty live region must never block clicks */
   }
   .toast {
@@ -53,7 +57,7 @@
     background: color-mix(in srgb, var(--bg-elevated) 85%, transparent);
     -webkit-backdrop-filter: blur(18px) saturate(150%);
     backdrop-filter: blur(18px) saturate(150%);
-    border: 0.5px solid var(--separator);
+    border: 1px solid var(--control-border); /* finding 6 — toast edge over a blur */
     border-radius: var(--radius-lg);
     box-shadow: var(--shadow-popover);
     font-size: 0.88rem;

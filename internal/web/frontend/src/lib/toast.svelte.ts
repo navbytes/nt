@@ -24,3 +24,15 @@ export function dismissToast() {
   clearTimeout(timer);
   toast.current = null;
 }
+
+// Drop a stale Undo toast as soon as a NEW write lands (W10). The undo engine is
+// single-level — it reverts the LATEST write — so a lingering "Undo" after a
+// subsequent write would silently revert the wrong operation. Callers invoke
+// this from their post-write sync so the dangling Undo disappears; a plain
+// confirmation toast (no undo handler) is left alone.
+export function clearUndoToast() {
+  if (toast.current?.undo) {
+    clearTimeout(timer);
+    toast.current = null;
+  }
+}

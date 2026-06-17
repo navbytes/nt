@@ -204,7 +204,7 @@
   }
   .sc {
     background: var(--bg-elevated);
-    border: 0.5px solid var(--separator);
+    border: 1px solid var(--control-border); /* finding 6 — modal edge */
     border-radius: var(--radius-popover);
     box-shadow: var(--shadow-popover);
     width: min(560px, 100%);

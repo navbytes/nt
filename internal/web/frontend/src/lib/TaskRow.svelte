@@ -6,25 +6,34 @@
   // activity) so every surface stays consistent from a single click.
   import { createMutation, useQueryClient } from "@tanstack/svelte-query";
   import { api, type Task, type TaskGroup } from "./api";
-  import { priorityClass, relativeDue, meaningfulSource, displayTitle, fmtDuration } from "./text";
-  import { showToast } from "./toast.svelte";
+  import { priorityClass, relativeDue, meaningfulSource, displayTitle, fmtDuration, dueTier } from "./text";
+  import { showToast, clearUndoToast } from "./toast.svelte";
   import { navigate } from "./router.svelte";
+  import { isTextEntry } from "./keys.svelte";
   import Icon from "./Icon.svelte";
 
   let {
     t,
     selected = false,
     onToggleSelect,
+    focusSibling,
   }: {
     t: Task;
     /** True when this row is part of a bulk selection (W11). */
     selected?: boolean;
     /** Toggle this row's bulk selection (x key / the select checkbox). */
     onToggleSelect?: () => void;
+    /** Move roving focus to the row that follows/precedes this id once it leaves
+     *  the list (complete/delete), so j/k keeps working (W12). */
+    focusSibling?: (id: string) => void;
   } = $props();
 
   const qc = useQueryClient();
   const synced = (d: { groups: TaskGroup[] }) => {
+    // A fresh write just landed, so any lingering single-level Undo toast from a
+    // PRIOR write would now revert the wrong op — drop it before we (maybe) post
+    // this write's own Undo (W10).
+    clearUndoToast();
     qc.setQueryData(["tasks"], d); // instant in any view subscribed to the task list
     for (const k of [["review"], ["state"], ["activity"], ["tasks-view"]]) {
       qc.invalidateQueries({ queryKey: k }); // tasks-view: recalled saved views re-filter server-side
@@ -43,32 +52,57 @@
   }
   const short = () => `“${displayTitle(t.text, 32)}”`;
 
+  // When a keyboard-driven complete/delete removes this row from the list, hand
+  // roving focus to the next sibling so j/k keeps working (W12). We capture
+  // "was this row focused" at mutate time and act on it once the write resolves.
+  let refocusOnDone = false;
+  function maybeRefocus() {
+    if (refocusOnDone) {
+      refocusOnDone = false;
+      focusSibling?.(t.id);
+    }
+  }
+
   const doneMut = createMutation({
     mutationFn: api.taskDone,
     onSuccess: (d) => {
       synced(d);
+      maybeRefocus();
       showToast(`Completed ${short()}`, undoLast);
     },
+    onError: (e) => showToast(`Couldn't complete: ${String(e)}`),
   });
-  const reopenMut = createMutation({ mutationFn: api.taskReopen, onSuccess: synced });
+  const reopenMut = createMutation({
+    mutationFn: api.taskReopen,
+    onSuccess: (d) => {
+      synced(d);
+      maybeRefocus();
+    },
+    onError: (e) => showToast(`Couldn't reopen: ${String(e)}`),
+  });
   const statusMut = createMutation({
     mutationFn: (a: { id: string; status: string }) => api.taskStatus(a.id, a.status),
     onSuccess: synced,
+    onError: (e) => showToast(`Couldn't change status: ${String(e)}`),
   });
   const deleteMut = createMutation({
     mutationFn: api.taskDelete,
     onSuccess: (d) => {
       synced(d);
+      maybeRefocus();
       showToast(`Deleted ${short()}`, undoLast);
     },
+    onError: (e) => showToast(`Couldn't delete: ${String(e)}`),
   });
   const editMut = createMutation({
     mutationFn: (a: { id: string; text: string }) => api.taskEdit(a.id, a.text),
     onSuccess: synced,
+    onError: (e) => showToast(`Couldn't save edit: ${String(e)}`),
   });
   const dueMut = createMutation({
     mutationFn: (a: { id: string; due: string }) => api.taskDue(a.id, a.due),
     onSuccess: synced,
+    onError: (e) => showToast(`Couldn't reschedule: ${String(e)}`),
   });
 
   // Inline edit of the task text — also the way to read a long title in full
@@ -121,21 +155,9 @@
   // Due-date urgency "temperature": a single tier that paints the due chip so the
   // pressure of a deadline reads at a glance — overdue runs hot (red), today is
   // the accent, the next few days are cool teal, anything further out stays muted.
-  // Done tasks never carry urgency. Date-only diff (a task due *today* isn't yet
-  // overdue), so it agrees with relativeDue()/the agenda buckets — no API change.
-  type Urgency = "over" | "today" | "soon" | "later";
-  function dueUrgency(dueRaw: string): Urgency {
-    const [y, mo, d] = dueRaw.slice(0, 10).split("-").map(Number);
-    if (!y || !mo || !d) return "later";
-    const now = new Date();
-    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    const diff = Math.round((new Date(y, mo - 1, d).getTime() - today.getTime()) / 86400000);
-    if (diff < 0) return "over";
-    if (diff === 0) return "today";
-    if (diff <= 3) return "soon"; // within the working horizon — worth a cue
-    return "later";
-  }
-  const urgency = $derived(t.due && t.status !== "done" ? dueUrgency(t.due) : null);
+  // Done tasks never carry urgency. Shared dueTier() (soon ≤3d here) keeps this in
+  // lockstep with the board card and the agenda buckets — see lib/text.ts.
+  const urgency = $derived(t.due && t.status !== "done" ? dueTier(t.due, 3) : null);
 
   function toggleDoing() {
     $statusMut.mutate({ id: t.id, status: t.status === "doing" ? "open" : "doing" });
@@ -143,7 +165,26 @@
   // No confirm() interrogation: delete acts immediately and the toast offers
   // Undo — reversibility beats a blocking dialog (and nt undo still works).
   function del() {
+    if ($deleteMut.isPending) return;
+    // If the focused row is being deleted, move focus to its sibling afterwards.
+    refocusOnDone = focusedRowEl() === document.activeElement;
     $deleteMut.mutate(t.id);
+  }
+
+  // The row's own <li> element, used to tell whether this row currently holds the
+  // roving focus (so we only steal focus to a sibling when it was ours).
+  function focusedRowEl(): HTMLElement | null {
+    return document.getElementById(`trow-${t.id}`);
+  }
+
+  // Toggle done/reopen from the keyboard or check button; guards against firing a
+  // second concurrent write while one is in flight (W11), and arranges sibling
+  // refocus when the keyboard drove it (W12).
+  function toggleDone(fromKeyboard: boolean) {
+    if ($doneMut.isPending || $reopenMut.isPending) return;
+    if (fromKeyboard) refocusOnDone = true;
+    if (t.status === "done") $reopenMut.mutate(t.id);
+    else $doneMut.mutate(t.id);
   }
 
   // Give the task a "body": create (or reuse) a linked detail note, then open it
@@ -206,14 +247,18 @@
   }
 
   // Keyboard actions on the focused row (j/k focus is driven by TaskRows). Space
-  // or Enter toggles done/reopen; `e` opens the inline editor; `d` opens the
-  // reschedule menu. j/k are left to bubble up to the list navigator.
+  // toggles done/reopen; `e` opens the inline editor; `d` opens the reschedule
+  // menu; `x` toggles selection. j/k are left to bubble up to the list navigator.
   function onRowKey(e: KeyboardEvent) {
     if (editing || scheduling) return;
-    if (e.key === "Enter" || e.key === " ") {
+    // Mirror TaskRows.onListKey: never swallow app/browser chords (Ctrl/Cmd+E…),
+    // text entry, or auto-repeat (W6).
+    if (e.metaKey || e.ctrlKey || e.altKey || isTextEntry(e.target) || e.repeat) return;
+    if (e.key === " ") {
+      // Space (only — Enter-completes was undocumented; removed per W6) toggles
+      // done/reopen, guarded against concurrent in-flight writes (W11).
       e.preventDefault();
-      if (t.status === "done") $reopenMut.mutate(t.id);
-      else $doneMut.mutate(t.id);
+      toggleDone(true);
     } else if (e.key === "e") {
       if (t.status === "done") return;
       e.preventDefault();
@@ -259,9 +304,9 @@
     >
   {/if}
   {#if t.status === "done"}
-    <button class="check check--done" title="Reopen" aria-label="Reopen task" onclick={() => $reopenMut.mutate(t.id)}></button>
+    <button class="check check--done" title="Reopen" aria-label="Reopen task" disabled={$reopenMut.isPending || $doneMut.isPending} onclick={() => toggleDone(false)}></button>
   {:else}
-    <button class="check" title="Mark done" aria-label="Mark task done" onclick={() => $doneMut.mutate(t.id)}></button>
+    <button class="check" title="Mark done" aria-label="Mark task done" disabled={$doneMut.isPending || $reopenMut.isPending} onclick={() => toggleDone(false)}></button>
   {/if}
   {#if editing}
     <textarea
@@ -341,8 +386,22 @@
     background: var(--accent-tint);
     border-radius: var(--radius-sm);
   }
+  /* Finding 14: on the accent-tint well, --muted metadata drops below AA
+     (~4.27-4.41:1). Lift the muted metadata (due "later", est, source) to
+     --label-secondary so it clears AA on the tint. */
+  .row--selected .row__due--later,
+  .row--selected .row__est {
+    color: var(--label-secondary);
+  }
   .selbox {
     flex: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    /* A proper ≥24px touch target (finding 15) so bulk-select is reachable on
+       coarse pointers, where there's no hover to reveal it. */
+    min-width: 24px;
+    min-height: 24px;
     background: none;
     border: none;
     color: var(--muted);
@@ -357,6 +416,16 @@
   .row:focus .selbox,
   .selbox--on {
     opacity: 1;
+  }
+  /* Touch/coarse pointers never hover, so keep the select affordance visible —
+     a calm, low-emphasis presence until the row is actually selected. */
+  @media (pointer: coarse) {
+    .selbox {
+      opacity: 0.55;
+    }
+    .selbox--on {
+      opacity: 1;
+    }
   }
   .selbox--on {
     color: var(--accent-color);
@@ -564,25 +633,28 @@
   .row__due--later {
     color: var(--muted);
   }
+  /* The pill ring is now a load-bearing shape cue (not just hue+weight), so its
+     alpha is raised to clear the 3:1 non-text threshold — kept in lockstep with
+     Board's .bcard__due rings. */
   .row__due--soon {
     color: var(--teal);
     padding: 1px 7px;
     border-radius: 999px;
-    box-shadow: inset 0 0 0 0.5px color-mix(in srgb, var(--teal) 45%, transparent);
+    box-shadow: inset 0 0 0 0.5px color-mix(in srgb, var(--teal) 70%, transparent);
   }
   .row__due--today {
     color: var(--accent-color);
     font-weight: 600;
     padding: 1px 7px;
     border-radius: 999px;
-    box-shadow: inset 0 0 0 0.5px color-mix(in srgb, var(--accent-color) 50%, transparent);
+    box-shadow: inset 0 0 0 0.5px color-mix(in srgb, var(--accent-color) 70%, transparent);
   }
   .row__due--over {
     color: var(--red);
     font-weight: 600;
     padding: 1px 7px;
     border-radius: 999px;
-    box-shadow: inset 0 0 0 0.5px color-mix(in srgb, var(--red) 50%, transparent);
+    box-shadow: inset 0 0 0 0.5px color-mix(in srgb, var(--red) 70%, transparent);
   }
   /* Quick-reschedule popover: a small anchored menu of due presets. The fixed
      transparent backdrop makes any outside click dismiss it. */

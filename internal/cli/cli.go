@@ -126,6 +126,14 @@ func fail(err error) int {
 	return 1
 }
 
+// usageErr reports an argument/usage error: same stream + "nt: " prefix as
+// fail(), but exit code 2 (reserved for bad invocation; 1 is for operational
+// failures). Use it for missing/invalid positional args and flag misuse.
+func usageErr(err error) int {
+	fmt.Fprintf(os.Stderr, "nt: %v\n", err)
+	return 2
+}
+
 // interactive reports whether nt is driven by a human at a terminal — both stdin
 // AND stdout must be TTYs. Agents and scripts almost always pipe at least one
 // (to feed input or capture output), so they read as non-interactive.
@@ -212,6 +220,17 @@ func splitArgs(args []string, boolFlags map[string]bool) (flags, positional []st
 	return flags, positional
 }
 
+// handleArgs returns the positional task handles in args, rejecting any stray
+// flag-looking token (e.g. `nt done --json id`) with a clear error rather than
+// silently treating it as a handle. cmd is the subcommand name for the message.
+func handleArgs(cmd string, args []string) ([]string, error) {
+	flags, positional := splitArgs(args, nil)
+	if len(flags) > 0 {
+		return nil, fmt.Errorf("%s: unknown flag %q", cmd, flags[0])
+	}
+	return positional, nil
+}
+
 // stringSlice is a repeatable string flag (e.g. --tag a --tag b).
 type stringSlice []string
 
@@ -260,7 +279,7 @@ USAGE
   nt note "title" [flags]     capture a note (--folder work files it in notes/work/)
   nt notes [--folder|--tag]   list notes (one row each)  (--json)
   nt show <note>              print a note in the terminal (alias: cat)
-  nt journal [--date D]       open today's daily note in $EDITOR  (alias: j)
+  nt journal [--date D]       open a daily note in $EDITOR (D: today|fri|+1d|YYYY-MM-DD)  (alias: j)
   nt list [flags]             list tasks            (alias: ls)
   nt view <name>              run a saved view; save/list/rm to manage them
   nt ready [flags]            open, unblocked tasks by urgency — start here
@@ -287,11 +306,13 @@ USAGE
   nt archive <note> [--undo]  retire a note from the active views (reversible; still on disk)
   nt undo                     revert the last change
   nt path                     print the store directory
+  nt version                  print the nt version (alias: -v, --version)
   nt git-init                 set up the store for git (union-merge + .gitignore)
   nt doctor [--check]         reconcile tasks.txt (dedup ids) after a git merge
   nt hook                     sync a Claude Code TodoWrite event (PostToolUse hook)
   nt mcp                      run the MCP server (stdio) — typed tools for agents
   nt mcp install [--client]   register nt with an AI client (claude-code|claude-desktop)
+                              --print/--dry-run shows what would change without writing
   nt web [--port N]           browse and edit notes in a browser (localhost only)
   nt web --detach             run the viewer in the background (--status / --stop to manage)
 
@@ -301,7 +322,7 @@ ADD/UPDATE FLAGS
   --parent <id>        --blocks <id>    --note <slug>   (link to a note)
   --discovered-from <id>   record that this task was surfaced while doing another
   update-only: --title "new text" (keeps tags/links)  --untag NAME (repeat)
-               --project none (clears)
+               --project none (clears)  --source none (clears)
 
 NOTE FLAGS (nt note)
   --body TEXT   --tag NAME (repeat)   --source NAME

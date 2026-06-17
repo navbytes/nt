@@ -9,11 +9,25 @@ export function makeWikilinkSource(getNotes: () => NoteLink[]) {
     const before = ctx.matchBefore(/\[\[[^\]\n]*$/);
     if (!before) return null;
     const q = before.text.slice(2).toLowerCase();
-    const options = getNotes()
-      .filter((n) => !q || n.title.toLowerCase().includes(q) || n.path.toLowerCase().includes(q))
+    // If the user already typed a closer right after the cursor (`[[Title]` or
+    // `[[Title]]`), don't append our own — that would produce `[[Title]]]`.
+    const after = ctx.state.sliceDoc(ctx.pos, ctx.pos + 2);
+    const closer = after.startsWith("]]") ? "" : after.startsWith("]") ? "]" : "]]";
+    const matches = getNotes().filter(
+      (n) => !q || n.title.toLowerCase().includes(q) || n.path.toLowerCase().includes(q),
+    );
+    if (matches.length === 0) {
+      // A disabled hint reads better than the popup vanishing — the user knows
+      // the source fired and simply has no match yet.
+      return {
+        from: before.from + 2,
+        options: [{ label: "No matching notes", apply: () => {}, type: "text" }],
+        validFor: /^[^\]\n]*$/,
+      };
+    }
+    const options = matches
       .slice(0, 20)
-      .map((n) => ({ label: n.title, detail: n.path, type: "text", apply: n.title + "]]" }));
-    if (options.length === 0) return null;
+      .map((n) => ({ label: n.title, detail: n.path, type: "text", apply: n.title + closer }));
     return { from: before.from + 2, options, validFor: /^[^\]\n]*$/ };
   };
 }

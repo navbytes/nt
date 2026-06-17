@@ -37,9 +37,55 @@
 
   // Mobile nav drawer: closed by default, auto-closes on navigation.
   let drawerOpen = $state(false);
+  let drawerRestore: HTMLElement | null = null;
   $effect(() => {
     void path;
     drawerOpen = false;
+  });
+
+  // When the drawer opens, move focus into it and trap Tab; Escape closes it and
+  // restores focus to the trigger (W13). When it closes, restore focus.
+  $effect(() => {
+    if (!drawerOpen) return;
+    drawerRestore = document.activeElement as HTMLElement;
+    const aside = document.querySelector<HTMLElement>(".sidebar");
+    queueMicrotask(() => {
+      aside?.querySelector<HTMLElement>("a, button, input, [tabindex]")?.focus();
+    });
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        drawerOpen = false;
+        return;
+      }
+      if (e.key !== "Tab" || !aside) return;
+      const focusables = [
+        ...aside.querySelectorAll<HTMLElement>(
+          'a[href], button:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex="-1"])',
+        ),
+      ].filter((el) => el.offsetParent !== null);
+      if (focusables.length === 0) return;
+      const first = focusables[0]!;
+      const last = focusables[focusables.length - 1]!;
+      const active = document.activeElement as HTMLElement;
+      if (e.shiftKey && active === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && active === last) {
+        e.preventDefault();
+        first.focus();
+      } else if (!aside.contains(active)) {
+        // Focus escaped the drawer (e.g. into the page) — pull it back.
+        e.preventDefault();
+        first.focus();
+      }
+    }
+    window.addEventListener("keydown", onKey, true);
+    return () => {
+      window.removeEventListener("keydown", onKey, true);
+      drawerRestore?.focus?.();
+      drawerRestore = null;
+    };
   });
 
   // Track the resolved theme so the toolbar toggle shows the right glyph
@@ -55,6 +101,16 @@
   $effect(() => {
     isDark = resolveDark();
   });
+  // Re-evaluate when the OS theme changes while no explicit override is set, so
+  // the toolbar glyph tracks the system (W27).
+  $effect(() => {
+    const mq = window.matchMedia("(prefers-color-scheme: dark)");
+    const onChange = () => {
+      if (!document.documentElement.getAttribute("data-theme")) isDark = resolveDark();
+    };
+    mq.addEventListener("change", onChange);
+    return () => mq.removeEventListener("change", onChange);
+  });
 
   function toggleTheme() {
     const root = document.documentElement;
@@ -62,10 +118,11 @@
     root.setAttribute("data-theme", next);
     localStorage.setItem("nt-theme", next);
     isDark = next === "dark";
-    // keep the PWA/status-bar tint in sync
+    // keep the PWA/status-bar tint in sync — same values as index.html (finding 2):
+    // dark = --bg-window (#161618), light = topbar/window chrome surface (#f6f6f8).
     document
       .querySelector('meta[name="theme-color"]')
-      ?.setAttribute("content", next === "dark" ? "#1e1e20" : "#ffffff");
+      ?.setAttribute("content", next === "dark" ? "#161618" : "#f6f6f8");
   }
 
 </script>

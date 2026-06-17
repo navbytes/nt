@@ -3,13 +3,13 @@
   import { api, type TaskGroup, type Task } from "./api";
   import TaskRow from "./TaskRow.svelte";
   import Icon from "./Icon.svelte";
-  import { priorityRank, priorityClass } from "./text";
+  import { priorityRank, priorityClass, dueTier } from "./text";
   import { parseQuickAdd } from "./quickparse";
   import { taskMatcher } from "./taskfilter";
   import { stepId } from "./listnav";
   import { palette } from "./palette.svelte";
   import { shortcuts, isTextEntry } from "./keys.svelte";
-  import { showToast } from "./toast.svelte";
+  import { showToast, clearUndoToast } from "./toast.svelte";
 
   // Within a bucket, float the most important work up: priority first (A→Z, then
   // unprioritised), then the earliest due date. Done stays in store order (most
@@ -60,7 +60,16 @@
   // Per-row writes (done/reopen/status/delete) live in TaskRow; this component
   // owns only the add form. They share the ["tasks"] cache, so both stay in sync.
   const set = (d: { groups: TaskGroup[] }) => qc.setQueryData(["tasks"], d);
-  const addMut = createMutation({ mutationFn: api.taskNew, onSuccess: set });
+  const addMut = createMutation({
+    mutationFn: api.taskNew,
+    // A new task is a fresh write — a stale Undo from a prior op would now revert
+    // the wrong thing, so clear it (W10).
+    onSuccess: (d) => {
+      clearUndoToast();
+      set(d);
+    },
+    onError: (e) => showToast(`Couldn't add task: ${String(e)}`),
+  });
 
   let newText = $state("");
   // Live "here's what I understood" preview of the todo.txt shorthand, so the
@@ -75,7 +84,8 @@
         !!preview.est ||
         !!preview.project ||
         preview.tags.length > 0 ||
-        preview.links.length > 0),
+        preview.links.length > 0 ||
+        preview.emptyKeys.length > 0),
   );
 
   // The live quick-filter (W12): client-side, same shorthand as quick-add
@@ -93,23 +103,15 @@
   // Status view: the raw groups, optionally filtered to a status set.
   const statusGroups = $derived(allGroups.filter((g) => !statuses || statuses.includes(g.status)));
 
-  function todayISO(): string {
-    const d = new Date();
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-  }
-  function plusDaysISO(n: number): string {
-    const d = new Date();
-    d.setDate(d.getDate() + n);
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-  }
   // A due value may carry a time-of-day ("2026-06-08T17:00"); dateOf gives the
   // date part for bucketing into the agenda groups below.
   const dateOf = (due?: string) => (due ? due.slice(0, 10) : "");
 
-  // Agenda view: re-bucket every task by its due date (the planner layout).
+  // Agenda view: re-bucket every task by its due date (the planner layout). The
+  // over/today/soon/later split comes from the SHARED dueTier() (week horizon =
+  // 7d here) so the agenda can never drift from the row/board temperature — see
+  // lib/text.ts (finding 16). Same semantics as the old inline comparison.
   const agendaGroups = $derived.by((): TaskGroup[] => {
-    const today = todayISO();
-    const weekEnd = plusDaysISO(7);
     const buckets = {
       Overdue: [] as Task[],
       Today: [] as Task[],
@@ -118,15 +120,13 @@
       "No date": [] as Task[],
       Done: [] as Task[],
     };
+    const TIER_BUCKET = { over: "Overdue", today: "Today", soon: "This week", later: "Later" } as const;
     for (const g of allGroups) {
       for (const t of g.tasks) {
         const due = dateOf(t.due); // YYYY-MM-DD, ignoring any time-of-day suffix
         if (t.status === "done") buckets.Done.push(t);
         else if (!due) buckets["No date"].push(t);
-        else if (due < today) buckets.Overdue.push(t);
-        else if (due === today) buckets.Today.push(t);
-        else if (due <= weekEnd) buckets["This week"].push(t);
-        else buckets.Later.push(t);
+        else buckets[TIER_BUCKET[dueTier(due, 7)]].push(t);
       }
     }
     return (Object.entries(buckets) as [string, Task[]][])
@@ -157,6 +157,25 @@
     const el = document.getElementById(`trow-${next}`);
     el?.focus();
     el?.scrollIntoView({ block: "nearest" });
+  }
+  // After a row leaves the list (completed/deleted), move roving focus to the row
+  // that took its slot — the next sibling in the OLD order, or the previous one if
+  // it was last (W12). Captured from flatIds *before* the write, so we know who
+  // followed; deferred a microtask so the post-write re-render has settled.
+  function focusSibling(removedId: string) {
+    const idx = flatIds.indexOf(removedId);
+    const after = flatIds.slice(idx + 1);
+    const before = flatIds.slice(0, idx).reverse();
+    queueMicrotask(() => {
+      for (const id of [...after, ...before]) {
+        const el = document.getElementById(`trow-${id}`);
+        if (el) {
+          el.focus();
+          el.scrollIntoView({ block: "nearest" });
+          return;
+        }
+      }
+    });
   }
   function onListKey(e: KeyboardEvent) {
     // Don't steal j/k while typing or when a modal owns the keyboard.
@@ -189,6 +208,13 @@
   }
   const visibleIds = $derived(new Set(flatIds));
   const selCount = $derived(selected.filter((id) => visibleIds.has(id)).length);
+  // Prune the selection to what's still visible whenever the list changes (filter
+  // edit / SSE refetch), so the bar's count and any action never reference a row
+  // that scrolled out of the current view (W18). Only writes when it shrinks.
+  $effect(() => {
+    const pruned = selected.filter((id) => visibleIds.has(id));
+    if (pruned.length !== selected.length) selected = pruned;
+  });
   let bulkBusy = $state(false);
   let rescheduling = $state(false);
   let bulkMenuEl: HTMLElement | undefined = $state();
@@ -242,6 +268,7 @@
     const n = ids.length;
     try {
       await api.taskBulk(action, ids, due);
+      clearUndoToast(); // fresh write — drop any stale single-level Undo (W10)
       showToast(`${verb} ${n} task${n > 1 ? "s" : ""}`, async () => {
         try {
           await api.undo();
@@ -308,6 +335,7 @@
       {#if preview.project}<span class="qa__chip qa__chip--proj">+{preview.project}</span>{/if}
       {#each preview.tags as tag (tag)}<span class="qa__chip qa__chip--tag">@{tag}</span>{/each}
       {#each preview.links as link (link)}<span class="qa__chip qa__chip--link">[[{link}]]</span>{/each}
+      {#each preview.emptyKeys as k (k)}<span class="qa__chip qa__chip--hint" title="This key needs a value">{k}: needs a value</span>{/each}
     </div>
   {/if}
 {/if}
@@ -333,6 +361,7 @@
             {t}
             selected={selected.includes(t.id)}
             onToggleSelect={() => toggleSel(t.id)}
+            {focusSibling}
           />
         {/each}
       </ul>
@@ -465,6 +494,8 @@
     z-index: 30;
     display: flex;
     align-items: center;
+    flex-wrap: wrap; /* finding 8: never overflow on a narrow viewport */
+    max-width: 100%;
     gap: 8px;
     margin-top: 16px;
     padding: 8px 12px;
@@ -473,6 +504,28 @@
     backdrop-filter: saturate(var(--glass-saturate)) blur(var(--glass-blur));
     border-radius: var(--radius);
     box-shadow: var(--shadow-float), var(--glass-hairline);
+  }
+  /* Finding 8: under ~640px the count + four buttons overflow ~375px screens.
+     Wrapping (above) handles the worst case; here we also tighten the buttons so
+     the bar usually still fits one row, and flip the Reschedule popover to the
+     right edge so it can't clip off-screen. */
+  @media (max-width: 640px) {
+    .bulk {
+      gap: 6px;
+    }
+    .bulk__count {
+      flex-basis: 100%; /* count on its own line; the actions share the next */
+      margin-right: 0;
+    }
+    .bulk__btn {
+      padding: 4px 9px;
+      font-size: 0.8rem;
+    }
+    .bulk__menu {
+      left: auto;
+      right: 0;
+      transform-origin: bottom right;
+    }
   }
   .bulk__count {
     font-family: var(--font-mono);
@@ -622,5 +675,13 @@
   }
   .qa__chip--tag {
     color: var(--accent-2);
+  }
+  /* A recognised key typed with no value yet — a quiet amber nudge, not an error.
+     The fallback is a real warning amber (not --accent-2 teal) so the warning
+     reads even before the --orange token lands, and stays distinct from the teal
+     due/tag chips (finding 9). */
+  .qa__chip--hint {
+    color: var(--orange, #a8620a);
+    border-color: color-mix(in srgb, currentColor 45%, transparent);
   }
 </style>
