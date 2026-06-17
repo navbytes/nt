@@ -789,15 +789,7 @@ func onboard(e *mutate.Engine) {
 // and web share one filter/sort implementation for lists and saved views.
 
 func formatRow(t *task.Task, idx int, isBlocked bool) string {
-	icon := "○"
-	switch task.EffectiveStatus(t, isBlocked) {
-	case "done":
-		icon = "✓"
-	case "doing":
-		icon = "◐"
-	case "blocked":
-		icon = "⊘"
-	}
+	icon := iconStatus(task.EffectiveStatus(t, isBlocked))
 	var meta []string
 	if t.Priority != 0 {
 		meta = append(meta, "("+string(t.Priority)+")")

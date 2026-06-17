@@ -379,7 +379,7 @@ func cmdRecall(args []string) int {
 		fmt.Println(formatRow(t, idx[t], blocked[t.ID()]))
 	}
 	for _, n := range notes {
-		fmt.Printf("   ▤ %s  %s  %s\n", shortID(n.ID), n.Rel, n.Title)
+		fmt.Printf("   %s %s  %s  %s\n", glyphNote(), shortID(n.ID), n.Rel, n.Title)
 	}
 	return 0
 }
@@ -805,33 +805,33 @@ func cmdLinks(args []string) int {
 		fmt.Printf("  ← %s:%d  %s\n", h.Path, h.Line, h.Text)
 	}
 	if parentRef != nil {
-		fmt.Printf("subtask of:\n  ⤴ %s  %s\n", parentRef.ShortID, parentRef.Title)
+		fmt.Printf("subtask of:\n  %s %s  %s\n", glyphSubtaskOf(), parentRef.ShortID, parentRef.Title)
 	}
 	if len(children) > 0 {
 		fmt.Println("subtasks:")
 		for _, c := range children {
-			fmt.Printf("  ⤵ %s  %s\n", c.ShortID, c.Title)
+			fmt.Printf("  %s %s  %s\n", glyphChild(), c.ShortID, c.Title)
 		}
 	}
 	if len(blocksR) > 0 {
 		fmt.Println("blocks:")
 		for _, b := range blocksR {
-			fmt.Printf("  ⛔ %s  %s\n", b.ShortID, b.Title)
+			fmt.Printf("  %s %s  %s\n", glyphBlocks(), b.ShortID, b.Title)
 		}
 	}
 	if len(blockedBy) > 0 {
 		fmt.Println("blocked by:")
 		for _, b := range blockedBy {
-			fmt.Printf("  ⏳ %s  %s\n", b.ShortID, b.Title)
+			fmt.Printf("  %s %s  %s\n", glyphBlockedBy(), b.ShortID, b.Title)
 		}
 	}
 	if discFrom != nil {
-		fmt.Printf("discovered from:\n  ↑ %s  %s\n", discFrom.ShortID, discFrom.Title)
+		fmt.Printf("discovered from:\n  %s %s  %s\n", glyphDiscFrom(), discFrom.ShortID, discFrom.Title)
 	}
 	if len(discHere) > 0 {
 		fmt.Println("discovered here:")
 		for _, o := range discHere {
-			fmt.Printf("  ↳ %s  %s\n", o.ShortID, o.Title)
+			fmt.Printf("  %s %s  %s\n", glyphDiscHere(), o.ShortID, o.Title)
 		}
 	}
 	return 0
@@ -898,7 +898,7 @@ func cmdLog(args []string) int {
 		if s := t.Source(); s != "" {
 			src = "  (" + s + ")" // @tags/+project are already inline in Text
 		}
-		fmt.Printf("  ✓ %s  %s%s\n", shortID(t.ID()), t.Text, src)
+		fmt.Printf("  %s %s  %s%s\n", glyphDone(), shortID(t.ID()), t.Text, src)
 	}
 	return 0
 }
@@ -941,7 +941,7 @@ func cmdReview(args []string) int {
 	}
 
 	if len(overdue)+len(stale)+len(undated)+len(stuck) == 0 {
-		fmt.Println("review: nothing needs attention — you're on top of it ✨")
+		fmt.Println("review: nothing needs attention — you're on top of it " + glyphReviewClear())
 		return 0
 	}
 	section := func(title string, ts []*task.Task) {
