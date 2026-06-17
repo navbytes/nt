@@ -25,9 +25,12 @@ import (
 )
 
 // Layout breakpoints (terminal columns), per SPEC §12.
+//   - <= compactMax (40): compact monitoring strip
+//   - 41..wideMin-1     : standard single-column list (covers the old dead band)
+//   - >= wideMin (120)  : split list + detail
 const (
 	wideMin    = 120 // split list + detail
-	compactMax = 55  // monitoring strip
+	compactMax = 40  // monitoring strip
 )
 
 type tab int
@@ -476,25 +479,37 @@ var (
 	// terminal background (Tokyo Night Storm / Tokyo Night Day). `NT_THEME=
 	// light|dark` forces it (see Run). All styles below reference these vars, so
 	// both themes flow through without per-style changes.
-	cFg      = lipgloss.AdaptiveColor{Dark: "#c0caf5", Light: "#3760bf"}
-	cDim     = lipgloss.AdaptiveColor{Dark: "#565f89", Light: "#848cb5"}
-	cMuted   = lipgloss.AdaptiveColor{Dark: "#787c99", Light: "#9aa0c2"}
-	cRed     = lipgloss.AdaptiveColor{Dark: "#f7768e", Light: "#f52a65"}
-	cOrange  = lipgloss.AdaptiveColor{Dark: "#ff9e64", Light: "#b15c00"}
-	cYellow  = lipgloss.AdaptiveColor{Dark: "#e0af68", Light: "#8c6c3e"}
+	cFg = lipgloss.AdaptiveColor{Dark: "#c0caf5", Light: "#3760bf"}
+	// cDim is the readable "secondary" grey for LIVE text (group counts, scroll
+	// indicators, inactive tabs, palette rows, dim labels). Raised to clear WCAG
+	// AA (~4.5:1) on the theme backgrounds — the old value was ~2.2-2.5:1.
+	cDim = lipgloss.AdaptiveColor{Dark: "#8b92be", Light: "#5c6285"}
+	// cFaint is the deliberately fainter grey used ONLY for struck-through "done"
+	// text (stDone), where a recessed look is intentional and the strikethrough
+	// itself carries the meaning. Not for live, must-read text.
+	cFaint   = lipgloss.AdaptiveColor{Dark: "#565f89", Light: "#9aa0c2"}
+	cMuted   = lipgloss.AdaptiveColor{Dark: "#8a90b3", Light: "#54597d"}
+	cRed     = lipgloss.AdaptiveColor{Dark: "#f7768e", Light: "#bb0f44"}
+	cOrange  = lipgloss.AdaptiveColor{Dark: "#ff9e64", Light: "#8f4a00"}
+	cYellow  = lipgloss.AdaptiveColor{Dark: "#e0af68", Light: "#7a5e2e"}
 	cGreen   = lipgloss.AdaptiveColor{Dark: "#9ece6a", Light: "#587539"}
 	cCyan    = lipgloss.AdaptiveColor{Dark: "#7dcfff", Light: "#007197"}
-	cBlue    = lipgloss.AdaptiveColor{Dark: "#7aa2f7", Light: "#2e7de9"}
-	cMagenta = lipgloss.AdaptiveColor{Dark: "#bb9af7", Light: "#9854f1"}
+	cBlue    = lipgloss.AdaptiveColor{Dark: "#7aa2f7", Light: "#2961c9"}
+	cMagenta = lipgloss.AdaptiveColor{Dark: "#bb9af7", Light: "#8a44e0"}
 	cBorder  = lipgloss.AdaptiveColor{Dark: "#3b4261", Light: "#a8aecb"}
-	cSelBg   = lipgloss.AdaptiveColor{Dark: "#283457", Light: "#b7c1e3"}
-	cBarBg   = lipgloss.AdaptiveColor{Dark: "#1f2335", Light: "#d0d5e3"}
+	// cSelBg is the selection background. The light variant was lightened (not
+	// darkened) so the dark-blue cFg.Light selected text clears AA on it.
+	cSelBg = lipgloss.AdaptiveColor{Dark: "#283457", Light: "#dde3f6"}
+	// cAccent is the selection accent bar (▌) — a darker blue in light mode so the
+	// bar stays clearly visible against the light selection background.
+	cAccent = lipgloss.AdaptiveColor{Dark: "#7aa2f7", Light: "#2e5fb0"}
+	cBarBg  = lipgloss.AdaptiveColor{Dark: "#1f2335", Light: "#d0d5e3"}
 
 	stBrand      = lipgloss.NewStyle().Foreground(cMagenta).Bold(true).Background(cBarBg)
 	stTabOn      = lipgloss.NewStyle().Foreground(cFg).Bold(true).Background(cBarBg)
-	stTabOff     = lipgloss.NewStyle().Foreground(cDim).Background(cBarBg)
+	stTabOff     = lipgloss.NewStyle().Foreground(cMuted).Background(cBarBg)
 	stBarBg      = lipgloss.NewStyle().Foreground(cMuted).Background(cBarBg)
-	stHeader     = lipgloss.NewStyle().Background(cBarBg)
+	stHeader     = lipgloss.NewStyle().Foreground(cFg).Background(cBarBg)
 	stRule       = lipgloss.NewStyle().Foreground(cBorder)
 	stGroup      = lipgloss.NewStyle().Foreground(cBlue).Bold(true)
 	stDim        = lipgloss.NewStyle().Foreground(cDim)
@@ -507,7 +522,7 @@ var (
 	stLink       = lipgloss.NewStyle().Foreground(cCyan)
 	stLinkU      = lipgloss.NewStyle().Foreground(cCyan).Underline(true) // followable [[link]]
 	stWarn       = lipgloss.NewStyle().Foreground(cYellow)               // unresolved / attention
-	stDone       = lipgloss.NewStyle().Foreground(cDim).Strikethrough(true)
+	stDone       = lipgloss.NewStyle().Foreground(cFaint).Strikethrough(true)
 	stGreen      = lipgloss.NewStyle().Foreground(cGreen)
 	stPanel      = lipgloss.NewStyle().Border(lipgloss.NormalBorder(), false, false, false, true).BorderForeground(cBorder).Padding(0, 2)
 	stPanelFocus = lipgloss.NewStyle().Border(lipgloss.NormalBorder(), false, false, false, true).BorderForeground(cBlue).Padding(0, 2)

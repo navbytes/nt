@@ -17,6 +17,14 @@ func (m *Model) View() string {
 	if m.width == 0 || m.height == 0 {
 		return "loading…"
 	}
+	// Too-short guard: a bordered card (border 2 + padding 2 + a content row)
+	// can't render below ~6 rows without clipping mid-border, so show a terse
+	// hint instead of a broken frame.
+	if m.height < 6 {
+		return lipgloss.NewStyle().Foreground(cMuted).
+			MaxWidth(m.width).MaxHeight(m.height).
+			Render("nt — window too short")
+	}
 	if m.help {
 		return m.helpView()
 	}
@@ -133,9 +141,14 @@ func (m *Model) headerView() string {
 	if avail < 1 || lipgloss.Width(right) > avail {
 		right = state // drop low-priority context first
 		if lipgloss.Width(right) > avail {
-			if m.locked && lipgloss.Width(lockChip) <= avail {
+			switch {
+			case m.locked && lipgloss.Width(lockChip) <= avail:
 				right = lockChip // at the extreme, the lock indicator still wins
-			} else {
+			case state != "" && avail >= 1:
+				// A 1-char sentinel so an active filter/scope/marked/locked state is
+				// never fully invisible at narrow widths (the footer keybar shows … too).
+				right = stBrand.Render("•")
+			default:
 				right = ""
 			}
 		}
@@ -214,8 +227,10 @@ func (m *Model) followBar() string {
 // chip renders a prominent badge (dark text on a bright background) for active
 // view state — so a filter/scope can't silently shrink the list unnoticed.
 func chip(label string, bg lipgloss.TerminalColor) string {
-	// Near-black on a bright badge reads on both light and dark terminals.
-	return lipgloss.NewStyle().Foreground(lipgloss.Color("#16161e")).Background(bg).Bold(true).Render(" " + label + " ")
+	// Near-black on the bright dark-theme badges; white on the darker light-theme
+	// badge colors (where near-black would only reach ~3.3:1). Both clear AA.
+	fg := lipgloss.AdaptiveColor{Dark: "#16161e", Light: "#ffffff"}
+	return lipgloss.NewStyle().Foreground(fg).Background(bg).Bold(true).Render(" " + label + " ")
 }
 
 // barPad returns n background-styled spaces for filling a bar to full width.
@@ -626,13 +641,16 @@ func (m *Model) notesList(width, h int) string {
 			lines = append(lines, selRow("▤ "+content, width, false))
 		case n.Archived:
 			// Recess the whole row (no tag styling) so it sits behind the working set.
-			body := truncate(content, width-5)
-			lines = append(lines, "   "+stDim.Render("▤ "+body))
+			// 1-col gutter + glyph + space matches the task rows' leading column so
+			// the body doesn't shift when switching tabs.
+			body := truncate(content, width-3)
+			lines = append(lines, " "+stDim.Render("▤ "+body))
 		default:
-			// Budget the content after the "   ▤ " gutter (3 pad + glyph + space).
-			body := truncate(content, width-5)
+			// Budget the content after the " ▤ " gutter (pad + glyph + space) — same
+			// 3-col leading column as the task/logbook rows.
+			body := truncate(content, width-3)
 			row := stDim.Render("▤") + " " + styleNoteRow(body, prefix, tags)
-			lines = append(lines, "   "+row)
+			lines = append(lines, " "+row)
 		}
 		hits = append(hits, hitLine{item: i})
 	}
@@ -732,6 +750,13 @@ func (m *Model) detailCard(h int) string {
 	return lipgloss.Place(m.width, h, lipgloss.Center, lipgloss.Center, card)
 }
 
+// kvWidth is the shared label-column width for detail-pane key/value rows; both
+// task and note detail route through it so the gutter can't drift between tabs.
+const kvWidth = 9
+
+// kvLabel renders a left-padded, dimmed detail-pane key label (e.g. "due      ").
+func kvLabel(k string) string { return stDim.Render(fmt.Sprintf("%-*s", kvWidth, k)) }
+
 func (m *Model) detailContent(w int) string {
 	t := m.selectedTask()
 	if t == nil {
@@ -741,7 +766,7 @@ func (m *Model) detailContent(w int) string {
 	b.WriteString(stTitle.Render(truncate(t.Text, w)) + "\n\n")
 	kv := func(k, v string) {
 		if v != "" {
-			b.WriteString(stDim.Render(fmt.Sprintf("%-9s", k)) + v + "\n")
+			b.WriteString(kvLabel(k) + v + "\n")
 		}
 	}
 	kv("status", m.icon(t)+" "+m.effStatus(t))
@@ -854,18 +879,18 @@ func (m *Model) noteDetail(n *note.Note, w int) string {
 	var b strings.Builder
 	b.WriteString(stTitle.Render(truncate(n.Title, w)) + "\n\n")
 	if folder := relFolder(n.Rel); folder != "" {
-		b.WriteString(stDim.Render("folder   ") + stMuted.Render(folder+"/") + "\n")
+		b.WriteString(kvLabel("folder") + stMuted.Render(folder+"/") + "\n")
 	}
 	if len(n.Tags) > 0 {
-		// Truncate to one line (w minus the 9-col label gutter) so a long tag run
-		// can't wrap onto a second line in the detail pane.
-		b.WriteString(stDim.Render("tags     ") + stTag.Render(truncate("@"+strings.Join(n.Tags, " @"), w-9)) + "\n")
+		// Truncate to one line (w minus the label gutter) so a long tag run can't
+		// wrap onto a second line in the detail pane.
+		b.WriteString(kvLabel("tags") + stTag.Render(truncate("@"+strings.Join(n.Tags, " @"), w-kvWidth)) + "\n")
 	}
 	if len(n.Aliases) > 0 {
-		b.WriteString(stDim.Render("aliases  ") + stMuted.Render(strings.Join(n.Aliases, ", ")) + "\n")
+		b.WriteString(kvLabel("aliases") + stMuted.Render(strings.Join(n.Aliases, ", ")) + "\n")
 	}
 	if n.Source != "" {
-		b.WriteString(stDim.Render("source   ") + n.Source + "\n")
+		b.WriteString(kvLabel("source") + n.Source + "\n")
 	}
 	b.WriteString("\n" + sectionHeader("BODY", w) + "\n")
 	b.WriteString(m.renderMarkdown(n.ID, n.Body, w))
@@ -905,7 +930,7 @@ func (m *Model) renderMarkdown(id, body string, w int) string {
 	if m.md.id == id && m.md.w == w && m.md.body == body {
 		return m.md.out
 	}
-	out := stMuted.Render(body)
+	out := lipgloss.NewStyle().Foreground(cFg).Render(body)
 	// Match the markdown style to the resolved theme (NT_THEME / config / auto),
 	// the same background lipgloss uses for the adaptive palette — a light
 	// terminal got dark markdown before.
@@ -1046,7 +1071,9 @@ func dueLabel(due string) (string, lipgloss.TerminalColor) {
 	today := now.Format("2006-01-02")
 	switch {
 	case due < today:
-		return due, cRed
+		// Prefix a "!" so an overdue date stays distinguishable from a future one
+		// with NO_COLOR / on a colorblind terminal (color alone isn't enough).
+		return "!" + due, cRed
 	case due == today:
 		return "today", cOrange
 	case due == now.AddDate(0, 0, 1).Format("2006-01-02"):
@@ -1127,7 +1154,7 @@ func selRow(body string, width int, marked bool) string {
 		mark = "●"
 	}
 	bar := lipgloss.NewStyle().Foreground(cYellow).Background(cSelBg).Render(mark) +
-		lipgloss.NewStyle().Foreground(cBlue).Background(cSelBg).Render("▌ ")
+		lipgloss.NewStyle().Foreground(cAccent).Background(cSelBg).Render("▌ ")
 	bw := lipgloss.Width(bar)
 	if lipgloss.Width(body) > width-bw {
 		body = truncate(body, width-bw)
