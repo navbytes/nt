@@ -350,6 +350,12 @@
     left: 12px;
     z-index: 20;
     width: 236px;
+    /* Cap to the stage (the positioned ancestor), not the viewport, so the
+       panel can never grow past the stage and get clipped by its overflow.
+       The body flex-scrolls within whatever height remains. */
+    max-height: calc(100% - 24px);
+    display: flex;
+    flex-direction: column;
     background: color-mix(in srgb, var(--bg-elevated) 86%, transparent);
     -webkit-backdrop-filter: saturate(var(--glass-saturate)) blur(var(--glass-blur));
     backdrop-filter: saturate(var(--glass-saturate)) blur(var(--glass-blur));
@@ -369,6 +375,7 @@
     pointer-events: none;
   }
   .gctl__bar {
+    flex: 0 0 auto;
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -409,11 +416,12 @@
     transform: rotate(90deg);
   }
   .gctl__body {
+    flex: 1 1 auto;
+    min-height: 0;
     padding: var(--space-1) var(--space-4) var(--space-4);
     display: flex;
     flex-direction: column;
     gap: var(--space-3);
-    max-height: calc(100vh - 140px);
     overflow-y: auto;
   }
   .gctl__row {

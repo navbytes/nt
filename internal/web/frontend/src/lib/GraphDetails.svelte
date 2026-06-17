@@ -102,7 +102,10 @@
     border-radius: var(--radius-popover);
     box-shadow: var(--shadow-float), var(--glass-hairline);
     padding: var(--space-4) var(--space-5) var(--space-5);
-    overflow: hidden;
+    /* Cap to the stage (the positioned ancestor) and scroll within, so long
+       note details can't grow past the stage and get clipped by its overflow. */
+    max-height: calc(100% - 24px);
+    overflow: hidden auto;
     animation: gdetails-in var(--motion) var(--ease-out);
   }
   /* spectral hairline along the top edge — the panel's identity cue */
