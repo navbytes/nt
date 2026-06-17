@@ -145,6 +145,9 @@
     $graphQ.data ? linkKindLegend(($graphQ.data.links ?? []).map((l) => l.kind)) : [],
   );
   const selectedNode = $derived(allNodes.find((n) => n.id === view.selectedId) ?? null);
+  // id → title lookup so the screen-reader fallback below can resolve neighbour
+  // names in O(1) instead of an allNodes.find() per neighbour (was O(n²) on mount).
+  const titleById = $derived(new Map(allNodes.map((n) => [n.id, n.title] as const)));
   // R is a plain (non-reactive) object read O(1) by the hot draw loop; the panel
   // reads this mirrored count instead so it stays reactive.
   let visibleCount = $state(0);
@@ -189,7 +192,10 @@
   function recompute() {
     const data = $graphQ.data;
     if (!data) return;
-    const nodes = toForceGraph(data).nodes;
+    // Reuse the memoized `allNodes` mapping instead of re-running toForceGraph
+    // here — recompute fires on every search keystroke / filter change, so a fresh
+    // O(n) node re-map per call was pure waste.
+    const nodes = allNodes;
     const color = new Map<string, string>();
     const shape = new Map<string, ShapeKind>();
     const pass = new Set<string>();
@@ -869,20 +875,46 @@
     }
     return group.children.length ? group : undefined;
   }
+  // 3D mutation coalescing. Re-setting any of three-forcegraph's accessors forces
+  // its digest to walk every node/link and recreate geometries (nodeThreeObject →
+  // rebuild all node objects incl. SpriteText label textures; nodeColor/linkColor →
+  // recreate all link lines). Hover (every mousemove), search (every keystroke) and
+  // selection can each fire these in tight bursts, which is what makes the 3D view
+  // lag and the page go unresponsive. Collapse all requests in a frame into a single
+  // digest pass (objects supersede colors, since rebuilding objects re-reads color).
+  const FX_COLORS = 1;
+  const FX_OBJECTS = 2;
+  let pending3d = 0;
+  let raf3d = 0;
+  function flush3d() {
+    raf3d = 0;
+    const f = pending3d;
+    pending3d = 0;
+    if (!graph || !built3d) return;
+    if (f & FX_OBJECTS) graph.nodeThreeObject((n: FGNode) => node3dObject(n));
+    if (f & FX_COLORS) {
+      graph.nodeColor((n: FGNode) => node3dColor(n));
+      graph.linkColor((l: any) => link3dColor(l));
+    }
+  }
+  function schedule3d(flags: number) {
+    if (!graph || !built3d) return;
+    pending3d |= flags;
+    if (!raf3d) raf3d = requestAnimationFrame(flush3d);
+  }
   // Re-apply the node objects (labels + selection halo). Called when selection /
   // labels / sizing change — rebuilds the per-node three objects.
   function refresh3dObjects() {
-    if (!graph || !built3d) return;
-    graph.nodeThreeObject((n: FGNode) => node3dObject(n));
+    schedule3d(FX_OBJECTS);
   }
   function bloomStrength(): number {
     return view.effects === "off" ? 0 : view.effects === "subtle" ? 1.0 : 1.6;
   }
   // 3D: re-set the color accessors with fresh closures so three rebuilds the
-  // materials after a filter / colorBy change (2D just repaints).
+  // materials after a filter / colorBy / hover change (2D just repaints). Coalesced
+  // through schedule3d so a burst of hover events collapses to one digest per frame.
   function refresh3dColors() {
-    graph?.nodeColor?.((n: FGNode) => node3dColor(n));
-    graph?.linkColor?.((l: any) => link3dColor(l));
+    schedule3d(FX_COLORS);
   }
   // Fly the 3D camera to frame a node (2D uses centerAt instead).
   function focusCamera3d(n: FGNode) {
@@ -941,6 +973,10 @@
   // any previous instance so the 2D ⟷ 3D toggle can swap them in the same <div>.
   async function buildGraph() {
     if (!container || destroyed) return;
+    // Drop any queued 3D digest from the renderer we're about to tear down.
+    if (raf3d) cancelAnimationFrame(raf3d);
+    raf3d = 0;
+    pending3d = 0;
     try {
       graph?._destructor?.();
     } catch {
@@ -1135,6 +1171,8 @@
       destroyed = true;
       if (clickTO) clearTimeout(clickTO);
       if (dofRAF) cancelAnimationFrame(dofRAF);
+      if (pulseRAF) cancelAnimationFrame(pulseRAF);
+      if (raf3d) cancelAnimationFrame(raf3d);
       ro?.disconnect();
       try {
         graph?._destructor?.();
@@ -1471,7 +1509,7 @@
           <a href={n.url}>{n.title}</a>
           {#if adjacency.get(n.id)?.size}
             — links to {[...(adjacency.get(n.id) ?? [])]
-              .map((id) => allNodes.find((m) => m.id === id)?.title)
+              .map((id) => titleById.get(id))
               .filter(Boolean)
               .join(", ")}
           {/if}
