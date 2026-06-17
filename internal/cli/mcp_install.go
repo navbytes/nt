@@ -2,6 +2,7 @@ package cli
 
 import (
 	"encoding/json"
+	"flag"
 	"fmt"
 	"os"
 	"os/exec"
@@ -27,22 +28,15 @@ import (
 //	nt mcp install --client claude-desktop
 //	nt mcp install --print              # show what would be done, change nothing
 func cmdMcpInstall(args []string) int {
-	client := "claude-code"
-	printOnly := false
-	for i := 0; i < len(args); i++ {
-		switch args[i] {
-		case "--client", "-c":
-			if i+1 >= len(args) {
-				return fail(fmt.Errorf("--client needs a value (claude-code | claude-desktop)"))
-			}
-			i++
-			client = args[i]
-		case "--print", "--dry-run", "-n":
-			printOnly = true
-		default:
-			return fail(fmt.Errorf("unknown flag %q (try: nt mcp install [--client claude-code|claude-desktop] [--print])", args[i]))
-		}
+	fs := flag.NewFlagSet("mcp install", flag.ContinueOnError)
+	client := fs.String("client", "claude-code", "AI client (claude-code | claude-desktop)")
+	print1 := fs.Bool("print", false, "show what would be done, change nothing")
+	dryRun := fs.Bool("dry-run", false, "alias for --print")
+	flags, _ := splitArgs(args, map[string]bool{"print": true, "dry-run": true})
+	if err := fs.Parse(flags); err != nil {
+		return 2
 	}
+	printOnly := *print1 || *dryRun
 
 	bin, err := ntBinaryPath()
 	if err != nil {
@@ -51,7 +45,7 @@ func cmdMcpInstall(args []string) int {
 	// The stdio server spec, shared by every client/path.
 	entry := map[string]any{"type": "stdio", "command": bin, "args": []any{"mcp"}}
 
-	switch client {
+	switch *client {
 	case "claude-code", "claude", "code":
 		return installClaudeCode(bin, entry, printOnly)
 	case "claude-desktop", "desktop":
@@ -61,7 +55,7 @@ func cmdMcpInstall(args []string) int {
 		}
 		return installFileMerge(path, "Claude Desktop", entry, printOnly)
 	default:
-		return fail(fmt.Errorf("unknown client %q (supported: claude-code, claude-desktop; or use --print)", client))
+		return usageErr(fmt.Errorf("unknown client %q (supported: claude-code, claude-desktop; or use --print)", *client))
 	}
 }
 

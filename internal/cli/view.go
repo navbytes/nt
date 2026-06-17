@@ -42,8 +42,7 @@ func cmdView(args []string) int {
 func viewSave(args []string) int {
 	flagTokens, pos := splitArgs(args, map[string]bool{"all": true, "show-blocked": true, "tree": true})
 	if len(pos) == 0 {
-		fmt.Fprintln(os.Stderr, "nt: view save needs a name, e.g. `nt view save week --sort due`")
-		return 2
+		return usageErr(fmt.Errorf("view save: needs a name, e.g. `nt view save week --sort due`"))
 	}
 	name := pos[0]
 	if err := view.ValidName(name); err != nil {
@@ -84,9 +83,9 @@ func viewSave(args []string) int {
 	if err := view.Save(dir, views); err != nil {
 		return fail(err)
 	}
-	verb := "Saved"
+	verb := "saved"
 	if existed {
-		verb = "Updated"
+		verb = "updated"
 	}
 	fmt.Printf("%s view %q → nt list %s\n", verb, name, spec.Summary())
 	return 0
@@ -102,8 +101,7 @@ func viewRecall(args []string) int {
 		return 2
 	}
 	if len(pos) == 0 {
-		fmt.Fprintln(os.Stderr, "nt: view recall needs a name (try `nt view list`)")
-		return 2
+		return usageErr(fmt.Errorf("view recall: needs a name (try `nt view list`)"))
 	}
 	name := pos[0]
 
@@ -153,8 +151,7 @@ func viewList() int {
 // viewRemove deletes a saved view by name.
 func viewRemove(args []string) int {
 	if len(args) == 0 {
-		fmt.Fprintln(os.Stderr, "nt: view rm needs a name")
-		return 2
+		return usageErr(fmt.Errorf("view rm: needs a name"))
 	}
 	name := args[0]
 	dir, err := store.ResolveDir()
@@ -173,6 +170,6 @@ func viewRemove(args []string) int {
 	if err := view.Save(dir, views); err != nil {
 		return fail(err)
 	}
-	fmt.Printf("Deleted view %q\n", name)
+	fmt.Printf("deleted view %q\n", name)
 	return 0
 }

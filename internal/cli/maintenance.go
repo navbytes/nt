@@ -40,7 +40,7 @@ func cmdArchive(args []string) int {
 		return archiveNotes(e, handles, *undo)
 	}
 	if *undo {
-		return fail(fmt.Errorf("archive: --undo needs a note handle (task archive isn't undoable; use `nt undo`)"))
+		return usageErr(fmt.Errorf("archive: --undo needs a note handle (task archive isn't undoable; use `nt undo`)"))
 	}
 	n, err := e.Archive()
 	if err != nil {
@@ -99,7 +99,7 @@ func cmdUndo(args []string) int {
 
 func cmdEdit(args []string) int {
 	if len(args) == 0 {
-		return fail(fmt.Errorf("edit: need an id (or note:slug)"))
+		return usageErr(fmt.Errorf("edit: need an id (or note:slug)"))
 	}
 	handle := args[0]
 	e, ok := engine()
@@ -189,9 +189,14 @@ func cmdPath(args []string) int {
 // and notes. dest is a new name or a folder/path (relative to notes/).
 func cmdMv(args []string) int {
 	if len(args) < 2 {
-		return fail(fmt.Errorf("mv: usage: nt mv <note> <new-name|folder/path>"))
+		return usageErr(fmt.Errorf("mv: usage: nt mv <note> <new-name|folder/path>"))
 	}
-	src, dest := args[0], strings.Join(args[1:], " ")
+	// dest is a single token (a name or folder/path); reject stray extra words so
+	// they don't silently get joined into the filename.
+	if len(args) > 2 {
+		return usageErr(fmt.Errorf("mv: dest must be a single token (got %d extra); quote names with spaces", len(args)-2))
+	}
+	src, dest := args[0], args[1]
 	e, ok := engine()
 	if !ok {
 		return 1
@@ -237,6 +242,13 @@ func cmdDoctor(args []string) int {
 	rep, err := e.Doctor(!*check)
 	if err != nil {
 		return fail(err)
+	}
+	if len(rep.Actions) > 0 || len(rep.Warnings) > 0 {
+		if *check {
+			fmt.Println("doctor — problems found:")
+		} else {
+			fmt.Println("doctor — changes:")
+		}
 	}
 	for _, a := range rep.Actions {
 		fmt.Println("  " + a)
