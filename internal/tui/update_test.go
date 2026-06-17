@@ -8,6 +8,7 @@ import (
 	"github.com/navbytes/nt/internal/mutate"
 	"github.com/navbytes/nt/internal/note"
 	"github.com/navbytes/nt/internal/task"
+	"github.com/navbytes/nt/internal/view"
 )
 
 func press(model tea.Model, keys ...string) tea.Model {
@@ -245,6 +246,110 @@ func TestVimCountsAndTabKeys(t *testing.T) {
 	m.tab = tabTasks
 	if mm := press(m, "[").(*Model); mm.tab != tabLogbook {
 		t.Fatalf("[ should wrap to the logbook tab, got %v", mm.tab)
+	}
+}
+
+// TestTabSwitchPreservesCursor: cycling tabs and coming back restores the
+// cursor instead of snapping to the top (U5).
+func TestTabSwitchPreservesCursor(t *testing.T) {
+	m := testModel(t)
+	m.width, m.height = 100, 24
+	for i := 0; i < 10; i++ {
+		_ = m.eng.Apply("add", func(d *task.Doc, rec *mutate.Recorder) error {
+			nt := task.New("filler")
+			d.Append(nt)
+			rec.Added(nt)
+			return nil
+		})
+	}
+	m.reload()
+	m.tab = tabTasks
+	m.cursor = 4
+	mm := press(m, "]").(*Model) // → notes
+	if mm.tab != tabNotes {
+		t.Fatalf("] should advance to notes, got %v", mm.tab)
+	}
+	mm = press(mm, "[").(*Model) // ← back to tasks
+	if mm.tab != tabTasks {
+		t.Fatalf("[ should return to tasks, got %v", mm.tab)
+	}
+	if mm.cursor != 4 {
+		t.Fatalf("tab round-trip should preserve cursor 4, got %d", mm.cursor)
+	}
+}
+
+// TestFilterEscRestoresPosition: cancelling a live filter with Esc restores the
+// prior selection and scroll offset, not just the filter text (U9).
+func TestFilterEscRestoresPosition(t *testing.T) {
+	m := testModel(t)
+	m.width, m.height = 100, 24
+	m.tab = tabTasks
+	m.cursor = 2
+	wantID := m.selectedID()
+
+	var model tea.Model = m
+	model = press(model, "/")      // open filter, snapshots position
+	model = press(model, "deploy") // live filter narrows the list
+	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	mm := model.(*Model)
+	if mm.filter != "" {
+		t.Fatalf("esc should restore empty filter, got %q", mm.filter)
+	}
+	if got := mm.selectedID(); got != wantID {
+		t.Fatalf("esc should restore the prior selection %s, got %s", wantID, got)
+	}
+}
+
+// TestAddTagDuplicateNotCounted: adding a tag that already exists is a no-op and
+// is reported as such rather than over-counting (U15).
+func TestAddTagDuplicateNotCounted(t *testing.T) {
+	m := testModel(t)
+	m.width, m.height = 100, 24
+	m.addTag("urgent")
+	if !strings.Contains(m.status, "tagged @urgent") {
+		t.Fatalf("first add should report tagged, got %q", m.status)
+	}
+	m.addTag("urgent") // duplicate
+	if !strings.Contains(m.status, "already tagged") {
+		t.Fatalf("duplicate add should report no-op, got %q", m.status)
+	}
+}
+
+// TestLockBlocksBodySave: Ctrl+S in the note-body capture refuses to write while
+// the read-only lock is on (U2 — lock bypass fix).
+func TestLockBlocksBodySave(t *testing.T) {
+	m := testModel(t)
+	m.width, m.height = 100, 24
+	n, err := note.Create(m.eng.S, "Locked", "", nil, "tui", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.reload()
+	m.locked = true
+	m.openBodyCapture(n.ID, "Locked")
+	m.bodyArea.SetValue("should not persist")
+	m.saveBodyCapture()
+	if !strings.Contains(m.status, "locked") {
+		t.Fatalf("save under lock should report locked, got %q", m.status)
+	}
+	got, _ := note.Load(n.Path)
+	if strings.Contains(got.Body, "should not persist") {
+		t.Fatal("body must not be written to disk while locked")
+	}
+}
+
+// TestClearViewRestoresToggles: clearing a view that forced showDone/showBlocked
+// on restores their prior values (U4).
+func TestClearViewRestoresToggles(t *testing.T) {
+	m := testModel(t)
+	m.showDone, m.showBlocked = false, false
+	m.applyView("everything", view.Spec{All: true})
+	if !m.showDone || !m.showBlocked {
+		t.Fatal("an All view should force both toggles on")
+	}
+	m.clearView()
+	if m.showDone || m.showBlocked {
+		t.Fatalf("clearView should restore prior toggles: done=%v blocked=%v", m.showDone, m.showBlocked)
 	}
 }
 

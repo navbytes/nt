@@ -165,7 +165,7 @@ func (m *Model) footerView() string {
 			stKeyBg.Render("t") + stBarBg.Render(" text   ") +
 			lipgloss.NewStyle().Foreground(cDim).Background(cBarBg).Render("esc")
 	} else if m.confirm != nil {
-		hint := "(y/n)"
+		hint := "(y/n/⏎)"
 		if m.confirm.hint != "" {
 			hint = m.confirm.hint
 		}
@@ -270,7 +270,7 @@ func (m *Model) keybarPairs() [][2]string {
 		}
 		p = append(p, [][2]string{{"spc", "mark"}, {"y", "yank"}, {"/", "filter"}, {"v", "group"}, {"b", "blocked"}}...)
 		if m.width >= wideMin {
-			p = append(p, [2]string{"‹ ›", "width"})
+			p = append(p, [2]string{"< >", "width"})
 		}
 		return append(p, [2]string{"u/U", "undo/redo"})
 	}
@@ -348,18 +348,20 @@ func (m *Model) wideView(h int) string {
 func (m *Model) scrollDetail(content string, h int) string {
 	lines := strings.Split(content, "\n")
 	n := len(lines)
-	if n <= h || h <= 0 {
+	// Reserve the last row for the scroll indicator: viewH content lines fit.
+	viewH := h - 1
+	if n <= viewH || viewH <= 0 {
 		m.detailScroll = 0
 		return content
 	}
-	if m.detailScroll > n-h {
-		m.detailScroll = n - h
+	if m.detailScroll > n-viewH {
+		m.detailScroll = n - viewH
 	}
 	if m.detailScroll < 0 {
 		m.detailScroll = 0
 	}
-	out := strings.Join(lines[m.detailScroll:m.detailScroll+h-1], "\n")
-	more := n - h - m.detailScroll
+	out := strings.Join(lines[m.detailScroll:m.detailScroll+viewH], "\n")
+	more := n - viewH - m.detailScroll
 	ind := fmt.Sprintf("↑%d ↓%d", m.detailScroll, max0(more))
 	if !m.detailFocus {
 		ind += "  (enter to scroll)"
@@ -539,7 +541,7 @@ func (m *Model) listView(width, h int) string {
 // logbookView renders the Logbook: completed tasks grouped by completion date,
 // newest first, each row showing who the task came from (src).
 func (m *Model) logbookView(width, h int) string {
-	empty := "  no completed tasks yet — finish one with 'x'"
+	empty := "  no completed tasks yet — finish one on the tasks tab (x)"
 	if m.filter != "" {
 		empty = fmt.Sprintf("  no completed tasks match %q", m.filter)
 	}
@@ -671,16 +673,18 @@ func (m *Model) taskRow(t *task.Task, sel bool, width int) string {
 // selMetaRow lays out a selected "glyph text … meta" row on the solid selection
 // bar. text and meta must be plain (selRow renders plain content); see selRow.
 func selMetaRow(glyph, text, meta string, width int, marked bool) string {
-	avail := width - 5 - lipgloss.Width(meta) // 3 bar + glyph + space
+	// Reserve 1 trailing column so the meta column's right edge matches listRow's
+	// (which ends in a space) — otherwise meta jumps 1 col left/right on select.
+	avail := width - 6 - lipgloss.Width(meta) // 3 bar + glyph + space + trailing
 	if avail < 4 {
 		avail = 4
 	}
 	left := glyph + " " + truncate(text, avail)
-	gap := width - 3 - lipgloss.Width(left) - lipgloss.Width(meta)
+	gap := width - 3 - lipgloss.Width(left) - lipgloss.Width(meta) - 1
 	if gap < 1 {
 		gap = 1
 	}
-	return selRow(left+strings.Repeat(" ", gap)+meta, width, marked)
+	return selRow(left+strings.Repeat(" ", gap)+meta+" ", width, marked)
 }
 
 // listRow lays out an unselected "gutter icon text … meta" row padded to width.
@@ -902,7 +906,14 @@ func (m *Model) renderMarkdown(id, body string, w int) string {
 		return m.md.out
 	}
 	out := stMuted.Render(body)
-	if r, err := glamour.NewTermRenderer(glamour.WithStandardStyle("dark"), glamour.WithWordWrap(w)); err == nil {
+	// Match the markdown style to the resolved theme (NT_THEME / config / auto),
+	// the same background lipgloss uses for the adaptive palette — a light
+	// terminal got dark markdown before.
+	mdStyle := "light"
+	if lipgloss.HasDarkBackground() {
+		mdStyle = "dark"
+	}
+	if r, err := glamour.NewTermRenderer(glamour.WithStandardStyle(mdStyle), glamour.WithWordWrap(w)); err == nil {
 		if s, err := r.Render(body); err == nil {
 			out = strings.Trim(s, "\n")
 		}
@@ -941,7 +952,7 @@ func (m *Model) helpView() string {
 			{"/", "filter (searches note bodies on the notes tab)"},
 			{"esc", "clear filter / scope"},
 			{"v", "cycle grouping (date→project→tag)"},
-			{"‹ ›", "resize the list/detail split (or drag the divider)"},
+			{"< >", "resize the list/detail split (or drag the divider)"},
 			{"ctrl+l", "lock / unlock (read-only: blocks all writes)"},
 			{".", "show / hide done · on the notes tab: archived"}, {"b", "show / hide blocked"},
 			{"?", "this help"}, {"q", "back out one level, then quit"},

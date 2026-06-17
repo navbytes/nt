@@ -99,29 +99,35 @@ type Model struct {
 	blocked   map[string]bool // task ULIDs blocked by an open dependency
 	lastSig   uint64          // content signature of the last rebuilt store (F4: skip redundant reloads)
 
-	groups    []group      // tasks tab, current grouping
-	flat      []*task.Task // selectable tasks in display order
-	logGroups []group      // logbook tab: done tasks grouped by completion date
-	logFlat   []*task.Task // logbook tab: selectable done tasks in display order
-	cursor    int          // index into flat (tasks) or notes (notes tab)
-	offset    int          // first visible line (scroll position)
-	hitLines  []hitLine    // per-line click map from the last list render (mouse)
-	tabHits   []tabHit     // clickable tab-label ranges from the last header render
+	groups    []group       // tasks tab, current grouping
+	flat      []*task.Task  // selectable tasks in display order
+	logGroups []group       // logbook tab: done tasks grouped by completion date
+	logFlat   []*task.Task  // logbook tab: selectable done tasks in display order
+	cursor    int           // index into flat (tasks) or notes (notes tab)
+	offset    int           // first visible line (scroll position)
+	tabCursor [tabCount]int // saved cursor per tab, so a round-trip keeps your place
+	tabOffset [tabCount]int // saved scroll offset per tab
+	hitLines  []hitLine     // per-line click map from the last list render (mouse)
+	tabHits   []tabHit      // clickable tab-label ranges from the last header render
 
-	filter        string
-	filterBefore  string // filter value before opening the filter prompt, for Esc-to-cancel
-	scopeTag      string // active @tag scope (filters the list); "" = none
-	scopeProject  string // active +project scope; "" = none
-	viewName      string // active saved smart view (nt view); "" = none
-	viewSpec      view.Spec
-	detailFocus   bool // detail pane is focused: j/k scroll the body, not the list
-	detailScroll  int  // scroll offset within the focused detail pane
-	splitPct      int  // wide-mode list width as a % of the terminal (resizable)
-	draggingSplit bool // a mouse drag on the divider is in progress
-	locked        bool // read-only lock: mutating keys are swallowed (ctrl+l)
-	help          bool
-	helpScroll    int  // scroll offset within the help overlay
-	ready         bool // gates key input until startup terminal-query noise settles
+	filter          string
+	filterBefore    string // filter value before opening the filter prompt, for Esc-to-cancel
+	filterSelBefore string // selected ID before the filter prompt opened, for Esc-to-cancel
+	filterOffBefore int    // scroll offset before the filter prompt opened
+	scopeTag        string // active @tag scope (filters the list); "" = none
+	scopeProject    string // active +project scope; "" = none
+	viewName        string // active saved smart view (nt view); "" = none
+	viewSpec        view.Spec
+	viewPrevDone    bool // showDone before applyView forced it on (restored on clearView)
+	viewPrevBlock   bool // showBlocked before applyView forced it on (restored on clearView)
+	detailFocus     bool // detail pane is focused: j/k scroll the body, not the list
+	detailScroll    int  // scroll offset within the focused detail pane
+	splitPct        int  // wide-mode list width as a % of the terminal (resizable)
+	draggingSplit   bool // a mouse drag on the divider is in progress
+	locked          bool // read-only lock: mutating keys are swallowed (ctrl+l)
+	help            bool
+	helpScroll      int  // scroll offset within the help overlay
+	ready           bool // gates key input until startup terminal-query noise settles
 
 	followMode    bool           // hint mode: tokens are labeled for keyboard activation
 	followTargets []followTarget // labeled actionable tokens (links/tags/projects)
@@ -132,11 +138,12 @@ type Model struct {
 	confirm      *confirmState   // pending y/n confirmation for a destructive action
 	yankPending  bool            // 'y' pressed, awaiting the chord target (y/l/t)
 
-	input  textinput.Model
-	ik     inputKind
-	pendD  bool   // first 'd' of a 'dd'
-	count  int    // vim repeat-count prefix being typed (0 = none)
-	status string // transient status line
+	input     textinput.Model
+	ik        inputKind
+	pendD     bool   // first 'd' of a 'dd'
+	count     int    // vim repeat-count prefix being typed (0 = none)
+	status    string // transient status line
+	statusGen int    // bumped on every setStatus; a stale auto-clear tick is ignored
 
 	bodyEdit   bool           // in-TUI note-body capture is active (U4)
 	bodyArea   textarea.Model // multi-line body editor for fast capture
@@ -381,6 +388,19 @@ func noteMatches(n *note.Note, needle string) bool {
 	return strings.Contains(hay, needle)
 }
 
+// switchTab changes the active tab, preserving each tab's cursor/offset across
+// round-trips instead of snapping back to the top every time. The restored
+// cursor is clamped to the destination tab's current length.
+func (m *Model) switchTab(dst tab) {
+	if dst == m.tab {
+		return
+	}
+	m.tabCursor[m.tab], m.tabOffset[m.tab] = m.cursor, m.offset
+	m.tab = dst
+	m.cursor, m.offset = m.tabCursor[dst], m.tabOffset[dst]
+	m.clampCursor()
+}
+
 func (m *Model) clampCursor() {
 	n := m.selectableLen()
 	if m.cursor >= n {
@@ -432,7 +452,10 @@ func (m *Model) selectedNote() *note.Note {
 	return m.notesView[m.cursor]
 }
 
-func (m *Model) setStatus(s string) { m.status = s }
+func (m *Model) setStatus(s string) {
+	m.status = s
+	m.statusGen++
+}
 
 // effStatus / icon account for dependency blocking when displaying a task.
 func (m *Model) effStatus(t *task.Task) string {

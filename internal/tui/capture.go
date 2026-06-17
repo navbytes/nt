@@ -51,6 +51,10 @@ func (m *Model) updateBodyEdit(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 // saveBodyCapture writes the captured body to the note (frontmatter preserved).
 func (m *Model) saveBodyCapture() {
+	if m.locked {
+		m.setStatus("locked (read-only) — ctrl+l to unlock")
+		return
+	}
 	body := strings.TrimRight(m.bodyArea.Value(), "\n")
 	if body == "" {
 		m.setStatus("note added (title only)")

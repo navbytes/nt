@@ -43,6 +43,11 @@ func (m *Model) loadViews() []struct {
 // follows the spec: a view that includes done (All / Status:done) or blocked
 // tasks turns the matching toggle on, so the view shows what it says it shows.
 func (m *Model) applyView(name string, spec view.Spec) {
+	// Snapshot the toggles a view may force on, so clearView can restore them
+	// (only on a fresh apply, not when switching between views).
+	if m.viewName == "" {
+		m.viewPrevDone, m.viewPrevBlock = m.showDone, m.showBlocked
+	}
 	m.viewName, m.viewSpec = name, spec
 	if spec.All || spec.Status == "done" {
 		m.showDone = true
@@ -59,6 +64,9 @@ func (m *Model) applyView(name string, spec view.Spec) {
 func (m *Model) clearView() {
 	m.viewName = ""
 	m.viewSpec = view.Spec{}
+	// Restore the done/blocked toggles applyView may have forced on, so a view
+	// doesn't leave stale done/blocked tasks visible after it's cleared.
+	m.showDone, m.showBlocked = m.viewPrevDone, m.viewPrevBlock
 	m.rebuild()
 	m.setStatus("view cleared")
 }
