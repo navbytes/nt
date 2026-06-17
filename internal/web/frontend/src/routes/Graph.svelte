@@ -62,11 +62,17 @@
   const FOG_NEUTRAL = 0.00045; // fog density at the framed distance (was a flat 0.0009)
   let camRefDist = 0; // camera distance when the graph was first framed (neutral point)
   let camRefTO: ReturnType<typeof setTimeout> | undefined; // locks camRefDist post-fit
-  // 3D is INTENTIONALLY a dark "deep space" field in BOTH themes — the
-  // UnrealBloomPass + additive coronas only read as luminous stars against a
-  // near-black background, so we don't follow the page theme here (audit #5).
-  const BG3D = "#05060d";
-  const LABEL3D = "#e6e9f5"; // 3D labels are always light (legible on BG3D)
+  // 3D field + label colors follow the page theme. Dark = a "deep space" near-black
+  // field where the UnrealBloomPass + additive coronas read as luminous stars. Light
+  // = a soft cool field with solid, legibly-coloured spheres; bloom + additive coronas
+  // wash out to nothing on a bright background, so they're dropped in light mode (see
+  // node3dObject + bloomStrength) and the sphere fill carries the colour instead.
+  function bg3d(): string {
+    return graphDark ? "#05060d" : "#eef1f7";
+  }
+  function label3dColor(): string {
+    return graphDark ? "#e6e9f5" : cssFg; // light text on the dark field, dark on light
+  }
 
   // Reduced-motion preference, kept live: read once for the initial value, then
   // updated by a matchMedia change listener (audit #27). Reads at imperative call
@@ -239,9 +245,9 @@
     const shape = new Map<string, ShapeKind>();
     const pass = new Set<string>();
     for (const n of nodes) {
-      // 3D always renders on a near-black field (BG3D) with bloom, so it always
-      // wants the DARK (bright) palette regardless of the page theme (audit #5).
-      color.set(n.id, colorOfNode(n, view.colorBy, built3d || graphDark));
+      // Palette follows the page theme in both 2D and 3D (3D now has a light field
+      // too): the bright palette reads on deep space, the light palette on the light field.
+      color.set(n.id, colorOfNode(n, view.colorBy, graphDark));
       shape.set(n.id, nodeShape(n, view.shapeBy));
       if (passes(n)) pass.add(n.id);
     }
@@ -1025,19 +1031,24 @@
     }
     return R.pass.has(n.id) ? base : withAlpha(base, 0.3); // dimmed = recede
   }
+  // Base link grey for 3D — a light blue-grey on the dark field, a darker blue-grey on
+  // the light field (the dark-field grey is invisible on a bright background).
+  function link3dGrey(a: number): string {
+    return graphDark ? `rgba(160,166,190,${a})` : `rgba(96,103,128,${a})`;
+  }
   function link3dColor(l: any): string {
     const s = linkEndId(l.source);
     const t = linkEndId(l.target);
     if (hoveredId) {
-      if (s !== hoveredId && t !== hoveredId) return "rgba(160,166,190,0.15)";
+      if (s !== hoveredId && t !== hoveredId) return link3dGrey(0.15);
       if (view.colorLinksByType) return withAlpha(linkKindColor(l.kind, graphDark), 0.9);
       if (view.colorLinks) return withAlpha(R.color.get(s) ?? cssAccent, 0.85);
-      return "rgba(190,196,220,0.85)";
+      return link3dGrey(0.85);
     }
     const bright = R.pass.has(s) && R.pass.has(t);
     if (view.colorLinksByType) return withAlpha(linkKindColor(l.kind, graphDark), bright ? 0.7 : 0.18);
     if (view.colorLinks) return withAlpha(R.color.get(s) ?? cssAccent, bright ? 0.6 : 0.18);
-    return bright ? "rgba(160,166,190,0.5)" : "rgba(160,166,190,0.18)";
+    return link3dGrey(bright ? 0.5 : 0.18);
   }
   // node3dVal drives the sphere volume. Honors the "Size by" pref so centrality
   // (PageRank) hubs read bigger in 3D too, matching the 2D radius logic.
@@ -1075,8 +1086,10 @@
   function node3dObject(n: FGNode): any {
     if (!three3d) return undefined;
     const group = new three3d.Group();
-    // glowing corona — additive sprite the UnrealBloomPass blooms into a star
-    if (view.effects !== "off") {
+    // glowing corona — additive sprite the UnrealBloomPass blooms into a star. Additive
+    // blending only reads against the dark field; on the light field it washes out, so
+    // light mode skips it and the solid sphere fill carries the colour instead.
+    if (view.effects !== "off" && graphDark) {
       const spr = new three3d.Sprite(
         new three3d.SpriteMaterial({
           map: glowTexture(),
@@ -1095,7 +1108,7 @@
       view.showLabels && (n.deg >= 5 || n.id === view.selectedId || pinned.has(n.id));
     if (labelOn && SpriteText3d) {
       const s = new SpriteText3d(displayTitle(n.title, 24));
-      s.color = LABEL3D; // always light — cssFg is near-black in light mode (audit #5)
+      s.color = label3dColor(); // light on the dark field, dark (cssFg) on the light field
       s.backgroundColor = false;
       s.textHeight = 5;
       s.position.y = node3dRadius(n) + 6;
@@ -1145,6 +1158,9 @@
     schedule3d(FX_OBJECTS);
   }
   function bloomStrength(): number {
+    // Additive bloom washes out to nothing on the bright light field (every pixel is
+    // already near-white), so the light theme renders solid spheres with no bloom.
+    if (!graphDark) return 0;
     return view.effects === "off" ? 0 : view.effects === "subtle" ? 1.0 : 1.6;
   }
   // Keep the 3D glow legible across the whole zoom range. The bloom + additive coronas
@@ -1274,7 +1290,7 @@
         .linkOpacity(0.55)
         .linkWidth(0)
         .linkCurvature(view.linkStyle === "curved" ? 0.18 : 0)
-        .backgroundColor(BG3D)
+        .backgroundColor(bg3d())
         .showNavInfo(false)
         // Disable 3D node-drag. On drag-end — which an ordinary click often registers
         // as a micro-drag — 3d-force-graph dispatches a synthetic touch `pointerup` to
@@ -1344,7 +1360,7 @@
       // big constellations (skipped in the flat "Effects: off" look).
       if (view.effects !== "off") {
         try {
-          g.scene().fog = new THREE.FogExp2(BG3D, FOG_NEUTRAL);
+          g.scene().fog = new THREE.FogExp2(bg3d(), FOG_NEUTRAL);
         } catch (e) {
           console.warn("3D fog unavailable:", e);
         }
@@ -1728,22 +1744,28 @@
   // ---- theme changes: refresh cached colors + canvas bg ----
   $effect(() => {
     if (typeof MutationObserver === "undefined") return;
-    const obs = new MutationObserver(() => {
-      readTheme();
-      graph?.backgroundColor(cssBg);
-      repaint();
-    });
-    obs.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme", "class"] });
-    const mq = window.matchMedia?.("(prefers-color-scheme: dark)");
-    const onMq = () => {
-      readTheme();
-      graph?.backgroundColor(cssBg);
+    const onTheme = () => {
+      readTheme(); // sets graphDark → the graphDark-tracked recompute re-colours nodes/objects
+      if (built3d) {
+        // 3D: swap the field + fog to the theme's colour and re-tune bloom (0 in light).
+        // The palette + coronas/labels are rebuilt by the recompute effect (it tracks
+        // graphDark); here we own only what recompute doesn't — bg, fog colour, bloom.
+        graph?.backgroundColor(bg3d());
+        const fog = graph?.scene?.()?.fog;
+        if (fog?.color) fog.color.set(bg3d());
+        tuneGlowForCamera();
+      } else {
+        graph?.backgroundColor(cssBg);
+      }
       repaint();
     };
-    mq?.addEventListener?.("change", onMq);
+    const obs = new MutationObserver(onTheme);
+    obs.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme", "class"] });
+    const mq = window.matchMedia?.("(prefers-color-scheme: dark)");
+    mq?.addEventListener?.("change", onTheme);
     return () => {
       obs.disconnect();
-      mq?.removeEventListener?.("change", onMq);
+      mq?.removeEventListener?.("change", onTheme);
     };
   });
 </script>
@@ -1870,7 +1892,11 @@
 <style>
   .graph-stage {
     position: relative;
-    margin: -28px -36px -64px;
+    /* Full-bleed past .main's padding (var(--space-7/8/10) = 24/32/48). The
+       HORIZONTAL bleed must equal .main's side padding exactly (32px) — any more
+       and the stage is wider than .main, which overflows the page (a small
+       horizontal scrollbar). Top/bottom over-bleed is harmless (clipped + offscreen). */
+    margin: -28px -32px -64px;
     /* 100dvh follows mobile browser chrome (toolbars) where 100vh overshoots
        (audit #9). Desktop layout is unchanged (dvh == vh with no dynamic chrome). */
     height: calc(100dvh - 58px);
