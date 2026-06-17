@@ -159,9 +159,10 @@ opens it). Only genuine paragraph-length `text` with no `body` (≥240 chars) is
 auto-split the same way; ordinary verbose one-liners are left intact and just
 clamp to a few lines in the UI (full text on hover / on edit).
 
-These machine-created task notes are filed under **`notes/tasks/`** (like daily
-notes go under `notes/journal/`), so they stay grouped and don't clutter a
-human's hand-curated folders.
+These machine-created task notes are filed under **`notes/__tasks__/`** (the
+reserved-looking name avoids colliding with a plain `tasks` folder you might keep
+for your own notes; daily notes likewise go under `notes/journal/`), so they stay
+grouped and don't clutter a human's hand-curated folders.
 
 Hook, skill, and MCP compose: the hook mirrors the todo list automatically, the
 skill/MCP capture notes and recall context. Use the MCP server if your client

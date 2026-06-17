@@ -1075,7 +1075,7 @@ func (s *Server) apiTaskNote(w http.ResponseWriter, r *http.Request) {
 	if title == "" {
 		title = "Task note"
 	}
-	// File under notes/tasks/ so task bodies don't clutter hand-curated folders.
+	// File under notes/__tasks__/ so task bodies don't clutter hand-curated folders.
 	n, err := note.Create(s.eng.S, title, "", nil, "web", note.TaskNoteFolder)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
