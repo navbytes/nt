@@ -4,12 +4,17 @@
   // active row opens the full /search page. Reuses the same ranked search API and
   // highlight helper the /search route uses.
   import { api } from "./api";
+  import { useQueryClient } from "@tanstack/svelte-query";
   import { navigate } from "./router.svelte";
   import { highlightParts } from "./text";
+  import { parseQuickAdd } from "./quickparse";
+  import { showToast } from "./toast.svelte";
   import type { SearchResult } from "./api-types";
   import Icon from "./Icon.svelte";
 
+  const qc = useQueryClient();
   let q = $state("");
+  let adding = $state(false);
   let debounced = $state("");
   let open = $state(false);
   let active = $state(-1);
@@ -56,6 +61,36 @@
   });
   const showDrop = $derived(open && debounced.length >= 2);
 
+  // The search field and the on-page quick-add look alike, so people type a task
+  // into search by mistake and hit "No matches". Parse the query with the same
+  // grammar the quick-add uses so we can offer to capture it as a task instead —
+  // emphasised when it carries todo.txt syntax (due:/!pri/@tag/+project).
+  const parsed = $derived(debounced.length >= 2 ? parseQuickAdd(debounced) : null);
+  const taskLike = $derived(
+    !!parsed && (!!parsed.priority || !!parsed.due || !!parsed.start || !!parsed.project || parsed.tags.length > 0),
+  );
+
+  async function addAsTask() {
+    const text = q.trim();
+    if (!text || adding) return;
+    adding = true;
+    try {
+      await api.taskNew(text);
+      await qc.invalidateQueries({ queryKey: ["tasks"] });
+      qc.invalidateQueries({ queryKey: ["state"] });
+      showToast(`Added task: ${parsed?.title || text}`);
+      open = false;
+      q = "";
+      active = -1;
+      inputEl?.blur();
+      navigate("/tasks");
+    } catch (e) {
+      showToast(`Couldn't add task: ${String(e)}`);
+    } finally {
+      adding = false;
+    }
+  }
+
   $effect(() => {
     // Keep the active row in range as results change.
     if (active > results.length - 1) active = results.length - 1;
@@ -86,7 +121,18 @@
       active = Math.max(active - 1, -1);
     } else if (e.key === "Enter") {
       e.preventDefault();
-      choose(active >= 0 ? results[active] : undefined);
+      // ⌘/Ctrl+Enter always captures the query as a task, from any row.
+      if (e.metaKey || e.ctrlKey) {
+        addAsTask();
+      } else if (active >= 0) {
+        choose(results[active]);
+      } else if (results.length === 0 && debounced.length >= 2) {
+        // Nothing to open — capture the query as a task instead of opening an
+        // empty search page. Rescues a task typed into search by mistake.
+        addAsTask();
+      } else {
+        goFull();
+      }
     } else if (e.key === "Escape") {
       // Esc: dismiss the dropdown if open, otherwise clear the field (a second
       // press, or Esc on an already-closed list, empties it — NSSearchField feel).
@@ -130,9 +176,10 @@
     <ul class="sbox__list" id="sbox-list" role="listbox">
       {#if searching && results.length === 0}
         <li class="sbox__msg muted" role="presentation">Searching…</li>
-      {:else if results.length === 0}
-        <li class="sbox__msg muted" role="presentation">No matches for “{debounced}”</li>
       {:else}
+        {#if results.length === 0}
+          <li class="sbox__msg muted" role="presentation">No matches for “{debounced}”</li>
+        {:else}
         {#each results as r, i (r.url + i)}
           <li role="presentation">
             <button
@@ -161,9 +208,22 @@
           </li>
         {/each}
         <li role="presentation">
-          <button class="sbox__item sbox__all" class:active={active === -1 && false} onclick={goFull}>
+          <button class="sbox__item sbox__all" onclick={goFull}>
             Search all results for “{debounced}”
             <Icon name="arrow-right" size={13} />
+          </button>
+        </li>
+        {/if}
+        <!-- Rescue: capture the query as a task (the field is easy to confuse
+             with the on-page quick-add). Emphasised when it carries task syntax. -->
+        <li role="presentation">
+          <button class="sbox__item sbox__add" class:sbox__add--strong={taskLike} onclick={addAsTask} disabled={adding}>
+            <Icon name="plus" size={13} />
+            <span class="sbox__addlabel">Add <strong>“{parsed?.title || debounced}”</strong> as a task</span>
+            {#if taskLike}
+              <span class="sbox__addmeta">{#if parsed?.priority}!{parsed.priority} {/if}{#if parsed?.due}due:{parsed.due} {/if}{#if parsed?.project}+{parsed.project} {/if}{#each parsed?.tags ?? [] as t}@{t} {/each}</span>
+            {/if}
+            <span class="sbox__kbd">⌘↵</span>
           </button>
         </li>
       {/if}
@@ -302,5 +362,48 @@
   }
   .sbox__item.active.sbox__all {
     color: var(--on-accent);
+  }
+  /* Capture-as-task rescue row: sits below results, separated by a hairline. */
+  .sbox__add {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    color: var(--label-secondary);
+    font-size: 0.82rem;
+    border-top: 1px solid var(--border-soft);
+  }
+  .sbox__add--strong {
+    color: var(--accent);
+  }
+  .sbox__add:disabled {
+    opacity: 0.55;
+  }
+  .sbox__addlabel {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .sbox__addlabel strong {
+    font-weight: 600;
+  }
+  .sbox__addmeta {
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    color: var(--accent-2);
+    white-space: nowrap;
+  }
+  .sbox__kbd {
+    margin-left: auto;
+    font-size: 0.7rem;
+    color: var(--muted);
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    padding: 0 5px;
+    white-space: nowrap;
+  }
+  .sbox__item.active .sbox__kbd {
+    color: var(--on-accent);
+    border-color: color-mix(in srgb, var(--on-accent) 40%, transparent);
   }
 </style>

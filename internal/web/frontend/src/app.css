@@ -516,11 +516,74 @@ code {
 .small {
   font-size: 13px;
 }
+
+/* ---- loading skeletons (finding: pending views render a bare "Loading…",
+   which jumps the layout when content lands and, on Home, flashes a literal
+   "0" before the real counts arrive). `.skel` is a shared ghost primitive: a
+   calm fill with a slow shimmer that sweeps a soft highlight across it. Views
+   compose ghost rows/cards/tiles from it that reserve the final layout height,
+   so the page settles instead of jumping. Under reduced-motion the shimmer is
+   dropped for a static fill (no animation). aria-hidden in the markup keeps the
+   ghosts out of the accessibility tree — a sibling aria-live="polite" carries a
+   spoken "Loading…" where the views need it. */
+.skel {
+  /* a 3-stop gradient panned across a 400%-wide background → a travelling sheen */
+  background: linear-gradient(
+    100deg,
+    var(--fill) 40%,
+    color-mix(in srgb, var(--fill-strong) 70%, var(--bg-elevated)) 50%,
+    var(--fill) 60%
+  );
+  background-size: 400% 100%;
+  border-radius: var(--radius-sm);
+  animation: skel-shimmer 1.4s var(--ease) infinite;
+}
+@keyframes skel-shimmer {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: -100% 0;
+  }
+}
+/* A wrapper that fades the whole ghost group up gently as it mounts. */
+.skel-group {
+  animation: skel-in var(--motion) var(--ease-out) both;
+}
+@keyframes skel-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .skel {
+    /* static fill — no travelling sheen — but still clearly a placeholder */
+    animation: none;
+    background: var(--fill);
+  }
+}
 .error {
   color: var(--red);
 }
 .spacer {
   flex: 1;
+}
+/* Visually-hidden but screen-reader-available — used to pair an aria-live
+   "Loading…" announcement with the aria-hidden skeleton ghosts (and any other
+   off-screen live label). Mirrors the scoped helper in Graph.svelte. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 /* ---- layout ---- */
@@ -906,12 +969,21 @@ body.resizing {
   font: inherit;
   padding: 8px 12px;
   background: var(--fill);
-  border: 1px solid var(--border);
+  /* Match the sibling capture fields (.qfilter / .newnote / tree__newform):
+     a hairline resting border that thickens to the accent on focus (finding:
+     the primary quick-add was the only input with no :focus halo, so it focused
+     differently from every other input in the app). */
+  border: 0.5px solid var(--separator-strong);
   border-radius: var(--radius-sm);
   color: var(--fg);
   transition:
     border-color var(--motion-fast) var(--ease),
     box-shadow var(--motion-fast) var(--ease);
+}
+.taskadd input:focus {
+  outline: none;
+  border-color: var(--accent-color);
+  box-shadow: var(--focus-ring-tight);
 }
 .btn {
   font: inherit;
@@ -1915,6 +1987,26 @@ body.resizing {
   /* Counts crowd the narrow topbar; the dashboard shows them anyway. */
   .topbar .stat {
     display: none;
+  }
+  /* Touch targets (finding): icon-only buttons sit at a 28-30px hit area on
+     desktop (mouse-precise), which is below the 44px comfortable tap target on
+     a phone. Bump them on mobile only — desktop keeps its tighter chrome. */
+  .icon-btn,
+  .palette-btn,
+  .pillbar__btn--icon,
+  .tree__new {
+    min-height: 44px;
+    min-width: 44px;
+  }
+  /* On a phone the row's fixed metadata + action buttons can sum wider than the
+     viewport even with the title truncated, pushing the row past the screen edge
+     (a sideways scroll). Let the row wrap so the actions/metadata flow onto a
+     second line instead; the title still takes the first line and ellipsizes. */
+  .row {
+    flex-wrap: wrap;
+  }
+  .row__actions {
+    margin-left: auto;
   }
 }
 

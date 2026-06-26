@@ -20,6 +20,17 @@ import (
 // tasks/notes (list, ready, today, agenda, recall, search, links, log). Split out
 // of commands.go, which keeps the mutating verbs + shared helpers (E6).
 
+// freshHint returns a getting-started nudge to append to an empty-state message
+// when the store has never been written to — so a brand-new user (whose first
+// command might be `nt ready` or `nt today`, not the no-arg TUI) learns the next
+// step. It stays silent for established users who simply have an empty list now.
+func freshHint(e *mutate.Engine) string {
+	if e != nil && e.S.IsFresh() {
+		return "\n  add your first task:  nt add \"my first task\""
+	}
+	return ""
+}
+
 func cmdList(args []string) int {
 	fs := flag.NewFlagSet("list", flag.ContinueOnError)
 	status := fs.String("status", "", "open|doing|blocked|done")
@@ -83,7 +94,7 @@ func runListSource(spec view.Spec, source string, asJSON bool) int {
 		return printJSON(tasksToJSON(rows, idx))
 	}
 	if len(rows) == 0 {
-		fmt.Println("no tasks")
+		fmt.Println("no tasks" + freshHint(e))
 		return 0
 	}
 	if spec.Tree {
@@ -185,7 +196,7 @@ func cmdReady(args []string) int {
 		return printJSON(tasksToJSON(rows, idx))
 	}
 	if len(rows) == 0 {
-		fmt.Println("nothing ready — all clear, or everything open is blocked")
+		fmt.Println("nothing ready — all clear, or everything open is blocked" + freshHint(e))
 		return 0
 	}
 	for _, t := range rows {
@@ -264,7 +275,7 @@ func runAgenda(args []string, defDays int) int {
 		return printJSON(tasksToJSON(rows, idx))
 	}
 	if len(rows) == 0 {
-		fmt.Println("nothing on the agenda — all clear within the horizon")
+		fmt.Println("nothing on the agenda — all clear within the horizon" + freshHint(e))
 		return 0
 	}
 	// Group into Overdue / Today / Upcoming, preserving urgency order within each.
@@ -371,7 +382,7 @@ func cmdRecall(args []string) int {
 		return printJSON(out)
 	}
 	if len(tasks) == 0 && len(notes) == 0 {
-		fmt.Println("nothing to recall")
+		fmt.Println("nothing to recall" + freshHint(e))
 		return 0
 	}
 	blocked := task.BlockedIDs(d.Tasks())

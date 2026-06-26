@@ -260,10 +260,15 @@
 <div class="editor">
   <div class="editor__bar">
     <div class="pillbar">
-      <button class="pillbar__btn pillbar__btn--accent" onclick={saveInPlace} disabled={saving || !loaded}>
-        {saving ? "Saving…" : "Save"}
+      <button
+        class="pillbar__btn pillbar__btn--accent"
+        class:pillbar__btn--ok={savedFlash}
+        onclick={saveInPlace}
+        disabled={saving || !loaded}
+      >
+        {saving ? "Saving…" : savedFlash ? "Saved ✓" : "Save"}
       </button>
-      <button class="pillbar__btn" onclick={done} disabled={saving || !loaded}>Done</button>
+      <button class="pillbar__btn" onclick={done} disabled={saving || !loaded} title="Save and close">Done</button>
       <span class="pillbar__sep"></span>
       <button class="pillbar__btn" onclick={requestClose}>Cancel</button>
     </div>
@@ -371,6 +376,18 @@
 </div>
 
 <style>
+  /* Success pulse on the Save button after an in-place save, so it visibly
+     confirms ("Saved ✓") instead of looking like it did nothing — Save keeps
+     you in the editor, Done saves and closes. The compound selector beats
+     app.css's .pillbar__btn--accent gradient so the fill (not just the border)
+     turns green. */
+  .pillbar__btn--accent.pillbar__btn--ok {
+    background: var(--green-color);
+    border-color: var(--green-color);
+    color: #fff;
+    box-shadow: none;
+  }
+
   /* Finding 5: let the editor flex within its column instead of relying on the
      magic calc(100vh - 140px) as a *fixed* height. With conflict/on-disk banners
      + the tag bar + backlinks on a short viewport the fixed height (plus the

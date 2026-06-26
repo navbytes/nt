@@ -300,7 +300,14 @@ func (m *Model) keybar(width int) string {
 	sep := lipgloss.NewStyle().Foreground(cBorder).Background(cBarBg).Render(" · ")
 	ell := lipgloss.NewStyle().Foreground(cDim).Background(cBarBg).Render("…")
 	seg := func(p [2]string) string { return stKeyBg.Render(p[0]) + stBarBg.Render(" "+p[1]) }
-	tail := seg([2]string{"?", "help"}) + sep + seg([2]string{"q", "quit"})
+	help := seg([2]string{"?", "help"})
+	tail := help + sep + seg([2]string{"q", "quit"})
+
+	// When the terminal is too narrow even for "? help · q quit", drop everything
+	// else and degrade to the lone "? help" gateway rather than losing it.
+	if lipgloss.Width(tail) > width {
+		return help
+	}
 
 	tailW := lipgloss.Width(sep) + lipgloss.Width(tail) // " · ? help · q quit"
 	ellW := lipgloss.Width(sep) + lipgloss.Width(ell)   // " · …"
@@ -518,7 +525,7 @@ func (m *Model) renderGroupedList(groups []group, width, h int, rowFn rowRendere
 	}
 	if total == 0 {
 		m.hitLines = nil
-		return stDim.Render(empty)
+		return empty
 	}
 	var lines []string
 	var hits []hitLine
@@ -544,11 +551,24 @@ func (m *Model) renderGroupedList(groups []group, width, h int, rowFn rowRendere
 	return m.viewport(lines, sel, h)
 }
 
+// emptyBlock renders a centered, multi-line empty-state: a heading, the primary
+// action, and a discovery hint, placed in the middle of the body area so a fresh
+// store reads as an invitation rather than a bare dim line.
+func (m *Model) emptyBlock(width, h int, heading, action, hint string) string {
+	block := lipgloss.JoinVertical(lipgloss.Center,
+		stTitle.Render(heading),
+		"",
+		stKey.Render(action),
+		stDim.Render(hint),
+	)
+	return lipgloss.Place(width, h, lipgloss.Center, lipgloss.Center, block)
+}
+
 // listView renders the grouped task list, windowed to h rows.
 func (m *Model) listView(width, h int) string {
-	empty := "  no tasks — press 'a' to add one"
+	empty := m.emptyBlock(width, h, "No tasks yet", "a  add a task", "?  keys    :  commands")
 	if m.filter != "" {
-		empty = fmt.Sprintf("  no tasks match %q", m.filter)
+		empty = stDim.Render(fmt.Sprintf("  no tasks match %q", m.filter))
 	}
 	return m.renderGroupedList(m.groups, width, h, m.taskRow, empty)
 }
@@ -556,9 +576,9 @@ func (m *Model) listView(width, h int) string {
 // logbookView renders the Logbook: completed tasks grouped by completion date,
 // newest first, each row showing who the task came from (src).
 func (m *Model) logbookView(width, h int) string {
-	empty := "  no completed tasks yet — finish one on the tasks tab (x)"
+	empty := m.emptyBlock(width, h, "Nothing completed yet", "x  complete a task on the tasks tab", "?  keys    :  commands")
 	if m.filter != "" {
-		empty = fmt.Sprintf("  no completed tasks match %q", m.filter)
+		empty = stDim.Render(fmt.Sprintf("  no completed tasks match %q", m.filter))
 	}
 	return m.renderGroupedList(m.logGroups, width, h, m.logRow, empty)
 }
@@ -611,7 +631,8 @@ func (m *Model) notesList(width, h int) string {
 		if m.filter != "" {
 			return stDim.Render(fmt.Sprintf("  no notes match %q", m.filter))
 		}
-		return stDim.Render("  no notes — press 'A' to add one")
+		return m.emptyBlock(width, h, "No notes yet",
+			"A  capture a note", "durable memory that outlives the session  ·  ?  keys    :  commands")
 	}
 	var lines []string
 	var hits []hitLine
@@ -745,7 +766,10 @@ func (m *Model) detailCard(h int) string {
 	if cardH < 4 {
 		cardH = 4
 	}
-	inner = m.scrollDetail(inner, cardH)
+	// Reserve a row for the always-on exit hint so even a short note tells the
+	// reader how to leave the card on an 80-col terminal.
+	inner = m.scrollDetail(inner, cardH-1)
+	inner += "\n" + stDim.Render("j/k scroll · esc back")
 	card := stCard.Width(w).Render(inner)
 	return lipgloss.Place(m.width, h, lipgloss.Center, lipgloss.Center, card)
 }

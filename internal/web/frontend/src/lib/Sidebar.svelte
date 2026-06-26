@@ -170,7 +170,17 @@
       </form>
     {/if}
     {#if $notesQ.isPending}
-      <p class="muted small">Loading…</p>
+      <!-- Ghost tree lines (indented like the real rows) so the tree reserves its
+           height and doesn't jump when the notes load. -->
+      <div class="skel-tree skel-group" aria-hidden="true">
+        {#each [0, 1, 0, 2, 1, 0, 1] as depth, i (i)}
+          <span
+            class="skel skel-treeline"
+            style="margin-left: {depth * 14}px; width: {[64, 52, 72, 44, 58, 68, 50][i]}%"
+          ></span>
+        {/each}
+      </div>
+      <p class="sr-only" aria-live="polite">Loading notes…</p>
     {:else if $notesQ.data}
       {#if $notesQ.data.tree.length > 0}
         <div role="tree" aria-label="Notes">
@@ -433,5 +443,18 @@
   }
   .tree__newform input:focus {
     border-color: var(--accent-color);
+  }
+
+  /* Loading skeleton: indented ghost lines matching the note-tree row rhythm, so
+     the tree reserves its height while notes load (finding). `.skel` (shimmer /
+     reduced-motion fill) is the shared primitive in app.css. */
+  .skel-tree {
+    display: flex;
+    flex-direction: column;
+    gap: 9px;
+    padding: 6px 10px 0;
+  }
+  .skel-treeline {
+    height: 11px;
   }
 </style>

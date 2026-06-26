@@ -49,6 +49,8 @@
   let built3d = false; // which renderer is currently mounted
   let built = false; // first build finished (gates dim-toggle rebuilds)
   let fitPending = false; // zoom-to-fit once the next layout settles
+  let userMoved = false; // user grabbed the 3D camera — suppress auto-refit
+  let tick3d = 0; // 3D engine-tick counter, drives periodic re-fit while settling
   let lastRoot: string | null = null; // detects local-root changes to reset expansion
   let destroyed = false; // component torn down (guards async builds)
   let bloomPass: any = null; // three UnrealBloomPass (3D only)
@@ -1247,6 +1249,24 @@
     if (!view.frozen) graph.d3ReheatSimulation();
   }
 
+  // The 3D renderer needs a WebGL context. Some embedded webviews — notably
+  // WebKitGTK, which backs the Linux desktop app — don't expose one, and
+  // 3d-force-graph then renders a blank canvas with no error. Probe for it up
+  // front so we can fall back to the 2D canvas (which needs no WebGL) instead of
+  // failing silently. The probe context is released immediately.
+  function webglAvailable(): boolean {
+    try {
+      const c = document.createElement("canvas");
+      const gl =
+        c.getContext("webgl2") || c.getContext("webgl") || c.getContext("experimental-webgl");
+      if (!gl) return false;
+      (gl as WebGLRenderingContext).getExtension("WEBGL_lose_context")?.loseContext();
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   // buildGraph (re)constructs the renderer for the active view.dim. It tears down
   // any previous instance so the 2D ⟷ 3D toggle can swap them in the same <div>.
   async function buildGraph() {
@@ -1268,8 +1288,20 @@
     graph = null;
     bloomPass = null;
     container.innerHTML = "";
+    userMoved = false; // fresh build → allow the settle-fit until the user grabs the camera
+    tick3d = 0;
 
-    if (view.dim === "3d") {
+    // Decide the renderer up front so a 3D failure can fall through to 2D within
+    // this same call (no recursion, no rebuild race with the dim effect).
+    let render3d = view.dim === "3d";
+    if (render3d && !webglAvailable()) {
+      showToast("3D graph needs WebGL, which isn't available here — showing 2D.");
+      view.dim = "2d";
+      render3d = false;
+    }
+
+    if (render3d) {
+      try {
       const { default: ForceGraph3D } = await import("3d-force-graph");
       // @ts-ignore - three 0.184 ships no bundled type declarations; only Vector2 is used
       const THREE: any = await import("three");
@@ -1323,16 +1355,22 @@
         })
         .onEngineTick(() => {
           if (!engineRunning) engineRunning = true;
-          // The layout is pre-warmed to ~final scale, so frame it once on the
-          // first rendered tick and then leave the camera alone — re-fitting every
-          // tick is what made the graph look like it was shrinking. Clearing
-          // fitPending here also means the stop handler won't yank a camera the
-          // user may have since orbited.
-          if (fitPending) {
-            fitPending = false;
-            graph?.zoomToFit?.(reduce ? 0 : 400, 60);
-            // Lock the neutral glow distance once the fit tween settles, then tune so
+          tick3d++;
+          // The constellation charges apart over the whole cooldown, so a single
+          // early fit ends up far too close — stuck zoomed into the central node.
+          // Track the inflating layout with periodic instant fits (not every
+          // frame — that reads as constant shrinking) until the user grabs the
+          // camera. The final settle-fit + glow lock happen in onEngineStop.
+          if (!userMoved && (tick3d === 1 || tick3d % 15 === 0)) {
+            graph?.zoomToFit?.(0, 60);
+          }
+        })
+        .onEngineStop(() => {
+          engineRunning = false;
+          if (!userMoved && !destroyed) {
+            // Frame the now-settled layout, then lock the neutral glow distance so
             // the adaptive bloom/fog measure zoom relative to the framed view.
+            graph?.zoomToFit?.(reduce ? 0 : 400, 60);
             if (camRefTO) clearTimeout(camRefTO);
             camRefTO = setTimeout(() => {
               const cam = graph?.camera?.();
@@ -1340,9 +1378,6 @@
               tuneGlowForCamera();
             }, reduce ? 0 : 450);
           }
-        })
-        .onEngineStop(() => {
-          engineRunning = false;
         });
 
       // Bloom — the additive glow that makes the constellation read as premium.
@@ -1377,9 +1412,33 @@
       } catch {
         /* controls not ready — the effect below re-applies */
       }
+      // A real user gesture on the canvas (drag-orbit or wheel-zoom) means they
+      // own the camera now — suppress the settle-fit so it never yanks their
+      // view. `once` self-removes the listener (we only need the first gesture)
+      // so they don't accumulate across 2D⟷3D rebuilds.
+      container.addEventListener("pointerdown", () => (userMoved = true), { once: true });
+      container.addEventListener("wheel", () => (userMoved = true), { once: true, passive: true });
       built3d = true;
       graph = g;
-    } else {
+      } catch (e) {
+        // Dynamic import or WebGL init failed (older webview, blocked chunk,
+        // lost context). Surface it and fall back to 2D so the graph is never
+        // a silent blank pane.
+        console.error("3D graph failed to initialise:", e);
+        showToast("Couldn't load the 3D graph — showing 2D instead.");
+        view.dim = "2d";
+        render3d = false;
+        try {
+          graph?._destructor?.();
+        } catch {
+          /* best-effort teardown of the partial 3D renderer */
+        }
+        graph = null;
+        if (container) container.innerHTML = "";
+      }
+    }
+
+    if (!render3d) {
       const { default: ForceGraph } = await import("force-graph");
       if (!container || destroyed) return;
       const g = new ForceGraph<FGNode, FGLink>(container)

@@ -341,7 +341,20 @@
 {/if}
 
 {#if $tasksQ.isPending}
-  <p class="muted">Loading tasks…</p>
+  <!-- Ghost rows that reserve the real list's layout height, so content landing
+       doesn't jump the page (finding). aria-hidden ghosts + a polite live label. -->
+  <div class="skel-group" aria-hidden="true">
+    <span class="skel skel-grouptitle"></span>
+    <ul class="rows">
+      {#each Array(6) as _, i (i)}
+        <li class="row skel-row">
+          <span class="skel skel-check"></span>
+          <span class="skel skel-rowtext" style="width: {[68, 84, 52, 76, 60, 72][i]}%"></span>
+        </li>
+      {/each}
+    </ul>
+  </div>
+  <p class="sr-only" aria-live="polite">Loading tasks…</p>
 {:else if $tasksQ.error}
   <div class="loaderr" role="alert">
     <p class="loaderr__msg">Couldn't load tasks.</p>
@@ -630,6 +643,30 @@
     background: var(--accent-fill);
     color: var(--on-accent);
   }
+  /* Loading skeleton: ghost rows that mirror the real .row layout (a check ring
+     + a title line of varied width) so the list reserves its height and the
+     page doesn't jump when tasks land. `.skel` (shimmer + reduced-motion fill)
+     is the shared primitive in app.css. */
+  .skel-grouptitle {
+    display: block;
+    width: 84px;
+    height: 11px;
+    margin: 0 0 12px;
+  }
+  .skel-row {
+    align-items: center;
+    border-bottom: 1px solid var(--border-soft);
+  }
+  .skel-check {
+    flex: none;
+    width: 19px;
+    height: 19px;
+    border-radius: 50%;
+  }
+  .skel-rowtext {
+    height: 12px;
+  }
+
   /* Friendly load-failure state — never expose the raw error object. */
   .loaderr {
     display: flex;

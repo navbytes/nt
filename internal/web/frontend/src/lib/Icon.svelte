@@ -39,6 +39,10 @@
     <path d="M9 4.5v15" />
   {:else if name === "close"}
     <path d="M6 6l12 12M18 6L6 18" />
+  {:else if name === "width"}
+    <path d="M3 12h18M3 12l4-4M3 12l4 4M21 12l-4-4M21 12l-4 4" />
+  {:else if name === "narrow"}
+    <path d="M9 8l-3 4 3 4M15 8l3 4-3 4M6 12h12" />
   {:else if name === "plus"}
     <path d="M12 5v14M5 12h14" />
   {:else if name === "search"}

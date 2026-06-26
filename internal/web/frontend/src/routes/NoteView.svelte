@@ -1,7 +1,7 @@
 <script lang="ts">
   import { createQuery, useQueryClient } from "@tanstack/svelte-query";
   import { api } from "../lib/api";
-  import { noteUI } from "../lib/noteUI.svelte";
+  import { noteUI, readWidth, toggleReadWidth } from "../lib/noteUI.svelte";
   import { navigate } from "../lib/router.svelte";
   import Editor from "../lib/Editor.svelte";
   import Icon from "../lib/Icon.svelte";
@@ -15,6 +15,11 @@
 
   let editing = $state(false);
   let activeId = $state("");
+  // The note column's rendered width. The width toggle only matters once the
+  // pane is wider than the comfortable ~72ch measure (~760px); below that,
+  // "full width" looks identical to "comfortable", so we hide the control to
+  // avoid a button that appears to do nothing.
+  let noteW = $state(0);
   // Ref to the rendered note body, so Mermaid renders into THIS note's prose and
   // not the editor preview's also-".prose" pane (W33).
   let bodyEl: HTMLElement | undefined = $state();
@@ -229,7 +234,7 @@
 {:else if $noteQ.data}
   {@const n = $noteQ.data}
   <div class="notewrap">
-    <article class="note">
+    <article class="note" class:note--wide={readWidth.wide} bind:clientWidth={noteW}>
       <div class="crumbs">
         <a class="crumbs__root" href="/notes">Notes</a>
         {#each n.crumbs ?? [] as c (c)}<span>{c}</span>{/each}
@@ -238,6 +243,17 @@
         <div class="pillbar__row">
           <div class="pillbar">
             <a class="pillbar__btn" href={`/graph?focus=${encodeURIComponent(handle)}`}><Icon name="focus" size={15} /> Graph</a>
+            {#if noteW === 0 || noteW > 760 || readWidth.wide}
+              <span class="pillbar__sep"></span>
+              <button
+                class="pillbar__btn pillbar__btn--icon"
+                class:pillbar__btn--on={readWidth.wide}
+                onclick={toggleReadWidth}
+                aria-pressed={readWidth.wide}
+                aria-label={readWidth.wide ? "Use comfortable reading width" : "Use full width"}
+                title={readWidth.wide ? "Comfortable width" : "Full width"}
+              ><Icon name={readWidth.wide ? "narrow" : "width"} size={16} /></button>
+            {/if}
             <span class="pillbar__sep"></span>
             <button
               class="pillbar__btn pillbar__btn--icon"
@@ -538,6 +554,13 @@
   /* ── Related panels (task refs + backlinks) ──────────────────────────────
      The shared .panel/.group__title/.rows globals already carry the mono
      heading + hairline rows; only a touch of polish on the heading + link rows. */
+  /* Wide reading mode lifts the comfortable 72ch measure (app.css) so the note
+     body fills the column on a large window. Code/tables already use full width;
+     this opts the prose text in too. Toggled from the toolbar, persisted. */
+  .note--wide :global(.prose) {
+    max-width: none;
+  }
+
   .panel {
     scroll-margin-top: 72px;
   }

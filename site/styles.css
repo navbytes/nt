@@ -21,7 +21,7 @@
   /* Text */
   --text: #f2f2f7;
   --text-secondary: #a6a6b0;
-  --mono-muted: #8b8b95;
+  --mono-muted: #9a9aa6;
 
   /* Accents */
   --accent: #4aa3ff;
@@ -344,9 +344,71 @@ section {
   display: none;
 }
 
+/* Mobile menu toggle (hamburger) — shown only below 760px. */
+.nav-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 1px solid var(--glass-border);
+  border-radius: 10px;
+  background: var(--glass);
+  color: var(--text);
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+.nav-toggle:hover {
+  border-color: var(--glass-border-strong);
+  background: var(--glass-2);
+}
+.nav-toggle svg {
+  width: 22px;
+  height: 22px;
+}
+.nav-toggle__close {
+  display: none;
+}
+.nav-toggle[aria-expanded="true"] .nav-toggle__open {
+  display: none;
+}
+.nav-toggle[aria-expanded="true"] .nav-toggle__close {
+  display: inline;
+}
+
+/* When open on mobile, the links drop down as a stacked panel under the bar. */
+.nav-links.open {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 0;
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  padding: 0.4rem 0;
+  background: rgba(13, 13, 18, 0.97);
+  -webkit-backdrop-filter: saturate(160%) blur(16px);
+  backdrop-filter: saturate(160%) blur(16px);
+  border-bottom: 1px solid var(--glass-border);
+  box-shadow: 0 18px 40px -22px rgba(0, 0, 0, 0.7);
+}
+.nav-links.open li {
+  width: 100%;
+}
+.nav-links.open a {
+  display: block;
+  padding: 0.85rem clamp(1.1rem, 5vw, 1.6rem);
+  font-size: 1rem;
+}
+
 @media (min-width: 760px) {
   .nav-links {
     display: flex;
+  }
+  .nav-toggle {
+    display: none;
   }
   .nav-actions .btn-ghost {
     display: inline-flex;
@@ -397,11 +459,14 @@ section {
   display: flex;
   flex-wrap: wrap;
   gap: 0.5rem 1.4rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
   font-family: var(--font-mono);
   font-size: 0.8rem;
   color: var(--mono-muted);
 }
-.hero-meta span {
+.hero-meta li {
   display: inline-flex;
   align-items: center;
   gap: 0.45rem;
@@ -532,6 +597,10 @@ section {
   white-space: nowrap;
   padding-block: 0.35rem;
   flex: 1 1 auto;
+  /* Without min-width:0 a flex item won't shrink below its content's intrinsic
+     width, so the long `curl … | bash` command would force the card (and the
+     whole page) wider than a phone screen instead of scrolling within it. */
+  min-width: 0;
   scrollbar-width: thin;
 }
 .code-block code .sigil {
@@ -594,6 +663,10 @@ section {
   border-radius: var(--radius);
   padding: 1.4rem;
   box-shadow: var(--shadow-card);
+  /* Let the card respect its grid track instead of being stretched to the
+     min-content width of the long install command inside it (which would
+     overflow a phone). Pairs with min-width:0 on .code-block code. */
+  min-width: 0;
 }
 .install-card h3 {
   display: flex;
@@ -623,6 +696,15 @@ section {
 }
 .install-card .btn {
   width: 100%;
+}
+.install-note {
+  margin: 0.85rem 0 0;
+  font-family: var(--font-mono);
+  font-size: 0.74rem;
+  color: var(--mono-muted);
+}
+.install-note code {
+  color: var(--text-secondary);
 }
 
 @media (min-width: 760px) {

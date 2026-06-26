@@ -447,7 +447,18 @@
 {#if daily}
   <Journal />
 {:else if $gridQ.isPending}
-  <p class="muted">Loading…</p>
+  <!-- Ghost cards reserving the grid's height so it doesn't jump when notes land. -->
+  <div class="notegrid skel-group" aria-hidden="true">
+    {#each Array(8) as _, i (i)}
+      <div class="notecard skel-card">
+        <span class="skel skel-cardtitle" style="width: {[78, 62, 88, 54, 70, 82, 60, 74][i]}%"></span>
+        <span class="skel skel-cardmeta"></span>
+        <span class="skel skel-cardline"></span>
+        <span class="skel skel-cardline" style="width: 80%"></span>
+      </div>
+    {/each}
+  </div>
+  <p class="sr-only" aria-live="polite">Loading notes…</p>
 {:else if $gridQ.error}
   <div class="empty">
     <p class="empty__lead">Couldn't load notes.</p>
@@ -895,6 +906,28 @@
   }
   .chip--more {
     cursor: default;
+  }
+
+  /* Loading skeleton: ghost cards inside the real .notegrid so the grid reserves
+     its height and column flow, then settles instead of jumping when notes land.
+     `.skel` (shimmer / reduced-motion fill) is the shared primitive in app.css. */
+  .skel-card {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+    min-height: 132px;
+  }
+  .skel-cardtitle {
+    height: 16px;
+    margin-bottom: var(--space-2);
+  }
+  .skel-cardmeta {
+    width: 40%;
+    height: 10px;
+  }
+  .skel-cardline {
+    width: 100%;
+    height: 11px;
   }
 
   /* ── Card grid (glass bento) ─────────────────────────────────────────────

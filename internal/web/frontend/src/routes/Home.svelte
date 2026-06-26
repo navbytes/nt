@@ -212,7 +212,14 @@
       {#if cap.over}<span class="card__pill card__pill--over"><Icon name="warning" size={12} /> Over</span>{/if}
     </div>
 
-    {#if cap.plannedMin > 0}
+    {#if $stateQ.isPending || $tasksQ.isPending}
+      <!-- Ghost ring while the day's budget + tasks load, so the rail reserves
+           its height instead of popping from a placeholder to the ring. -->
+      <div class="ringwrap skel-group" aria-hidden="true">
+        <span class="skel skel-ring"></span>
+      </div>
+      <p class="sr-only" aria-live="polite">Loading capacity…</p>
+    {:else if cap.plannedMin > 0}
       <div class="ringwrap">
         <Ring
           value={cap.fraction}
@@ -248,20 +255,35 @@
     <div class="card__head">
       <h2 class="card__label" id="mo-h">Momentum</h2>
     </div>
-    <div class="stats">
-      <div class="stat-tile">
-        <span class="stat-tile__n">{completedToday}</span>
-        <span class="stat-tile__k">done today</span>
+    {#if $stateQ.isPending}
+      <!-- Guard against flashing literal "0"s before the real counts arrive
+           (finding): show ghost number tiles until state loads, so an idle store
+           never reads as "0 open / 0 notes" for a frame. -->
+      <div class="stats skel-group" aria-hidden="true">
+        {#each ["done today", "open", "notes"] as k (k)}
+          <div class="stat-tile">
+            <span class="skel skel-stat"></span>
+            <span class="stat-tile__k">{k}</span>
+          </div>
+        {/each}
       </div>
-      <div class="stat-tile">
-        <span class="stat-tile__n">{openCount}</span>
-        <span class="stat-tile__k">open</span>
+      <p class="sr-only" aria-live="polite">Loading momentum…</p>
+    {:else}
+      <div class="stats">
+        <div class="stat-tile">
+          <span class="stat-tile__n">{completedToday}</span>
+          <span class="stat-tile__k">done today</span>
+        </div>
+        <div class="stat-tile">
+          <span class="stat-tile__n">{openCount}</span>
+          <span class="stat-tile__k">open</span>
+        </div>
+        <div class="stat-tile">
+          <span class="stat-tile__n">{noteCount}</span>
+          <span class="stat-tile__k">notes</span>
+        </div>
       </div>
-      <div class="stat-tile">
-        <span class="stat-tile__n">{noteCount}</span>
-        <span class="stat-tile__k">notes</span>
-      </div>
-    </div>
+    {/if}
   </section>
 
   <!-- ── WEEK SPARKLINE: 7-day completion trend (omitted if no real data) ─── -->
@@ -494,6 +516,22 @@
     letter-spacing: var(--tracking-caps);
     color: var(--muted);
     text-align: center;
+  }
+
+  /* Loading skeletons for the rail (finding): a ghost number inside each stat
+     tile (so the Momentum card never flashes a literal "0") and a ghost ring for
+     Capacity while the day's budget loads. `.skel` (shimmer / reduced-motion
+     fill) is the shared primitive in app.css. */
+  .skel-stat {
+    width: 28px;
+    height: 22px;
+    margin-bottom: 2px;
+    border-radius: var(--radius-xs);
+  }
+  .skel-ring {
+    width: 120px;
+    height: 120px;
+    border-radius: 50%;
   }
 
   /* ── recent-activity feed (restyled: status dots + hairlines + mono when) ─ */

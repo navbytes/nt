@@ -12,6 +12,8 @@ export interface Toast {
   message: string;
   /** When set, the toast shows an Undo button that runs this. */
   undo?: () => void | Promise<void>;
+  /** The auto-dismiss lifetime in ms — drives the Undo toast's draining bar. */
+  ttlMs: number;
 }
 
 /** How many toasts can be visible at once; older ones are evicted. */
@@ -47,7 +49,7 @@ function syncCurrent() {
  */
 export function showToast(message: string, undo?: () => void | Promise<void>, ttlMs = 6000): number {
   const id = ++seq;
-  toast.items = [...toast.items, { id, message, undo }];
+  toast.items = [...toast.items, { id, message, undo, ttlMs }];
   // Evict the oldest while over the visible cap.
   while (toast.items.length > MAX_VISIBLE) {
     const dropped = toast.items[0]!;
@@ -60,6 +62,24 @@ export function showToast(message: string, undo?: () => void | Promise<void>, tt
   );
   syncCurrent();
   return id;
+}
+
+// Pause / resume the auto-dismiss clock for one toast. The Toaster pauses on
+// hover/focus and resumes on leave/blur, so a user reaching for Undo never
+// watches it vanish mid-reach. Resume restarts the toast's own ttl from the top
+// (simpler than tracking remaining time, and forgiving — the user just touched
+// it, so a fresh full window is the kind behaviour). No-ops if the toast is
+// gone.
+export function pauseToast(id: number): void {
+  clearTimer(id);
+}
+export function resumeToast(id: number): void {
+  const t = toast.items.find((x) => x.id === id);
+  if (!t || timers.has(id)) return;
+  timers.set(
+    id,
+    setTimeout(() => dismissToast(id), t.ttlMs),
+  );
 }
 
 /** Dismiss one toast by id, or (no id) clear the entire stack. */
