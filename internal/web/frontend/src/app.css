@@ -1998,6 +1998,16 @@ body.resizing {
     min-height: 44px;
     min-width: 44px;
   }
+  /* On a phone the row's fixed metadata + action buttons can sum wider than the
+     viewport even with the title truncated, pushing the row past the screen edge
+     (a sideways scroll). Let the row wrap so the actions/metadata flow onto a
+     second line instead; the title still takes the first line and ellipsizes. */
+  .row {
+    flex-wrap: wrap;
+  }
+  .row__actions {
+    margin-left: auto;
+  }
 }
 
 /* Hamburger is hidden on desktop (the sidebar is always visible there). */

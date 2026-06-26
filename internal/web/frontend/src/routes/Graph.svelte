@@ -49,6 +49,8 @@
   let built3d = false; // which renderer is currently mounted
   let built = false; // first build finished (gates dim-toggle rebuilds)
   let fitPending = false; // zoom-to-fit once the next layout settles
+  let userMoved = false; // user grabbed the 3D camera — suppress auto-refit
+  let tick3d = 0; // 3D engine-tick counter, drives periodic re-fit while settling
   let lastRoot: string | null = null; // detects local-root changes to reset expansion
   let destroyed = false; // component torn down (guards async builds)
   let bloomPass: any = null; // three UnrealBloomPass (3D only)
@@ -1286,6 +1288,8 @@
     graph = null;
     bloomPass = null;
     container.innerHTML = "";
+    userMoved = false; // fresh build → allow the settle-fit until the user grabs the camera
+    tick3d = 0;
 
     // Decide the renderer up front so a 3D failure can fall through to 2D within
     // this same call (no recursion, no rebuild race with the dim effect).
@@ -1351,16 +1355,22 @@
         })
         .onEngineTick(() => {
           if (!engineRunning) engineRunning = true;
-          // The layout is pre-warmed to ~final scale, so frame it once on the
-          // first rendered tick and then leave the camera alone — re-fitting every
-          // tick is what made the graph look like it was shrinking. Clearing
-          // fitPending here also means the stop handler won't yank a camera the
-          // user may have since orbited.
-          if (fitPending) {
-            fitPending = false;
-            graph?.zoomToFit?.(reduce ? 0 : 400, 60);
-            // Lock the neutral glow distance once the fit tween settles, then tune so
+          tick3d++;
+          // The constellation charges apart over the whole cooldown, so a single
+          // early fit ends up far too close — stuck zoomed into the central node.
+          // Track the inflating layout with periodic instant fits (not every
+          // frame — that reads as constant shrinking) until the user grabs the
+          // camera. The final settle-fit + glow lock happen in onEngineStop.
+          if (!userMoved && (tick3d === 1 || tick3d % 15 === 0)) {
+            graph?.zoomToFit?.(0, 60);
+          }
+        })
+        .onEngineStop(() => {
+          engineRunning = false;
+          if (!userMoved && !destroyed) {
+            // Frame the now-settled layout, then lock the neutral glow distance so
             // the adaptive bloom/fog measure zoom relative to the framed view.
+            graph?.zoomToFit?.(reduce ? 0 : 400, 60);
             if (camRefTO) clearTimeout(camRefTO);
             camRefTO = setTimeout(() => {
               const cam = graph?.camera?.();
@@ -1368,9 +1378,6 @@
               tuneGlowForCamera();
             }, reduce ? 0 : 450);
           }
-        })
-        .onEngineStop(() => {
-          engineRunning = false;
         });
 
       // Bloom — the additive glow that makes the constellation read as premium.
@@ -1405,6 +1412,12 @@
       } catch {
         /* controls not ready — the effect below re-applies */
       }
+      // A real user gesture on the canvas (drag-orbit or wheel-zoom) means they
+      // own the camera now — suppress the settle-fit so it never yanks their
+      // view. `once` self-removes the listener (we only need the first gesture)
+      // so they don't accumulate across 2D⟷3D rebuilds.
+      container.addEventListener("pointerdown", () => (userMoved = true), { once: true });
+      container.addEventListener("wheel", () => (userMoved = true), { once: true, passive: true });
       built3d = true;
       graph = g;
       } catch (e) {
