@@ -106,9 +106,82 @@ func Run(args []string) int {
 		printHelp()
 		return 0
 	default:
-		fmt.Fprintf(os.Stderr, "nt: unknown command %q (try `nt help`)\n", cmd)
+		if s := suggestCommand(cmd); s != "" {
+			fmt.Fprintf(os.Stderr, "nt: unknown command %q — did you mean %q? (try `nt help`)\n", cmd, s)
+		} else {
+			fmt.Fprintf(os.Stderr, "nt: unknown command %q (try `nt help`)\n", cmd)
+		}
 		return 2
 	}
+}
+
+// knownCommands lists the dispatchable verbs + aliases, used to suggest a near
+// match on a typo. Kept in sync with the switch in the dispatcher above.
+var knownCommands = []string{
+	"add", "a", "note", "notes", "show", "cat", "journal", "j", "list", "ls",
+	"view", "views", "ready", "today", "agenda", "review", "recall", "log",
+	"done", "do", "skip", "start", "stop", "update", "up", "search", "q",
+	"tags", "tag", "links", "mv", "rename", "rm", "delete", "archive", "undo",
+	"edit", "path", "doctor", "git-init", "hook", "mcp", "web", "version", "help",
+}
+
+// suggestCommand returns the closest known command to cmd within a small edit
+// distance, or "" if nothing is close enough — so a typo like "redy" points to
+// "ready" instead of dumping the whole help wall on the user.
+func suggestCommand(cmd string) string {
+	best, bestDist := "", 1<<30
+	// Allow more slack for longer words; cap so unrelated input suggests nothing.
+	max := 2
+	if len(cmd) >= 6 {
+		max = 3
+	}
+	for _, c := range knownCommands {
+		d := levenshtein(cmd, c)
+		if d < bestDist {
+			bestDist, best = d, c
+		}
+	}
+	if bestDist <= max {
+		return best
+	}
+	return ""
+}
+
+func levenshtein(a, b string) int {
+	la, lb := len(a), len(b)
+	if la == 0 {
+		return lb
+	}
+	if lb == 0 {
+		return la
+	}
+	prev := make([]int, lb+1)
+	for j := 0; j <= lb; j++ {
+		prev[j] = j
+	}
+	for i := 1; i <= la; i++ {
+		cur := make([]int, lb+1)
+		cur[0] = i
+		for j := 1; j <= lb; j++ {
+			cost := 1
+			if a[i-1] == b[j-1] {
+				cost = 0
+			}
+			cur[j] = min3(prev[j]+1, cur[j-1]+1, prev[j-1]+cost)
+		}
+		prev = cur
+	}
+	return prev[lb]
+}
+
+func min3(a, b, c int) int {
+	if b < a {
+		a = b
+	}
+	if c < a {
+		a = c
+	}
+	return a
 }
 
 // engine opens the store + mutation engine, reporting errors uniformly.

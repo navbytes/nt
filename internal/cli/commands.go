@@ -757,6 +757,13 @@ func cmdDefault() int {
 	if e.S.IsFresh() {
 		onboard(e)
 	}
+	// The no-arg TUI needs a real terminal. In any non-interactive context — a
+	// pipe, CI, a container, or an AI agent shelling out (the headline use case)
+	// — opening /dev/tty fails and the *most documented* first command ("just
+	// run nt") would crash. Fall back to a plain task list instead.
+	if !interactive() {
+		return cmdList(nil)
+	}
 	if err := tui.Run(); err != nil {
 		return fail(err)
 	}
@@ -766,7 +773,7 @@ func cmdDefault() int {
 // onboard seeds a sample task + note on first run and prints the essentials.
 func onboard(e *mutate.Engine) {
 	_ = e.Apply("seed", func(d *task.Doc, rec *mutate.Recorder) error {
-		t := task.New("welcome to nt — press done when you've read this @nt")
+		t := task.New("welcome to nt — press x to complete this, ? for all keys @nt")
 		t.SetKey("src", "nt")
 		d.Append(t)
 		rec.Added(t)

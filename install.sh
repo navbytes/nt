@@ -67,7 +67,29 @@ mkdir -p "$INSTALL_DIR"
 install -m 0755 "$tmp/nt" "$INSTALL_DIR/nt"
 echo "Installed nt $version -> $INSTALL_DIR/nt"
 
+on_path=1
 case ":$PATH:" in
   *":$INSTALL_DIR:"*) ;;
-  *) echo "note: add $INSTALL_DIR to your PATH to run 'nt' from anywhere" ;;
+  *)
+    on_path=0
+    # Pick the most likely shell rc file to mention.
+    rc="your shell profile"
+    case "${SHELL:-}" in
+      */zsh) rc="~/.zshrc" ;;
+      */bash) rc="~/.bashrc" ;;
+      */fish) rc="~/.config/fish/config.fish" ;;
+    esac
+    echo
+    echo "note: $INSTALL_DIR is not on your PATH yet. Add this line to $rc:"
+    echo "    export PATH=\"$INSTALL_DIR:\$PATH\""
+    ;;
 esac
+
+# Point new users at a productive first move — the moment adoption is won.
+nt_cmd="nt"
+[ "$on_path" -eq 0 ] && nt_cmd="$INSTALL_DIR/nt"
+echo
+echo "Next steps:"
+echo "    $nt_cmd add \"my first task\"     # capture a task"
+echo "    $nt_cmd                          # open the TUI (or 'nt ready' to see what's next)"
+echo "    $nt_cmd mcp install              # wire nt into Claude as durable AI memory"
