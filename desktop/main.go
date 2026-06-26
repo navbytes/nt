@@ -15,6 +15,7 @@ package main
 
 import (
 	"log"
+	"os"
 	"runtime"
 
 	"github.com/wailsapp/wails/v2"
@@ -34,6 +35,15 @@ import (
 var version = "dev"
 
 func main() {
+	// WebKitGTK (the Linux webview) disables WebGL under its default DMA-BUF
+	// renderer on many GPU/driver combinations, which left the 3D graph a blank
+	// canvas in the desktop app. Opting out of the DMA-BUF renderer restores a
+	// working WebGL context. Must be set before the webview initialises; it has
+	// no effect on macOS/Windows, so it's guarded to Linux.
+	if runtime.GOOS == "linux" {
+		_ = os.Setenv("WEBKIT_DISABLE_DMABUF_RENDERER", "1")
+	}
+
 	// Open the same store + mutation engine the CLI/TUI/MCP use.
 	eng, err := mutate.Open()
 	if err != nil {
