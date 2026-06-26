@@ -103,9 +103,10 @@ func cmdAdd(args []string) int {
 	recur := fs.String("recur", "", "recurrence: weekly|3d|… (prefix + for strict, e.g. +monthly)")
 	noteSlug := fs.String("note", "", "link to a note slug")
 	est := fs.String("est", "", "time estimate (90m, 2h, 1h30m)")
+	asJSON := fs.Bool("json", false, "print the created task as JSON (id, text, status, …)")
 	fs.Var(&tags, "tag", "tag (repeatable)")
 
-	flags, positional := splitArgs(args, nil)
+	flags, positional := splitArgs(args, map[string]bool{"json": true})
 	if err := fs.Parse(flags); err != nil {
 		return 2
 	}
@@ -180,6 +181,11 @@ func cmdAdd(args []string) int {
 	})
 	if err != nil {
 		return fail(err)
+	}
+	if *asJSON {
+		// Same id-bearing shape as `list/ready/recall --json` (and the MCP
+		// nt_add tool), so an agent on the CLI path can capture-then-reference.
+		return printJSON(tasksToJSON([]*task.Task{created}, nil)[0])
 	}
 	fmt.Printf("added %s  %s\n", shortID(created.ID()), title)
 	return 0
@@ -359,10 +365,11 @@ func cmdNote(args []string) int {
 	source := fs.String("source", "cli", "origin")
 	folder := fs.String("folder", "", "subfolder under notes/ (e.g. work or work/auth)")
 	var fields stringSlice
+	asJSON := fs.Bool("json", false, "print the created note as JSON (id, title, path, …)")
 	fs.Var(&tags, "tag", "tag (repeatable)")
 	fs.Var(&fields, "field", "extra frontmatter key=value (repeatable, e.g. status=stable)")
 
-	flags, positional := splitArgs(args, nil)
+	flags, positional := splitArgs(args, map[string]bool{"json": true})
 	if err := fs.Parse(flags); err != nil {
 		return 2
 	}
@@ -398,6 +405,9 @@ func cmdNote(args []string) int {
 		if err := n.Save(); err != nil {
 			return fail(err)
 		}
+	}
+	if *asJSON {
+		return printJSON(notesToJSON([]*note.Note{n})[0])
 	}
 	rel, _ := filepath.Rel(e.S.Dir, n.Path)
 	fmt.Printf("note %s  %s\n", shortID(n.ID), rel)
@@ -507,11 +517,12 @@ func cmdUpdate(args []string) int {
 	title := fs.String("title", "", "replace the task's description (keeps tags/project/links)")
 	project := fs.String("project", "", "set the +project ('none' clears)")
 	source := fs.String("source", "", "set the task's source ('none' clears)")
+	asJSON := fs.Bool("json", false, "print the updated task(s) as JSON")
 	var addTags, rmTags stringSlice
 	fs.Var(&addTags, "tag", "add an @tag (repeatable)")
 	fs.Var(&rmTags, "untag", "remove an @tag (repeatable)")
 
-	flags, positional := splitArgs(args, nil)
+	flags, positional := splitArgs(args, map[string]bool{"json": true})
 	if err := fs.Parse(flags); err != nil {
 		return 2
 	}
@@ -561,8 +572,9 @@ func cmdUpdate(args []string) int {
 	}
 	count := 0
 	var single, recurMsg string
+	var updated []*task.Task
 	err := e.Apply("update", func(d *task.Doc, rec *mutate.Recorder) error {
-		count, single, recurMsg = 0, "", ""
+		count, single, recurMsg, updated = 0, "", "", nil
 		for _, handle := range handles {
 			t, err := resolveHandle(d, handle)
 			if err != nil {
@@ -627,12 +639,16 @@ func cmdUpdate(args []string) int {
 				t.RemoveTag(tg)
 			}
 			single = fmt.Sprintf("updated %s  %s", shortID(t.ID()), t.Text)
+			updated = append(updated, t)
 			count++
 		}
 		return nil
 	})
 	if err != nil {
 		return fail(err)
+	}
+	if *asJSON {
+		return printJSON(tasksToJSON(updated, nil))
 	}
 	if count == 1 {
 		fmt.Println(single + recurMsg)
@@ -754,15 +770,17 @@ func cmdDefault() int {
 	if !ok {
 		return 1
 	}
-	if e.S.IsFresh() {
-		onboard(e)
-	}
 	// The no-arg TUI needs a real terminal. In any non-interactive context — a
 	// pipe, CI, a container, or an AI agent shelling out (the headline use case)
 	// — opening /dev/tty fails and the *most documented* first command ("just
-	// run nt") would crash. Fall back to a plain task list instead.
+	// run nt") would crash. Fall back to a plain task list instead, and do NOT
+	// seed the welcome sample items: an agent's store should contain only what
+	// the agent captured, never demo rows that pollute recall/ready/review.
 	if !interactive() {
 		return cmdList(nil)
+	}
+	if e.S.IsFresh() {
+		onboard(e)
 	}
 	if err := tui.Run(); err != nil {
 		return fail(err)

@@ -389,16 +389,21 @@ USAGE
   nt web [--port N]           browse and edit notes in a browser (localhost only)
   nt web --detach             run the viewer in the background (--status / --stop to manage)
 
+  (task:N and bare row numbers are a TUI/interactive convenience; scripts and
+   agents pass the stable <id> from --json or 'nt list'.)
+
 ADD/UPDATE FLAGS
   --pri high|med|low   --due today|tomorrow|fri|+3d|YYYY-MM-DD
   --tag NAME (repeat)  --project NAME   --source NAME
-  --parent <id>        --blocks <id>    --note <slug>   (link to a note)
+  --parent <id>        --blocks <id>
   --discovered-from <id>   record that this task was surfaced while doing another
+  --json                   print the created/updated task(s) as JSON (id, text, status…)
+  add-only:    --note <slug> (link to a note)   --est 90m|2h   --recur weekly|3d
   update-only: --title "new text" (keeps tags/links)  --untag NAME (repeat)
                --project none (clears)  --source none (clears)
 
 NOTE FLAGS (nt note)
-  --body TEXT   --tag NAME (repeat)   --source NAME
+  --body TEXT   --tag NAME (repeat)   --source NAME   --json (print as JSON)
   --folder DIR        file under notes/DIR/ (created as needed; or path-style:
                       nt note "decisions/Chose flock over SQLite")
   --field key=value   set extra frontmatter at capture (repeatable, preserved)

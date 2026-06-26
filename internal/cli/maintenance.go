@@ -330,6 +330,20 @@ func cmdGitInit(args []string) int {
 // session's TodoWrite list into nt (SPEC §8). It is deliberately silent and
 // always exits 0 — a hook must never break or slow the Claude session.
 func cmdHook(args []string) int {
+	// With --help, or when stdin is a terminal (no piped event — almost
+	// certainly a human or agent exploring what it does rather than the hook
+	// firing), print the contract + settings snippet instead of silently
+	// blocking on stdin or exiting with no output at all.
+	for _, a := range args {
+		if a == "-h" || a == "--help" {
+			printHookHelp()
+			return 0
+		}
+	}
+	if isCharDevice(os.Stdin) {
+		printHookHelp()
+		return 0
+	}
 	e, err := mutate.Open()
 	if err != nil {
 		return 0
@@ -340,4 +354,29 @@ func cmdHook(args []string) int {
 	}
 	_ = aisync.Sync(e, data)
 	return 0
+}
+
+func printHookHelp() {
+	fmt.Print(`nt hook — mirror a Claude Code TodoWrite list into your nt store.
+
+It is a PostToolUse hook, not an interactive command: it reads the hook's JSON
+event from stdin, upserts each todo as a task (tagged src:claude, idempotent),
+is silent, and always exits 0. Wire it once into Claude Code's settings
+(~/.claude/settings.json or a project .claude/settings.json):
+
+  {
+    "hooks": {
+      "PostToolUse": [
+        {
+          "matcher": "TodoWrite",
+          "hooks": [ { "type": "command", "command": "nt hook" } ]
+        }
+      ]
+    }
+  }
+
+Then your agent's todo list is captured automatically as you work. Full setup
+and the status mapping: docs/claude-integration.md. For typed agent tools
+(nt_add, nt_ready, nt_recall, …) instead of the hook, see: nt mcp install.
+`)
 }
