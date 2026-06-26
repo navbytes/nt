@@ -17,12 +17,12 @@ func (m *Model) deleteTargets() {
 	if len(ids) == 0 {
 		return
 	}
-	prompt := "Delete this task?"
+	prompt := "delete this task? (u undoes)"
 	if len(ids) > 1 {
-		prompt = fmt.Sprintf("Delete %d tasks?", len(ids))
+		prompt = fmt.Sprintf("delete %d tasks? (u undoes)", len(ids))
 	}
 	if h := m.hiddenMarked(); h > 0 {
-		prompt = fmt.Sprintf("Delete %d tasks (%d hidden)?", len(ids), h)
+		prompt = fmt.Sprintf("delete %d tasks (%d hidden)? (u undoes)", len(ids), h)
 	}
 	m.askConfirm(prompt, func() { m.doDelete(ids) })
 }
@@ -56,7 +56,7 @@ func (m *Model) deleteNoteTarget() {
 	}
 	back := links.Backlinks(m.eng.S, n.ID, n.Rel)
 	if len(back) == 0 {
-		m.askConfirm(fmt.Sprintf("Delete note %q? (→ .trash)", n.Title), func() { m.doDeleteNote(n, false) })
+		m.askConfirm(fmt.Sprintf("delete note %q? (→ .trash, u undoes)", n.Title), func() { m.doDeleteNote(n, false) })
 		return
 	}
 	prompt := fmt.Sprintf("%q has %d inbound link(s) — u: unlink & delete · f: delete anyway · esc: cancel", n.Title, len(back))
