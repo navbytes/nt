@@ -1247,6 +1247,24 @@
     if (!view.frozen) graph.d3ReheatSimulation();
   }
 
+  // The 3D renderer needs a WebGL context. Some embedded webviews — notably
+  // WebKitGTK, which backs the Linux desktop app — don't expose one, and
+  // 3d-force-graph then renders a blank canvas with no error. Probe for it up
+  // front so we can fall back to the 2D canvas (which needs no WebGL) instead of
+  // failing silently. The probe context is released immediately.
+  function webglAvailable(): boolean {
+    try {
+      const c = document.createElement("canvas");
+      const gl =
+        c.getContext("webgl2") || c.getContext("webgl") || c.getContext("experimental-webgl");
+      if (!gl) return false;
+      (gl as WebGLRenderingContext).getExtension("WEBGL_lose_context")?.loseContext();
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   // buildGraph (re)constructs the renderer for the active view.dim. It tears down
   // any previous instance so the 2D ⟷ 3D toggle can swap them in the same <div>.
   async function buildGraph() {
@@ -1269,7 +1287,17 @@
     bloomPass = null;
     container.innerHTML = "";
 
-    if (view.dim === "3d") {
+    // Decide the renderer up front so a 3D failure can fall through to 2D within
+    // this same call (no recursion, no rebuild race with the dim effect).
+    let render3d = view.dim === "3d";
+    if (render3d && !webglAvailable()) {
+      showToast("3D graph needs WebGL, which isn't available here — showing 2D.");
+      view.dim = "2d";
+      render3d = false;
+    }
+
+    if (render3d) {
+      try {
       const { default: ForceGraph3D } = await import("3d-force-graph");
       // @ts-ignore - three 0.184 ships no bundled type declarations; only Vector2 is used
       const THREE: any = await import("three");
@@ -1379,7 +1407,25 @@
       }
       built3d = true;
       graph = g;
-    } else {
+      } catch (e) {
+        // Dynamic import or WebGL init failed (older webview, blocked chunk,
+        // lost context). Surface it and fall back to 2D so the graph is never
+        // a silent blank pane.
+        console.error("3D graph failed to initialise:", e);
+        showToast("Couldn't load the 3D graph — showing 2D instead.");
+        view.dim = "2d";
+        render3d = false;
+        try {
+          graph?._destructor?.();
+        } catch {
+          /* best-effort teardown of the partial 3D renderer */
+        }
+        graph = null;
+        if (container) container.innerHTML = "";
+      }
+    }
+
+    if (!render3d) {
       const { default: ForceGraph } = await import("force-graph");
       if (!container || destroyed) return;
       const g = new ForceGraph<FGNode, FGLink>(container)
