@@ -378,11 +378,14 @@
 <style>
   /* Success pulse on the Save button after an in-place save, so it visibly
      confirms ("Saved ✓") instead of looking like it did nothing — Save keeps
-     you in the editor, Done saves and closes. */
-  .pillbar__btn--ok {
+     you in the editor, Done saves and closes. The compound selector beats
+     app.css's .pillbar__btn--accent gradient so the fill (not just the border)
+     turns green. */
+  .pillbar__btn--accent.pillbar__btn--ok {
     background: var(--green-color);
     border-color: var(--green-color);
     color: #fff;
+    box-shadow: none;
   }
 
   /* Finding 5: let the editor flex within its column instead of relying on the

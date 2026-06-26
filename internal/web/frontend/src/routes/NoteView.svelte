@@ -15,6 +15,11 @@
 
   let editing = $state(false);
   let activeId = $state("");
+  // The note column's rendered width. The width toggle only matters once the
+  // pane is wider than the comfortable ~72ch measure (~760px); below that,
+  // "full width" looks identical to "comfortable", so we hide the control to
+  // avoid a button that appears to do nothing.
+  let noteW = $state(0);
   // Ref to the rendered note body, so Mermaid renders into THIS note's prose and
   // not the editor preview's also-".prose" pane (W33).
   let bodyEl: HTMLElement | undefined = $state();
@@ -229,7 +234,7 @@
 {:else if $noteQ.data}
   {@const n = $noteQ.data}
   <div class="notewrap">
-    <article class="note" class:note--wide={readWidth.wide}>
+    <article class="note" class:note--wide={readWidth.wide} bind:clientWidth={noteW}>
       <div class="crumbs">
         <a class="crumbs__root" href="/notes">Notes</a>
         {#each n.crumbs ?? [] as c (c)}<span>{c}</span>{/each}
@@ -238,15 +243,17 @@
         <div class="pillbar__row">
           <div class="pillbar">
             <a class="pillbar__btn" href={`/graph?focus=${encodeURIComponent(handle)}`}><Icon name="focus" size={15} /> Graph</a>
-            <span class="pillbar__sep"></span>
-            <button
-              class="pillbar__btn pillbar__btn--icon"
-              class:pillbar__btn--on={readWidth.wide}
-              onclick={toggleReadWidth}
-              aria-pressed={readWidth.wide}
-              aria-label={readWidth.wide ? "Use comfortable reading width" : "Use full width"}
-              title={readWidth.wide ? "Comfortable width" : "Full width"}
-            ><Icon name={readWidth.wide ? "narrow" : "width"} size={16} /></button>
+            {#if noteW === 0 || noteW > 760 || readWidth.wide}
+              <span class="pillbar__sep"></span>
+              <button
+                class="pillbar__btn pillbar__btn--icon"
+                class:pillbar__btn--on={readWidth.wide}
+                onclick={toggleReadWidth}
+                aria-pressed={readWidth.wide}
+                aria-label={readWidth.wide ? "Use comfortable reading width" : "Use full width"}
+                title={readWidth.wide ? "Comfortable width" : "Full width"}
+              ><Icon name={readWidth.wide ? "narrow" : "width"} size={16} /></button>
+            {/if}
             <span class="pillbar__sep"></span>
             <button
               class="pillbar__btn pillbar__btn--icon"
