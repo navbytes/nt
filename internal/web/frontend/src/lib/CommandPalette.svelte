@@ -117,13 +117,23 @@
     }
   }
 
+  // Keep the active option in view when the arrow keys walk past the visible
+  // edge of the max-height scroll list (the list scrolls but `active` only
+  // moved a highlight). The option ids match the aria-activedescendant pattern
+  // above (`palette-opt-<i>`). Guarded for jsdom, which stubs scrollIntoView.
+  function scrollActiveIntoView() {
+    document.getElementById(`palette-opt-${active}`)?.scrollIntoView?.({ block: "nearest" });
+  }
+
   function onInputKey(e: KeyboardEvent) {
     if (e.key === "ArrowDown") {
       e.preventDefault();
       active = Math.min(active + 1, items.length - 1);
+      scrollActiveIntoView();
     } else if (e.key === "ArrowUp") {
       e.preventDefault();
       active = Math.max(active - 1, 0);
+      scrollActiveIntoView();
     } else if (e.key === "Enter") {
       e.preventDefault();
       choose(items[active]);

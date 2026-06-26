@@ -4,6 +4,8 @@ import {
   showToast,
   dismissToast,
   clearUndoToast,
+  pauseToast,
+  resumeToast,
   MAX_VISIBLE,
 } from "../lib/toast.svelte";
 
@@ -86,6 +88,36 @@ describe("toast store", () => {
     const undos = toast.items.filter((t) => t.undo);
     expect(undos).toHaveLength(1);
     expect(undos[0]?.message).toBe("Completed “b”");
+  });
+
+  it("pauseToast freezes the dismiss clock; the toast survives past its ttl", () => {
+    showToast("Completed “z”", vi.fn(), 6000);
+    const id = toast.current!.id;
+    vi.advanceTimersByTime(3000);
+    pauseToast(id); // user reaches for Undo (hover/focus)
+    vi.advanceTimersByTime(60000); // long pause — must NOT auto-dismiss
+    expect(toast.items).toHaveLength(1);
+  });
+
+  it("resumeToast restarts the ttl from the top after a pause", () => {
+    showToast("Completed “z”", vi.fn(), 6000);
+    const id = toast.current!.id;
+    pauseToast(id);
+    vi.advanceTimersByTime(10000);
+    resumeToast(id);
+    vi.advanceTimersByTime(5999);
+    expect(toast.items).toHaveLength(1); // fresh full window, not yet elapsed
+    vi.advanceTimersByTime(1);
+    expect(toast.items).toHaveLength(0);
+  });
+
+  it("resumeToast is a no-op for an already-dismissed toast", () => {
+    const id = showToast("gone", vi.fn(), 6000);
+    dismissToast(id);
+    resumeToast(id); // must not resurrect or schedule a stray timer
+    expect(toast.items).toHaveLength(0);
+    vi.advanceTimersByTime(10000);
+    expect(toast.items).toHaveLength(0);
   });
 
   it("dismiss with no id clears the whole stack and cancels timers", () => {
