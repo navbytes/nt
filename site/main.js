@@ -53,7 +53,7 @@
     }, 1800);
   }
 
-  var copyButtons = document.querySelectorAll("[data-copy]");
+  var copyButtons = document.querySelectorAll("[data-copy-target], [data-copy]");
   Array.prototype.forEach.call(copyButtons, function (btn) {
     // Remember the resting aria-label so we can restore it after the flash.
     if (btn.getAttribute("aria-label")) {
@@ -172,6 +172,43 @@
       // Kick off shortly after load so it reads as a live session.
       window.setTimeout(nextLine, 600);
     }
+  }
+
+  /* ---------------------------------------------------------------
+     4. Mobile nav toggle
+     Below 760px the primary nav links are hidden; this hamburger
+     reveals them as a stacked dropdown. Closes on Escape, on link
+     click, and on an outside click. Keyboard- and SR-friendly via
+     aria-expanded / aria-controls (already on the markup).
+  --------------------------------------------------------------- */
+  var navToggle = document.querySelector(".nav-toggle");
+  var navLinks = document.getElementById("nav-links");
+  if (navToggle && navLinks) {
+    var setNav = function (open) {
+      navToggle.setAttribute("aria-expanded", open ? "true" : "false");
+      navToggle.setAttribute("aria-label", open ? "Close menu" : "Open menu");
+      navLinks.classList.toggle("open", open);
+    };
+    navToggle.addEventListener("click", function () {
+      setNav(navToggle.getAttribute("aria-expanded") !== "true");
+    });
+    navLinks.addEventListener("click", function (e) {
+      if (e.target.closest("a")) setNav(false);
+    });
+    document.addEventListener("keydown", function (e) {
+      if (e.key === "Escape" && navToggle.getAttribute("aria-expanded") === "true") {
+        setNav(false);
+        navToggle.focus();
+      }
+    });
+    document.addEventListener("click", function (e) {
+      if (
+        navToggle.getAttribute("aria-expanded") === "true" &&
+        !e.target.closest(".nav-inner")
+      ) {
+        setNav(false);
+      }
+    });
   }
 
   /* ---------------------------------------------------------------

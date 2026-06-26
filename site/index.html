@@ -19,15 +19,44 @@
     />
     <meta name="theme-color" content="#0d0d12" />
     <link rel="icon" type="image/svg+xml" href="assets/favicon.svg" />
+    <link rel="canonical" href="https://navbytes.github.io/nt/" />
 
     <!-- Open Graph / social -->
     <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="nt" />
+    <meta property="og:url" content="https://navbytes.github.io/nt/" />
     <meta property="og:title" content="nt — Agents forget. Your files don't." />
     <meta
       property="og:description"
       content="Tasks & notes as plain text — todo.txt and Markdown your editor, grep, git, and your AI agents all read and write. One static binary. No database. No cloud."
     />
+    <meta property="og:image" content="https://navbytes.github.io/nt/assets/og.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="nt — Agents forget. Your files don't. Tasks & notes as plain text." />
     <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="nt — Agents forget. Your files don't." />
+    <meta
+      name="twitter:description"
+      content="Tasks & notes as plain text — todo.txt and Markdown your editor, grep, git, and your AI agents all read and write. One static binary. No database. No cloud."
+    />
+    <meta name="twitter:image" content="https://navbytes.github.io/nt/assets/og.png" />
+
+    <!-- Structured data — helps search + AI answer engines describe nt. -->
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@type": "SoftwareApplication",
+        "name": "nt",
+        "description": "Terminal-first task & note manager that keeps everything as plain text — todo.txt tasks and Markdown notes your editor, grep, git, and AI agents all read and write. One static binary. No database. No cloud.",
+        "applicationCategory": "DeveloperApplication",
+        "operatingSystem": "macOS, Linux, Windows",
+        "license": "https://github.com/navbytes/nt/blob/main/LICENSE",
+        "codeRepository": "https://github.com/navbytes/nt",
+        "url": "https://navbytes.github.io/nt/",
+        "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" }
+      }
+    </script>
 
     <link rel="stylesheet" href="styles.css" />
   </head>
@@ -83,7 +112,7 @@
         </a>
 
         <nav aria-label="Primary">
-          <ul class="nav-links">
+          <ul class="nav-links" id="nav-links">
             <li><a href="#features">Features</a></li>
             <li><a href="#install">Install</a></li>
             <li><a href="#showcase">Showcase</a></li>
@@ -93,12 +122,19 @@
 
         <div class="nav-actions">
           <a class="btn btn-ghost btn-sm" href="https://github.com/navbytes/nt" rel="noopener">View source</a>
-          <a
-            class="btn btn-primary btn-sm"
-            href="https://github.com/navbytes/nt/releases/latest"
-            rel="noopener"
-            >Download for macOS</a
+          <a class="btn btn-primary btn-sm" href="#install">Install</a>
+          <button
+            type="button"
+            class="nav-toggle"
+            aria-expanded="false"
+            aria-controls="nav-links"
+            aria-label="Open menu"
           >
+            <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round">
+              <path class="nav-toggle__open" d="M4 7h16M4 12h16M4 17h16" />
+              <path class="nav-toggle__close" d="M6 6l12 12M18 6 6 18" />
+            </svg>
+          </button>
         </div>
       </div>
     </header>
@@ -123,7 +159,7 @@
               cloud.
             </p>
             <div class="hero-ctas">
-              <a class="btn btn-primary" href="https://github.com/navbytes/nt/releases/latest" rel="noopener">
+              <a class="btn btn-primary" href="#install">
                 <svg viewBox="0 0 24 24" aria-hidden="true" fill="currentColor">
                   <path
                     d="M12 3v10.5m0 0 3.5-3.5M12 13.5 8.5 10M5 16.5v2A1.5 1.5 0 0 0 6.5 20h11a1.5 1.5 0 0 0 1.5-1.5v-2"
@@ -134,7 +170,7 @@
                     stroke-linejoin="round"
                   />
                 </svg>
-                Download for macOS
+                Install nt
               </a>
               <a class="btn btn-ghost" href="https://github.com/navbytes/nt" rel="noopener">
                 <svg viewBox="0 0 24 24" aria-hidden="true" fill="currentColor">
@@ -145,11 +181,11 @@
                 View source
               </a>
             </div>
-            <div class="hero-meta" role="list">
-              <span role="listitem"><span class="tick">✓</span> Single static Go binary</span>
-              <span role="listitem"><span class="tick">✓</span> Works fully offline</span>
-              <span role="listitem"><span class="tick">✓</span> MIT licensed</span>
-            </div>
+            <ul class="hero-meta">
+              <li><span class="tick" aria-hidden="true">✓</span> Single static Go binary</li>
+              <li><span class="tick" aria-hidden="true">✓</span> Works fully offline</li>
+              <li><span class="tick" aria-hidden="true">✓</span> MIT licensed</li>
+            </ul>
           </div>
 
           <!-- Terminal card -->
@@ -176,7 +212,14 @@
                 <span data-copy-label>Copy</span>
               </button>
             </div>
-            <div class="term-body" data-typed>
+            <div
+              class="term-body"
+              data-typed
+              id="hero-session"
+              data-command='nt add "ship v1" due:fri @work !high
+nt note "Chose flock over SQLite" --folder decisions
+nt recall --source claude'
+            >
               <div class="term-line" data-type><span class="term-prompt">$</span> <span class="term-cmd">nt add "ship v1" </span><span class="term-flag">due:fri @work !high</span></div>
               <div class="term-line"><span class="term-ok">✓ added</span> <span class="term-muted">task:42</span> <span class="term-pri">(A)</span> ship v1 <span class="term-muted">@work due:Fri</span></div>
               <div class="term-line gap" aria-hidden="true"></div>
@@ -247,8 +290,8 @@
             <div class="install-card reveal">
               <h3><span class="tag">desktop</span> Native app</h3>
               <p>
-                macOS universal <code>.zip</code> — signed &amp; notarized. The web UI in a native
-                window, no port opened.
+                Native bundles for <strong>macOS, Linux &amp; Windows</strong> — the web UI in a
+                native window over your local store, no port opened at all.
               </p>
               <a class="btn btn-ghost" href="https://github.com/navbytes/nt/releases/latest" rel="noopener">
                 <svg viewBox="0 0 24 24" aria-hidden="true" fill="none">
@@ -257,6 +300,7 @@
                 </svg>
                 Get it on GitHub Releases
               </a>
+              <p class="install-note"><code>brew install navbytes/tap/nt</code> — coming soon.</p>
             </div>
           </div>
         </div>
@@ -516,10 +560,11 @@
               database, no cloud — just durable plain text.
             </p>
             <div class="closing-ctas">
-              <a class="btn btn-primary" href="https://github.com/navbytes/nt/releases/latest" rel="noopener">
-                Download for macOS
-              </a>
-              <a class="btn btn-ghost" href="https://github.com/navbytes/nt" rel="noopener">
+              <a class="btn btn-primary" href="#install"> Install nt </a>
+              <a class="btn btn-ghost btn-star" href="https://github.com/navbytes/nt" rel="noopener">
+                <svg viewBox="0 0 24 24" aria-hidden="true" fill="currentColor">
+                  <path d="M12 2.5l2.95 5.98 6.6.96-4.77 4.65 1.13 6.56L12 18.6l-5.9 3.1 1.13-6.56-4.77-4.65 6.6-.96L12 2.5Z" />
+                </svg>
                 Star on GitHub
               </a>
             </div>
