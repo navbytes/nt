@@ -24,7 +24,7 @@ jobs:
   goreleaser:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0 # full history so GoReleaser can build the changelog
       # On manual dispatch, mint the tag here (the default token may push refs
@@ -97,7 +97,7 @@ jobs:
       # Build the tagged commit in both trigger modes: on a tag push that's
       # GITHUB_REF; on manual dispatch it's the tag the goreleaser job just
       # created (this job `needs` it, so the tag already exists on the remote).
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
 
