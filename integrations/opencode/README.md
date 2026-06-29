@@ -141,6 +141,24 @@ only when it `nt_search`es for "jwt".
 - **Token budget is a standing cost.** Anything tagged `rule`/`memory-core` is
   billed every turn. Audit it occasionally with `nt export --tag rule` and trim.
 
+## Provider compatibility (LiteLLM / BYO models)
+
+This integration is **provider-agnostic**. Everything here runs in the OpenCode
+harness *before* the model call, so it works identically whether OpenCode talks
+to Claude or any other model through a LiteLLM proxy or a custom provider — it
+does **not** depend on OpenCode's hosted ("Zen") models.
+
+- `nt mcp install` and `install.sh` only **merge** `mcp.nt` and
+  `permission.skill.nt`; your `provider` / `model` / endpoint config is left
+  untouched.
+- **Always-in-context layer** (rules + core memory via the plugin, plus
+  `AGENTS.md`) is injected as plain system-prompt text — **no tool-calling
+  required**, so it works on every model/route.
+- **On-demand KB layer** (the `nt_*` MCP tools) requires the routed model to
+  support **tool/function calling** through LiteLLM. Claude does. On a model with
+  weak tool support that layer degrades gracefully — the injected rules/memory
+  still apply.
+
 ## Requirements
 - `nt` on PATH (or `NT_BIN`).
 - OpenCode with MCP support (all current versions). Live injection needs the
