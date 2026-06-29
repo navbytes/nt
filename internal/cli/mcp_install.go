@@ -26,10 +26,11 @@ import (
 //
 //	nt mcp install                      # Claude Code (claude CLI, user scope)
 //	nt mcp install --client claude-desktop
+//	nt mcp install --client opencode    # OpenCode (~/.config/opencode/opencode.json)
 //	nt mcp install --print              # show what would be done, change nothing
 func cmdMcpInstall(args []string) int {
 	fs := flag.NewFlagSet("mcp install", flag.ContinueOnError)
-	client := fs.String("client", "claude-code", "AI client (claude-code | claude-desktop)")
+	client := fs.String("client", "claude-code", "AI client (claude-code | claude-desktop | opencode)")
 	print1 := fs.Bool("print", false, "show what would be done, change nothing")
 	dryRun := fs.Bool("dry-run", false, "alias for --print")
 	flags, _ := splitArgs(args, map[string]bool{"print": true, "dry-run": true})
@@ -54,9 +55,67 @@ func cmdMcpInstall(args []string) int {
 			return fail(err)
 		}
 		return installFileMerge(path, "Claude Desktop", entry, printOnly)
+	case "opencode", "open-code":
+		path, err := opencodeConfigPath()
+		if err != nil {
+			return fail(err)
+		}
+		return installOpencode(path, bin, printOnly)
 	default:
-		return usageErr(fmt.Errorf("unknown client %q (supported: claude-code, claude-desktop; or use --print)", *client))
+		return usageErr(fmt.Errorf("unknown client %q (supported: claude-code, claude-desktop, opencode; or use --print)", *client))
 	}
+}
+
+// opencodeSchema is the JSON Schema URL OpenCode configs declare via "$schema".
+const opencodeSchema = "https://opencode.ai/config.json"
+
+// opencodeConfigPath resolves OpenCode's global config file. OpenCode reads
+// ~/.config/opencode/opencode.json on every platform (it honors XDG_CONFIG_HOME,
+// not the OS-specific app-support dirs Claude Desktop uses).
+func opencodeConfigPath() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("locate home dir: %w", err)
+	}
+	base := os.Getenv("XDG_CONFIG_HOME")
+	if base == "" {
+		base = filepath.Join(home, ".config")
+	}
+	return filepath.Join(base, "opencode", "opencode.json"), nil
+}
+
+// opencodeEntry is nt's MCP entry in OpenCode's schema: a "local" (stdio) server
+// whose `command` is an argv array — distinct from Claude's command+args shape.
+func opencodeEntry(bin string) map[string]any {
+	return map[string]any{"type": "local", "command": []any{bin, "mcp"}, "enabled": true}
+}
+
+// installOpencode registers nt under the top-level "mcp" key of opencode.json,
+// preserving every other key and stamping "$schema" on a freshly created file.
+func installOpencode(path, bin string, printOnly bool) int {
+	entry := opencodeEntry(bin)
+	if printOnly {
+		snippet := map[string]any{"$schema": opencodeSchema, "mcp": map[string]any{"nt": entry}}
+		out, _ := json.MarshalIndent(snippet, "", "  ")
+		fmt.Printf("Add to %s (OpenCode):\n%s\n", path, out)
+		return 0
+	}
+	changed, prev, err := mergeNamedEntry(path, "mcp", "nt", entry, opencodeSchema)
+	if err != nil {
+		return fail(err)
+	}
+	switch {
+	case !changed && prev != nil:
+		fmt.Printf("nt is already registered in %s (no change)\n", path)
+	case prev != nil:
+		fmt.Printf("updated nt registration in %s\n  command: %s mcp\n", path, bin)
+	default:
+		fmt.Printf("registered nt in %s (OpenCode)\n  command: %s mcp\n", path, bin)
+	}
+	if changed {
+		fmt.Println("restart OpenCode (or reload its MCP servers) to pick it up.")
+	}
+	return 0
 }
 
 // ntBinaryPath returns the absolute, symlink-resolved path to this executable.
@@ -164,13 +223,24 @@ func desktopConfigPath() (string, error) {
 	}
 }
 
-// mergeMCPEntry sets mcpServers.<name> = entry in the JSON config at path,
-// preserving every other key. It creates the file (and parent dirs) when
-// missing. Returns whether the file was changed and the previous entry (nil if
-// none existed). The write is atomic (temp + rename in the same dir).
+// mergeMCPEntry sets mcpServers.<name> = entry in the JSON config at path
+// (Claude's schema). It is a thin wrapper over mergeNamedEntry.
 func mergeMCPEntry(path, name string, entry map[string]any) (changed bool, prev map[string]any, err error) {
+	return mergeNamedEntry(path, "mcpServers", name, entry, "")
+}
+
+// mergeNamedEntry sets <topKey>.<name> = entry in the JSON config at path,
+// preserving every other key. Different clients nest MCP servers under different
+// keys ("mcpServers" for Claude, "mcp" for OpenCode), so the key is a parameter.
+// When schemaURL is non-empty and the file is created fresh, it stamps a
+// top-level "$schema" so editors validate the new config. It creates the file
+// (and parent dirs) when missing. Returns whether the file was changed and the
+// previous entry (nil if none existed). The write is atomic (temp + rename).
+func mergeNamedEntry(path, topKey, name string, entry map[string]any, schemaURL string) (changed bool, prev map[string]any, err error) {
 	root := map[string]any{}
+	fresh := true
 	if data, rerr := os.ReadFile(path); rerr == nil {
+		fresh = false
 		if len(data) > 0 {
 			if jerr := json.Unmarshal(data, &root); jerr != nil {
 				return false, nil, fmt.Errorf("%s is not valid JSON (%v); fix it or use --print and edit by hand", path, jerr)
@@ -180,10 +250,10 @@ func mergeMCPEntry(path, name string, entry map[string]any) (changed bool, prev 
 		return false, nil, fmt.Errorf("read %s: %w", path, rerr)
 	}
 
-	servers, _ := root["mcpServers"].(map[string]any)
+	servers, _ := root[topKey].(map[string]any)
 	if servers == nil {
-		if _, exists := root["mcpServers"]; exists {
-			return false, nil, fmt.Errorf("%s has a non-object \"mcpServers\" value; fix it or use --print", path)
+		if _, exists := root[topKey]; exists {
+			return false, nil, fmt.Errorf("%s has a non-object %q value; fix it or use --print", path, topKey)
 		}
 		servers = map[string]any{}
 	}
@@ -194,8 +264,13 @@ func mergeMCPEntry(path, name string, entry map[string]any) (changed bool, prev 
 		return false, prev, nil // already correct — idempotent no-op
 	}
 
+	if fresh && schemaURL != "" {
+		if _, ok := root["$schema"]; !ok {
+			root["$schema"] = schemaURL
+		}
+	}
 	servers[name] = entry
-	root["mcpServers"] = servers
+	root[topKey] = servers
 
 	out, merr := json.MarshalIndent(root, "", "  ")
 	if merr != nil {
