@@ -1,0 +1,197 @@
+package cli
+
+import (
+	"encoding/json"
+	"flag"
+	"fmt"
+	"os"
+	"sort"
+	"strings"
+
+	"github.com/navbytes/nt/internal/note"
+	"github.com/navbytes/nt/internal/task"
+)
+
+// cmdExport compiles selected notes (and optionally open tasks) into a single
+// document — the missing primitive for feeding nt content into an always-in-context
+// layer like OpenCode's `instructions` / AGENTS.md or a SKILL.md body. Unlike
+// `nt search`/`nt recall` (shaped for an agent's on-demand reads), export produces
+// one clean, concatenated artifact suitable for a file an editor or agent loads at
+// startup.
+//
+//	nt export --tag rule                 # the always-in-context rules file
+//	nt export --tag rule --out rules.md  # write to a file instead of stdout
+//	nt export --folder ref --format json # the reference KB as structured JSON
+//
+// Each note carries an HTML-comment provenance line (`<!-- nt:<id> <rel> -->`) so
+// the source note — by its stable nt id — stays traceable from the compiled output.
+func cmdExport(args []string) int {
+	fs := flag.NewFlagSet("export", flag.ContinueOnError)
+	folder := fs.String("folder", "", "only notes under this folder")
+	format := fs.String("format", "md", "output format: md | json")
+	out := fs.String("out", "", "write to this file instead of stdout")
+	title := fs.String("title", "", "H1 heading for the md document (optional)")
+	typ := fs.String("type", "note", "what to export: note | task | all")
+	limit := fs.Int("limit", 0, "keep at most N notes (0 = all)")
+	includeArchived := fs.Bool("include-archived", false, "also include archived notes")
+	noProvenance := fs.Bool("no-provenance", false, "omit the <!-- nt:id --> provenance lines")
+	var tags stringSlice
+	fs.Var(&tags, "tag", "only notes with this tag (repeatable, AND)")
+	flags, _ := splitArgs(args, map[string]bool{"include-archived": true, "no-provenance": true})
+	if err := fs.Parse(flags); err != nil {
+		return 2
+	}
+	switch *format {
+	case "md", "json":
+	default:
+		return usageErr(fmt.Errorf("export: --format must be md or json, got %q", *format))
+	}
+	wantNotes := *typ == "note" || *typ == "all"
+	wantTasks := *typ == "task" || *typ == "all"
+	if !wantNotes && !wantTasks {
+		return usageErr(fmt.Errorf("export: --type must be note, task, or all, got %q", *typ))
+	}
+
+	e, ok := engine()
+	if !ok {
+		return 1
+	}
+
+	var notes []*note.Note
+	if wantNotes {
+		all := mustNotes(e)
+		if !*includeArchived {
+			all = note.Active(all)
+		}
+		prefix := strings.Trim(*folder, "/")
+		for _, n := range all {
+			if prefix != "" && !strings.HasPrefix(n.Rel, prefix+"/") {
+				continue
+			}
+			match := true
+			for _, want := range tags {
+				if !contains(n.Tags, want) {
+					match = false
+					break
+				}
+			}
+			if match {
+				notes = append(notes, n)
+			}
+		}
+		// Stable order: by folder/path then title, so the compiled file diffs cleanly.
+		sort.SliceStable(notes, func(i, j int) bool {
+			if notes[i].Rel != notes[j].Rel {
+				return notes[i].Rel < notes[j].Rel
+			}
+			return notes[i].Title < notes[j].Title
+		})
+		if *limit > 0 && len(notes) > *limit {
+			notes = notes[:*limit]
+		}
+	}
+
+	var tasks []*task.Task
+	if wantTasks {
+		if d, err := e.Read(); err == nil {
+			for _, t := range d.Tasks() {
+				if t.Status() == "done" {
+					continue
+				}
+				keep := true
+				for _, want := range tags {
+					if !contains(t.Tags(), want) {
+						keep = false
+						break
+					}
+				}
+				if keep {
+					tasks = append(tasks, t)
+				}
+			}
+		}
+	}
+
+	var rendered string
+	if *format == "json" {
+		payload := map[string]any{}
+		if wantNotes {
+			payload["notes"] = notesToJSON(notes)
+		}
+		if wantTasks {
+			idx := map[*task.Task]int{}
+			for i, t := range tasks {
+				idx[t] = i + 1
+			}
+			payload["tasks"] = tasksToJSON(tasks, idx)
+		}
+		if *out == "" {
+			return printJSON(payload)
+		}
+		data, err := json.MarshalIndent(payload, "", "  ")
+		if err != nil {
+			return fail(fmt.Errorf("export: encode json: %w", err))
+		}
+		rendered = string(data)
+	} else {
+		rendered = renderExportMarkdown(*title, notes, tasks, !*noProvenance)
+		if *out == "" {
+			fmt.Print(rendered)
+			if !strings.HasSuffix(rendered, "\n") {
+				fmt.Println()
+			}
+			return 0
+		}
+	}
+
+	if !strings.HasSuffix(rendered, "\n") {
+		rendered += "\n"
+	}
+	if err := os.WriteFile(*out, []byte(rendered), 0o644); err != nil {
+		return fail(fmt.Errorf("export: write %s: %w", *out, err))
+	}
+	fmt.Printf("exported %d note(s), %d task(s) → %s\n", len(notes), len(tasks), *out)
+	return 0
+}
+
+// renderExportMarkdown concatenates note bodies (and an open-task checklist) into
+// one markdown document. It strips a note's leading "# Title" H1 (the title is
+// re-emitted as a section heading) so headings nest consistently.
+func renderExportMarkdown(title string, notes []*note.Note, tasks []*task.Task, provenance bool) string {
+	var b strings.Builder
+	b.WriteString("<!-- Generated by `nt export` — edit the source notes in nt, not this file. -->\n")
+	if title != "" {
+		fmt.Fprintf(&b, "\n# %s\n", title)
+	}
+	for _, n := range notes {
+		b.WriteString("\n")
+		if provenance {
+			fmt.Fprintf(&b, "<!-- nt:%s %s -->\n", n.ID, n.Rel)
+		}
+		fmt.Fprintf(&b, "## %s\n\n", n.Title)
+		body := strings.TrimSpace(n.Body)
+		if h1 := "# " + n.Title; strings.HasPrefix(body, h1) {
+			body = strings.TrimSpace(strings.TrimPrefix(body, h1))
+		}
+		if body != "" {
+			b.WriteString(body)
+			b.WriteString("\n")
+		}
+	}
+	if len(tasks) > 0 {
+		b.WriteString("\n## Open tasks\n\n")
+		for _, t := range tasks {
+			marker := " "
+			if t.Status() == "doing" {
+				marker = "~"
+			}
+			line := strings.TrimSpace(t.Text)
+			if provenance {
+				fmt.Fprintf(&b, "- [%s] %s `nt:%s`\n", marker, line, shortID(t.ID()))
+			} else {
+				fmt.Fprintf(&b, "- [%s] %s\n", marker, line)
+			}
+		}
+	}
+	return b.String()
+}

@@ -121,17 +121,17 @@ on-demand-recall design is built for ("read only what's relevant").
 ### Phase 0 — Audit ✅ (this document)
 Capability report complete; read+write verdict positive.
 
-### Phase 1 — Rules + static KB (read-only, lowest effort)
-- **Rules into context.** Add an export verb to `nt` —
-  `nt export [--tag rules] [--folder ref] [--format md]` — that concatenates
-  selected notes into one markdown file. Point OpenCode at it:
-  `{"instructions": [".opencode/nt-rules.md"]}`. Re-run on change (or via a tiny
-  plugin/`session.created` hook — see Phase 3).
-  *Status: `nt export` is the one net-new `nt` command this plan requires.*
-- **Curated KB as Skills.** For a handful of high-value notes, write
-  `.opencode/skills/<name>/SKILL.md` (frontmatter `name` + `description`) whose
-  body is the note (or `nt show <handle>`). Progressive disclosure: only the
-  description sits in context until the agent loads it.
+### Phase 1 — Rules + static KB ✅ (shipped here)
+- **`nt export`** (`--tag`/`--folder`/`--type`/`--format md|json`/`--out`/
+  `--no-provenance`) concatenates selected notes into one document for the
+  always-in-context layer. **Done.**
+- **Live injection.** The `nt-memory` plugin compiles `nt export --tag rule`
+  (+ `memory-core`) and injects it into the system prompt every session via
+  `experimental.chat.system.transform` — no stale file. File-mode fallback writes
+  `nt-rules.md` and loads it via `instructions`. See
+  [`integrations/opencode/`](../integrations/opencode/).
+- **Curated KB as Skills.** The bundled `skills/nt/SKILL.md` teaches the workflow;
+  any high-value note can be surfaced the same way (progressive disclosure).
 
 ### Phase 2 — On-demand KB retrieval ✅ (shipped here)
 - `nt mcp install --client opencode` registers the stdio server; the agent gets
@@ -188,12 +188,16 @@ Capability report complete; read+write verdict positive.
 
 ---
 
-## What this PR changes
+## What ships for OpenCode
 
 - `nt mcp install --client opencode` — registers nt's MCP server into
-  `~/.config/opencode/opencode.json` in OpenCode's schema (`mcp` key, `local`
-  type, argv `command`), idempotent, `$schema`-stamped, `--print`-able. This
-  delivers Phases 2 and 3's engine with one command.
-- README + this doc describe the OpenCode mapping and the phased plan.
-- The only net-new `nt` feature the full plan still wants is `nt export` for the
-  Phase 1 rules file; everything else is configuration.
+  `~/.config/opencode/opencode.json` (`mcp` key, `local` type, argv `command`),
+  idempotent, `$schema`-stamped, `--print`-able. Delivers Phases 2–3's engine.
+- `nt export` — compiles tagged/foldered notes (and open tasks) into one md/json
+  document for the always-in-context layer. Delivers Phase 1's compile step.
+- **[`integrations/opencode/`](../integrations/opencode/)** — a ready-to-use
+  bundle: the `nt-memory` plugin (live rules/memory injection), the `nt` skill,
+  a thin `AGENTS.md`, an example `opencode.json`, and an idempotent `install.sh`.
+  Its README is the full architecture + best-practices write-up and the
+  folder/tag conventions (`rules/`+`rule`, `memory/`+`memory-core`, everything
+  else = on-demand KB).

@@ -65,6 +65,8 @@ func Run(args []string) int {
 		return cmdUpdate(rest)
 	case "search", "q":
 		return cmdSearch(rest)
+	case "export":
+		return cmdExport(rest)
 	case "tags":
 		return cmdTags(rest)
 	case "tag":
@@ -367,6 +369,7 @@ USAGE
   nt update <id…> [flags]     change one or more tasks (bulk)  (alias: up)
   nt list --tree              show sub-tasks indented under their parent
   nt search "query" [--tag T]  full-text + tag search (AND terms; "phrase"; --json) (alias: q)
+  nt export [--tag|--folder]  compile notes into one md/json doc (rules/instructions, SKILL.md)
   nt tags                     list the tag vocabulary with counts
   nt tag <id|note…> +x -y     retag tasks or notes (no $EDITOR; preserves frontmatter)
   nt links <id|note>          forward links + backlinks + deps  (--orphans, --json)
