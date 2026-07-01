@@ -509,6 +509,57 @@ func cmdSupersede(args []string) int {
 	return 0
 }
 
+// cmdRelink rewrites a wrong outbound [[link]] inside a note's body:
+// `nt relink <note> <old-target> <new-target>`. `nt mv` fixes *inbound* links on
+// rename; this fixes an *outbound* reference that points at the wrong (or a
+// nonexistent) note — the gap the write-time dangling-link warning flags.
+func cmdRelink(args []string) int {
+	flags, positional := splitArgs(args, map[string]bool{})
+	fs := flag.NewFlagSet("relink", flag.ContinueOnError)
+	if err := fs.Parse(flags); err != nil {
+		return 2
+	}
+	if len(positional) < 3 {
+		return usageErr(fmt.Errorf("relink: usage: nt relink <note> <old-target> <new-target>"))
+	}
+	handle, oldT, newT := positional[0], positional[1], positional[2]
+	e, ok := engine()
+	if !ok {
+		return 1
+	}
+	notes := mustNotes(e)
+	n, err := resolveNote(notes, handle)
+	if err != nil {
+		return fail(fmt.Errorf("relink: %w", err))
+	}
+	if _, ok := links.Resolve(newT, nil, notes); !ok {
+		return fail(fmt.Errorf("relink: new target [[%s]] doesn't resolve to any note", newT))
+	}
+	body, count := relinkBody(n.Body, oldT, newT)
+	if count == 0 {
+		return fail(fmt.Errorf("relink: no [[%s]] found in %s", oldT, shortID(n.ID)))
+	}
+	n.Body = body
+	if err := n.Save(); err != nil {
+		return fail(err)
+	}
+	fmt.Printf("relinked %d reference(s): [[%s]] → [[%s]] in %s\n", count, oldT, newT, shortID(n.ID))
+	return 0
+}
+
+// relinkBody rewrites [[oldT]], [[oldT|alias]] and [[oldT#frag]] to point at newT,
+// preserving any alias/fragment. Returns the new body and the replacement count.
+func relinkBody(body, oldT, newT string) (string, int) {
+	count := 0
+	for _, suffix := range []string{"]]", "|", "#"} {
+		from := "[[" + oldT + suffix
+		to := "[[" + newT + suffix
+		count += strings.Count(body, from)
+		body = strings.ReplaceAll(body, from, to)
+	}
+	return body, count
+}
+
 // cmdJournal opens today's daily note (notes/journal/YYYY-MM-DD.md) in $EDITOR,
 // creating it if missing — the journal's CLI entry point, mirroring the web
 // /journal route so an agent or a person can keep a dated log from either surface.

@@ -24,6 +24,7 @@ import (
 	"github.com/navbytes/nt/internal/search"
 	"github.com/navbytes/nt/internal/task"
 	"github.com/navbytes/nt/internal/view"
+	"github.com/navbytes/nt/internal/workstream"
 )
 
 const protocolVersion = "2024-11-05"
@@ -170,6 +171,8 @@ func (s *server) dispatch(name string, a map[string]any) (string, error) {
 		return s.note(a)
 	case "nt_supersede":
 		return s.supersede(a)
+	case "nt_relink":
+		return s.relink(a)
 	case "nt_index":
 		return s.index(a)
 	case "nt_get":
@@ -206,7 +209,7 @@ func (s *server) ready(a map[string]any) (string, error) {
 		if t.Done || (blocked[t.ID()] && !t.Done) {
 			continue // done or dependency-blocked → not ready
 		}
-		if !wsVisible(t.Key("ws"), ws) {
+		if !workstream.Visible(t.Key("ws"), ws) {
 			continue // another agent's parallel work; shared/own tasks stay visible
 		}
 		if source != "" && t.Source() != source {
@@ -273,7 +276,7 @@ func (s *server) status(a map[string]any) (string, error) {
 	blocked := task.BlockedIDs(d.Tasks())
 
 	inScope := func(t *task.Task) bool {
-		if !wsVisible(t.Key("ws"), ws) {
+		if !workstream.Visible(t.Key("ws"), ws) {
 			return false // another agent's parallel work
 		}
 		if project != "" && !contains(t.Projects(), project) {
@@ -618,6 +621,44 @@ func (s *server) supersede(a map[string]any) (string, error) {
 	return jsonText(map[string]any{"superseded": oldH, "canonical": newNote.ID}), nil
 }
 
+// relink rewrites a wrong outbound [[link]] inside a note's body (nt_relink).
+func (s *server) relink(a map[string]any) (string, error) {
+	handle := strings.TrimSpace(str(a, "handle"))
+	oldT := strings.TrimSpace(str(a, "old"))
+	newT := strings.TrimSpace(str(a, "new"))
+	if handle == "" || oldT == "" || newT == "" {
+		return "", fmt.Errorf("handle, old, and new are required")
+	}
+	notes := s.listNotes()
+	n, ok := resolveNoteMCP(notes, handle)
+	if !ok {
+		return "", fmt.Errorf("no note %q", handle)
+	}
+	if _, ok := links.Resolve(newT, nil, notes); !ok {
+		return "", fmt.Errorf("new target [[%s]] doesn't resolve to any note", newT)
+	}
+	body, count := relinkBody(n.Body, oldT, newT)
+	if count == 0 {
+		return "", fmt.Errorf("no [[%s]] found in note %q", oldT, handle)
+	}
+	n.Body = body
+	if err := n.Save(); err != nil {
+		return "", err
+	}
+	return jsonText(map[string]any{"id": n.ID, "relinked": count, "from": oldT, "to": newT}), nil
+}
+
+// relinkBody rewrites [[oldT]], [[oldT|alias]] and [[oldT#frag]] to newT.
+func relinkBody(body, oldT, newT string) (string, int) {
+	count := 0
+	for _, suffix := range []string{"]]", "|", "#"} {
+		from := "[[" + oldT + suffix
+		count += strings.Count(body, from)
+		body = strings.ReplaceAll(body, from, "[["+newT+suffix)
+	}
+	return body, count
+}
+
 // markSuperseded stamps oldHandle's note with superseded_by=newID.
 func (s *server) markSuperseded(oldHandle, newID string) error {
 	old, ok := resolveNoteMCP(s.listNotes(), oldHandle)
@@ -673,6 +714,12 @@ func (s *server) index(a map[string]any) (string, error) {
 		return "", err
 	}
 	tag, folder := strings.TrimSpace(str(a, "tag")), strings.Trim(strings.TrimSpace(str(a, "folder")), "/")
+	since := ""
+	if s := strings.TrimSpace(str(a, "updated_since")); s != "" {
+		if d, ok := dateparse.Date(s); ok {
+			since = d
+		}
+	}
 	notes := note.Active(s.listNotes())
 	stubs := make([]noteStub, 0, len(notes))
 	for _, n := range notes {
@@ -684,6 +731,9 @@ func (s *server) index(a map[string]any) (string, error) {
 		}
 		if tag != "" && !contains(n.Tags, tag) {
 			continue
+		}
+		if since != "" && noteChangedDate(n) < since {
+			continue // "what changed since T"
 		}
 		stubs = append(stubs, noteToStub(n, ""))
 	}
@@ -702,7 +752,7 @@ func (s *server) index(a map[string]any) (string, error) {
 	blocked := task.BlockedIDs(d.Tasks())
 	var active, scoped []*task.Task
 	for _, t := range d.Tasks() {
-		if !wsVisible(t.Key("ws"), ws) {
+		if !workstream.Visible(t.Key("ws"), ws) {
 			continue
 		}
 		if tag != "" && !contains(t.Tags(), tag) {
@@ -793,7 +843,7 @@ func (s *server) log(a map[string]any) (string, error) {
 			if source != "" && t.Source() != source {
 				continue
 			}
-			if !wsVisible(t.Key("ws"), ws) {
+			if !workstream.Visible(t.Key("ws"), ws) {
 				continue
 			}
 			kept = append(kept, t)
@@ -1116,6 +1166,7 @@ type noteStub struct {
 	Snippet     string   `json:"snippet,omitempty"` // query-context line (search only)
 	Tags        []string `json:"tags,omitempty"`
 	Folder      string   `json:"folder,omitempty"`
+	Source      string   `json:"source,omitempty"` // author/agent — ownership on a shared store
 	Updated     string   `json:"updated,omitempty"`
 }
 
@@ -1126,7 +1177,7 @@ func noteToStub(n *note.Note, snippet string) noteStub {
 	}
 	return noteStub{
 		ID: n.ID, Rel: n.Rel, Title: n.Title, Description: n.Description(160),
-		Snippet: snippet, Tags: n.Tags, Folder: pathDir(n.Rel), Updated: shortDate(upd),
+		Snippet: snippet, Tags: n.Tags, Folder: pathDir(n.Rel), Source: n.Source, Updated: shortDate(upd),
 	}
 }
 
@@ -1137,6 +1188,22 @@ func shortID(id string) string {
 		return id
 	}
 	return id[len(id)-6:]
+}
+
+// noteChangedDate is a note's effective change date (YYYY-MM-DD): the later of its
+// file mtime (catches external edits) and its frontmatter updated/created.
+func noteChangedDate(n *note.Note) string {
+	upd := n.Updated
+	if upd == "" {
+		upd = n.Created
+	}
+	d := shortDate(upd)
+	if !n.ModTime.IsZero() {
+		if m := n.ModTime.Format("2006-01-02"); m > d {
+			d = m
+		}
+	}
+	return d
 }
 
 // pathDir is the folder part of a notes/-relative path ("" for a root note).

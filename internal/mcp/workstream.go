@@ -37,16 +37,3 @@ func (s *server) workstream(a map[string]any) string {
 	}
 	return workstream.Env()
 }
-
-// wsVisible decides whether a task in workstream taskWS is visible to an agent
-// currently scoped to `current`. An unscoped agent (current "" ) or an explicit
-// widen ("*") sees everything. Otherwise a task is visible when it belongs to
-// this workstream OR carries no workstream at all — so the shared human backlog
-// (CLI/TUI/web tasks) and pre-workstream tasks stay visible to every agent, and
-// only another agent's explicitly-stamped work is hidden.
-func wsVisible(taskWS, current string) bool {
-	if current == "" || current == "*" {
-		return true
-	}
-	return taskWS == "" || taskWS == current
-}

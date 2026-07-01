@@ -34,8 +34,12 @@ type Note struct {
 	// archived one — so a resume sees the single canonical decision, not both
 	// forks — while the pointer preserves the trail.
 	SupersededBy string
-	Body         string
-	Extra        []string // raw frontmatter lines for keys nt doesn't model (preserved verbatim)
+	// ModTime is the note file's last-modified time, set by List/Load/cache. It
+	// captures every change — including edits made outside nt (Obsidian, git) that
+	// never touch the `updated:` frontmatter — so "changed since T" is reliable.
+	ModTime time.Time
+	Body    string
+	Extra   []string // raw frontmatter lines for keys nt doesn't model (preserved verbatim)
 }
 
 // Slug derives a filesystem-safe slug from a title, falling back to a timestamp
@@ -234,6 +238,9 @@ func Load(path string) (*Note, error) {
 		return nil, err
 	}
 	n := &Note{Path: path}
+	if info, serr := os.Stat(path); serr == nil {
+		n.ModTime = info.ModTime()
+	}
 	text := string(data)
 	if strings.HasPrefix(text, fmDelim+"\n") {
 		rest := text[len(fmDelim)+1:]

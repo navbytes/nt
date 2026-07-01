@@ -45,6 +45,31 @@ func Derive() string {
 	return ""
 }
 
+// Visible decides whether a task in workstream taskWS is visible to a reader
+// currently scoped to `current`. An unscoped reader (current "") or an explicit
+// widen ("*") sees everything. Otherwise a task is visible when it belongs to this
+// workstream OR carries no workstream at all — so the shared human backlog and
+// pre-workstream tasks stay visible to everyone, and only another agent's
+// explicitly-stamped work is hidden.
+func Visible(taskWS, current string) bool {
+	if current == "" || current == "*" {
+		return true
+	}
+	return taskWS == "" || taskWS == current
+}
+
+// Scope resolves the effective current workstream for a read: an explicit value
+// (a literal id, or "*" to widen) wins; otherwise the NT_WORKSTREAM environment.
+func Scope(explicit string) string {
+	if e := strings.TrimSpace(explicit); e != "" {
+		if e == "auto" {
+			return Derive()
+		}
+		return e
+	}
+	return Env()
+}
+
 func gitBranch() string {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()

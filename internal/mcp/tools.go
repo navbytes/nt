@@ -121,13 +121,23 @@ var toolDefs = []toolDef{
 		}, "handle", "by"),
 	},
 	{
+		Name:        "nt_relink",
+		Description: "Fix a wrong outbound [[link]] in a note's body: rewrite [[old]] → [[new]] (nt_mv only fixes inbound links on rename). Use it to repair a dangling reference nt_note flagged.",
+		InputSchema: obj(map[string]any{
+			"handle": sp("the note whose body to edit (id/slug/title)"),
+			"old":    sp("the current [[target]] text to replace"),
+			"new":    sp("the correct [[target]] (must resolve to a note)"),
+		}, "handle", "old", "new"),
+	},
+	{
 		Name:        "nt_index",
 		Description: "Resuming work: the KB catalog. One stub per note (id, title, one-line description, tags, folder) — NO bodies — plus active (open+doing) tasks and a few recent completions (recentlyDone). Load this first, then nt_get the few notes you need or nt_search by topic. Cheap and bounded; replaces dumping every note. Scope with tag/folder.",
 		InputSchema: obj(map[string]any{
-			"tag":        sp("only notes/tasks with this tag"),
-			"folder":     sp("only notes under this folder, e.g. ref"),
-			"limit":      map[string]any{"type": "integer", "description": "cap the note catalog to N (truncated=true when more exist); scope with tag/folder for big stores"},
-			"workstream": wsArg,
+			"tag":           sp("only notes/tasks with this tag"),
+			"folder":        sp("only notes under this folder, e.g. ref"),
+			"limit":         map[string]any{"type": "integer", "description": "cap the note catalog to N (truncated=true when more exist); scope with tag/folder for big stores"},
+			"updated_since": sp("only notes changed on/after this date (today|+3d|YYYY-MM-DD) — 'what changed since last session'"),
+			"workstream":    wsArg,
 		}),
 	},
 	{

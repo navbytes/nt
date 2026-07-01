@@ -9,6 +9,7 @@ import (
 
 	"github.com/navbytes/nt/internal/note"
 	"github.com/navbytes/nt/internal/task"
+	"github.com/navbytes/nt/internal/workstream"
 )
 
 // shortDate trims an RFC3339-ish timestamp to its YYYY-MM-DD prefix.
@@ -30,7 +31,20 @@ type indexNote struct {
 	Description string   `json:"description,omitempty"`
 	Tags        []string `json:"tags,omitempty"`
 	Folder      string   `json:"folder,omitempty"`
+	Source      string   `json:"source,omitempty"` // author/agent that captured it — ownership on a shared store
 	Updated     string   `json:"updated,omitempty"`
+}
+
+// noteChangedDate is the note's effective change date (YYYY-MM-DD): the later of
+// its file mtime (catches external edits) and its frontmatter updated/created.
+func noteChangedDate(n *note.Note, frontmatter string) string {
+	d := shortDate(frontmatter)
+	if !n.ModTime.IsZero() {
+		if m := n.ModTime.Format("2006-01-02"); m > d {
+			d = m
+		}
+	}
+	return d
 }
 
 // cmdIndex prints a compact catalog of the knowledge base — one line per note
@@ -50,11 +64,21 @@ func cmdIndex(args []string) int {
 	asJSON := fs.Bool("json", false, "machine-readable output")
 	noTasks := fs.Bool("no-tasks", false, "omit the active-task section")
 	limit := fs.Int("limit", 0, "cap the note catalog to N (0 = all); scope with --tag/--folder for large stores")
+	updatedSince := fs.String("updated-since", "", "only notes changed on/after this date (today|fri|+3d|YYYY-MM-DD) — 'what's new since last session'")
+	ws := fs.String("workstream", "", `scope tasks to a workstream (default: NT_WORKSTREAM; "*" = all)`)
 	var tags stringSlice
 	fs.Var(&tags, "tag", "only notes with this tag (repeatable, AND)")
 	flags, _ := splitArgs(args, map[string]bool{"json": true, "no-tasks": true})
 	if err := fs.Parse(flags); err != nil {
 		return 2
+	}
+	since := ""
+	if s := strings.TrimSpace(*updatedSince); s != "" {
+		d, ok := parseDate(s)
+		if !ok {
+			return usageErr(fmt.Errorf("index: --updated-since: unrecognized date %q (try today|fri|+3d|YYYY-MM-DD)", s))
+		}
+		since = d
 	}
 	e, ok := engine()
 	if !ok {
@@ -85,8 +109,11 @@ func cmdIndex(args []string) int {
 		if updated == "" {
 			updated = n.Created
 		}
+		if since != "" && noteChangedDate(n, updated) < since {
+			continue // "what's changed since T" — skip anything older
+		}
 		stubs = append(stubs, indexNote{
-			ID: n.ID, Title: n.Title, Description: n.Description(160),
+			ID: n.ID, Title: n.Title, Description: n.Description(160), Source: n.Source,
 			Tags: n.Tags, Folder: noteFolder(n), Updated: shortDate(updated),
 		})
 	}
@@ -108,8 +135,12 @@ func cmdIndex(args []string) int {
 	if !*noTasks {
 		if d, err := e.Read(); err == nil {
 			blocked := task.BlockedIDs(d.Tasks())
+			cur := workstream.Scope(*ws)
 			var scoped []*task.Task
 			for _, t := range d.Tasks() {
+				if cur != "" && !workstream.Visible(t.Key("ws"), cur) {
+					continue
+				}
 				keep := true
 				for _, want := range tags {
 					if !contains(t.Tags(), want) {

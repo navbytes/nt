@@ -14,6 +14,7 @@ import (
 	"github.com/navbytes/nt/internal/note"
 	"github.com/navbytes/nt/internal/task"
 	"github.com/navbytes/nt/internal/view"
+	"github.com/navbytes/nt/internal/workstream"
 )
 
 // Read/report commands: the non-mutating verbs that list, query, and render
@@ -41,6 +42,7 @@ func cmdList(args []string) int {
 	all := fs.Bool("all", false, "include done tasks")
 	showBlocked := fs.Bool("show-blocked", false, "include dependency-blocked tasks")
 	tree := fs.Bool("tree", false, "show sub-tasks indented under their parent, with progress")
+	ws := fs.String("workstream", "", `scope to a workstream (default: NT_WORKSTREAM; "*" = all)`)
 	asJSON := fs.Bool("json", false, "machine-readable output")
 
 	flags, _ := splitArgs(args, map[string]bool{"all": true, "json": true, "show-blocked": true, "tree": true})
@@ -55,19 +57,19 @@ func cmdList(args []string) int {
 		All:         *all,
 		ShowBlocked: *showBlocked,
 		Tree:        *tree,
-	}, *source, *asJSON)
+	}, *source, *ws, *asJSON)
 }
 
 // runList renders the task list selected by spec — the shared core behind both
 // `nt list` and `nt view recall`, so a saved view filters/sorts exactly as the
 // equivalent flags would. asJSON is a recall-time output choice, kept out of the
 // saved Spec.
-func runList(spec view.Spec, asJSON bool) int { return runListSource(spec, "", asJSON) }
+func runList(spec view.Spec, asJSON bool) int { return runListSource(spec, "", "", asJSON) }
 
-// runListSource is runList with an extra source filter applied after view.Apply
-// (view.Spec has no Source field, so the CLI filters it here for parity with
-// ready/agenda/recall/log).
-func runListSource(spec view.Spec, source string, asJSON bool) int {
+// runListSource is runList with extra source and workstream filters applied after
+// view.Apply (view.Spec has neither field, so the CLI filters them here for parity
+// with ready/agenda/log — and, for workstream, with the MCP tools).
+func runListSource(spec view.Spec, source, ws string, asJSON bool) int {
 	e, ok := engine()
 	if !ok {
 		return 1
@@ -84,6 +86,15 @@ func runListSource(spec view.Spec, source string, asJSON bool) int {
 		kept := rows[:0]
 		for _, t := range rows {
 			if t.Source() == source {
+				kept = append(kept, t)
+			}
+		}
+		rows = kept
+	}
+	if cur := workstream.Scope(ws); cur != "" {
+		kept := rows[:0]
+		for _, t := range rows {
+			if workstream.Visible(t.Key("ws"), cur) {
 				kept = append(kept, t)
 			}
 		}
@@ -157,6 +168,7 @@ func cmdReady(args []string) int {
 	source := fs.String("source", "", "filter by source (e.g. claude)")
 	tag := fs.String("tag", "", "filter by tag")
 	project := fs.String("project", "", "filter by project")
+	ws := fs.String("workstream", "", `scope to a workstream (default: NT_WORKSTREAM; "*" = all)`)
 	asJSON := fs.Bool("json", false, "machine-readable output")
 
 	flags, _ := splitArgs(args, map[string]bool{"json": true})
@@ -174,12 +186,16 @@ func cmdReady(args []string) int {
 	all := d.Tasks()
 	idx := indexMap(all)
 	blocked := task.BlockedIDs(all)
+	cur := workstream.Scope(*ws)
 
 	today := mutate.Today()
 	var rows []*task.Task
 	for _, t := range all {
 		// keep with all=false, showBlocked=false drops done + dependency-blocked.
 		if !view.Keep(t, view.Spec{Tag: *tag, Project: *project}, blocked) {
+			continue
+		}
+		if cur != "" && !workstream.Visible(t.Key("ws"), cur) {
 			continue
 		}
 		if *source != "" && t.Source() != *source {
