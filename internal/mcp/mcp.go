@@ -574,6 +574,9 @@ func (s *server) index(a map[string]any) (string, error) {
 	notes := note.Active(s.listNotes())
 	stubs := make([]noteStub, 0, len(notes))
 	for _, n := range notes {
+		if n.Reserved() {
+			continue // task-detail notes aren't part of the KB catalog
+		}
 		if folder != "" && !strings.HasPrefix(n.Rel, folder+"/") {
 			continue
 		}
@@ -591,18 +594,29 @@ func (s *server) index(a map[string]any) (string, error) {
 
 	ws := s.workstream(a)
 	blocked := task.BlockedIDs(d.Tasks())
-	var active []*task.Task
+	var active, scoped []*task.Task
 	for _, t := range d.Tasks() {
-		if t.Done || blocked[t.ID()] || !wsVisible(t.Key("ws"), ws) {
+		if !wsVisible(t.Key("ws"), ws) {
 			continue
 		}
 		if tag != "" && !contains(t.Tags(), tag) {
 			continue
 		}
-		active = append(active, t)
+		scoped = append(scoped, t)
+		if !t.Done && !blocked[t.ID()] {
+			active = append(active, t)
+		}
 	}
 	task.SortByUrgency(active)
-	return jsonText(map[string]any{"notes": stubs, "tasks": tasksOut(active)}), nil
+	// A few recent completions so a resuming agent sees what's already handled —
+	// not just what's open (the active list omits done tasks).
+	recent := task.CompletedSince(scoped, "")
+	if len(recent) > 5 {
+		recent = recent[:5]
+	}
+	return jsonText(map[string]any{
+		"notes": stubs, "tasks": tasksOut(active), "recentlyDone": tasksOut(recent),
+	}), nil
 }
 
 // get fetches one note's full content by handle (id/slug/title) — the on-demand
@@ -713,25 +727,24 @@ func (s *server) search(a map[string]any) (string, error) {
 	}
 	var hits []scored
 	if typ == "all" || typ == "note" {
-		bodyHit := map[string]string{} // path → matching-line snippet
-		if q != "" {
-			if hh, e := search.Literal(q, s.eng.S.NotesDir()); e == nil {
-				for _, h := range hh {
-					if _, ok := bodyHit[h.Path]; !ok {
-						bodyHit[h.Path] = clipLine(h.Text, 160)
-					}
-				}
-			}
-		}
 		for _, n := range notes {
+			if n.Reserved() {
+				continue // task-detail / machine notes aren't part of the KB catalog
+			}
 			if tag != "" && !contains(n.Tags, tag) {
 				continue
 			}
+			// Match title first (rank 0), then the BODY only (rank 1). Scanning the
+			// parsed body — not the raw file — means a query never matches frontmatter
+			// (so a tag like `auth` no longer masquerades as a body hit), and the
+			// snippet is a real excerpt around the term, not a `tags: […]` line.
 			switch {
 			case q == "" || strings.Contains(strings.ToLower(n.Title), ql):
 				hits = append(hits, scored{n, "", 0})
-			case bodyHit[n.Path] != "":
-				hits = append(hits, scored{n, bodyHit[n.Path], 1})
+			default:
+				if snip := bodySnippet(n.Body, ql); snip != "" {
+					hits = append(hits, scored{n, snip, 1})
+				}
 			}
 		}
 		sort.SliceStable(hits, func(i, j int) bool {
@@ -1010,6 +1023,25 @@ func noteToStub(n *note.Note, snippet string) noteStub {
 func pathDir(rel string) string {
 	if i := strings.LastIndex(rel, "/"); i >= 0 {
 		return rel[:i]
+	}
+	return ""
+}
+
+// bodySnippet returns the first body line containing ql (lowercased query),
+// collapsed and clamped — a real excerpt around the match. "" if no line matches
+// or ql is empty. Headings are skipped so the snippet is prose, not a "# Title".
+func bodySnippet(body, ql string) string {
+	if ql == "" {
+		return ""
+	}
+	for _, raw := range strings.Split(body, "\n") {
+		line := strings.TrimSpace(raw)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		if strings.Contains(strings.ToLower(line), ql) {
+			return clipLine(line, 160)
+		}
 	}
 	return ""
 }

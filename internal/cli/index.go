@@ -64,6 +64,9 @@ func cmdIndex(args []string) int {
 	prefix := strings.Trim(*folder, "/")
 	var stubs []indexNote
 	for _, n := range notes {
+		if n.Reserved() {
+			continue // task-detail notes aren't part of the KB catalog
+		}
 		if prefix != "" && !strings.HasPrefix(n.Rel, prefix+"/") {
 			continue
 		}
@@ -93,15 +96,15 @@ func cmdIndex(args []string) int {
 		return stubs[i].Title < stubs[j].Title
 	})
 
-	// Active tasks: open + doing, unblocked, by urgency — no bodies.
-	var active []*task.Task
+	// Active tasks (open + doing, unblocked, by urgency) plus a few recent
+	// completions so a resuming reader sees what's already handled, not only what's
+	// open. No bodies.
+	var active, recent []*task.Task
 	if !*noTasks {
 		if d, err := e.Read(); err == nil {
 			blocked := task.BlockedIDs(d.Tasks())
+			var scoped []*task.Task
 			for _, t := range d.Tasks() {
-				if t.Done || blocked[t.ID()] {
-					continue
-				}
 				keep := true
 				for _, want := range tags {
 					if !contains(t.Tags(), want) {
@@ -109,11 +112,19 @@ func cmdIndex(args []string) int {
 						break
 					}
 				}
-				if keep {
+				if !keep {
+					continue
+				}
+				scoped = append(scoped, t)
+				if !t.Done && !blocked[t.ID()] {
 					active = append(active, t)
 				}
 			}
 			task.SortByUrgency(active)
+			recent = task.CompletedSince(scoped, "")
+			if len(recent) > 5 {
+				recent = recent[:5]
+			}
 		}
 	}
 
@@ -121,6 +132,7 @@ func cmdIndex(args []string) int {
 		payload := map[string]any{"notes": stubs}
 		if !*noTasks {
 			payload["tasks"] = tasksToJSON(active, map[*task.Task]int{})
+			payload["recentlyDone"] = tasksToJSON(recent, map[*task.Task]int{})
 		}
 		return printJSON(payload)
 	}
@@ -154,7 +166,13 @@ func cmdIndex(args []string) int {
 			fmt.Printf("- [%s] %s `%s`\n", mark, strings.TrimSpace(t.Text), shortID(t.ID()))
 		}
 	}
-	if len(stubs) == 0 && len(active) == 0 {
+	if !*noTasks && len(recent) > 0 {
+		fmt.Println("\n# Recently done")
+		for _, t := range recent {
+			fmt.Printf("- [x] %s `%s`\n", strings.TrimSpace(t.Text), shortID(t.ID()))
+		}
+	}
+	if len(stubs) == 0 && len(active) == 0 && len(recent) == 0 {
 		fmt.Println("index is empty" + freshHint(e))
 	}
 	return 0

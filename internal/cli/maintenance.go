@@ -299,8 +299,8 @@ func cmdDoctor(args []string) int {
 type noteLint struct {
 	Dangling    []string // "[[target]] in <source>" — an unresolved wiki-link (a real break)
 	NoteCount   int
-	MissingDesc int // active notes with no explicit `description:` (index scannability)
-	Orphans     int // active notes nothing links to (informational)
+	MissingDesc []string // handles of active notes with no explicit `description:`
+	Orphans     []string // handles of active notes nothing links to (informational)
 }
 
 // lintNotes scans notes and tasks for KB-graph health: unresolved [[links]]
@@ -336,12 +336,16 @@ func lintNotes(e *mutate.Engine) noteLint {
 		}
 	}
 	for _, n := range active {
+		if n.Reserved() {
+			continue // machine task-detail notes aren't held to KB hygiene
+		}
 		rep.NoteCount++
+		handle := shortID(n.ID) + " " + n.Rel
 		if !hasExplicitDescription(n) {
-			rep.MissingDesc++
+			rep.MissingDesc = append(rep.MissingDesc, handle)
 		}
 		if !linked[n.Path] {
-			rep.Orphans++
+			rep.Orphans = append(rep.Orphans, handle)
 		}
 	}
 	return rep
@@ -358,19 +362,34 @@ func hasExplicitDescription(n *note.Note) bool {
 	return false
 }
 
-// printNoteHygiene emits the informational (non-failing) note-quality summary.
+// printNoteHygiene emits the informational (non-failing) note-quality summary,
+// naming a few offenders so they're actionable (not just a count).
 func printNoteHygiene(nl noteLint) {
-	if nl.MissingDesc == 0 && nl.Orphans == 0 {
+	if len(nl.MissingDesc) == 0 && len(nl.Orphans) == 0 {
 		return
 	}
 	fmt.Printf("note hygiene: %d note(s)", nl.NoteCount)
-	if nl.MissingDesc > 0 {
-		fmt.Printf(", %d without a description: (add one so `nt index` is scannable)", nl.MissingDesc)
+	if len(nl.MissingDesc) > 0 {
+		fmt.Printf(", %d without a description:", len(nl.MissingDesc))
 	}
-	if nl.Orphans > 0 {
-		fmt.Printf(", %d orphan(s) nothing links to", nl.Orphans)
+	if len(nl.Orphans) > 0 {
+		fmt.Printf(", %d orphan(s)", len(nl.Orphans))
 	}
 	fmt.Println()
+	if len(nl.MissingDesc) > 0 {
+		fmt.Printf("  no description (add one so `nt index` is scannable): %s\n", sampleList(nl.MissingDesc, 8))
+	}
+	if len(nl.Orphans) > 0 {
+		fmt.Printf("  orphans (nothing links to them): %s\n", sampleList(nl.Orphans, 8))
+	}
+}
+
+// sampleList joins up to n items, appending "(+K more)" when it truncates.
+func sampleList(items []string, n int) string {
+	if len(items) <= n {
+		return strings.Join(items, ", ")
+	}
+	return strings.Join(items[:n], ", ") + fmt.Sprintf(" (+%d more)", len(items)-n)
 }
 
 // cmdGitInit prepares $NT_DIR for version control: a .gitattributes so the

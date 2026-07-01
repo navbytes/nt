@@ -384,7 +384,8 @@ USAGE
   nt path                     print the store directory
   nt version                  print the nt version (alias: -v, --version)
   nt git-init                 set up the store for git (union-merge + .gitignore)
-  nt doctor [--check]         reconcile tasks.txt (dedup ids) after a git merge
+  nt doctor [--check]         health check: reconcile tasks.txt (dedup ids) + lint notes
+                              (dangling [[links]], missing descriptions, orphans)
   nt hook                     sync a Claude Code TodoWrite event (PostToolUse hook)
   nt mcp                      run the MCP server (stdio) — typed tools for agents
   nt mcp install [--client]   register nt with an AI client (claude-code|claude-desktop|opencode)

@@ -411,6 +411,7 @@ func cmdSearch(args []string) int {
 	fs := flag.NewFlagSet("search", flag.ContinueOnError)
 	typ := fs.String("type", "all", "note|task|all")
 	asJSON := fs.Bool("json", false, "machine-readable output")
+	limit := fs.Int("limit", 0, "cap results per kind (0 = all); a broad term can otherwise print the whole store")
 	var tags stringSlice
 	fs.Var(&tags, "tag", "only items with this tag (repeatable, AND)")
 	flags, positional := splitArgs(args, map[string]bool{"json": true})
@@ -446,6 +447,9 @@ func cmdSearch(args []string) int {
 	if *typ != "task" {
 		notes := note.Active(mustNotes(e))
 		for _, n := range notes {
+			if n.Reserved() {
+				continue // task-detail notes aren't part of the KB
+			}
 			if len(tags) > 0 && !hasAll(n.Tags) {
 				continue
 			}
@@ -467,6 +471,7 @@ func cmdSearch(args []string) int {
 			return noteHits[i].n.Rel < noteHits[j].n.Rel
 		})
 	}
+	noteTotal := len(noteHits)
 
 	// Tasks: AND-match the whole task line (text + tags + project).
 	var taskHits []*task.Task
@@ -483,6 +488,15 @@ func cmdSearch(args []string) int {
 			if len(terms) == 0 || matchesAll(t.Line(), terms) {
 				taskHits = append(taskHits, t)
 			}
+		}
+	}
+	taskTotal := len(taskHits)
+	if *limit > 0 {
+		if len(noteHits) > *limit {
+			noteHits = noteHits[:*limit]
+		}
+		if len(taskHits) > *limit {
+			taskHits = taskHits[:*limit]
 		}
 	}
 
@@ -512,6 +526,10 @@ func cmdSearch(args []string) int {
 	}
 	if found == 0 {
 		fmt.Println("no matches")
+	}
+	if *limit > 0 && (noteTotal > len(noteHits) || taskTotal > len(taskHits)) {
+		fmt.Printf("… showing %d of %d notes, %d of %d tasks (raise --limit or narrow the query)\n",
+			len(noteHits), noteTotal, len(taskHits), taskTotal)
 	}
 	return 0
 }

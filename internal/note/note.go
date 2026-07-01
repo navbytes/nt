@@ -91,12 +91,17 @@ func Create(s *store.Store, title, body string, tags []string, source, folder st
 			return nil, fmt.Errorf("create folder: %w", err)
 		}
 	}
-	n.Path = uniquePath(dir, Slug(title))
+	p, err := claimPath(dir, Slug(title))
+	if err != nil {
+		return nil, err
+	}
+	n.Path = p
 	// Defense in depth against path traversal: cleanFolder rejects ".."/absolute
 	// folders and Slug strips the title to [a-z0-9-], so the path can't escape
 	// notes/ — but with a web endpoint feeding untrusted input we assert it
 	// explicitly rather than trust those barriers transitively.
 	if !withinDir(notesDir, n.Path) {
+		_ = os.Remove(n.Path)
 		return nil, fmt.Errorf("refusing to write note outside notes/: %q", n.Path)
 	}
 	if err := n.Save(); err != nil {
@@ -132,18 +137,29 @@ func cleanFolder(folder string) (string, error) {
 	return f, nil
 }
 
-// uniquePath avoids clobbering an existing note with the same slug.
-func uniquePath(dir, slug string) string {
-	p := filepath.Join(dir, slug+".md")
-	if _, err := os.Stat(p); os.IsNotExist(err) {
-		return p
-	}
-	for i := 2; ; i++ {
-		p := filepath.Join(dir, fmt.Sprintf("%s-%d.md", slug, i))
-		if _, err := os.Stat(p); os.IsNotExist(err) {
-			return p
+// claimPath atomically reserves a free note path for a slug. It O_EXCL-creates an
+// empty placeholder so two concurrent processes can never pick — and then clobber —
+// the same filename (a stat-then-write race that silently loses one write). Save
+// later rewrites the placeholder we now own. On a collision it advances the "-N"
+// suffix, exactly like the old uniquePath.
+func claimPath(dir, slug string) (string, error) {
+	for i := 1; i < 1_000_000; i++ {
+		name := slug + ".md"
+		if i > 1 {
+			name = fmt.Sprintf("%s-%d.md", slug, i)
 		}
+		p := filepath.Join(dir, name)
+		f, err := os.OpenFile(p, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+		if err == nil {
+			_ = f.Close()
+			return p, nil
+		}
+		if !os.IsExist(err) {
+			return "", fmt.Errorf("claim note path: %w", err)
+		}
+		// exists — another note (or a racing writer) has this slug; try the next.
 	}
+	return "", fmt.Errorf("too many slug collisions for %q", slug)
 }
 
 // Save writes the note atomically with frontmatter.
@@ -158,6 +174,16 @@ func (n *Note) Save() error {
 	}
 	if len(n.Aliases) > 0 {
 		fmt.Fprintf(&b, "aliases: [%s]\n", strings.Join(n.Aliases, ", "))
+	}
+	// Persist the title when the body's own H1 would otherwise win on reload
+	// (Load's precedence is frontmatter title → alias → first body heading). Without
+	// this, `nt note --title X` with a body starting "# Y" silently becomes titled
+	// "Y" — breaking the index and get-by-title. Only emitted when it actually
+	// differs, so Obsidian notes whose H1 == title stay frontmatter-clean.
+	if n.Title != "" {
+		if bh := firstHeading(n.Body); bh != "" && bh != n.Title {
+			fmt.Fprintf(&b, "title: %s\n", n.Title)
+		}
 	}
 	if n.Source != "" {
 		fmt.Fprintf(&b, "source: %s\n", n.Source)
@@ -382,6 +408,12 @@ func clampLine(s string, max int) string {
 	}
 	return s
 }
+
+// Reserved reports whether a note lives in a machine-managed folder that isn't
+// part of the human/agent knowledge base — currently notes/__tasks__/, where
+// nt files the detail bodies of split tasks. These are reachable by id/link but
+// are kept out of the KB catalog (nt index) and search so they don't pollute it.
+func (n *Note) Reserved() bool { return strings.HasPrefix(n.Rel, "__tasks__/") }
 
 func Active(ns []*Note) []*Note {
 	out := ns[:0:0]

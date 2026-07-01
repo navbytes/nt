@@ -112,7 +112,7 @@ var toolDefs = []toolDef{
 	},
 	{
 		Name:        "nt_index",
-		Description: "Resuming work: the KB catalog. One stub per note (id, title, one-line description, tags, folder) — NO bodies — plus active (open+doing) tasks. Load this first, then nt_get the few notes you need or nt_search by topic. Cheap and bounded; replaces dumping every note. Scope with tag/folder.",
+		Description: "Resuming work: the KB catalog. One stub per note (id, title, one-line description, tags, folder) — NO bodies — plus active (open+doing) tasks and a few recent completions (recentlyDone). Load this first, then nt_get the few notes you need or nt_search by topic. Cheap and bounded; replaces dumping every note. Scope with tag/folder.",
 		InputSchema: obj(map[string]any{
 			"tag":        sp("only notes/tasks with this tag"),
 			"folder":     sp("only notes under this folder, e.g. ref"),

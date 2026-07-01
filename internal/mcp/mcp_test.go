@@ -120,10 +120,14 @@ func TestMCPAddSplitsLongCapture(t *testing.T) {
 	if !strings.Contains(res.Task.Text, "[[") {
 		t.Errorf("the split task should link its detail note: %q", res.Task.Text)
 	}
-	// The full text is preserved in the note body (retrievable via search full=true).
-	rout, _ := s.dispatch("nt_search", map[string]any{"query": "connection pool exhaustion", "full": true})
+	// The full text is preserved in the linked detail note. It lives under
+	// __tasks__/ (excluded from the KB catalog/search), so fetch it by handle.
+	rout, err := s.dispatch("nt_get", map[string]any{"handle": res.Note})
+	if err != nil {
+		t.Fatalf("nt_get %q: %v", res.Note, err)
+	}
 	if !strings.Contains(rout, "connection pool exhaustion") {
-		t.Error("the note should hold the full original text")
+		t.Errorf("the note should hold the full original text: %s", rout)
 	}
 
 	// A normal short capture is untouched (no note, no link).
