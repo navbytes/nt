@@ -70,7 +70,11 @@ fi
 echo "→ seeding nt rules/ and memory/ folders (examples — edit or remove)"
 "$nt" search --tag rule --type note >/dev/null 2>&1 || true
 if ! "$nt" notes --folder rules >/dev/null 2>&1 || [ -z "$("$nt" notes --folder rules 2>/dev/null)" ]; then
-  "$nt" note "Prefer the smallest change that solves the problem" \
+  "$nt" note "Output style: terse factual bullets" \
+    --body "- Answer in bullet points, not prose.
+- Plain, direct words. No filler, hedging, or fancy phrasing.
+- Lead with the fact/answer; skip preamble and restating the question.
+- Elaborate only when asked." \
     --folder rules --tag rule --source opencode >/dev/null || true
 fi
 if [ -z "$("$nt" notes --folder memory 2>/dev/null)" ]; then
