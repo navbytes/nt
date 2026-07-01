@@ -826,6 +826,13 @@ func (s *server) index(a map[string]any) (string, error) {
 	if len(recent) > 5 {
 		recent = recent[:5]
 	}
+	// Compact mode: one line per note/task instead of JSON. The session-start
+	// nt_index call is the dominant recurring token cost once the store matures;
+	// compact drops the JSON scaffolding (keys, braces, quotes) an agent doesn't
+	// need to read the catalog. Opt in with format:"compact".
+	if str(a, "format") == "compact" {
+		return compactIndex(stubs, active, recent, noteTotal), nil
+	}
 	out := map[string]any{
 		"notes": stubs, "tasks": tasksOut(active), "recentlyDone": tasksOut(recent),
 	}
@@ -834,6 +841,42 @@ func (s *server) index(a map[string]any) (string, error) {
 		out["noteTotal"] = noteTotal
 	}
 	return jsonText(out), nil
+}
+
+// compactIndex renders the KB catalog as terse plain text — one line per note
+// (shortid · title — description · @tags) and per active task — for the
+// session-start nt_index call. Much cheaper than JSON for the same information.
+func compactIndex(stubs []noteStub, active, recent []*task.Task, noteTotal int) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "NOTES (%d)\n", noteTotal)
+	for _, n := range stubs {
+		fmt.Fprintf(&b, "%s  %s", shortID(n.ID), n.Title)
+		if n.Description != "" {
+			fmt.Fprintf(&b, " — %s", n.Description)
+		}
+		if len(n.Tags) > 0 {
+			fmt.Fprintf(&b, "  @%s", strings.Join(n.Tags, " @"))
+		}
+		b.WriteByte('\n')
+	}
+	if noteTotal > len(stubs) {
+		fmt.Fprintf(&b, "… %d more (pass a higher limit or a tag/folder filter)\n", noteTotal-len(stubs))
+	}
+	fmt.Fprintf(&b, "\nTASKS (%d open)\n", len(active))
+	for _, t := range active {
+		fmt.Fprintf(&b, "%s  [%s] %s", shortID(t.ID()), t.Status(), t.Text)
+		if due := t.Due(); due != "" {
+			fmt.Fprintf(&b, " (due %s)", due)
+		}
+		b.WriteByte('\n')
+	}
+	if len(recent) > 0 {
+		b.WriteString("\nRECENTLY DONE\n")
+		for _, t := range recent {
+			fmt.Fprintf(&b, "%s  %s\n", shortID(t.ID()), t.Text)
+		}
+	}
+	return b.String()
 }
 
 // get fetches one note's full content by handle (id/slug/title) — the on-demand
@@ -993,7 +1036,14 @@ func (s *server) search(a map[string]any) (string, error) {
 	var tout []taskOut
 	taskTotal := 0
 	if typ == "all" || typ == "task" {
+		ws := s.workstream(a)
 		for _, t := range d.Tasks() {
+			// Scope tasks to the caller's workstream, exactly as nt_index/nt_ready
+			// do — otherwise a parallel agent's search leaks every other agent's
+			// in-flight tasks. Notes stay store-wide (knowledge is shared).
+			if !workstream.Visible(t.Key("ws"), ws) {
+				continue
+			}
 			if tag != "" && !contains(t.Tags(), tag) {
 				continue
 			}
@@ -1407,8 +1457,11 @@ func requireID(a map[string]any) (string, error) {
 	return id, nil
 }
 
+// jsonText serializes a tool result. MCP payloads are consumed by the model, not
+// read by a human, so we emit COMPACT JSON (no indentation) — the 2-space pretty
+// print was ~24% pure whitespace on every read, billed on every retrieval.
 func jsonText(v any) string {
-	b, err := json.MarshalIndent(v, "", "  ")
+	b, err := json.Marshal(v)
 	if err != nil {
 		return fmt.Sprintf("error encoding result: %v", err)
 	}
@@ -1416,8 +1469,19 @@ func jsonText(v any) string {
 }
 
 func str(a map[string]any, k string) string {
-	if v, ok := a[k].(string); ok {
+	switch v := a[k].(type) {
+	case string:
 		return v
+	case []any:
+		// Tolerate an LLM passing a single-element array (e.g. tag: ["auth"])
+		// where a string is expected. Without this the type assertion silently
+		// fails, the filter no-ops, and nt_index/nt_search return the FULL store
+		// — the worst-case token blast from a natural arg shape.
+		if len(v) == 1 {
+			if s, ok := v[0].(string); ok {
+				return s
+			}
+		}
 	}
 	return ""
 }

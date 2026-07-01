@@ -86,8 +86,17 @@ func opencodeConfigPath() (string, error) {
 
 // opencodeEntry is nt's MCP entry in OpenCode's schema: a "local" (stdio) server
 // whose `command` is an argv array — distinct from Claude's command+args shape.
+// It ships environment.NT_WORKSTREAM=auto so the documented parallel-agent task
+// isolation actually activates through the install path (previously the env only
+// appeared in the committed example opencode.json, which install never wrote —
+// so the isolation silently never turned on).
 func opencodeEntry(bin string) map[string]any {
-	return map[string]any{"type": "local", "command": []any{bin, "mcp"}, "enabled": true}
+	return map[string]any{
+		"type":        "local",
+		"command":     []any{bin, "mcp"},
+		"enabled":     true,
+		"environment": map[string]any{"NT_WORKSTREAM": "auto"},
+	}
 }
 
 // installOpencode registers nt under the top-level "mcp" key of opencode.json,

@@ -7,7 +7,7 @@ current Anomaly/SST version with a JS server + Go TUI, repo
 
 It is grounded in an audit of this repository's source and runtime, not the
 binary's name. **Headline finding:** `nt` is already a non-interactive,
-JSON-emitting CLI *and* ships a stdio **MCP server** (`nt mcp`) with 15 typed
+JSON-emitting CLI *and* ships a stdio **MCP server** (`nt mcp`) with 17 typed
 read **and write** tools — and OpenCode natively consumes MCP servers. That
 collapses most of what the brief assumed "must be built." The agent-driven
 read/write loop (knowledge-base retrieval **and** write-back memory) needs **no
@@ -50,10 +50,10 @@ memory must be built"** (a custom `nt_save` tool and/or a plugin). Two facts
 change the design:
 
 1. **`nt` already exposes write tools over MCP** — `nt_add`, `nt_note`,
-   `nt_done`, `nt_update`, `nt_tag`, `nt_mv`, `nt_archive` — alongside the read
+   `nt_done`, `nt_update`, `nt_tag`, `nt_mv`, `nt_archive`, `nt_supersede`, `nt_relink` — alongside the read
    tools `nt_index`, `nt_search`, `nt_get`, `nt_ready`, `nt_status`, `nt_view`,
    `nt_log`, `nt_links`. Verified end-to-end over stdio JSON-RPC (`tools/list` →
-   15 tools; `tools/call nt_index`/`nt_search`/`nt_get` → results).
+   17 tools; `tools/call nt_index`/`nt_search`/`nt_get` → results).
 2. **OpenCode is a first-class MCP client.** Its config has a top-level `mcp` key
    for `"type": "local"` (stdio) servers, and the agent calls those tools the
    same way it calls built-ins.
@@ -94,7 +94,7 @@ cost.
 
 | Concept | Surface | Mechanism | Token cost |
 |---------|---------|-----------|-----------|
-| **Rules** (small, stable, always true) | `instructions` glob → an `nt`-generated markdown file (or `AGENTS.md`) | `nt export --tag rules > .opencode/nt-rules.md`; `"instructions": [".opencode/nt-rules.md"]` | Paid every request — keep it small |
+| **Rules** (small, stable, always true) | `instructions` glob → an `nt`-generated markdown file (or `AGENTS.md`) | `nt export --tag rule > .opencode/nt-rules.md`; `"instructions": [".opencode/nt-rules.md"]` | Paid every request — keep it small |
 | **Knowledge base** (large, queried occasionally) | **MCP tools** `nt_index` → `nt_search` / `nt_get` / `nt_links` / `nt_status` | Already registered via `nt mcp install --client opencode` | **Zero until called** (lazy, index-first) |
 | **Memory write-back** (capture as the agent works) | **MCP tools** `nt_add` / `nt_note` / `nt_done` / `nt_update` | Same registration; agent calls them explicitly | Only when writing |
 | **Curated KB highlights** (optional) | **Agent Skills** | Symlink/export curated notes to `.opencode/skills/<name>/SKILL.md` | Only the skill list is always-loaded; bodies load on demand |
@@ -140,7 +140,7 @@ Capability report complete; read+write verdict positive.
 
 ### Phase 3 — Write-back memory ✅ for the engine; optional automation
 - The write tools (`nt_add`, `nt_note`, `nt_done`, `nt_update`, `nt_tag`,
-  `nt_mv`, `nt_archive`) are live the moment the MCP server is registered — the
+  `nt_mv`, `nt_archive`, `nt_supersede`, `nt_relink`) are live the moment the MCP server is registered — the
   agent captures memory by calling them. **No `nt_save` to build.**
 - *Optional automation* (OpenCode-side, no `nt` change): a small OpenCode
   **plugin** on `session.idle` or `session.compacted` that shells out to
@@ -162,7 +162,7 @@ Capability report complete; read+write verdict positive.
 ## 5. Open questions & risks
 
 - **Always-loaded token cost.** The rules file is billed every request. Keep
-  `nt export --tag rules` output to genuinely-stable, must-always-apply rules;
+  `nt export --tag rule` output to genuinely-stable, must-always-apply rules;
   push everything else behind `nt_search`/Skills.
 - **Synchronous tool latency.** `nt` queries are local-fs and fast. `nt_search`
   now returns bounded stubs (default `limit` 8, `truncated` flag) rather than

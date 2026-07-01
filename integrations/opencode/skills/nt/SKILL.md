@@ -72,6 +72,8 @@ distinguishable from the user's hand-entered items (the MCP tools default it).
 - `nt_archive` — retire a stale note from the index/search (reversible).
 - `nt_supersede` (handle, by) — mark a note replaced by another; the old one leaves
   the index so a resume sees only the current decision.
+- `nt_relink` (from, to) — repoint every `[[link]]` from one handle to another
+  (e.g. after superseding, redirect references to the canonical note).
 
 **Dedup guard:** `nt_note` refuses a near-duplicate of an existing note (parallel
 agents often record the same decision). When it errors, prefer to **update** the

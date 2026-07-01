@@ -137,6 +137,7 @@ var toolDefs = []toolDef{
 			"folder":        sp("only notes under this folder, e.g. ref"),
 			"limit":         map[string]any{"type": "integer", "description": "cap the note catalog to N (truncated=true when more exist); scope with tag/folder for big stores"},
 			"updated_since": sp("only notes changed on/after this date (today|+3d|YYYY-MM-DD) — 'what changed since last session'"),
+			"format":        sp("'compact' for terse one-line-per-item text (cheaper — prefer for the session-start load); default is JSON"),
 			"workstream":    wsArg,
 		}),
 	},
