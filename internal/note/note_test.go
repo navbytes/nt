@@ -1,9 +1,11 @@
 package note
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/navbytes/nt/internal/store"
@@ -192,15 +194,99 @@ func TestSavePreservesUnknownFrontmatter(t *testing.T) {
 	}
 }
 
-func TestWithinDir(t *testing.T) {
-	base := "/store/notes"
-	if !withinDir(base, "/store/notes/work/x.md") {
-		t.Error("a path inside notes/ should be allowed")
+// claimPath must keep the resolved path under the notes root (the containment
+// barrier before the create sink), refusing any dir that escapes it.
+func TestClaimPathContainment(t *testing.T) {
+	root := t.TempDir()
+	// A dir inside the root → succeeds and returns a path under root.
+	p, err := claimPath(root, root, "ok")
+	if err != nil || !strings.HasPrefix(p, root) {
+		t.Fatalf("in-root claim should succeed: p=%q err=%v", p, err)
 	}
-	if withinDir(base, "/store/secrets.txt") {
-		t.Error("a sibling path must be rejected")
+	// A dir outside the root (its parent) → refused.
+	if _, err := claimPath(root, filepath.Dir(root), "x"); err == nil {
+		t.Error("claimPath must refuse a path outside the notes root")
 	}
-	if withinDir(base, "/store/notes/../../etc/passwd") {
-		t.Error("a traversal path must be rejected")
+}
+
+// TestTitlePersistsWhenBodyH1Differs: an explicit title must survive reload even
+// when the body opens with a different H1 (regression: title was lost to the H1,
+// poisoning the index and breaking get-by-title).
+func TestTitlePersistsWhenBodyH1Differs(t *testing.T) {
+	s := testStore(t)
+	n, err := Create(s, "Auth token refresh design", "# Decision\n\nUse SELECT FOR UPDATE.", nil, "cli", "decisions")
+	if err != nil {
+		t.Fatal(err)
 	}
+	got, err := Load(n.Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Title != "Auth token refresh design" {
+		t.Fatalf("title not preserved: got %q", got.Title)
+	}
+	if !strings.Contains(string(mustRead(t, n.Path)), "title: Auth token refresh design") {
+		t.Error("expected a title: frontmatter key when body H1 differs")
+	}
+}
+
+// A note whose body H1 already equals its title stays frontmatter-clean (no
+// redundant title: key).
+func TestTitleNotDuplicatedWhenH1Matches(t *testing.T) {
+	s := testStore(t)
+	n, err := Create(s, "Clean Note", "# Clean Note\n\nbody", nil, "cli", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(mustRead(t, n.Path)), "title:") {
+		t.Error("title: should not be written when the body H1 already matches")
+	}
+	if got, _ := Load(n.Path); got.Title != "Clean Note" {
+		t.Errorf("title wrong: %q", got.Title)
+	}
+}
+
+// TestConcurrentSameSlugNoLoss: many notes with the same title created at once must
+// each get their own file (regression: a stat-then-write race clobbered ~half).
+func TestConcurrentSameSlugNoLoss(t *testing.T) {
+	s := testStore(t)
+	const n = 40
+	var wg sync.WaitGroup
+	errs := make(chan error, n)
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			if _, err := Create(s, "Same Title", fmt.Sprintf("instance %d", i), nil, "cli", ""); err != nil {
+				errs <- err
+			}
+		}(i)
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Fatalf("concurrent create failed: %v", err)
+	}
+	notes, err := List(s)
+	if err != nil {
+		t.Fatal(err)
+	}
+	count := 0
+	for _, nt := range notes {
+		if strings.HasPrefix(nt.Rel, "same-title") {
+			count++
+		}
+	}
+	if count != n {
+		t.Fatalf("expected %d distinct note files, got %d (data loss from slug race)", n, count)
+	}
+}
+
+func mustRead(t *testing.T, path string) []byte {
+	t.Helper()
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return b
 }

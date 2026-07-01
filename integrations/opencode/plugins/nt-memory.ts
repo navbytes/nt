@@ -14,9 +14,9 @@
  *    `todo.updated` — the OpenCode analog of Claude Code's `nt hook`.
  *
  * The knowledge base (everything in nt outside the small rules/memory core) is
- * NOT injected — it stays behind the nt MCP tools (nt_search / nt_recall /
- * nt_links), fetched on demand so it costs zero tokens until used. Register those
- * once with:  nt mcp install --client opencode
+ * NOT injected — it stays behind the nt MCP tools (nt_index / nt_search /
+ * nt_get / nt_links), fetched on demand so it costs zero tokens until used.
+ * Register those once with:  nt mcp install --client opencode
  *
  * Everything here is wrapped so a missing or broken nt can never break a session.
  *
@@ -73,7 +73,7 @@ export const NtMemory: Plugin = async ({ $ }) => {
   // Compile the always-in-context block: rules first, then core memory. Each is a
   // separate `nt export` (tag filters are AND-combined, so two tags need two
   // calls). Provenance comments are dropped to save tokens — the agent can still
-  // nt_search/nt_recall the source note by content.
+  // nt_search/nt_get the source note by content.
   const compile = async (): Promise<string> => {
     const [rules, memory] = await Promise.all([
       nt(["export", "--tag", CONFIG.rulesTag, "--title", "Rules", "--no-provenance"]),

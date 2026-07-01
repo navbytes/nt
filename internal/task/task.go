@@ -216,6 +216,16 @@ func (t *Task) Links() []string {
 	return out
 }
 
+// Display is the human-readable task text for contexts that show a task by
+// reference (backlinks, "links to me") — the description with [[wiki-link]]
+// markup removed and whitespace collapsed, so a linked task reads as a clean
+// title instead of exposing link syntax. Tags/projects are kept (they're part of
+// the task); key:value metadata is already excluded from Text.
+func (t *Task) Display() string {
+	s := linkRe.ReplaceAllString(t.Text, "")
+	return strings.Join(strings.Fields(s), " ")
+}
+
 func prefixed(text string, p byte) []string {
 	var out []string
 	for _, w := range strings.Fields(text) {

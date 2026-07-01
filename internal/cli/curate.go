@@ -76,8 +76,8 @@ func cmdShow(args []string) int {
 }
 
 // cmdNotes lists notes (one row per note), optionally filtered by folder/tag —
-// the note-side counterpart to `nt list` for tasks. Without it the only way to
-// enumerate notes was `nt recall` (which leads with every task) or shelling to ls.
+// the note-side counterpart to `nt list` for tasks (a fuller listing than the
+// `nt index` catalog, which is tuned for an agent's cheap read-back).
 func cmdNotes(args []string) int {
 	fs := flag.NewFlagSet("notes", flag.ContinueOnError)
 	folder := fs.String("folder", "", "only notes under this folder")

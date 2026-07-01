@@ -21,6 +21,7 @@ import (
 type Cache struct {
 	mu      sync.Mutex
 	entries map[string]entry
+	byID    map[string]*Note // id → note, rebuilt each List for O(1) get-by-id
 }
 
 type entry struct {
@@ -30,7 +31,17 @@ type entry struct {
 }
 
 // NewCache returns an empty note cache.
-func NewCache() *Cache { return &Cache{entries: map[string]entry{}} }
+func NewCache() *Cache { return &Cache{entries: map[string]entry{}, byID: map[string]*Note{}} }
+
+// ByID returns the note with the given id as of the last List (nil if none). It
+// does not walk the dir, so callers should List first to refresh — the id index
+// is rebuilt on every List. This turns a get-by-id from an O(notes) resolve scan
+// into an O(1) map lookup.
+func (c *Cache) ByID(id string) *Note {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.byID[id]
+}
 
 // List returns all notes under notes/, reusing unchanged files from the cache
 // and re-parsing only those that were added or modified. Deleted files are
@@ -94,5 +105,16 @@ func (c *Cache) List(s *store.Store) ([]*Note, error) {
 	c.mu.Unlock()
 
 	sort.Slice(out, func(i, j int) bool { return out[i].Rel < out[j].Rel })
+
+	// Rebuild the id index from the current set (cheap — no parsing).
+	c.mu.Lock()
+	c.byID = make(map[string]*Note, len(out))
+	for _, n := range out {
+		if n.ID != "" {
+			c.byID[n.ID] = n
+		}
+	}
+	c.mu.Unlock()
+
 	return out, nil
 }

@@ -24,6 +24,7 @@ import (
 	"github.com/navbytes/nt/internal/search"
 	"github.com/navbytes/nt/internal/task"
 	"github.com/navbytes/nt/internal/view"
+	"github.com/navbytes/nt/internal/workstream"
 )
 
 const protocolVersion = "2024-11-05"
@@ -34,12 +35,28 @@ func Serve(version string) error {
 	if err != nil {
 		return err
 	}
-	return (&server{eng: e, version: version}).loop(os.Stdin, os.Stdout)
+	return (&server{eng: e, version: version, cache: note.NewCache()}).loop(os.Stdin, os.Stdout)
 }
 
 type server struct {
 	eng     *mutate.Engine
 	version string
+	cache   *note.Cache // parse cache for read handlers: re-stat every call, re-parse only what changed
+}
+
+// listNotes returns all notes via the per-server parse cache. It stats every note
+// file each call (so reads stay fresh and read-your-writes holds) but re-parses
+// only files that changed since the last call — turning the O(notes) re-parse that
+// each read tool used to do into an O(changed) one. Falls back to an empty slice
+// on error (retrieval prefers a partial answer over failing). Read handlers only:
+// write handlers mutate notes and must not touch cache-shared pointers.
+func (s *server) listNotes() []*note.Note {
+	if s.cache == nil {
+		ns, _ := note.List(s.eng.S)
+		return ns
+	}
+	ns, _ := s.cache.List(s.eng.S)
+	return ns
 }
 
 type request struct {
@@ -152,8 +169,14 @@ func (s *server) dispatch(name string, a map[string]any) (string, error) {
 		return s.update(a)
 	case "nt_note":
 		return s.note(a)
-	case "nt_recall":
-		return s.recall(a)
+	case "nt_supersede":
+		return s.supersede(a)
+	case "nt_relink":
+		return s.relink(a)
+	case "nt_index":
+		return s.index(a)
+	case "nt_get":
+		return s.get(a)
 	case "nt_log":
 		return s.log(a)
 	case "nt_search":
@@ -186,7 +209,7 @@ func (s *server) ready(a map[string]any) (string, error) {
 		if t.Done || (blocked[t.ID()] && !t.Done) {
 			continue // done or dependency-blocked → not ready
 		}
-		if !wsVisible(t.Key("ws"), ws) {
+		if !workstream.Visible(t.Key("ws"), ws) {
 			continue // another agent's parallel work; shared/own tasks stay visible
 		}
 		if source != "" && t.Source() != source {
@@ -249,12 +272,11 @@ func (s *server) status(a map[string]any) (string, error) {
 	}
 	project, tag := strings.TrimSpace(str(a, "project")), strings.TrimSpace(str(a, "tag"))
 	ws := s.workstream(a)
-	notes, _ := note.List(s.eng.S)
-	notes = note.Active(notes) // a resuming agent gets the working set, not retired memory
+	notes := note.Active(s.listNotes()) // a resuming agent gets the working set, not retired memory
 	blocked := task.BlockedIDs(d.Tasks())
 
 	inScope := func(t *task.Task) bool {
-		if !wsVisible(t.Key("ws"), ws) {
+		if !workstream.Visible(t.Key("ws"), ws) {
 			return false // another agent's parallel work
 		}
 		if project != "" && !contains(t.Projects(), project) {
@@ -425,18 +447,74 @@ func (s *server) add(a map[string]any) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	sim := s.similarToTask(created)
 	if splitNote != "" {
 		hint := "detail saved as the task's linked note under notes/__tasks__/ — following the task opens it."
 		if strings.TrimSpace(str(a, "body")) == "" {
 			hint = "text was long, so it was split: a short title on the task, the full text in a linked note (notes/__tasks__/). Prefer a short text + a separate body next time."
 		}
-		return jsonText(map[string]any{
-			"task": taskToOut(created),
-			"note": splitNote,
-			"hint": hint,
-		}), nil
+		res := map[string]any{"task": taskToOut(created), "note": splitNote, "hint": hint}
+		if len(sim) > 0 {
+			res["similar"] = sim
+		}
+		return jsonText(res), nil
 	}
-	return jsonText(taskToOut(created)), nil
+	// Flat top-level task shape (backward-compatible), plus a non-blocking `similar`
+	// list so an agent notices it may be doubling a teammate's task/decision.
+	res := toMap(taskToOut(created))
+	if len(sim) > 0 {
+		res["similar"] = sim
+	}
+	return jsonText(res), nil
+}
+
+// similarToTask finds open tasks (shared project/tag + similar title) and active
+// decision notes (shared tag + similar title) that the new task likely duplicates
+// — the task-layer analog of the note dedup guard, but advisory (tasks legitimately
+// repeat, so this never blocks).
+func (s *server) similarToTask(created *task.Task) []map[string]string {
+	if created == nil {
+		return nil
+	}
+	title := created.Display()
+	out := []map[string]string{}
+	if d, err := s.eng.Read(); err == nil {
+		for _, t := range d.Tasks() {
+			if t.ID() == created.ID() || t.Done {
+				continue
+			}
+			shared := false
+			for _, p := range created.Projects() {
+				if contains(t.Projects(), p) {
+					shared = true
+				}
+			}
+			for _, tg := range created.Tags() {
+				if contains(t.Tags(), tg) {
+					shared = true
+				}
+			}
+			if shared && note.TitleOverlap(title, t.Display()) >= 0.5 {
+				out = append(out, map[string]string{"kind": "task", "id": t.ID(), "text": t.Display()})
+			}
+		}
+	}
+	tags := created.Tags()
+	for _, n := range note.Active(s.listNotes()) {
+		if n.Reserved() {
+			continue
+		}
+		shared := false
+		for _, tg := range tags {
+			if contains(n.Tags, tg) {
+				shared = true
+			}
+		}
+		if shared && note.TitleOverlap(title, n.Title) >= 0.5 {
+			out = append(out, map[string]string{"kind": "note", "id": n.ID, "title": n.Title})
+		}
+	}
+	return out
 }
 
 func (s *server) done(a map[string]any) (string, error) {
@@ -529,72 +607,277 @@ func (s *server) note(a map[string]any) (string, error) {
 	if source == "" {
 		source = "claude"
 	}
-	n, err := note.Create(s.eng.S, title, str(a, "body"), strSlice(a, "tags"), source, str(a, "folder"))
+	tags := strSlice(a, "tags")
+	supersede := strings.TrimSpace(str(a, "supersede"))
+
+	// Dedup-on-write guard: refuse a near-duplicate of an existing note so parallel
+	// agents don't silently fork the same decision. The agent then updates it,
+	// supersedes it, or passes force=true to record a deliberate separate note.
+	if supersede == "" && !boolArg(a, "force") {
+		if sim := note.FindSimilar(note.Active(s.listNotes()), title, tags); len(sim) > 0 {
+			ids := make([]string, 0, len(sim))
+			for _, n := range sim {
+				ids = append(ids, fmt.Sprintf("%s (%q)", n.ID, n.Title))
+			}
+			return "", fmt.Errorf("near-duplicate note(s) already exist: %s — update one (nt_tag/nt_mv/nt_get), replace it (supersede=<id>), or set force=true for a deliberate separate note", strings.Join(ids, "; "))
+		}
+	}
+
+	n, err := note.Create(s.eng.S, title, str(a, "body"), tags, source, str(a, "folder"))
 	if err != nil {
 		return "", err
 	}
-	return jsonText(noteToOut(n)), nil
+	if desc := strings.TrimSpace(str(a, "description")); desc != "" {
+		n.Extra = append(n.Extra, "description: "+desc)
+		if err := n.Save(); err != nil {
+			return "", err
+		}
+	}
+	if supersede != "" {
+		if err := s.markSuperseded(supersede, n.ID); err != nil {
+			return "", err
+		}
+	}
+	// Keep the note's fields at the top level (backward-compatible), adding
+	// danglingLinks / superseded only when relevant.
+	res := toMap(noteToOut(n))
+	if dangling := s.danglingLinks(n); len(dangling) > 0 {
+		res["danglingLinks"] = dangling // bad outbound [[refs]] to fix now
+	}
+	if supersede != "" {
+		res["superseded"] = supersede
+	}
+	return jsonText(res), nil
 }
 
-func (s *server) recall(a map[string]any) (string, error) {
+// toMap flattens a struct to a map via its JSON tags, so extra keys can be added
+// to a response without losing the struct's top-level shape.
+func toMap(v any) map[string]any {
+	b, _ := json.Marshal(v)
+	m := map[string]any{}
+	_ = json.Unmarshal(b, &m)
+	return m
+}
+
+// supersede marks one note as replaced by another (nt_supersede).
+func (s *server) supersede(a map[string]any) (string, error) {
+	oldH := strings.TrimSpace(str(a, "handle"))
+	by := strings.TrimSpace(str(a, "by"))
+	if oldH == "" || by == "" {
+		return "", fmt.Errorf("handle and by are required (the old note, and the note that replaces it)")
+	}
+	notes := s.listNotes()
+	newNote, ok := resolveNoteMCP(notes, by)
+	if !ok {
+		return "", fmt.Errorf("no note %q (by)", by)
+	}
+	if err := s.markSuperseded(oldH, newNote.ID); err != nil {
+		return "", err
+	}
+	return jsonText(map[string]any{"superseded": oldH, "canonical": newNote.ID}), nil
+}
+
+// relink rewrites a wrong outbound [[link]] inside a note's body (nt_relink).
+func (s *server) relink(a map[string]any) (string, error) {
+	handle := strings.TrimSpace(str(a, "handle"))
+	oldT := strings.TrimSpace(str(a, "old"))
+	newT := strings.TrimSpace(str(a, "new"))
+	if handle == "" || oldT == "" || newT == "" {
+		return "", fmt.Errorf("handle, old, and new are required")
+	}
+	notes := s.listNotes()
+	n, ok := resolveNoteMCP(notes, handle)
+	if !ok {
+		return "", fmt.Errorf("no note %q", handle)
+	}
+	if _, ok := links.Resolve(newT, nil, notes); !ok {
+		return "", fmt.Errorf("new target [[%s]] doesn't resolve to any note", newT)
+	}
+	body, count := relinkBody(n.Body, oldT, newT)
+	if count == 0 {
+		return "", fmt.Errorf("no [[%s]] found in note %q", oldT, handle)
+	}
+	n.Body = body
+	if err := n.Save(); err != nil {
+		return "", err
+	}
+	return jsonText(map[string]any{"id": n.ID, "relinked": count, "from": oldT, "to": newT}), nil
+}
+
+// relinkBody rewrites [[oldT]], [[oldT|alias]] and [[oldT#frag]] to newT.
+func relinkBody(body, oldT, newT string) (string, int) {
+	count := 0
+	for _, suffix := range []string{"]]", "|", "#"} {
+		from := "[[" + oldT + suffix
+		count += strings.Count(body, from)
+		body = strings.ReplaceAll(body, from, "[["+newT+suffix)
+	}
+	return body, count
+}
+
+// markSuperseded stamps oldHandle's note with superseded_by=newID.
+func (s *server) markSuperseded(oldHandle, newID string) error {
+	old, ok := resolveNoteMCP(s.listNotes(), oldHandle)
+	if !ok {
+		return fmt.Errorf("no note %q to supersede", oldHandle)
+	}
+	if old.ID == newID {
+		return fmt.Errorf("a note can't supersede itself")
+	}
+	old.SupersededBy = newID
+	return old.Save()
+}
+
+// danglingLinks returns the [[links]] in a note's body that don't resolve.
+func (s *server) danglingLinks(n *note.Note) []string {
+	if !strings.Contains(n.Body, "[[") {
+		return nil
+	}
+	d, _ := s.eng.Read()
+	notes := s.listNotes()
+	var out []string
+	for _, raw := range links.Wikilinks(n.Body) {
+		if _, ok := links.Resolve(raw, d, notes); !ok {
+			out = append(out, raw)
+		}
+	}
+	return out
+}
+
+// resolveNoteMCP resolves a handle to a note (id/slug/title), nil if not found.
+func resolveNoteMCP(notes []*note.Note, handle string) (*note.Note, bool) {
+	it, ok := links.Resolve(handle, nil, notes)
+	if !ok || it.Kind != "note" {
+		return nil, false
+	}
+	for _, n := range notes {
+		if n.Path == it.Path {
+			return n, true
+		}
+	}
+	return nil, false
+}
+
+// index is the progressive-disclosure entry point: a compact catalog of the
+// knowledge base — one stub per note (id, title, one-line description, tags,
+// folder), NO bodies — plus the active (open+doing, unblocked) task list. An agent
+// loads this cheaply to resume context, then fetches only the notes it needs by id
+// (nt_get) or nt_search. It replaces the old bulk recall, which returned every note
+// body and grew linearly with the whole corpus.
+func (s *server) index(a map[string]any) (string, error) {
 	d, err := s.eng.Read()
 	if err != nil {
 		return "", err
 	}
-	source, since := str(a, "source"), str(a, "since")
-	ws := s.workstream(a)
-	includeDone := boolArg(a, "include_done")
-	var tasks []*task.Task
-	for _, t := range d.Tasks() {
-		if !includeDone && t.Done {
-			continue // recall restores ACTIVE context; finished work lives in nt_log
+	tag, folder := strings.TrimSpace(str(a, "tag")), strings.Trim(strings.TrimSpace(str(a, "folder")), "/")
+	since := ""
+	if s := strings.TrimSpace(str(a, "updated_since")); s != "" {
+		if d, ok := dateparse.Date(s); ok {
+			since = d
 		}
-		if !wsVisible(t.Key("ws"), ws) {
-			continue // tasks isolate per workstream; notes below stay shared
-		}
-		if source != "" && t.Source() != source {
-			continue
-		}
-		if since != "" && t.Created != "" && t.Created < since {
-			continue
-		}
-		tasks = append(tasks, t)
 	}
-	allNotes, _ := note.List(s.eng.S)
-	allNotes = note.Active(allNotes) // recall restores active context; archived notes are retired
-	var notes []*note.Note
-	for _, n := range allNotes {
-		if source != "" && n.Source != source {
+	notes := note.Active(s.listNotes())
+	stubs := make([]noteStub, 0, len(notes))
+	for _, n := range notes {
+		if n.Reserved() {
+			continue // task-detail notes aren't part of the KB catalog
+		}
+		if folder != "" && !strings.HasPrefix(n.Rel, folder+"/") {
 			continue
 		}
-		if since != "" && n.Created != "" && shortDate(n.Created) < since {
+		if tag != "" && !contains(n.Tags, tag) {
 			continue
 		}
-		notes = append(notes, n)
+		if since != "" && noteChangedDate(n) < since {
+			continue // "what changed since T"
+		}
+		stubs = append(stubs, noteToStub(n, ""))
+	}
+	sort.SliceStable(stubs, func(i, j int) bool {
+		if stubs[i].Folder != stubs[j].Folder {
+			return stubs[i].Folder < stubs[j].Folder
+		}
+		return stubs[i].Title < stubs[j].Title
+	})
+	noteTotal := len(stubs)
+	if lim := intArg(a, "limit"); lim > 0 && len(stubs) > lim {
+		stubs = stubs[:lim]
 	}
 
-	// Context-cost controls (opt-in, so the default full reload is unchanged):
-	// limit keeps the most recent N of each (the cheap "what was I doing"); brief
-	// drops note bodies → a pointer index the agent can nt_view/nt_links on demand.
-	if limit := intArg(a, "limit"); limit > 0 {
-		if len(tasks) > limit {
-			tasks = tasks[len(tasks)-limit:]
+	ws := s.workstream(a)
+	blocked := task.BlockedIDs(d.Tasks())
+	var active, scoped []*task.Task
+	for _, t := range d.Tasks() {
+		if !workstream.Visible(t.Key("ws"), ws) {
+			continue
 		}
-		if len(notes) > limit {
-			sort.SliceStable(notes, func(i, j int) bool { return notes[i].Created > notes[j].Created })
-			notes = notes[:limit]
+		if tag != "" && !contains(t.Tags(), tag) {
+			continue
+		}
+		scoped = append(scoped, t)
+		if !t.Done && !blocked[t.ID()] {
+			active = append(active, t)
 		}
 	}
-	brief := boolArg(a, "brief")
-	nout := make([]noteOut, 0, len(notes))
-	for _, n := range notes {
-		o := noteToOut(n)
-		if brief {
-			o.Body = ""
-		}
-		nout = append(nout, o)
+	task.SortByUrgency(active)
+	// A few recent completions so a resuming agent sees what's already handled —
+	// not just what's open (the active list omits done tasks).
+	recent := task.CompletedSince(scoped, "")
+	if len(recent) > 5 {
+		recent = recent[:5]
 	}
-	return jsonText(map[string]any{"tasks": tasksOut(tasks), "notes": nout}), nil
+	out := map[string]any{
+		"notes": stubs, "tasks": tasksOut(active), "recentlyDone": tasksOut(recent),
+	}
+	if noteTotal > len(stubs) {
+		out["truncated"] = true
+		out["noteTotal"] = noteTotal
+	}
+	return jsonText(out), nil
+}
+
+// get fetches one note's full content by handle (id/slug/title) — the on-demand
+// half of progressive disclosure. With `section`, it returns only the markdown
+// block under the matching heading, so an agent can pull a slice, not the whole
+// note.
+func (s *server) get(a map[string]any) (string, error) {
+	handle := strings.TrimSpace(str(a, "handle"))
+	if handle == "" {
+		return "", fmt.Errorf("handle is required (a note id, slug, or title)")
+	}
+	notes := s.listNotes() // refreshes the cache's id index used by ByID below
+	// Fast path: a bare id resolves via the cache's id index in O(1), skipping the
+	// slug/title resolve scan. Falls through to Resolve for slug/title handles.
+	var n *note.Note
+	if s.cache != nil {
+		n = s.cache.ByID(handle)
+	}
+	if n == nil {
+		it, ok := links.Resolve(handle, nil, notes)
+		if !ok || it.Kind != "note" {
+			return "", fmt.Errorf("no note %q", handle)
+		}
+		for _, cand := range notes {
+			if cand.Path == it.Path {
+				n = cand
+				break
+			}
+		}
+	}
+	if n == nil {
+		return "", fmt.Errorf("no note %q", handle)
+	}
+	body := strings.TrimSpace(n.Body)
+	if section := strings.TrimSpace(str(a, "section")); section != "" {
+		body = extractSection(n.Body, section)
+		if body == "" {
+			return "", fmt.Errorf("no section %q in note %q", section, handle)
+		}
+	}
+	return jsonText(map[string]any{
+		"id": n.ID, "title": n.Title, "tags": n.Tags, "folder": pathDir(n.Rel),
+		"source": n.Source, "body": body,
+	}), nil
 }
 
 func (s *server) log(a map[string]any) (string, error) {
@@ -616,7 +899,7 @@ func (s *server) log(a map[string]any) (string, error) {
 			if source != "" && t.Source() != source {
 				continue
 			}
-			if !wsVisible(t.Key("ws"), ws) {
+			if !workstream.Visible(t.Key("ws"), ws) {
 				continue
 			}
 			kept = append(kept, t)
@@ -626,6 +909,12 @@ func (s *server) log(a map[string]any) (string, error) {
 	return jsonText(tasksOut(done)), nil
 }
 
+// search is the KB's on-demand retrieval verb. It returns ranked STUBS (id,
+// title, one-line description, a query-context snippet, tags, folder) — NOT full
+// bodies — so a broad query costs a few hundred tokens, not the whole corpus. The
+// agent picks an id and fetches it with nt_get. Ranking: title matches first, then
+// body matches; results are hard-capped by `limit` (default 8). Pass full=true to
+// get bodies inline for the (still limited) hits.
 func (s *server) search(a map[string]any) (string, error) {
 	q := strings.TrimSpace(str(a, "query"))
 	tag := strings.TrimSpace(str(a, "tag"))
@@ -636,45 +925,93 @@ func (s *server) search(a map[string]any) (string, error) {
 	if typ == "" {
 		typ = "all"
 	}
+	limit := intArg(a, "limit")
+	if limit <= 0 {
+		limit = 8
+	}
+	full := boolArg(a, "full")
 	d, err := s.eng.Read()
 	if err != nil {
 		return "", err
 	}
-	notes, _ := note.List(s.eng.S)
-	notes = note.Active(notes) // search returns the working set (body scan below skips archived too)
+	notes := note.Active(s.listNotes())
 	ql := strings.ToLower(q)
 
-	var nout []noteOut
+	type scored struct {
+		n       *note.Note
+		snippet string
+		rank    int // 0 = title match, 1 = body/tag match — title ranks first
+	}
+	var hits []scored
 	if typ == "all" || typ == "note" {
-		bodyHit := map[string]bool{}
-		if q != "" {
-			if hits, e := search.Literal(q, s.eng.S.NotesDir()); e == nil {
-				for _, h := range hits {
-					bodyHit[h.Path] = true
-				}
-			}
-		}
 		for _, n := range notes {
+			if n.Reserved() {
+				continue // task-detail / machine notes aren't part of the KB catalog
+			}
 			if tag != "" && !contains(n.Tags, tag) {
 				continue
 			}
-			if q == "" || strings.Contains(strings.ToLower(n.Title), ql) || bodyHit[n.Path] {
-				nout = append(nout, noteToOut(n))
+			// Match title first (rank 0), then the BODY only (rank 1). Scanning the
+			// parsed body — not the raw file — means a query never matches frontmatter
+			// (so a tag like `auth` no longer masquerades as a body hit), and the
+			// snippet is a real excerpt around the term, not a `tags: […]` line.
+			switch {
+			case q == "" || strings.Contains(strings.ToLower(n.Title), ql):
+				hits = append(hits, scored{n, "", 0})
+			default:
+				if snip := bodySnippet(n.Body, ql); snip != "" {
+					hits = append(hits, scored{n, snip, 1})
+				}
 			}
 		}
+		sort.SliceStable(hits, func(i, j int) bool {
+			if hits[i].rank != hits[j].rank {
+				return hits[i].rank < hits[j].rank
+			}
+			return hits[i].n.Rel < hits[j].n.Rel
+		})
 	}
+	noteTotal := len(hits)
+	if len(hits) > limit {
+		hits = hits[:limit]
+	}
+	var noteRes any
+	if full {
+		arr := make([]noteOut, 0, len(hits))
+		for _, h := range hits {
+			arr = append(arr, noteToOut(h.n))
+		}
+		noteRes = arr
+	} else {
+		arr := make([]noteStub, 0, len(hits))
+		for _, h := range hits {
+			arr = append(arr, noteToStub(h.n, h.snippet))
+		}
+		noteRes = arr
+	}
+
 	var tout []taskOut
+	taskTotal := 0
 	if typ == "all" || typ == "task" {
 		for _, t := range d.Tasks() {
 			if tag != "" && !contains(t.Tags(), tag) {
 				continue
 			}
 			if q == "" || strings.Contains(strings.ToLower(t.Text), ql) {
-				tout = append(tout, taskToOut(t))
+				taskTotal++
+				if len(tout) < limit {
+					tout = append(tout, taskToOut(t))
+				}
 			}
 		}
 	}
-	return jsonText(map[string]any{"notes": nout, "tasks": tout}), nil
+	out := map[string]any{"notes": noteRes, "tasks": tout}
+	if noteTotal > len(hits) || taskTotal > len(tout) {
+		// Never cap silently: tell the agent more exist so it can narrow the query.
+		out["truncated"] = true
+		out["totals"] = map[string]int{"notes": noteTotal, "tasks": taskTotal, "limit": limit}
+	}
+	return jsonText(out), nil
 }
 
 func (s *server) links(a map[string]any) (string, error) {
@@ -686,7 +1023,7 @@ func (s *server) links(a map[string]any) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	notes, _ := note.List(s.eng.S)
+	notes := s.listNotes()
 
 	forward := func(raws []string) []linkOut {
 		out := make([]linkOut, 0, len(raws))
@@ -866,12 +1203,135 @@ type noteOut struct {
 	Title    string   `json:"title"`
 	Tags     []string `json:"tags,omitempty"`
 	Source   string   `json:"source,omitempty"`
-	Archived bool     `json:"archived,omitempty"` // retired from recall/search/status
+	Archived bool     `json:"archived,omitempty"` // retired from search/status
 	Body     string   `json:"body,omitempty"`
 }
 
 func noteToOut(n *note.Note) noteOut {
 	return noteOut{ID: n.ID, Rel: n.Rel, Title: n.Title, Tags: n.Tags, Source: n.Source, Archived: n.Archived, Body: strings.TrimSpace(n.Body)}
+}
+
+// noteStub is a note WITHOUT its body — the progressive-disclosure unit returned
+// by nt_index and nt_search. The agent reads the stub (id + description + snippet)
+// to decide whether to nt_get the full note.
+type noteStub struct {
+	ID          string   `json:"id,omitempty"`
+	Rel         string   `json:"rel,omitempty"`
+	Title       string   `json:"title"`
+	Description string   `json:"description,omitempty"`
+	Snippet     string   `json:"snippet,omitempty"` // query-context line (search only)
+	Tags        []string `json:"tags,omitempty"`
+	Folder      string   `json:"folder,omitempty"`
+	Source      string   `json:"source,omitempty"` // author/agent — ownership on a shared store
+	Updated     string   `json:"updated,omitempty"`
+}
+
+func noteToStub(n *note.Note, snippet string) noteStub {
+	upd := n.Updated
+	if upd == "" {
+		upd = n.Created
+	}
+	return noteStub{
+		ID: n.ID, Rel: n.Rel, Title: n.Title, Description: n.Description(160),
+		Snippet: snippet, Tags: n.Tags, Folder: pathDir(n.Rel), Source: n.Source, Updated: shortDate(upd),
+	}
+}
+
+// shortID is the last 6 chars of a ULID — the human-facing handle nt prints
+// (the entropy tail; the timestamp prefix is shared by same-second ids).
+func shortID(id string) string {
+	if len(id) <= 6 {
+		return id
+	}
+	return id[len(id)-6:]
+}
+
+// noteChangedDate is a note's effective change date (YYYY-MM-DD): the later of its
+// file mtime (catches external edits) and its frontmatter updated/created.
+func noteChangedDate(n *note.Note) string {
+	upd := n.Updated
+	if upd == "" {
+		upd = n.Created
+	}
+	d := shortDate(upd)
+	if !n.ModTime.IsZero() {
+		if m := n.ModTime.Format("2006-01-02"); m > d {
+			d = m
+		}
+	}
+	return d
+}
+
+// pathDir is the folder part of a notes/-relative path ("" for a root note).
+func pathDir(rel string) string {
+	if i := strings.LastIndex(rel, "/"); i >= 0 {
+		return rel[:i]
+	}
+	return ""
+}
+
+// bodySnippet returns the first body line containing ql (lowercased query),
+// collapsed and clamped — a real excerpt around the match. "" if no line matches
+// or ql is empty. Headings are skipped so the snippet is prose, not a "# Title".
+func bodySnippet(body, ql string) string {
+	if ql == "" {
+		return ""
+	}
+	for _, raw := range strings.Split(body, "\n") {
+		line := strings.TrimSpace(raw)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		if strings.Contains(strings.ToLower(line), ql) {
+			return clipLine(line, 160)
+		}
+	}
+	return ""
+}
+
+// clipLine collapses whitespace and truncates to one line ≤max chars.
+func clipLine(s string, max int) string {
+	s = strings.Join(strings.Fields(s), " ")
+	if max > 0 && len(s) > max {
+		return strings.TrimSpace(s[:max-1]) + "…"
+	}
+	return s
+}
+
+// extractSection returns the markdown block under the heading whose text matches
+// name (case-insensitive), up to the next heading of the same or higher level.
+// Returns "" if no such heading exists.
+func extractSection(body, name string) string {
+	lines := strings.Split(body, "\n")
+	want := strings.ToLower(strings.TrimSpace(name))
+	start, level := -1, 0
+	for i, ln := range lines {
+		t := strings.TrimSpace(ln)
+		if !strings.HasPrefix(t, "#") {
+			continue
+		}
+		h := strings.TrimSpace(strings.TrimLeft(t, "#"))
+		lv := len(t) - len(strings.TrimLeft(t, "#"))
+		if strings.ToLower(h) == want {
+			start, level = i, lv
+			break
+		}
+	}
+	if start < 0 {
+		return ""
+	}
+	end := len(lines)
+	for i := start + 1; i < len(lines); i++ {
+		t := strings.TrimSpace(lines[i])
+		if strings.HasPrefix(t, "#") {
+			lv := len(t) - len(strings.TrimLeft(t, "#"))
+			if lv <= level {
+				end = i
+				break
+			}
+		}
+	}
+	return strings.TrimSpace(strings.Join(lines[start:end], "\n"))
 }
 
 // linkOut is one forward link in the nt_links result.
@@ -910,7 +1370,14 @@ func backlinksOut(hits []search.Hit, notes []*note.Note) []map[string]string {
 			seen[hk] = true
 			out = append(out, map[string]string{"kind": "note", "handle": hk, "title": n.Title})
 		} else {
-			out = append(out, map[string]string{"kind": "task", "text": strings.TrimSpace(h.Text)})
+			// A task backlink: parse the raw todo.txt line into a clean reference
+			// (short id + display text) instead of leaking `id:<ULID>`/link markup.
+			row := map[string]string{"kind": "task", "text": strings.TrimSpace(h.Text)}
+			if t, ok := task.ParseLine(h.Text); ok && t.ID() != "" {
+				row["id"] = shortID(t.ID())
+				row["text"] = t.Display()
+			}
+			out = append(out, row)
 		}
 	}
 	return out

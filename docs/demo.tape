@@ -30,7 +30,7 @@ Type "nt ready" Enter
 Sleep 2s
 
 # Read it back — the AI-memory loop.
-Type "nt recall" Enter
+Type "nt index" Enter
 Sleep 2s
 
 # The terminal UI.

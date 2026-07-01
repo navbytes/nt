@@ -15,7 +15,7 @@ import (
 // cmdExport compiles selected notes (and optionally open tasks) into a single
 // document — the missing primitive for feeding nt content into an always-in-context
 // layer like OpenCode's `instructions` / AGENTS.md or a SKILL.md body. Unlike
-// `nt search`/`nt recall` (shaped for an agent's on-demand reads), export produces
+// `nt search`/`nt index` (shaped for an agent's on-demand reads), export produces
 // one clean, concatenated artifact suitable for a file an editor or agent loads at
 // startup.
 //
@@ -29,6 +29,7 @@ func cmdExport(args []string) int {
 	fs := flag.NewFlagSet("export", flag.ContinueOnError)
 	folder := fs.String("folder", "", "only notes under this folder")
 	format := fs.String("format", "md", "output format: md | json")
+	jsonAlias := fs.Bool("json", false, "alias for --format json (matches every other command's --json)")
 	out := fs.String("out", "", "write to this file instead of stdout")
 	title := fs.String("title", "", "H1 heading for the md document (optional)")
 	typ := fs.String("type", "note", "what to export: note | task | all")
@@ -37,9 +38,12 @@ func cmdExport(args []string) int {
 	noProvenance := fs.Bool("no-provenance", false, "omit the <!-- nt:id --> provenance lines")
 	var tags stringSlice
 	fs.Var(&tags, "tag", "only notes with this tag (repeatable, AND)")
-	flags, _ := splitArgs(args, map[string]bool{"include-archived": true, "no-provenance": true})
+	flags, _ := splitArgs(args, map[string]bool{"include-archived": true, "no-provenance": true, "json": true})
 	if err := fs.Parse(flags); err != nil {
 		return 2
+	}
+	if *jsonAlias {
+		*format = "json"
 	}
 	switch *format {
 	case "md", "json":

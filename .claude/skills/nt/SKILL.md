@@ -17,22 +17,25 @@ distinguishable from what the user typed by hand.
 > If the `nt` MCP server is registered with your client, **prefer the typed
 > `nt_*` tools over shelling out** — they go through the same store, default
 > `source` to `claude`, and avoid CLI-string mistakes. Capture: `nt_add`,
-> `nt_note`, `nt_done`, `nt_update`, `nt_tag`, `nt_mv`. Retrieve: `nt_ready`,
-> `nt_recall`, `nt_search`, `nt_links`, `nt_log`. Fall back to the `nt` commands
-> below when the tools aren't available — the workflow is identical.
+> `nt_note`, `nt_done`, `nt_update`, `nt_tag`, `nt_mv`. Retrieve: `nt_index`,
+> `nt_search`, `nt_get`, `nt_ready`, `nt_links`, `nt_log`. Fall back to the `nt`
+> commands below when the tools aren't available — the workflow is identical.
 
-## Start here: `nt ready` + `nt recall`
+## Start here: `nt index` + `nt ready`
 
-At the start of substantive work, find what's actionable and reload prior context:
+At the start of substantive work, load a cheap catalog of what exists — then open
+only what's relevant. Don't bulk-load note bodies (it wastes context and degrades
+reasoning).
 
 ```bash
-nt ready --json                     # open, UNBLOCKED tasks by urgency — start here
-nt recall --source claude --json    # the fuller context: tasks + notes you created before
+nt index --json                     # KB catalog: note stubs (id·title·description) + active tasks — no bodies
+nt ready --json                     # open, UNBLOCKED tasks by urgency
 ```
 
-`nt ready` is your "pick up here" feed; `nt recall` is the broader read. **Before
-creating anything, retrieve first** (`nt recall` / `nt search`) so you don't
-duplicate an item that already exists.
+`nt index` is your "what's here" catalog; `nt ready` is the task feed. **Before
+creating anything, retrieve first** (`nt index` / `nt search`) so you don't
+duplicate an item that already exists. To read a specific note, `nt show <id>`
+(MCP: `nt_get`); to find one, `nt search <q>` returns ranked stubs.
 
 ## Capture tasks
 
@@ -82,8 +85,9 @@ Durable memory needs the reasoning a future session would otherwise rediscover:
   to its origin: `nt add "backfill user.tier column" --discovered-from <id> --source claude`.
   `nt links <id>` then shows "discovered from ↑" / "discovered here ↳" both ways.
 - **Decisions, constraints, dead-ends** — write a note (not a task) so the *why*
-  survives. Treat it like a code comment for the next engineer; `nt recall --json`
-  returns note bodies so the next session reads it back in full.
+  survives. Treat it like a code comment for the next engineer; give it a
+  `--description` so it's findable in `nt index`, and the next session reads the
+  full body back with `nt show <id>` (MCP: `nt_get`).
 
 ## Find & navigate the knowledge base
 
@@ -133,7 +137,7 @@ the returned id directly with `nt links` / `nt tag` / `nt mv` / `nt rm`.
 ## Conventions
 
 - **Always** `--source claude` on items you create.
-- Retrieve (`recall`/`search`) before creating, to avoid duplicates.
+- Retrieve (`index`/`search`) before creating, to avoid duplicates.
 - Tasks are one line; put anything longer in a note and link to it.
 - Organize notes into folders (`ref/`, `decisions/`, `inbox/`) rather than a flat root.
 - The store is global at `$NT_DIR` (default `~/.local/share/nt`); `nt path` prints it.
@@ -143,9 +147,9 @@ the returned id directly with `nt links` / `nt tag` / `nt mv` / `nt rm`.
 When several agents share one store (e.g. parallel git worktrees), tasks are
 **isolated per workstream** so your in-flight work doesn't mix with another
 session's, while **notes stay shared** so knowledge cross-pollinates. This is
-automatic via the MCP tools when `NT_WORKSTREAM` is set (grove/CI/harness export
+automatic via the MCP tools and CLI `nt add` when `NT_WORKSTREAM` is set (grove/CI/harness export
 it; `auto` derives it from the git branch). You don't stamp anything — `nt_add`
-records it, and `nt_recall`/`nt_ready`/`nt_status`/`nt_log` scope to it.
+records it, and `nt_index`/`nt_ready`/`nt_status`/`nt_log` scope to it.
 
 - Tasks with no workstream (the human's CLI/TUI/web backlog) stay visible to
   everyone — only *another* agent's stamped tasks are hidden.

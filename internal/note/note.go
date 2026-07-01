@@ -29,8 +29,17 @@ type Note struct {
 	Updated  string // stamped when nt rewrites the note (retag, --field)
 	Archived bool   // frontmatter archived: true — retired from active views, still on disk
 	Favorite bool   // frontmatter favorite: true — starred/pinned for quick access
-	Body     string
-	Extra    []string // raw frontmatter lines for keys nt doesn't model (preserved verbatim)
+	// SupersededBy is the id of the note that replaces this one (frontmatter
+	// superseded_by:). A superseded note is dropped from active views like an
+	// archived one — so a resume sees the single canonical decision, not both
+	// forks — while the pointer preserves the trail.
+	SupersededBy string
+	// ModTime is the note file's last-modified time, set by List/Load/cache. It
+	// captures every change — including edits made outside nt (Obsidian, git) that
+	// never touch the `updated:` frontmatter — so "changed since T" is reliable.
+	ModTime time.Time
+	Body    string
+	Extra   []string // raw frontmatter lines for keys nt doesn't model (preserved verbatim)
 }
 
 // Slug derives a filesystem-safe slug from a title, falling back to a timestamp
@@ -86,32 +95,33 @@ func Create(s *store.Store, title, body string, tags []string, source, folder st
 	if clean, err := cleanFolder(folder); err != nil {
 		return nil, err
 	} else if clean != "" {
-		dir = filepath.Join(dir, filepath.FromSlash(clean))
+		dir = filepath.Clean(filepath.Join(dir, filepath.FromSlash(clean)))
+		// Containment barrier before the mkdir sink: the folder is untrusted (web
+		// input), so assert the resolved dir stays under notes/ before creating it.
+		if !contained(notesDir, dir) {
+			return nil, fmt.Errorf("refusing to create folder outside notes/: %q", dir)
+		}
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return nil, fmt.Errorf("create folder: %w", err)
 		}
 	}
-	n.Path = uniquePath(dir, Slug(title))
-	// Defense in depth against path traversal: cleanFolder rejects ".."/absolute
-	// folders and Slug strips the title to [a-z0-9-], so the path can't escape
-	// notes/ — but with a web endpoint feeding untrusted input we assert it
-	// explicitly rather than trust those barriers transitively.
-	if !withinDir(notesDir, n.Path) {
+	p, err := claimPath(notesDir, dir, Slug(title))
+	if err != nil {
+		return nil, err
+	}
+	n.Path = p
+	// Re-assert containment in this function before Save writes the file. claimPath
+	// already guards its own create sink, but a CodeQL barrier guard only sanitizes
+	// sinks in the same control-flow graph — the value flowing on into Save →
+	// store.WriteAtomic (os.Rename) lives in *this* CFG, so the barrier has to be
+	// here too, exactly as the pre-refactor withinDir check was.
+	if !contained(notesDir, n.Path) {
 		return nil, fmt.Errorf("refusing to write note outside notes/: %q", n.Path)
 	}
 	if err := n.Save(); err != nil {
 		return nil, err
 	}
 	return n, nil
-}
-
-// withinDir reports whether target resolves inside base (no "../" escape).
-func withinDir(base, target string) bool {
-	rel, err := filepath.Rel(base, target)
-	if err != nil {
-		return false
-	}
-	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
 // cleanFolder normalizes a slash-separated subfolder and refuses paths that
@@ -132,18 +142,49 @@ func cleanFolder(folder string) (string, error) {
 	return f, nil
 }
 
-// uniquePath avoids clobbering an existing note with the same slug.
-func uniquePath(dir, slug string) string {
-	p := filepath.Join(dir, slug+".md")
-	if _, err := os.Stat(p); os.IsNotExist(err) {
-		return p
+// contained reports whether target resolves inside root (no "../" escape) — the
+// path-traversal barrier guarding every filesystem sink that consumes untrusted
+// (title/folder/web) input. It uses the filepath.Rel + ".." idiom that CodeQL's
+// TaintedPath query recognizes as a sanitizing guard (a strings.HasPrefix compare
+// is not recognized), so placing it in a sink's own function sanitizes that sink.
+func contained(root, target string) bool {
+	rel, err := filepath.Rel(root, target)
+	if err != nil {
+		return false
 	}
-	for i := 2; ; i++ {
-		p := filepath.Join(dir, fmt.Sprintf("%s-%d.md", slug, i))
-		if _, err := os.Stat(p); os.IsNotExist(err) {
-			return p
+	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
+// claimPath atomically reserves a free note path for a slug under the notes root.
+// It O_EXCL-creates an empty placeholder so two concurrent processes can never pick
+// — and then clobber — the same filename (a stat-then-write race that silently loses
+// one write). Save later rewrites the placeholder we now own. On a collision it
+// advances the "-N" suffix, exactly like the old uniquePath.
+func claimPath(root, dir, slug string) (string, error) {
+	for i := 1; i < 1_000_000; i++ {
+		name := slug + ".md"
+		if i > 1 {
+			name = fmt.Sprintf("%s-%d.md", slug, i)
 		}
+		p := filepath.Clean(filepath.Join(dir, name))
+		// Containment barrier before the create sink: the resolved path must stay
+		// under notes/. Slug strips titles to [a-z0-9-] and cleanFolder rejects
+		// ".."/absolute folders, so this can't fail in practice — but asserting it
+		// here defeats any path traversal from untrusted (e.g. web) input.
+		if !contained(root, p) {
+			return "", fmt.Errorf("refusing note path outside notes/: %q", p)
+		}
+		f, err := os.OpenFile(p, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+		if err == nil {
+			_ = f.Close()
+			return p, nil
+		}
+		if !os.IsExist(err) {
+			return "", fmt.Errorf("claim note path: %w", err)
+		}
+		// exists — another note (or a racing writer) has this slug; try the next.
 	}
+	return "", fmt.Errorf("too many slug collisions for %q", slug)
 }
 
 // Save writes the note atomically with frontmatter.
@@ -159,6 +200,16 @@ func (n *Note) Save() error {
 	if len(n.Aliases) > 0 {
 		fmt.Fprintf(&b, "aliases: [%s]\n", strings.Join(n.Aliases, ", "))
 	}
+	// Persist the title when the body's own H1 would otherwise win on reload
+	// (Load's precedence is frontmatter title → alias → first body heading). Without
+	// this, `nt note --title X` with a body starting "# Y" silently becomes titled
+	// "Y" — breaking the index and get-by-title. Only emitted when it actually
+	// differs, so Obsidian notes whose H1 == title stay frontmatter-clean.
+	if n.Title != "" {
+		if bh := firstHeading(n.Body); bh != "" && bh != n.Title {
+			fmt.Fprintf(&b, "title: %s\n", n.Title)
+		}
+	}
 	if n.Source != "" {
 		fmt.Fprintf(&b, "source: %s\n", n.Source)
 	}
@@ -173,6 +224,9 @@ func (n *Note) Save() error {
 	}
 	if n.Favorite {
 		b.WriteString("favorite: true\n")
+	}
+	if n.SupersededBy != "" {
+		fmt.Fprintf(&b, "superseded_by: %s\n", n.SupersededBy)
 	}
 	for _, line := range n.Extra { // unknown keys (Obsidian properties), verbatim
 		b.WriteString(line)
@@ -200,6 +254,9 @@ func Load(path string) (*Note, error) {
 		return nil, err
 	}
 	n := &Note{Path: path}
+	if info, serr := os.Stat(path); serr == nil {
+		n.ModTime = info.ModTime()
+	}
 	text := string(data)
 	if strings.HasPrefix(text, fmDelim+"\n") {
 		rest := text[len(fmDelim)+1:]
@@ -253,6 +310,8 @@ func parseFrontmatter(fm string, n *Note) {
 			n.Archived = unquote(val) == "true"
 		case "favorite":
 			n.Favorite = unquote(val) == "true"
+		case "superseded_by":
+			n.SupersededBy = unquote(val)
 		case "title":
 			if v := unquote(val); v != "" {
 				n.Title = v
@@ -351,10 +410,121 @@ func humanizeFilename(path string) string {
 // Active drops archived notes — the working set, for views/search that should
 // hide retired notes. List itself returns everything (archived included) so
 // link-rewriting and the archived view still see them.
+// Description returns the note's one-line summary for index/stub views: its
+// `description:` frontmatter if set (kept in Extra, since nt doesn't model the
+// key), else the first non-heading body line. Clamped to a single line ≤max chars.
+// This is the "one-sentence summary" granularity of progressive disclosure — what
+// an agent reads to decide whether to open the full note.
+func (n *Note) Description(max int) string {
+	for _, line := range n.Extra {
+		k, v, ok := strings.Cut(line, ":")
+		if ok && strings.EqualFold(strings.TrimSpace(k), "description") {
+			if d := strings.TrimSpace(strings.Trim(strings.TrimSpace(v), `"'`)); d != "" {
+				return clampLine(d, max)
+			}
+		}
+	}
+	for _, raw := range strings.Split(n.Body, "\n") {
+		line := strings.TrimSpace(raw)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		return clampLine(line, max)
+	}
+	return ""
+}
+
+func clampLine(s string, max int) string {
+	s = strings.Join(strings.Fields(s), " ") // collapse whitespace to one line
+	if max > 0 && len(s) > max {
+		return strings.TrimSpace(s[:max-1]) + "…"
+	}
+	return s
+}
+
+// Reserved reports whether a note lives in a machine-managed folder that isn't
+// part of the human/agent knowledge base — currently notes/__tasks__/, where
+// nt files the detail bodies of split tasks. These are reachable by id/link but
+// are kept out of the KB catalog (nt index) and search so they don't pollute it.
+func (n *Note) Reserved() bool { return strings.HasPrefix(n.Rel, "__tasks__/") }
+
+// FindSimilar returns active, non-reserved notes that look like near-duplicates of
+// a note with the given title and tags — a guard against concurrent forks (two
+// agents independently recording the same decision). A candidate matches when it
+// has the identical slug, OR it shares a tag AND its title word-set overlaps
+// heavily (Jaccard ≥ 0.5). This is a cheap heuristic, not semantic dedup.
+func FindSimilar(notes []*Note, title string, tags []string) []*Note {
+	want := titleTokens(title)
+	slug := Slug(title)
+	tagset := map[string]bool{}
+	for _, t := range tags {
+		tagset[t] = true
+	}
+	var out []*Note
+	for _, n := range notes {
+		if n.Archived || n.SupersededBy != "" || n.Reserved() {
+			continue
+		}
+		sharedTag := false
+		for _, t := range n.Tags {
+			if tagset[t] {
+				sharedTag = true
+				break
+			}
+		}
+		if Slug(n.Title) == slug || (sharedTag && jaccard(want, titleTokens(n.Title)) >= 0.5) {
+			out = append(out, n)
+		}
+	}
+	return out
+}
+
+// TitleOverlap is the word-set Jaccard (0..1) of two titles, ignoring short and
+// stopword tokens — the similarity heuristic behind duplicate detection, exported
+// so task-side dedup can reuse the exact same notion nt uses for notes.
+func TitleOverlap(a, b string) float64 { return jaccard(titleTokens(a), titleTokens(b)) }
+
+var titleStopwords = map[string]bool{
+	"the": true, "and": true, "for": true, "over": true, "via": true, "with": true,
+	"vs": true, "not": true, "use": true, "using": true, "into": true, "from": true,
+}
+
+func titleTokens(s string) map[string]bool {
+	out := map[string]bool{}
+	for _, w := range strings.FieldsFunc(strings.ToLower(s), func(r rune) bool {
+		return (r < 'a' || r > 'z') && (r < '0' || r > '9')
+	}) {
+		if len(w) >= 3 && !titleStopwords[w] {
+			out[w] = true
+		}
+	}
+	return out
+}
+
+func jaccard(a, b map[string]bool) float64 {
+	if len(a) == 0 || len(b) == 0 {
+		return 0
+	}
+	inter := 0
+	for k := range a {
+		if b[k] {
+			inter++
+		}
+	}
+	union := len(a) + len(b) - inter
+	if union == 0 {
+		return 0
+	}
+	return float64(inter) / float64(union)
+}
+
+// Active drops notes retired from the working set: archived notes and superseded
+// ones (a superseded note has a newer canonical version, so views show only the
+// current decision, not both forks).
 func Active(ns []*Note) []*Note {
 	out := ns[:0:0]
 	for _, n := range ns {
-		if !n.Archived {
+		if !n.Archived && n.SupersededBy == "" {
 			out = append(out, n)
 		}
 	}

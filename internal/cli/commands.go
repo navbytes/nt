@@ -12,12 +12,14 @@ import (
 	"time"
 
 	"github.com/navbytes/nt/internal/dateparse"
+	"github.com/navbytes/nt/internal/links"
 	"github.com/navbytes/nt/internal/mutate"
 	"github.com/navbytes/nt/internal/note"
 	"github.com/navbytes/nt/internal/quickadd"
 	"github.com/navbytes/nt/internal/task"
 	"github.com/navbytes/nt/internal/tui"
 	"github.com/navbytes/nt/internal/web"
+	"github.com/navbytes/nt/internal/workstream"
 )
 
 // cmdWeb starts the localhost notes viewer (SPEC §12.1). Read-only browse/render
@@ -153,6 +155,12 @@ func cmdAdd(args []string) int {
 			t.SetKey("due", dueVal)
 		}
 		t.SetKey("src", *source)
+		// Stamp the workstream when NT_WORKSTREAM is set, so a human's CLI writes
+		// isolate the same way an agent's MCP writes do (symmetric; unset = the
+		// shared backlog, unchanged). "*" is a read-only widener, never stamped.
+		if ws := workstream.Env(); ws != "" && ws != "*" {
+			t.SetKey("ws", ws)
+		}
 		if estVal != "" {
 			t.SetKey("est", estVal)
 		}
@@ -182,13 +190,75 @@ func cmdAdd(args []string) int {
 	if err != nil {
 		return fail(err)
 	}
+	// Non-blocking overlap warning: two agents on a shared store often create the
+	// same implementation task for one decision (the field study's task-layer
+	// duplication). Unlike notes, tasks legitimately repeat, so we warn rather than
+	// refuse — surfacing near-duplicate tasks and any decision note on the topic.
+	warnDuplicateTask(e, created)
 	if *asJSON {
-		// Same id-bearing shape as `list/ready/recall --json` (and the MCP
-		// nt_add tool), so an agent on the CLI path can capture-then-reference.
+		// Same id-bearing shape as `list/ready --json` (and the MCP nt_add tool),
+		// so an agent on the CLI path can capture-then-reference.
 		return printJSON(tasksToJSON([]*task.Task{created}, nil)[0])
 	}
 	fmt.Printf("added %s  %s\n", shortID(created.ID()), title)
 	return 0
+}
+
+// taskProjTagOverlap reports whether two tasks share a project or tag.
+func taskProjTagOverlap(a, b *task.Task) bool {
+	for _, p := range a.Projects() {
+		if contains(b.Projects(), p) {
+			return true
+		}
+	}
+	for _, tg := range a.Tags() {
+		if contains(b.Tags(), tg) {
+			return true
+		}
+	}
+	return false
+}
+
+// warnDuplicateTask prints (to stderr, non-blocking) any existing open task that
+// looks like a duplicate of the one just created — shared project/tag + similar
+// title — and any active decision note on the same topic, so the author can link
+// or dedupe instead of quietly doubling the work.
+func warnDuplicateTask(e *mutate.Engine, created *task.Task) {
+	if created == nil {
+		return
+	}
+	title := created.Display()
+	d, err := e.Read()
+	if err != nil {
+		return
+	}
+	for _, t := range d.Tasks() {
+		if t.ID() == created.ID() || t.Done {
+			continue
+		}
+		if taskProjTagOverlap(created, t) && note.TitleOverlap(title, t.Display()) >= 0.5 {
+			fmt.Fprintf(os.Stderr, "note: similar task already exists — %s  %s (link or dedupe instead of doubling work)\n", shortID(t.ID()), t.Display())
+		}
+	}
+	tags := created.Tags()
+	if len(tags) == 0 {
+		return
+	}
+	for _, n := range note.Active(mustNotes(e)) {
+		if n.Reserved() {
+			continue
+		}
+		shared := false
+		for _, tg := range tags {
+			if contains(n.Tags, tg) {
+				shared = true
+				break
+			}
+		}
+		if shared && note.TitleOverlap(title, n.Title) >= 0.5 {
+			fmt.Fprintf(os.Stderr, "note: a decision note already covers this — %s  %s (consider [[linking]] the task to it)\n", shortID(n.ID), n.Title)
+		}
+	}
 }
 
 // recurNote renders the "next occurrence" suffix for a completion line when a
@@ -364,12 +434,15 @@ func cmdNote(args []string) int {
 	body := fs.String("body", "", "note body")
 	source := fs.String("source", "cli", "origin")
 	folder := fs.String("folder", "", "subfolder under notes/ (e.g. work or work/auth)")
+	desc := fs.String("description", "", "one-line summary shown in `nt index`")
+	supersede := fs.String("supersede", "", "mark this note as replacing an existing one (its handle) — the old note retires from active views")
+	force := fs.Bool("force", false, "create even if a near-duplicate note already exists")
 	var fields stringSlice
 	asJSON := fs.Bool("json", false, "print the created note as JSON (id, title, path, …)")
 	fs.Var(&tags, "tag", "tag (repeatable)")
 	fs.Var(&fields, "field", "extra frontmatter key=value (repeatable, e.g. status=stable)")
 
-	flags, positional := splitArgs(args, map[string]bool{"json": true})
+	flags, positional := splitArgs(args, map[string]bool{"json": true, "force": true})
 	if err := fs.Parse(flags); err != nil {
 		return 2
 	}
@@ -390,9 +463,29 @@ func cmdNote(args []string) int {
 	if !ok {
 		return 1
 	}
+	// Dedup-on-write guard: don't silently fork a decision a teammate already
+	// captured. Skipped when --force, or when --supersede is explicitly replacing.
+	if !*force && strings.TrimSpace(*supersede) == "" {
+		if sim := note.FindSimilar(note.Active(mustNotes(e)), title, tags); len(sim) > 0 {
+			fmt.Fprintf(os.Stderr, "note: a near-duplicate already exists — not creating. Did you mean to update it?\n")
+			for _, s := range sim {
+				fmt.Fprintf(os.Stderr, "  %s  %s  %s\n", shortID(s.ID), s.Rel, s.Title)
+			}
+			fmt.Fprintf(os.Stderr, "→ edit it (nt edit <id>), replace it (nt note … --supersede <id>), or force a new one (--force)\n")
+			return 1
+		}
+	}
 	n, err := note.Create(e.S, title, *body, tags, *source, fold)
 	if err != nil {
 		return fail(err)
+	}
+	if h := strings.TrimSpace(*supersede); h != "" {
+		if code := markSuperseded(e, h, n.ID); code != 0 {
+			return code
+		}
+	}
+	if d := strings.TrimSpace(*desc); d != "" { // --description → a modeled frontmatter key
+		fields = append(fields, "description="+d)
 	}
 	if len(fields) > 0 { // --field key=value → extra frontmatter, preserved verbatim
 		for _, f := range fields {
@@ -406,12 +499,127 @@ func cmdNote(args []string) int {
 			return fail(err)
 		}
 	}
+	// Warn (don't fail) on any [[link]] in the body that doesn't resolve, so a
+	// mistyped outbound reference is caught at capture instead of later by doctor.
+	warnDanglingLinks(e, n)
 	if *asJSON {
 		return printJSON(notesToJSON([]*note.Note{n})[0])
 	}
 	rel, _ := filepath.Rel(e.S.Dir, n.Path)
 	fmt.Printf("note %s  %s\n", shortID(n.ID), rel)
 	return 0
+}
+
+// markSuperseded stamps oldHandle's note with superseded_by=newID (retiring it
+// from active views). Returns a nonzero CLI code on failure.
+func markSuperseded(e *mutate.Engine, oldHandle, newID string) int {
+	notes := mustNotes(e)
+	old, err := resolveNote(notes, oldHandle)
+	if err != nil {
+		return fail(fmt.Errorf("supersede: %w", err))
+	}
+	if old.ID == newID {
+		return fail(fmt.Errorf("supersede: a note can't supersede itself"))
+	}
+	old.SupersededBy = newID
+	if err := old.Save(); err != nil {
+		return fail(err)
+	}
+	return 0
+}
+
+// warnDanglingLinks prints a warning for each [[link]] in the note body that
+// doesn't resolve — a write-time catch for mistyped outbound references.
+func warnDanglingLinks(e *mutate.Engine, n *note.Note) {
+	if !strings.Contains(n.Body, "[[") {
+		return
+	}
+	notes := mustNotes(e)
+	d, _ := e.Read()
+	for _, raw := range links.Wikilinks(n.Body) {
+		if _, ok := links.Resolve(raw, d, notes); !ok {
+			fmt.Fprintf(os.Stderr, "note: warning — [[%s]] doesn't resolve to any note or task (dangling link)\n", raw)
+		}
+	}
+}
+
+// cmdSupersede marks one note as replaced by another: `nt supersede <old> --by
+// <new>`. The old note retires from active views (index/search/status) so a
+// resume sees only the current decision, while superseded_by preserves the trail.
+func cmdSupersede(args []string) int {
+	fs := flag.NewFlagSet("supersede", flag.ContinueOnError)
+	by := fs.String("by", "", "handle of the note that replaces the old one (required)")
+	flags, positional := splitArgs(args, map[string]bool{})
+	if err := fs.Parse(flags); err != nil {
+		return 2
+	}
+	if len(positional) == 0 || strings.TrimSpace(*by) == "" {
+		return usageErr(fmt.Errorf("supersede: usage: nt supersede <old-handle> --by <new-handle>"))
+	}
+	e, ok := engine()
+	if !ok {
+		return 1
+	}
+	newNote, err := resolveNote(mustNotes(e), strings.TrimSpace(*by))
+	if err != nil {
+		return fail(fmt.Errorf("supersede: --by: %w", err))
+	}
+	if code := markSuperseded(e, strings.Join(positional, " "), newNote.ID); code != 0 {
+		return code
+	}
+	fmt.Printf("superseded — retired the old note; %s is now canonical\n", shortID(newNote.ID))
+	return 0
+}
+
+// cmdRelink rewrites a wrong outbound [[link]] inside a note's body:
+// `nt relink <note> <old-target> <new-target>`. `nt mv` fixes *inbound* links on
+// rename; this fixes an *outbound* reference that points at the wrong (or a
+// nonexistent) note — the gap the write-time dangling-link warning flags.
+func cmdRelink(args []string) int {
+	flags, positional := splitArgs(args, map[string]bool{})
+	fs := flag.NewFlagSet("relink", flag.ContinueOnError)
+	if err := fs.Parse(flags); err != nil {
+		return 2
+	}
+	if len(positional) < 3 {
+		return usageErr(fmt.Errorf("relink: usage: nt relink <note> <old-target> <new-target>"))
+	}
+	handle, oldT, newT := positional[0], positional[1], positional[2]
+	e, ok := engine()
+	if !ok {
+		return 1
+	}
+	notes := mustNotes(e)
+	n, err := resolveNote(notes, handle)
+	if err != nil {
+		return fail(fmt.Errorf("relink: %w", err))
+	}
+	if _, ok := links.Resolve(newT, nil, notes); !ok {
+		return fail(fmt.Errorf("relink: new target [[%s]] doesn't resolve to any note", newT))
+	}
+	body, count := relinkBody(n.Body, oldT, newT)
+	if count == 0 {
+		return fail(fmt.Errorf("relink: no [[%s]] found in %s", oldT, shortID(n.ID)))
+	}
+	n.Body = body
+	if err := n.Save(); err != nil {
+		return fail(err)
+	}
+	fmt.Printf("relinked %d reference(s): [[%s]] → [[%s]] in %s\n", count, oldT, newT, shortID(n.ID))
+	return 0
+}
+
+// relinkBody rewrites [[oldT]], [[oldT|alias]] and [[oldT#frag]] to point at newT,
+// preserving any alias/fragment. Returns the new body and the replacement count.
+func relinkBody(body, oldT, newT string) (string, int) {
+	count := 0
+	for _, suffix := range []string{"]]", "|", "#"} {
+		from := "[[" + oldT + suffix
+		to := "[[" + newT + suffix
+		count += strings.Count(body, from)
+		body = strings.ReplaceAll(body, from, to)
+	}
+	return body, count
 }
 
 // cmdJournal opens today's daily note (notes/journal/YYYY-MM-DD.md) in $EDITOR,
@@ -798,12 +1006,12 @@ func onboard(e *mutate.Engine) {
 		return nil
 	})
 	_, _ = note.Create(e.S, "Welcome to nt",
-		"nt stores tasks in tasks.txt (todo.txt format) and notes here as markdown.\n\nTry:\n- `nt add \"my first task\" --due today`\n- `nt recall` to read items back later\n", []string{"nt"}, "nt", "")
+		"nt stores tasks in tasks.txt (todo.txt format) and notes here as markdown.\n\nTry:\n- `nt add \"my first task\" --due today`\n- `nt index` to see everything at a glance later\n", []string{"nt"}, "nt", "")
 	fmt.Printf(`Welcome to nt. Your store is %s
 
   nt add "title"   add a task
   nt               list your tasks
-  nt recall        read items back (great for AI sessions)
+  nt index         see everything at a glance (great for AI sessions)
 
 `, e.S.Dir)
 }
@@ -895,13 +1103,6 @@ func contains(ss []string, want string) bool {
 		}
 	}
 	return false
-}
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }
 
 // --- JSON output ---------------------------------------------------------

@@ -100,26 +100,53 @@ var toolDefs = []toolDef{
 	},
 	{
 		Name:        "nt_note",
-		Description: "Save a note (finding/decision/dead-end) — capture the WHY. recall returns the body.",
+		Description: "Save a note (finding/decision/dead-end) — capture the WHY. Set description to a one-line summary; it's what nt_index shows. Guarded against near-duplicates: if a similar note exists it errors — update that one, supersede it, or set force=true. Use supersede=<id> to replace an existing note (the old one retires from views).",
 		InputSchema: obj(map[string]any{
-			"title":  st(),
-			"body":   sp("markdown"),
-			"tags":   at(),
-			"folder": sp("subfolder, e.g. ref or decisions/auth"),
-			"source": st(),
+			"title":       st(),
+			"body":        sp("markdown"),
+			"description": sp("one-line summary shown in nt_index (progressive disclosure)"),
+			"tags":        at(),
+			"folder":      sp("subfolder, e.g. ref or decisions/auth"),
+			"source":      st(),
+			"supersede":   sp("id of an existing note this replaces; the old note retires from active views"),
+			"force":       map[string]any{"type": "boolean", "description": "create even if a near-duplicate exists"},
 		}, "title"),
 	},
 	{
-		Name:        "nt_recall",
-		Description: "Read back earlier open tasks and notes (bodies included) to restore prior-session context. Completed tasks are omitted (see nt_log). To save context: brief=true returns note pointers without bodies (nt_view one to read it); limit=N keeps the most recent N.",
+		Name:        "nt_supersede",
+		Description: "Reconcile duplicate/obsolete notes: mark one note as replaced by another. The old note retires from nt_index/nt_search (so a resume sees only the current decision) while a superseded_by pointer preserves the trail.",
 		InputSchema: obj(map[string]any{
-			"source":       st(),
-			"since":        sp("on/after YYYY-MM-DD"),
-			"brief":        map[string]any{"type": "boolean", "description": "omit note bodies — pointers only"},
-			"limit":        it(),
-			"include_done": map[string]any{"type": "boolean", "description": "also include completed tasks"},
-			"workstream":   wsArg,
+			"handle": sp("the note being replaced (id/slug/title)"),
+			"by":     sp("the note that replaces it (id/slug/title)"),
+		}, "handle", "by"),
+	},
+	{
+		Name:        "nt_relink",
+		Description: "Fix a wrong outbound [[link]] in a note's body: rewrite [[old]] → [[new]] (nt_mv only fixes inbound links on rename). Use it to repair a dangling reference nt_note flagged.",
+		InputSchema: obj(map[string]any{
+			"handle": sp("the note whose body to edit (id/slug/title)"),
+			"old":    sp("the current [[target]] text to replace"),
+			"new":    sp("the correct [[target]] (must resolve to a note)"),
+		}, "handle", "old", "new"),
+	},
+	{
+		Name:        "nt_index",
+		Description: "Resuming work: the KB catalog. One stub per note (id, title, one-line description, tags, folder) — NO bodies — plus active (open+doing) tasks and a few recent completions (recentlyDone). Load this first, then nt_get the few notes you need or nt_search by topic. Cheap and bounded; replaces dumping every note. Scope with tag/folder.",
+		InputSchema: obj(map[string]any{
+			"tag":           sp("only notes/tasks with this tag"),
+			"folder":        sp("only notes under this folder, e.g. ref"),
+			"limit":         map[string]any{"type": "integer", "description": "cap the note catalog to N (truncated=true when more exist); scope with tag/folder for big stores"},
+			"updated_since": sp("only notes changed on/after this date (today|+3d|YYYY-MM-DD) — 'what changed since last session'"),
+			"workstream":    wsArg,
 		}),
+	},
+	{
+		Name:        "nt_get",
+		Description: "Fetch one note's full body by handle (id, slug, or title) — the on-demand half of the index. With section, returns only the markdown block under that heading.",
+		InputSchema: obj(map[string]any{
+			"handle":  sp("note id, slug, or title (from nt_index / nt_search)"),
+			"section": sp("optional: a heading within the note to return just that block"),
+		}, "handle"),
 	},
 	{
 		Name:        "nt_log",
@@ -133,11 +160,13 @@ var toolDefs = []toolDef{
 	},
 	{
 		Name:        "nt_search",
-		Description: "Find notes and tasks by text and/or tag — the KB's retrieval verb. Pass query, tag, or both.",
+		Description: "Find notes and tasks by text and/or tag — the KB's retrieval verb. Returns ranked STUBS (id, title, description, snippet) not bodies; nt_get the id you want. Title matches rank first; results are capped by limit (default 8) with truncated=true when more exist. Pass query, tag, or both; full=true to inline bodies.",
 		InputSchema: obj(map[string]any{
 			"query": sp("text to match in titles + bodies (optional if tag is set)"),
 			"tag":   sp("only items with this tag"),
 			"type":  enum("note", "task", "all"),
+			"limit": it(),
+			"full":  map[string]any{"type": "boolean", "description": "return full note bodies instead of stubs"},
 		}),
 	},
 	{

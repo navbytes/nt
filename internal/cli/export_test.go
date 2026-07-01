@@ -93,3 +93,19 @@ func TestExportRejectsBadFormat(t *testing.T) {
 		t.Fatal("expected non-zero exit for bad --format")
 	}
 }
+
+// nt export --json is an alias for --format json (parity with every other command).
+func TestExportJSONAlias(t *testing.T) {
+	t.Setenv("NT_DIR", t.TempDir())
+	captureRun(t, "note", "Rule one", "--folder", "rules", "--tag", "rule", "--body", "x")
+	out := captureRun(t, "export", "--tag", "rule", "--json")
+	var p struct {
+		Notes []map[string]any `json:"notes"`
+	}
+	if err := json.Unmarshal([]byte(out), &p); err != nil {
+		t.Fatalf("export --json should emit JSON: %v\n%s", err, out)
+	}
+	if len(p.Notes) != 1 {
+		t.Fatalf("expected 1 note, got %d", len(p.Notes))
+	}
+}

@@ -1,6 +1,6 @@
 ---
 name: nt
-description: Capture and recall durable memory in the user's nt store across OpenCode sessions. Use when asked to save/track a task or TODO, take a note, record a decision or finding, mark something done, search or recall what was captured before, or organize the knowledge base. nt persists everything as plain files (tasks + markdown notes) that outlive the session.
+description: Capture and recall durable memory in the user's nt store across OpenCode sessions. Use when asked to save/track a task or TODO, take a note, record a decision or finding, mark something done, search or look up what was captured before, or organize the knowledge base. nt persists everything as plain files (tasks + markdown notes) that outlive the session.
 compatibility: opencode
 metadata:
   backend: nt
@@ -14,23 +14,37 @@ as plain text the next session reads back. Drive it through the **`nt_*` MCP
 tools** (registered via `nt mcp install --client opencode`); fall back to the
 `nt` CLI only if the tools aren't present.
 
-## The loop
+## The loop — index first, then fetch on demand
 
-**At the start of substantive work**, reload context before creating anything:
+Don't bulk-load the whole store. Load a cheap **index** of what exists, then open
+only what's relevant. (Dumping every note body wastes context and *degrades*
+reasoning — long, irrelevant context measurably hurts.)
 
-- `nt_ready` — open, unblocked tasks by urgency. Your "pick up here" feed.
-- `nt_recall` — the broader read: prior tasks **and note bodies** you captured before.
-- `nt_search` — look up a specific topic before acting, to avoid duplicating a note.
+**At the start of substantive work:**
+
+- `nt_index` — the KB catalog: one stub per note (id · title · one-line
+  description · tags · folder) with NO bodies, plus the active task list. Read
+  this first to see what's available.
+- `nt_ready` — open, unblocked tasks by urgency, if you only need the task feed.
+
+**When you need specifics (on demand):**
+
+- `nt_search` — ranked stubs matching text/tag (title matches first; capped by
+  `limit`, default 8; `truncated: true` means narrow the query). Returns
+  id + snippet, not bodies.
+- `nt_get` — the full body of ONE note by id (or just a `section` heading). This
+  is how you read a note after the index/search points you at it.
+- `nt_links` — follow forward links + backlinks to reconstruct why something exists.
 
 **As you work**, capture the *why*, not just the *what*:
 
 - `nt_add` — a task. Short, verb-first title (~60 chars); put detail in `body`.
   Chain discovered work with `discovered_from: <id>`.
-- `nt_note` — a finding, decision, constraint, or dead-end. The body is what a
-  future session reads back, so write it like a comment for the next engineer.
+- `nt_note` — a finding, decision, constraint, or dead-end. **Always set
+  `description`** (a one-line summary) — it's what `nt_index` shows, so the note
+  is findable without opening it. The body is what a future `nt_get` reads back.
 - `nt_done` / `nt_update` — complete or change a task by its **stable id**
   (never a row number).
-- `nt_links` — follow forward links + backlinks to reconstruct why something exists.
 
 ## Where things go (folders + tags)
 
@@ -41,7 +55,7 @@ plugin injects into every session — keep them small and high-signal:
 |-------------|--------|-----|------|
 | **Rule** (stable directive: "always run gofmt", style/process) | `rules/` | `rule` | Must apply every session. Costs tokens every turn — keep terse. |
 | **Core memory** (small evolving fact: a user preference, a key project convention) | `memory/` | `memory-core` | The agent should *always* know it. A handful, not hundreds. |
-| **Knowledge base** (findings, decisions, reference) | `ref/`, `decisions/` | topical, e.g. `auth` | Looked up on demand via `nt_search` — **not** injected, so size is free. |
+| **Knowledge base** (findings, decisions, reference) | `ref/`, `decisions/` | topical, e.g. `auth` | Looked up on demand via `nt_index` → `nt_search`/`nt_get` — **not** injected, so size is free. |
 
 So: a durable directive → `nt_note "…" --folder rules --tag rule`; a learned
 preference → `nt_note "…" --folder memory --tag memory-core`; everything else →
@@ -55,13 +69,24 @@ distinguishable from the user's hand-entered items (the MCP tools default it).
 
 - `nt_mv` — refile/rename a note (rewrites every `[[link]]`).
 - `nt_tag` — add/remove tags (e.g. promote a `ref` note into `rule` once it's stable).
-- `nt_archive` — retire a stale note from recall/search (reversible).
+- `nt_archive` — retire a stale note from the index/search (reversible).
+- `nt_supersede` (handle, by) — mark a note replaced by another; the old one leaves
+  the index so a resume sees only the current decision.
+
+**Dedup guard:** `nt_note` refuses a near-duplicate of an existing note (parallel
+agents often record the same decision). When it errors, prefer to **update** the
+existing note or **supersede** it; pass `force: true` only for a deliberately
+separate note. Watch the `danglingLinks` field in the result — a `[[link]]` that
+didn't resolve is a typo to fix.
 
 ## Conventions
 
-- **Retrieve before you create** (`nt_recall` / `nt_search`) to avoid duplicates.
+- **Retrieve before you create** (`nt_index` / `nt_search`) to avoid duplicates.
+- Always give notes a **`description`** so the index stays scannable.
 - Tasks are one line; anything longer is a note `body`, linked from the task.
 - Keep the `rules/` + `memory/` core **small** — it's billed on every request.
-  The big knowledge base belongs behind `nt_search`, where it's free until used.
+  The big knowledge base belongs behind `nt_search`/`nt_get`, free until used.
 - Promote, don't duplicate: when a `ref` note becomes a standing rule, retag it
   rather than copying it into the rules core.
+- `nt doctor` checks store health (dangling `[[links]]`, notes missing a
+  description); run it occasionally to keep the KB clean.

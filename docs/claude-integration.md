@@ -64,16 +64,18 @@ teaches Claude to use `nt` directly. With it installed, you can say things like:
 - "what should I work on?" → Claude runs `nt ready` (open, unblocked, by urgency)
 - "save that as a task in nt"
 - "note this finding for later"
-- "what did we capture last session?" → Claude runs `nt recall --source claude`
+- "what did we capture last session?" → Claude runs `nt index --source claude`
 - or just type `/nt`
 
-Claude will run the right `nt` commands (`ready`, `add`, `note`, `recall`,
-`done`, `links`, `search`), always passing `--source claude`.
+Claude will run the right `nt` commands (`ready`, `add`, `note`, `index`,
+`show`, `done`, `links`, `search`), always passing `--source claude`.
 
 **Start a session with `nt ready`.** It returns only actionable work — open
 tasks that aren't done and aren't waiting on a dependency — newest-urgency
-first. That's the agent's "pick up here" feed; `nt recall` is the broader
-"everything we captured" read.
+first. That's the agent's "pick up here" feed; `nt index` is the broader
+"everything we captured" read — a compact catalog of note stubs (title,
+description, tags) plus the active tasks, from which Claude fetches a specific
+body with `nt show <handle>` on demand.
 
 Install it by keeping `.claude/skills/nt/` in your project, or copy it to
 `~/.claude/skills/nt/` to make it available everywhere.
@@ -116,14 +118,19 @@ nt mcp install --print                  # show what it would do, change nothing
 For any other client (Cursor, a project `.mcp.json`, …), `nt mcp install --print`
 emits the snippet to paste.
 
-Tools exposed — **capture:** `nt_add`, `nt_note` (with `folder`), `nt_done`,
-`nt_update`, `nt_tag`, `nt_mv`, `nt_archive` (retire stale notes, reversible);
-**retrieve:** `nt_ready` (start here), `nt_status` (one-call project/area state),
-`nt_view` (recall the user's saved smart views — list them by calling it bare),
-`nt_recall` (incl. note bodies), `nt_log`, `nt_search` (text and/or tag),
-`nt_links` (forward links + backlinks). They go through the same locked,
-journaled engine as the CLI, default `source` to `claude`, and require **stable
-task ids** (positional `task:N` is refused — the index isn't safe for an agent).
+Tools exposed (**15**) — **capture:** `nt_add`, `nt_note` (with `folder` and
+`description`), `nt_done`, `nt_update`, `nt_tag`, `nt_mv`, `nt_archive` (retire
+stale notes, reversible); **retrieve:** `nt_index` (start here — a compact
+catalog of note stubs plus the active tasks, no bodies), `nt_get` (fetch one
+note's full body by id/slug/title, optional `section`), `nt_ready`,
+`nt_status` (one-call project/area state), `nt_view` (recall the user's saved
+smart views — list them by calling it bare), `nt_log`, `nt_search` (ranked
+stubs, text and/or tag; `full:true` inlines bodies), `nt_links` (forward links +
+backlinks). They go through the same locked, journaled engine as the CLI,
+default `source` to `claude`, and require **stable task ids** (positional
+`task:N` is refused — the index isn't safe for an agent). Retrieval is
+index-first progressive disclosure: load the small stub catalog, then fetch
+bodies on demand.
 
 ### Parallel agents — workstreams
 
@@ -144,7 +151,7 @@ in-flight **tasks** isolated while **notes** (the knowledge base) stay shared:
   for worktree-per-process setups like grove, where each `nt mcp` runs in its own
   worktree. Avoid `auto` when one server is shared across trees, or the branch may
   be renamed mid-session; prefer a literal there.
-- `nt_add` stamps the resolved id (`ws:` on the task); `nt_recall` / `nt_ready` /
+- `nt_add` stamps the resolved id (`ws:` on the task); `nt_index` / `nt_ready` /
   `nt_status` / `nt_log` scope to it. Tasks with no workstream (the human's
   CLI/TUI/web backlog) stay visible to every agent — only *another* agent's
   stamped tasks are hidden. `nt_search` / `nt_view` are never scoped.
@@ -165,19 +172,19 @@ for your own notes; daily notes likewise go under `notes/journal/`), so they sta
 grouped and don't clutter a human's hand-curated folders.
 
 Hook, skill, and MCP compose: the hook mirrors the todo list automatically, the
-skill/MCP capture notes and recall context. Use the MCP server if your client
+skill/MCP capture notes and read back context. Use the MCP server if your client
 supports it; the CLI + skill work everywhere.
 
 ## Hook vs. skill — when each fires
 
 - **Hook** = passive, automatic. Mirrors Claude's *own* todo list. Best for
   capturing the agent's working task list without asking.
-- **Skill** = active, on request. For deliberately saving notes, recalling prior
+- **Skill** = active, on request. For deliberately saving notes, reading back prior
   context, or managing tasks conversationally — things that aren't in the todo
   list.
 
 They compose: the hook keeps the task list in sync; the skill handles notes,
-recall, and ad-hoc edits.
+read-back, and ad-hoc edits.
 
 ---
 
@@ -189,7 +196,8 @@ recall, and ad-hoc edits.
 
 # session 2 — pick up where it left off
 nt ready --json                    # what's actionable right now (open, unblocked)
-nt recall --source claude --json   # the fuller context: everything captured
+nt index --source claude --json    # the fuller context: stub catalog of everything captured
+nt show token-refresh-race         # fetch a specific note's body on demand
 # → Claude reads its prior work back and continues
 ```
 

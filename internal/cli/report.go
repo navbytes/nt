@@ -14,6 +14,7 @@ import (
 	"github.com/navbytes/nt/internal/note"
 	"github.com/navbytes/nt/internal/task"
 	"github.com/navbytes/nt/internal/view"
+	"github.com/navbytes/nt/internal/workstream"
 )
 
 // Read/report commands: the non-mutating verbs that list, query, and render
@@ -41,6 +42,7 @@ func cmdList(args []string) int {
 	all := fs.Bool("all", false, "include done tasks")
 	showBlocked := fs.Bool("show-blocked", false, "include dependency-blocked tasks")
 	tree := fs.Bool("tree", false, "show sub-tasks indented under their parent, with progress")
+	ws := fs.String("workstream", "", `scope to a workstream (default: NT_WORKSTREAM; "*" = all)`)
 	asJSON := fs.Bool("json", false, "machine-readable output")
 
 	flags, _ := splitArgs(args, map[string]bool{"all": true, "json": true, "show-blocked": true, "tree": true})
@@ -55,19 +57,19 @@ func cmdList(args []string) int {
 		All:         *all,
 		ShowBlocked: *showBlocked,
 		Tree:        *tree,
-	}, *source, *asJSON)
+	}, *source, *ws, *asJSON)
 }
 
 // runList renders the task list selected by spec — the shared core behind both
 // `nt list` and `nt view recall`, so a saved view filters/sorts exactly as the
 // equivalent flags would. asJSON is a recall-time output choice, kept out of the
 // saved Spec.
-func runList(spec view.Spec, asJSON bool) int { return runListSource(spec, "", asJSON) }
+func runList(spec view.Spec, asJSON bool) int { return runListSource(spec, "", "", asJSON) }
 
-// runListSource is runList with an extra source filter applied after view.Apply
-// (view.Spec has no Source field, so the CLI filters it here for parity with
-// ready/agenda/recall/log).
-func runListSource(spec view.Spec, source string, asJSON bool) int {
+// runListSource is runList with extra source and workstream filters applied after
+// view.Apply (view.Spec has neither field, so the CLI filters them here for parity
+// with ready/agenda/log — and, for workstream, with the MCP tools).
+func runListSource(spec view.Spec, source, ws string, asJSON bool) int {
 	e, ok := engine()
 	if !ok {
 		return 1
@@ -84,6 +86,15 @@ func runListSource(spec view.Spec, source string, asJSON bool) int {
 		kept := rows[:0]
 		for _, t := range rows {
 			if t.Source() == source {
+				kept = append(kept, t)
+			}
+		}
+		rows = kept
+	}
+	if cur := workstream.Scope(ws); cur != "" {
+		kept := rows[:0]
+		for _, t := range rows {
+			if workstream.Visible(t.Key("ws"), cur) {
 				kept = append(kept, t)
 			}
 		}
@@ -157,6 +168,7 @@ func cmdReady(args []string) int {
 	source := fs.String("source", "", "filter by source (e.g. claude)")
 	tag := fs.String("tag", "", "filter by tag")
 	project := fs.String("project", "", "filter by project")
+	ws := fs.String("workstream", "", `scope to a workstream (default: NT_WORKSTREAM; "*" = all)`)
 	asJSON := fs.Bool("json", false, "machine-readable output")
 
 	flags, _ := splitArgs(args, map[string]bool{"json": true})
@@ -174,12 +186,16 @@ func cmdReady(args []string) int {
 	all := d.Tasks()
 	idx := indexMap(all)
 	blocked := task.BlockedIDs(all)
+	cur := workstream.Scope(*ws)
 
 	today := mutate.Today()
 	var rows []*task.Task
 	for _, t := range all {
 		// keep with all=false, showBlocked=false drops done + dependency-blocked.
 		if !view.Keep(t, view.Spec{Tag: *tag, Project: *project}, blocked) {
+			continue
+		}
+		if cur != "" && !workstream.Visible(t.Key("ws"), cur) {
 			continue
 		}
 		if *source != "" && t.Source() != *source {
@@ -324,77 +340,6 @@ func addDays(date string, n int) string {
 	return tm.AddDate(0, 0, n).Format("2006-01-02")
 }
 
-func cmdRecall(args []string) int {
-	fs := flag.NewFlagSet("recall", flag.ContinueOnError)
-	source := fs.String("source", "", "filter by source")
-	since := fs.String("since", "", "only items on/after YYYY-MM-DD")
-	typ := fs.String("type", "all", "task|note|all")
-	asJSON := fs.Bool("json", false, "machine-readable output")
-
-	flags, _ := splitArgs(args, map[string]bool{"json": true})
-	if err := fs.Parse(flags); err != nil {
-		return 2
-	}
-	e, ok := engine()
-	if !ok {
-		return 1
-	}
-	d, err := e.Read()
-	if err != nil {
-		return fail(err)
-	}
-	idx := indexMap(d.Tasks())
-
-	var tasks []*task.Task
-	if *typ != "note" {
-		for _, t := range d.Tasks() {
-			if *source != "" && t.Source() != *source {
-				continue
-			}
-			if *since != "" && t.Created != "" && t.Created < *since {
-				continue
-			}
-			tasks = append(tasks, t)
-		}
-	}
-	var notes []*note.Note
-	if *typ != "task" {
-		all, _ := note.List(e.S)
-		for _, n := range all {
-			if n.Archived {
-				continue // recall is the active context — archived notes are retired
-			}
-			if *source != "" && n.Source != *source {
-				continue
-			}
-			if *since != "" && n.Created != "" && n.Created[:min(10, len(n.Created))] < *since {
-				continue
-			}
-			notes = append(notes, n)
-		}
-	}
-
-	if *asJSON {
-		out := map[string]any{
-			"tasks": tasksToJSON(tasks, idx),
-			"notes": notesToJSON(notes),
-		}
-		return printJSON(out)
-	}
-	if len(tasks) == 0 && len(notes) == 0 {
-		fmt.Println("nothing to recall" + freshHint(e))
-		return 0
-	}
-	blocked := task.BlockedIDs(d.Tasks())
-	for _, t := range tasks {
-		fmt.Println(formatRow(t, idx[t], blocked[t.ID()]))
-	}
-	for _, n := range notes {
-		fmt.Printf("   %s %s  %s  %s\n", glyphNote(), shortID(n.ID), n.Rel, n.Title)
-	}
-	return 0
-}
-
 // searchTerms tokenizes a query into match terms: whitespace-separated words,
 // each ANDed (order-independent), with "double quotes" grouping a multi-word
 // exact phrase into one term. Returns lowercased terms.
@@ -482,6 +427,7 @@ func cmdSearch(args []string) int {
 	fs := flag.NewFlagSet("search", flag.ContinueOnError)
 	typ := fs.String("type", "all", "note|task|all")
 	asJSON := fs.Bool("json", false, "machine-readable output")
+	limit := fs.Int("limit", 0, "cap results per kind (0 = all); a broad term can otherwise print the whole store")
 	var tags stringSlice
 	fs.Var(&tags, "tag", "only items with this tag (repeatable, AND)")
 	flags, positional := splitArgs(args, map[string]bool{"json": true})
@@ -517,6 +463,9 @@ func cmdSearch(args []string) int {
 	if *typ != "task" {
 		notes := note.Active(mustNotes(e))
 		for _, n := range notes {
+			if n.Reserved() {
+				continue // task-detail notes aren't part of the KB
+			}
 			if len(tags) > 0 && !hasAll(n.Tags) {
 				continue
 			}
@@ -538,6 +487,7 @@ func cmdSearch(args []string) int {
 			return noteHits[i].n.Rel < noteHits[j].n.Rel
 		})
 	}
+	noteTotal := len(noteHits)
 
 	// Tasks: AND-match the whole task line (text + tags + project).
 	var taskHits []*task.Task
@@ -554,6 +504,15 @@ func cmdSearch(args []string) int {
 			if len(terms) == 0 || matchesAll(t.Line(), terms) {
 				taskHits = append(taskHits, t)
 			}
+		}
+	}
+	taskTotal := len(taskHits)
+	if *limit > 0 {
+		if len(noteHits) > *limit {
+			noteHits = noteHits[:*limit]
+		}
+		if len(taskHits) > *limit {
+			taskHits = taskHits[:*limit]
 		}
 	}
 
@@ -583,6 +542,10 @@ func cmdSearch(args []string) int {
 	}
 	if found == 0 {
 		fmt.Println("no matches")
+	}
+	if *limit > 0 && (noteTotal > len(noteHits) || taskTotal > len(taskHits)) {
+		fmt.Printf("… showing %d of %d notes, %d of %d tasks (raise --limit or narrow the query)\n",
+			len(noteHits), noteTotal, len(taskHits), taskTotal)
 	}
 	return 0
 }
@@ -733,7 +696,14 @@ func cmdLinks(args []string) int {
 			continue
 		}
 		rel, _ := filepath.Rel(e.S.Dir, h.Path)
-		backs = append(backs, backRef{Path: rel, Line: h.Line, Text: strings.TrimSpace(h.Text)})
+		text := strings.TrimSpace(h.Text)
+		// A task line: render short id + clean text so the raw `id:<ULID>` and
+		// link markup don't leak into "linked from". Note prose lines have no id
+		// and are left as-is.
+		if t, ok := task.ParseLine(h.Text); ok && t.ID() != "" {
+			text = shortID(t.ID()) + "  " + t.Display()
+		}
+		backs = append(backs, backRef{Path: rel, Line: h.Line, Text: text})
 	}
 
 	// Task structure & dependencies — discovered-from/here, blocks/blocked-by, and

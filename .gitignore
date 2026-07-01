@@ -12,3 +12,6 @@
 # go
 *.test
 *.out
+
+# Claude Code scheduler runtime lock (leaks session id/pid — never track)
+.claude/scheduled_tasks.lock

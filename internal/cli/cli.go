@@ -49,8 +49,12 @@ func Run(args []string) int {
 		return cmdAgenda(rest)
 	case "review":
 		return cmdReview(rest)
-	case "recall":
-		return cmdRecall(rest)
+	case "index":
+		return cmdIndex(rest)
+	case "supersede":
+		return cmdSupersede(rest)
+	case "relink":
+		return cmdRelink(rest)
 	case "log":
 		return cmdLog(rest)
 	case "done", "do":
@@ -121,10 +125,11 @@ func Run(args []string) int {
 // match on a typo. Kept in sync with the switch in the dispatcher above.
 var knownCommands = []string{
 	"add", "a", "note", "notes", "show", "cat", "journal", "j", "list", "ls",
-	"view", "views", "ready", "today", "agenda", "review", "recall", "log",
+	"view", "views", "ready", "today", "agenda", "review", "index", "log",
 	"done", "do", "skip", "start", "stop", "update", "up", "search", "q",
 	"tags", "tag", "links", "mv", "rename", "rm", "delete", "archive", "undo",
 	"edit", "path", "doctor", "git-init", "hook", "mcp", "web", "version", "help",
+	"supersede", "relink",
 }
 
 // suggestCommand returns the closest known command to cmd within a small edit
@@ -361,7 +366,7 @@ USAGE
   nt today [flags]            overdue + due-today + just-started, grouped
   nt agenda [--days N]        the next N days, grouped Overdue/Today/Upcoming
   nt review [--stale N]       weekly digest: overdue, stale, undated, stuck projects
-  nt recall [flags]           read back prior items (for AI sessions)
+  nt index [--tag|--folder]   compact KB catalog (ids+titles+descriptions) + active tasks — start here
   nt log [--since|--days N]    completed tasks, newest first (the Logbook)
   nt done <id|task:N>         mark a task done       (alias: do)
   nt skip <id|task:N>         move a recurring task to its next occurrence
@@ -375,6 +380,8 @@ USAGE
   nt links <id|note>          forward links + backlinks + deps  (--orphans, --json)
   nt edit <id|note>           edit a task or note in $EDITOR
   nt mv <note> <new|path>     rename/move a note, updating all [[links]] to it
+  nt supersede <old> --by <new>  mark a note replaced by another (retires the old from views)
+  nt relink <note> <old> <new>   fix a wrong outbound [[link]] in a note's body
   nt rm <id|note> [flags]     delete tasks (undoable) or notes (to .trash/)
                               notes: --unlink strips inbound links, --force keeps them;
                               -y/--yes skips the confirm prompt
@@ -384,7 +391,8 @@ USAGE
   nt path                     print the store directory
   nt version                  print the nt version (alias: -v, --version)
   nt git-init                 set up the store for git (union-merge + .gitignore)
-  nt doctor [--check]         reconcile tasks.txt (dedup ids) after a git merge
+  nt doctor [--check]         health check: reconcile tasks.txt (dedup ids) + lint notes
+                              (dangling [[links]], missing descriptions, orphans)
   nt hook                     sync a Claude Code TodoWrite event (PostToolUse hook)
   nt mcp                      run the MCP server (stdio) — typed tools for agents
   nt mcp install [--client]   register nt with an AI client (claude-code|claude-desktop|opencode)
@@ -407,14 +415,17 @@ ADD/UPDATE FLAGS
 
 NOTE FLAGS (nt note)
   --body TEXT   --tag NAME (repeat)   --source NAME   --json (print as JSON)
+  --description TEXT  one-line summary shown in 'nt index' (progressive disclosure)
   --folder DIR        file under notes/DIR/ (created as needed; or path-style:
                       nt note "decisions/Chose flock over SQLite")
   --field key=value   set extra frontmatter at capture (repeatable, preserved)
+  --supersede <id>    replace an existing note (retires it from views)
+  --force             create even if a near-duplicate note already exists
 
-LIST/RECALL FLAGS
+LIST FLAGS
   --status open|doing|blocked|done   --tag NAME   --project NAME
   --sort urgency|due|created         --all        --json
-  --show-blocked                     --source NAME / --since YYYY-MM-DD (recall)
+  --show-blocked                     --source NAME / --since YYYY-MM-DD
 
 Recurring: add --recur weekly|3d|… ; completing spawns the next occurrence.
 Dependencies: add --blocks <id> ; blocked tasks hide unless --show-blocked.

@@ -218,7 +218,7 @@
               id="hero-session"
               data-command='nt add "ship v1" due:fri @work !high
 nt note "Chose flock over SQLite" --folder decisions
-nt recall --source claude'
+nt index --source claude'
             >
               <div class="term-line" data-type><span class="term-prompt">$</span> <span class="term-cmd">nt add "ship v1" </span><span class="term-flag">due:fri @work !high</span></div>
               <div class="term-line"><span class="term-ok">✓ added</span> <span class="term-muted">task:42</span> <span class="term-pri">(A)</span> ship v1 <span class="term-muted">@work due:Fri</span></div>
@@ -226,8 +226,8 @@ nt recall --source claude'
               <div class="term-line" data-type><span class="term-prompt">$</span> <span class="term-cmd">nt note "Chose flock over SQLite" </span><span class="term-flag">--folder decisions</span></div>
               <div class="term-line"><span class="term-ok">✓ wrote</span> <span class="term-accent">notes/decisions/chose-flock-over-sqlite.md</span></div>
               <div class="term-line gap" aria-hidden="true"></div>
-              <div class="term-line" data-type><span class="term-prompt">$</span> <span class="term-cmd">nt recall </span><span class="term-flag">--source claude</span></div>
-              <div class="term-line"><span class="term-muted"># what an agent captured, read straight back —</span></div>
+              <div class="term-line" data-type><span class="term-prompt">$</span> <span class="term-cmd">nt index </span><span class="term-flag">--source claude</span></div>
+              <div class="term-line"><span class="term-muted"># the catalog an agent reads back — stubs, then open one —</span></div>
               <div class="term-line"><span class="term-pri">(A)</span> fix token refresh race <span class="term-muted">@auth</span> <span class="term-accent">[[jwt-expiry]]</span></div>
               <div class="term-line"><span class="term-muted">·</span> note: "retry budget = 3, backoff 250ms"</div>
             </div>
@@ -366,7 +366,7 @@ nt recall --source claude'
               <p>
                 The action items and notes an agent writes today survive as plain text the next
                 agent — or the next <em>you</em> — reads back tomorrow. Wire it up with a Claude Code
-                hook, the <code>nt mcp</code> server, or just <code>nt recall</code>.
+                hook, the <code>nt mcp</code> server, or just <code>nt index</code>.
               </p>
             </article>
 
@@ -556,7 +556,7 @@ nt recall --source claude'
             <p class="eyebrow" style="justify-content: center">// it's all just text you own</p>
             <h2 id="closing-title">Give your agents a memory<br />they can't lose.</h2>
             <p>
-              Capture as you work, <code>nt recall</code> when you resume. One static binary, no
+              Capture as you work, <code>nt index</code> when you resume. One static binary, no
               database, no cloud — just durable plain text.
             </p>
             <div class="closing-ctas">

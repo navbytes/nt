@@ -25,7 +25,7 @@ it be in context *all the time*?" That splits cleanly into three layers:
 |-------|-----------|---------|------------------|-----------|
 | **Rules** | Small, stable directives ("always run gofmt", review process) | `rules/` + tag `rule` | Injected into the system prompt (plugin) | Paid every turn → keep tiny |
 | **Core memory** | A handful of evolving, always-relevant facts (user prefs, key conventions) | `memory/` + tag `memory-core` | Injected alongside rules | Paid every turn → keep tiny |
-| **Knowledge base** | Everything else: findings, decisions, reference, task history | `ref/`, `decisions/`, … | nt **MCP tools** (`nt_search`, `nt_recall`, `nt_links`) | **Zero until queried** |
+| **Knowledge base** | Everything else: findings, decisions, reference, task history | `ref/`, `decisions/`, … | nt **MCP tools** (`nt_index` → `nt_search`/`nt_get`, `nt_links`) | **Zero until queried** |
 
 The discipline that makes this work: **the rules + core-memory core stays
 small** (it's always in context), and the **bulk knowledge base stays behind the
@@ -43,11 +43,12 @@ TUI, web UI, and Obsidian.
 ## The building blocks (what's in this bundle)
 
 ### 1. MCP server — the read/write engine (`mcp.nt`)
-`nt mcp` exposes 14 typed tools. OpenCode is a first-class MCP client, so this
+`nt mcp` exposes 15 typed tools. OpenCode is a first-class MCP client, so this
 *is* the knowledge-base + memory read/write path — no custom OpenCode tool
-needed.
+needed. Retrieval follows progressive disclosure: `nt_index` (cheap catalog of
+stubs) → `nt_search` (ranked stubs) → `nt_get` (one note's body). No bulk dump.
 
-- **Read:** `nt_ready`, `nt_recall`, `nt_search`, `nt_links`, `nt_status`, `nt_view`, `nt_log`
+- **Read:** `nt_index`, `nt_search`, `nt_get`, `nt_ready`, `nt_status`, `nt_links`, `nt_view`, `nt_log`
 - **Write:** `nt_add`, `nt_note`, `nt_done`, `nt_update`, `nt_tag`, `nt_mv`, `nt_archive`
 
 Registered (absolute path, idempotent) by:
@@ -85,7 +86,7 @@ conventions, loaded on demand via OpenCode's `skill` tool (its description sits
 in context; the body loads only when relevant — progressive disclosure).
 
 ### 4. `AGENTS.md` — the thin always-on nudge
-A tiny file telling the agent it *has* nt memory, to `nt_ready`/`nt_recall` at
+A tiny file telling the agent it *has* nt memory, to `nt_index`/`nt_ready` at
 the start, capture as it works, and how to lazy-load `@`-references (OpenCode does
 not auto-expand them). The substance lives in nt, not here.
 
