@@ -70,6 +70,14 @@ distinguishable from the user's hand-entered items (the MCP tools default it).
 - `nt_mv` — refile/rename a note (rewrites every `[[link]]`).
 - `nt_tag` — add/remove tags (e.g. promote a `ref` note into `rule` once it's stable).
 - `nt_archive` — retire a stale note from the index/search (reversible).
+- `nt_supersede` (handle, by) — mark a note replaced by another; the old one leaves
+  the index so a resume sees only the current decision.
+
+**Dedup guard:** `nt_note` refuses a near-duplicate of an existing note (parallel
+agents often record the same decision). When it errors, prefer to **update** the
+existing note or **supersede** it; pass `force: true` only for a deliberately
+separate note. Watch the `danglingLinks` field in the result — a `[[link]]` that
+didn't resolve is a typo to fix.
 
 ## Conventions
 

@@ -2,6 +2,7 @@ package cli
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -99,7 +100,7 @@ func TestDoctorHealthyStoreWithGoodLinks(t *testing.T) {
 func TestIndexLimitTruncates(t *testing.T) {
 	t.Setenv("NT_DIR", t.TempDir())
 	for i := 0; i < 5; i++ {
-		captureRun(t, "note", "Note", "--folder", "ref", "--description", "d", "--body", "b")
+		captureRun(t, "note", fmt.Sprintf("Distinct topic %d", i), "--force", "--folder", "ref", "--description", "d", "--body", "b")
 	}
 	out := captureRun(t, "index", "--limit", "2", "--json")
 	var p struct {

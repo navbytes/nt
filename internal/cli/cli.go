@@ -51,6 +51,8 @@ func Run(args []string) int {
 		return cmdReview(rest)
 	case "index":
 		return cmdIndex(rest)
+	case "supersede":
+		return cmdSupersede(rest)
 	case "log":
 		return cmdLog(rest)
 	case "done", "do":
@@ -125,6 +127,7 @@ var knownCommands = []string{
 	"done", "do", "skip", "start", "stop", "update", "up", "search", "q",
 	"tags", "tag", "links", "mv", "rename", "rm", "delete", "archive", "undo",
 	"edit", "path", "doctor", "git-init", "hook", "mcp", "web", "version", "help",
+	"supersede",
 }
 
 // suggestCommand returns the closest known command to cmd within a small edit
@@ -375,6 +378,7 @@ USAGE
   nt links <id|note>          forward links + backlinks + deps  (--orphans, --json)
   nt edit <id|note>           edit a task or note in $EDITOR
   nt mv <note> <new|path>     rename/move a note, updating all [[links]] to it
+  nt supersede <old> --by <new>  mark a note replaced by another (retires the old from views)
   nt rm <id|note> [flags]     delete tasks (undoable) or notes (to .trash/)
                               notes: --unlink strips inbound links, --force keeps them;
                               -y/--yes skips the confirm prompt
@@ -412,6 +416,8 @@ NOTE FLAGS (nt note)
   --folder DIR        file under notes/DIR/ (created as needed; or path-style:
                       nt note "decisions/Chose flock over SQLite")
   --field key=value   set extra frontmatter at capture (repeatable, preserved)
+  --supersede <id>    replace an existing note (retires it from views)
+  --force             create even if a near-duplicate note already exists
 
 LIST FLAGS
   --status open|doing|blocked|done   --tag NAME   --project NAME

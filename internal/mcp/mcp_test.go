@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -529,9 +530,10 @@ func TestMCPIndexAndSearch(t *testing.T) {
 		t.Error("nt_search full=true should inline the body")
 	}
 
-	// limit caps results and flags truncation.
+	// limit caps results and flags truncation. Distinct titles so the dedup guard
+	// doesn't refuse them.
 	for i := 0; i < 5; i++ {
-		must("nt_note", map[string]any{"title": "Ref note", "folder": "ref", "tags": []any{"bulk"}, "body": "x"})
+		must("nt_note", map[string]any{"title": fmt.Sprintf("Ref topic %d", i), "folder": "ref", "tags": []any{"bulk"}, "body": "x", "force": true})
 	}
 	var capped struct {
 		Notes     []noteStub `json:"notes"`
@@ -743,5 +745,42 @@ func TestMCPUpdateClaimsWorkstream(t *testing.T) {
 	t.Setenv("NT_WORKSTREAM", "feat-b")
 	if got := indexTaskTexts(t, s, map[string]any{}); !hasText(got, "shared chore") {
 		t.Errorf("after release, feat-b should see it again, got %v", got)
+	}
+}
+
+// TestMCPDedupSupersedeAndDanglingLinks: nt_note refuses a near-duplicate,
+// force bypasses it, nt_supersede retires a note from the index, and a note with
+// an unresolved [[link]] reports danglingLinks.
+func TestMCPDedupSupersedeAndDanglingLinks(t *testing.T) {
+	s := newServer(t)
+	must := func(name string, a map[string]any) string {
+		t.Helper()
+		out, err := s.dispatch(name, a)
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		return out
+	}
+	var first noteOut
+	json.Unmarshal([]byte(must("nt_note", map[string]any{"title": "Refresh token rotation", "tags": []any{"auth"}, "body": "single-use"})), &first)
+
+	// Near-duplicate is refused.
+	if _, err := s.dispatch("nt_note", map[string]any{"title": "Refresh token rotation strategy", "tags": []any{"auth"}}); err == nil {
+		t.Error("nt_note should refuse a near-duplicate")
+	}
+	// force bypasses.
+	var forked noteOut
+	json.Unmarshal([]byte(must("nt_note", map[string]any{"title": "Refresh token rotation strategy", "tags": []any{"auth"}, "force": true})), &forked)
+
+	// nt_supersede retires the fork; nt_index no longer lists it.
+	must("nt_supersede", map[string]any{"handle": forked.ID, "by": first.ID})
+	if strings.Contains(must("nt_index", map[string]any{}), forked.ID) {
+		t.Error("superseded note should be gone from nt_index")
+	}
+
+	// A note with an unresolved [[link]] reports danglingLinks.
+	out := must("nt_note", map[string]any{"title": "Links somewhere", "tags": []any{"x"}, "body": "see [[ghost]]"})
+	if !strings.Contains(out, "danglingLinks") || !strings.Contains(out, "ghost") {
+		t.Errorf("expected danglingLinks for an unresolved [[ghost]]: %s", out)
 	}
 }

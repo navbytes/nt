@@ -168,6 +168,8 @@ func (s *server) dispatch(name string, a map[string]any) (string, error) {
 		return s.update(a)
 	case "nt_note":
 		return s.note(a)
+	case "nt_supersede":
+		return s.supersede(a)
 	case "nt_index":
 		return s.index(a)
 	case "nt_get":
@@ -546,7 +548,23 @@ func (s *server) note(a map[string]any) (string, error) {
 	if source == "" {
 		source = "claude"
 	}
-	n, err := note.Create(s.eng.S, title, str(a, "body"), strSlice(a, "tags"), source, str(a, "folder"))
+	tags := strSlice(a, "tags")
+	supersede := strings.TrimSpace(str(a, "supersede"))
+
+	// Dedup-on-write guard: refuse a near-duplicate of an existing note so parallel
+	// agents don't silently fork the same decision. The agent then updates it,
+	// supersedes it, or passes force=true to record a deliberate separate note.
+	if supersede == "" && !boolArg(a, "force") {
+		if sim := note.FindSimilar(note.Active(s.listNotes()), title, tags); len(sim) > 0 {
+			ids := make([]string, 0, len(sim))
+			for _, n := range sim {
+				ids = append(ids, fmt.Sprintf("%s (%q)", n.ID, n.Title))
+			}
+			return "", fmt.Errorf("near-duplicate note(s) already exist: %s — update one (nt_tag/nt_mv/nt_get), replace it (supersede=<id>), or set force=true for a deliberate separate note", strings.Join(ids, "; "))
+		}
+	}
+
+	n, err := note.Create(s.eng.S, title, str(a, "body"), tags, source, str(a, "folder"))
 	if err != nil {
 		return "", err
 	}
@@ -556,7 +574,91 @@ func (s *server) note(a map[string]any) (string, error) {
 			return "", err
 		}
 	}
-	return jsonText(noteToOut(n)), nil
+	if supersede != "" {
+		if err := s.markSuperseded(supersede, n.ID); err != nil {
+			return "", err
+		}
+	}
+	// Keep the note's fields at the top level (backward-compatible), adding
+	// danglingLinks / superseded only when relevant.
+	res := toMap(noteToOut(n))
+	if dangling := s.danglingLinks(n); len(dangling) > 0 {
+		res["danglingLinks"] = dangling // bad outbound [[refs]] to fix now
+	}
+	if supersede != "" {
+		res["superseded"] = supersede
+	}
+	return jsonText(res), nil
+}
+
+// toMap flattens a struct to a map via its JSON tags, so extra keys can be added
+// to a response without losing the struct's top-level shape.
+func toMap(v any) map[string]any {
+	b, _ := json.Marshal(v)
+	m := map[string]any{}
+	_ = json.Unmarshal(b, &m)
+	return m
+}
+
+// supersede marks one note as replaced by another (nt_supersede).
+func (s *server) supersede(a map[string]any) (string, error) {
+	oldH := strings.TrimSpace(str(a, "handle"))
+	by := strings.TrimSpace(str(a, "by"))
+	if oldH == "" || by == "" {
+		return "", fmt.Errorf("handle and by are required (the old note, and the note that replaces it)")
+	}
+	notes := s.listNotes()
+	newNote, ok := resolveNoteMCP(notes, by)
+	if !ok {
+		return "", fmt.Errorf("no note %q (by)", by)
+	}
+	if err := s.markSuperseded(oldH, newNote.ID); err != nil {
+		return "", err
+	}
+	return jsonText(map[string]any{"superseded": oldH, "canonical": newNote.ID}), nil
+}
+
+// markSuperseded stamps oldHandle's note with superseded_by=newID.
+func (s *server) markSuperseded(oldHandle, newID string) error {
+	old, ok := resolveNoteMCP(s.listNotes(), oldHandle)
+	if !ok {
+		return fmt.Errorf("no note %q to supersede", oldHandle)
+	}
+	if old.ID == newID {
+		return fmt.Errorf("a note can't supersede itself")
+	}
+	old.SupersededBy = newID
+	return old.Save()
+}
+
+// danglingLinks returns the [[links]] in a note's body that don't resolve.
+func (s *server) danglingLinks(n *note.Note) []string {
+	if !strings.Contains(n.Body, "[[") {
+		return nil
+	}
+	d, _ := s.eng.Read()
+	notes := s.listNotes()
+	var out []string
+	for _, raw := range links.Wikilinks(n.Body) {
+		if _, ok := links.Resolve(raw, d, notes); !ok {
+			out = append(out, raw)
+		}
+	}
+	return out
+}
+
+// resolveNoteMCP resolves a handle to a note (id/slug/title), nil if not found.
+func resolveNoteMCP(notes []*note.Note, handle string) (*note.Note, bool) {
+	it, ok := links.Resolve(handle, nil, notes)
+	if !ok || it.Kind != "note" {
+		return nil, false
+	}
+	for _, n := range notes {
+		if n.Path == it.Path {
+			return n, true
+		}
+	}
+	return nil, false
 }
 
 // index is the progressive-disclosure entry point: a compact catalog of the

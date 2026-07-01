@@ -100,7 +100,7 @@ var toolDefs = []toolDef{
 	},
 	{
 		Name:        "nt_note",
-		Description: "Save a note (finding/decision/dead-end) — capture the WHY. Set description to a one-line summary; it's what nt_index shows so the note is discoverable without opening it.",
+		Description: "Save a note (finding/decision/dead-end) — capture the WHY. Set description to a one-line summary; it's what nt_index shows. Guarded against near-duplicates: if a similar note exists it errors — update that one, supersede it, or set force=true. Use supersede=<id> to replace an existing note (the old one retires from views).",
 		InputSchema: obj(map[string]any{
 			"title":       st(),
 			"body":        sp("markdown"),
@@ -108,7 +108,17 @@ var toolDefs = []toolDef{
 			"tags":        at(),
 			"folder":      sp("subfolder, e.g. ref or decisions/auth"),
 			"source":      st(),
+			"supersede":   sp("id of an existing note this replaces; the old note retires from active views"),
+			"force":       map[string]any{"type": "boolean", "description": "create even if a near-duplicate exists"},
 		}, "title"),
+	},
+	{
+		Name:        "nt_supersede",
+		Description: "Reconcile duplicate/obsolete notes: mark one note as replaced by another. The old note retires from nt_index/nt_search (so a resume sees only the current decision) while a superseded_by pointer preserves the trail.",
+		InputSchema: obj(map[string]any{
+			"handle": sp("the note being replaced (id/slug/title)"),
+			"by":     sp("the note that replaces it (id/slug/title)"),
+		}, "handle", "by"),
 	},
 	{
 		Name:        "nt_index",

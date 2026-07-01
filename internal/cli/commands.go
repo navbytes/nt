@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/navbytes/nt/internal/dateparse"
+	"github.com/navbytes/nt/internal/links"
 	"github.com/navbytes/nt/internal/mutate"
 	"github.com/navbytes/nt/internal/note"
 	"github.com/navbytes/nt/internal/quickadd"
@@ -372,12 +373,14 @@ func cmdNote(args []string) int {
 	source := fs.String("source", "cli", "origin")
 	folder := fs.String("folder", "", "subfolder under notes/ (e.g. work or work/auth)")
 	desc := fs.String("description", "", "one-line summary shown in `nt index`")
+	supersede := fs.String("supersede", "", "mark this note as replacing an existing one (its handle) — the old note retires from active views")
+	force := fs.Bool("force", false, "create even if a near-duplicate note already exists")
 	var fields stringSlice
 	asJSON := fs.Bool("json", false, "print the created note as JSON (id, title, path, …)")
 	fs.Var(&tags, "tag", "tag (repeatable)")
 	fs.Var(&fields, "field", "extra frontmatter key=value (repeatable, e.g. status=stable)")
 
-	flags, positional := splitArgs(args, map[string]bool{"json": true})
+	flags, positional := splitArgs(args, map[string]bool{"json": true, "force": true})
 	if err := fs.Parse(flags); err != nil {
 		return 2
 	}
@@ -398,9 +401,26 @@ func cmdNote(args []string) int {
 	if !ok {
 		return 1
 	}
+	// Dedup-on-write guard: don't silently fork a decision a teammate already
+	// captured. Skipped when --force, or when --supersede is explicitly replacing.
+	if !*force && strings.TrimSpace(*supersede) == "" {
+		if sim := note.FindSimilar(note.Active(mustNotes(e)), title, tags); len(sim) > 0 {
+			fmt.Fprintf(os.Stderr, "note: a near-duplicate already exists — not creating. Did you mean to update it?\n")
+			for _, s := range sim {
+				fmt.Fprintf(os.Stderr, "  %s  %s  %s\n", shortID(s.ID), s.Rel, s.Title)
+			}
+			fmt.Fprintf(os.Stderr, "→ edit it (nt edit <id>), replace it (nt note … --supersede <id>), or force a new one (--force)\n")
+			return 1
+		}
+	}
 	n, err := note.Create(e.S, title, *body, tags, *source, fold)
 	if err != nil {
 		return fail(err)
+	}
+	if h := strings.TrimSpace(*supersede); h != "" {
+		if code := markSuperseded(e, h, n.ID); code != 0 {
+			return code
+		}
 	}
 	if d := strings.TrimSpace(*desc); d != "" { // --description → a modeled frontmatter key
 		fields = append(fields, "description="+d)
@@ -417,11 +437,75 @@ func cmdNote(args []string) int {
 			return fail(err)
 		}
 	}
+	// Warn (don't fail) on any [[link]] in the body that doesn't resolve, so a
+	// mistyped outbound reference is caught at capture instead of later by doctor.
+	warnDanglingLinks(e, n)
 	if *asJSON {
 		return printJSON(notesToJSON([]*note.Note{n})[0])
 	}
 	rel, _ := filepath.Rel(e.S.Dir, n.Path)
 	fmt.Printf("note %s  %s\n", shortID(n.ID), rel)
+	return 0
+}
+
+// markSuperseded stamps oldHandle's note with superseded_by=newID (retiring it
+// from active views). Returns a nonzero CLI code on failure.
+func markSuperseded(e *mutate.Engine, oldHandle, newID string) int {
+	notes := mustNotes(e)
+	old, err := resolveNote(notes, oldHandle)
+	if err != nil {
+		return fail(fmt.Errorf("supersede: %w", err))
+	}
+	if old.ID == newID {
+		return fail(fmt.Errorf("supersede: a note can't supersede itself"))
+	}
+	old.SupersededBy = newID
+	if err := old.Save(); err != nil {
+		return fail(err)
+	}
+	return 0
+}
+
+// warnDanglingLinks prints a warning for each [[link]] in the note body that
+// doesn't resolve — a write-time catch for mistyped outbound references.
+func warnDanglingLinks(e *mutate.Engine, n *note.Note) {
+	if !strings.Contains(n.Body, "[[") {
+		return
+	}
+	notes := mustNotes(e)
+	d, _ := e.Read()
+	for _, raw := range links.Wikilinks(n.Body) {
+		if _, ok := links.Resolve(raw, d, notes); !ok {
+			fmt.Fprintf(os.Stderr, "note: warning — [[%s]] doesn't resolve to any note or task (dangling link)\n", raw)
+		}
+	}
+}
+
+// cmdSupersede marks one note as replaced by another: `nt supersede <old> --by
+// <new>`. The old note retires from active views (index/search/status) so a
+// resume sees only the current decision, while superseded_by preserves the trail.
+func cmdSupersede(args []string) int {
+	fs := flag.NewFlagSet("supersede", flag.ContinueOnError)
+	by := fs.String("by", "", "handle of the note that replaces the old one (required)")
+	flags, positional := splitArgs(args, map[string]bool{})
+	if err := fs.Parse(flags); err != nil {
+		return 2
+	}
+	if len(positional) == 0 || strings.TrimSpace(*by) == "" {
+		return usageErr(fmt.Errorf("supersede: usage: nt supersede <old-handle> --by <new-handle>"))
+	}
+	e, ok := engine()
+	if !ok {
+		return 1
+	}
+	newNote, err := resolveNote(mustNotes(e), strings.TrimSpace(*by))
+	if err != nil {
+		return fail(fmt.Errorf("supersede: --by: %w", err))
+	}
+	if code := markSuperseded(e, strings.Join(positional, " "), newNote.ID); code != 0 {
+		return code
+	}
+	fmt.Printf("superseded — retired the old note; %s is now canonical\n", shortID(newNote.ID))
 	return 0
 }
 
