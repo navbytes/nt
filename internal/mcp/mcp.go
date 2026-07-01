@@ -447,18 +447,74 @@ func (s *server) add(a map[string]any) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	sim := s.similarToTask(created)
 	if splitNote != "" {
 		hint := "detail saved as the task's linked note under notes/__tasks__/ — following the task opens it."
 		if strings.TrimSpace(str(a, "body")) == "" {
 			hint = "text was long, so it was split: a short title on the task, the full text in a linked note (notes/__tasks__/). Prefer a short text + a separate body next time."
 		}
-		return jsonText(map[string]any{
-			"task": taskToOut(created),
-			"note": splitNote,
-			"hint": hint,
-		}), nil
+		res := map[string]any{"task": taskToOut(created), "note": splitNote, "hint": hint}
+		if len(sim) > 0 {
+			res["similar"] = sim
+		}
+		return jsonText(res), nil
 	}
-	return jsonText(taskToOut(created)), nil
+	// Flat top-level task shape (backward-compatible), plus a non-blocking `similar`
+	// list so an agent notices it may be doubling a teammate's task/decision.
+	res := toMap(taskToOut(created))
+	if len(sim) > 0 {
+		res["similar"] = sim
+	}
+	return jsonText(res), nil
+}
+
+// similarToTask finds open tasks (shared project/tag + similar title) and active
+// decision notes (shared tag + similar title) that the new task likely duplicates
+// — the task-layer analog of the note dedup guard, but advisory (tasks legitimately
+// repeat, so this never blocks).
+func (s *server) similarToTask(created *task.Task) []map[string]string {
+	if created == nil {
+		return nil
+	}
+	title := created.Display()
+	out := []map[string]string{}
+	if d, err := s.eng.Read(); err == nil {
+		for _, t := range d.Tasks() {
+			if t.ID() == created.ID() || t.Done {
+				continue
+			}
+			shared := false
+			for _, p := range created.Projects() {
+				if contains(t.Projects(), p) {
+					shared = true
+				}
+			}
+			for _, tg := range created.Tags() {
+				if contains(t.Tags(), tg) {
+					shared = true
+				}
+			}
+			if shared && note.TitleOverlap(title, t.Display()) >= 0.5 {
+				out = append(out, map[string]string{"kind": "task", "id": t.ID(), "text": t.Display()})
+			}
+		}
+	}
+	tags := created.Tags()
+	for _, n := range note.Active(s.listNotes()) {
+		if n.Reserved() {
+			continue
+		}
+		shared := false
+		for _, tg := range tags {
+			if contains(n.Tags, tg) {
+				shared = true
+			}
+		}
+		if shared && note.TitleOverlap(title, n.Title) >= 0.5 {
+			out = append(out, map[string]string{"kind": "note", "id": n.ID, "title": n.Title})
+		}
+	}
+	return out
 }
 
 func (s *server) done(a map[string]any) (string, error) {

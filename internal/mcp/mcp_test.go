@@ -784,3 +784,39 @@ func TestMCPDedupSupersedeAndDanglingLinks(t *testing.T) {
 		t.Errorf("expected danglingLinks for an unresolved [[ghost]]: %s", out)
 	}
 }
+
+// TestMCPTaskOverlapWarning: nt_add is advisory (non-blocking) about a near-
+// duplicate task on the same project/tag, and about a decision note already on the
+// topic — the task-layer analog of the note dedup guard.
+func TestMCPTaskOverlapWarning(t *testing.T) {
+	s := newServer(t)
+	must := func(name string, a map[string]any) string {
+		t.Helper()
+		out, err := s.dispatch(name, a)
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		return out
+	}
+	// First task — no similar yet.
+	first := must("nt_add", map[string]any{"text": "normalize watermark timestamps to UTC", "project": "pipeline"})
+	if strings.Contains(first, "similar") {
+		t.Errorf("first task should have no similar: %s", first)
+	}
+	// A near-duplicate task on the same project → flagged as similar (non-blocking).
+	dup := must("nt_add", map[string]any{"text": "normalize timestamps UTC for watermark", "project": "pipeline"})
+	if !strings.Contains(dup, "similar") || !strings.Contains(dup, "\"kind\": \"task\"") {
+		t.Errorf("near-duplicate task should be flagged as similar: %s", dup)
+	}
+	// An unrelated task is not flagged.
+	other := must("nt_add", map[string]any{"text": "write the deploy script", "project": "pipeline"})
+	if strings.Contains(other, "similar") {
+		t.Errorf("unrelated task should not be flagged: %s", other)
+	}
+	// A decision note on the topic → a task on it is flagged to link, not duplicate.
+	must("nt_note", map[string]any{"title": "Config precedence order", "tags": []any{"clitool"}, "body": "flags > env > file"})
+	tsk := must("nt_add", map[string]any{"text": "Config precedence order test", "tags": []any{"clitool"}})
+	if !strings.Contains(tsk, "\"kind\": \"note\"") {
+		t.Errorf("a task restating a decision note should surface it: %s", tsk)
+	}
+}

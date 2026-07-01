@@ -463,6 +463,11 @@ func FindSimilar(notes []*Note, title string, tags []string) []*Note {
 	return out
 }
 
+// TitleOverlap is the word-set Jaccard (0..1) of two titles, ignoring short and
+// stopword tokens — the similarity heuristic behind duplicate detection, exported
+// so task-side dedup can reuse the exact same notion nt uses for notes.
+func TitleOverlap(a, b string) float64 { return jaccard(titleTokens(a), titleTokens(b)) }
+
 var titleStopwords = map[string]bool{
 	"the": true, "and": true, "for": true, "over": true, "via": true, "with": true,
 	"vs": true, "not": true, "use": true, "using": true, "into": true, "from": true,

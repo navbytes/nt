@@ -190,13 +190,75 @@ func cmdAdd(args []string) int {
 	if err != nil {
 		return fail(err)
 	}
+	// Non-blocking overlap warning: two agents on a shared store often create the
+	// same implementation task for one decision (the field study's task-layer
+	// duplication). Unlike notes, tasks legitimately repeat, so we warn rather than
+	// refuse — surfacing near-duplicate tasks and any decision note on the topic.
+	warnDuplicateTask(e, created)
 	if *asJSON {
-		// Same id-bearing shape as `list/ready/recall --json` (and the MCP
-		// nt_add tool), so an agent on the CLI path can capture-then-reference.
+		// Same id-bearing shape as `list/ready --json` (and the MCP nt_add tool),
+		// so an agent on the CLI path can capture-then-reference.
 		return printJSON(tasksToJSON([]*task.Task{created}, nil)[0])
 	}
 	fmt.Printf("added %s  %s\n", shortID(created.ID()), title)
 	return 0
+}
+
+// taskProjTagOverlap reports whether two tasks share a project or tag.
+func taskProjTagOverlap(a, b *task.Task) bool {
+	for _, p := range a.Projects() {
+		if contains(b.Projects(), p) {
+			return true
+		}
+	}
+	for _, tg := range a.Tags() {
+		if contains(b.Tags(), tg) {
+			return true
+		}
+	}
+	return false
+}
+
+// warnDuplicateTask prints (to stderr, non-blocking) any existing open task that
+// looks like a duplicate of the one just created — shared project/tag + similar
+// title — and any active decision note on the same topic, so the author can link
+// or dedupe instead of quietly doubling the work.
+func warnDuplicateTask(e *mutate.Engine, created *task.Task) {
+	if created == nil {
+		return
+	}
+	title := created.Display()
+	d, err := e.Read()
+	if err != nil {
+		return
+	}
+	for _, t := range d.Tasks() {
+		if t.ID() == created.ID() || t.Done {
+			continue
+		}
+		if taskProjTagOverlap(created, t) && note.TitleOverlap(title, t.Display()) >= 0.5 {
+			fmt.Fprintf(os.Stderr, "note: similar task already exists — %s  %s (link or dedupe instead of doubling work)\n", shortID(t.ID()), t.Display())
+		}
+	}
+	tags := created.Tags()
+	if len(tags) == 0 {
+		return
+	}
+	for _, n := range note.Active(mustNotes(e)) {
+		if n.Reserved() {
+			continue
+		}
+		shared := false
+		for _, tg := range tags {
+			if contains(n.Tags, tg) {
+				shared = true
+				break
+			}
+		}
+		if shared && note.TitleOverlap(title, n.Title) >= 0.5 {
+			fmt.Fprintf(os.Stderr, "note: a decision note already covers this — %s  %s (consider [[linking]] the task to it)\n", shortID(n.ID), n.Title)
+		}
+	}
 }
 
 // recurNote renders the "next occurrence" suffix for a completion line when a

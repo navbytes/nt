@@ -197,6 +197,9 @@ func cmdIndex(args []string) int {
 			if len(s.Tags) > 0 {
 				line += "  @" + strings.Join(s.Tags, " @")
 			}
+			if s.Source != "" {
+				line += "  ·" + s.Source // authorship — who captured it (ownership on a shared store)
+			}
 			fmt.Println(line)
 		}
 	}
