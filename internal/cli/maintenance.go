@@ -243,7 +243,14 @@ func cmdDoctor(args []string) int {
 	if err != nil {
 		return fail(err)
 	}
-	if len(rep.Actions) > 0 || len(rep.Warnings) > 0 {
+	// Notes lint: the KB-side health check (broken [[links]], plus informational
+	// counts for missing descriptions and orphans). Read-only — no lock needed,
+	// and never auto-fixed (a dangling link is a user decision, like a dep cycle).
+	nl := lintNotes(e)
+	taskProblem := rep.HasProblems()
+	noteProblem := len(nl.Dangling) > 0
+
+	if len(rep.Actions) > 0 || len(rep.Warnings) > 0 || noteProblem {
 		if *check {
 			fmt.Println("doctor — problems found:")
 		} else {
@@ -256,8 +263,13 @@ func cmdDoctor(args []string) int {
 	for _, w := range rep.Warnings {
 		fmt.Println("  ⚠ " + w)
 	}
-	if !rep.HasProblems() {
+	for _, dl := range nl.Dangling {
+		fmt.Println("  ⚠ dangling link " + dl)
+	}
+
+	if !taskProblem && !noteProblem {
 		fmt.Println("store is healthy — no issues found")
+		printNoteHygiene(nl)
 		return 0
 	}
 	if rep.Issues() > 0 {
@@ -272,10 +284,93 @@ func cmdDoctor(args []string) int {
 	if len(rep.Warnings) > 0 {
 		fmt.Printf("%d dependency warning(s) need a manual fix (see ⚠ above)\n", len(rep.Warnings))
 	}
+	if noteProblem {
+		fmt.Printf("%d dangling note link(s) — fix the [[target]] or the note it points to\n", len(nl.Dangling))
+	}
+	printNoteHygiene(nl)
 	if *check {
 		return 1
 	}
 	return 0
+}
+
+// noteLint is the KB-side health report `nt doctor` produces alongside the task
+// reconciliation.
+type noteLint struct {
+	Dangling    []string // "[[target]] in <source>" — an unresolved wiki-link (a real break)
+	NoteCount   int
+	MissingDesc int // active notes with no explicit `description:` (index scannability)
+	Orphans     int // active notes nothing links to (informational)
+}
+
+// lintNotes scans notes and tasks for KB-graph health: unresolved [[links]]
+// (reported as fixable-by-hand problems), plus informational counts of notes
+// missing a description and notes nothing links to. Links resolve against ALL
+// notes (incl. archived) so a link to a retired note isn't miscalled dangling.
+func lintNotes(e *mutate.Engine) noteLint {
+	var rep noteLint
+	allNotes, _ := note.List(e.S)
+	active := note.Active(allNotes)
+	d, _ := e.Read()
+
+	linked := map[string]bool{}
+	check := func(raw, src string) {
+		if it, ok := links.Resolve(raw, d, allNotes); ok {
+			if it.Kind == "note" {
+				linked[it.Path] = true
+			}
+		} else {
+			rep.Dangling = append(rep.Dangling, fmt.Sprintf("[[%s]] in %s", raw, src))
+		}
+	}
+	for _, n := range active {
+		for _, raw := range links.Wikilinks(n.Body) {
+			check(raw, shortID(n.ID)+" "+n.Rel)
+		}
+	}
+	if d != nil {
+		for _, t := range d.Tasks() {
+			for _, raw := range links.Wikilinks(t.Text) {
+				check(raw, "task "+shortID(t.ID()))
+			}
+		}
+	}
+	for _, n := range active {
+		rep.NoteCount++
+		if !hasExplicitDescription(n) {
+			rep.MissingDesc++
+		}
+		if !linked[n.Path] {
+			rep.Orphans++
+		}
+	}
+	return rep
+}
+
+// hasExplicitDescription reports whether a note carries a `description:` line in
+// its frontmatter (kept in Extra, since nt doesn't model the key).
+func hasExplicitDescription(n *note.Note) bool {
+	for _, line := range n.Extra {
+		if k, _, ok := strings.Cut(line, ":"); ok && strings.EqualFold(strings.TrimSpace(k), "description") {
+			return true
+		}
+	}
+	return false
+}
+
+// printNoteHygiene emits the informational (non-failing) note-quality summary.
+func printNoteHygiene(nl noteLint) {
+	if nl.MissingDesc == 0 && nl.Orphans == 0 {
+		return
+	}
+	fmt.Printf("note hygiene: %d note(s)", nl.NoteCount)
+	if nl.MissingDesc > 0 {
+		fmt.Printf(", %d without a description: (add one so `nt index` is scannable)", nl.MissingDesc)
+	}
+	if nl.Orphans > 0 {
+		fmt.Printf(", %d orphan(s) nothing links to", nl.Orphans)
+	}
+	fmt.Println()
 }
 
 // cmdGitInit prepares $NT_DIR for version control: a .gitattributes so the
@@ -377,6 +472,6 @@ is silent, and always exits 0. Wire it once into Claude Code's settings
 
 Then your agent's todo list is captured automatically as you work. Full setup
 and the status mapping: docs/claude-integration.md. For typed agent tools
-(nt_add, nt_ready, nt_recall, …) instead of the hook, see: nt mcp install.
+(nt_add, nt_index, nt_search, …) instead of the hook, see: nt mcp install.
 `)
 }

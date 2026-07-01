@@ -351,6 +351,38 @@ func humanizeFilename(path string) string {
 // Active drops archived notes — the working set, for views/search that should
 // hide retired notes. List itself returns everything (archived included) so
 // link-rewriting and the archived view still see them.
+// Description returns the note's one-line summary for index/stub views: its
+// `description:` frontmatter if set (kept in Extra, since nt doesn't model the
+// key), else the first non-heading body line. Clamped to a single line ≤max chars.
+// This is the "one-sentence summary" granularity of progressive disclosure — what
+// an agent reads to decide whether to open the full note.
+func (n *Note) Description(max int) string {
+	for _, line := range n.Extra {
+		k, v, ok := strings.Cut(line, ":")
+		if ok && strings.EqualFold(strings.TrimSpace(k), "description") {
+			if d := strings.TrimSpace(strings.Trim(strings.TrimSpace(v), `"'`)); d != "" {
+				return clampLine(d, max)
+			}
+		}
+	}
+	for _, raw := range strings.Split(n.Body, "\n") {
+		line := strings.TrimSpace(raw)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		return clampLine(line, max)
+	}
+	return ""
+}
+
+func clampLine(s string, max int) string {
+	s = strings.Join(strings.Fields(s), " ") // collapse whitespace to one line
+	if max > 0 && len(s) > max {
+		return strings.TrimSpace(s[:max-1]) + "…"
+	}
+	return s
+}
+
 func Active(ns []*Note) []*Note {
 	out := ns[:0:0]
 	for _, n := range ns {

@@ -7,7 +7,7 @@ current Anomaly/SST version with a JS server + Go TUI, repo
 
 It is grounded in an audit of this repository's source and runtime, not the
 binary's name. **Headline finding:** `nt` is already a non-interactive,
-JSON-emitting CLI *and* ships a stdio **MCP server** (`nt mcp`) with 14 typed
+JSON-emitting CLI *and* ships a stdio **MCP server** (`nt mcp`) with 15 typed
 read **and write** tools — and OpenCode natively consumes MCP servers. That
 collapses most of what the brief assumed "must be built." The agent-driven
 read/write loop (knowledge-base retrieval **and** write-back memory) needs **no
@@ -26,7 +26,7 @@ Audited against `internal/` and a built binary (`v0.10.0`-era `main`).
 | 1 | **Purpose & data model** | Task + note manager built explicitly as "durable memory for AI sessions." Tasks are todo.txt-style lines in `tasks.txt`; notes are markdown files with YAML frontmatter under `notes/` **with subfolders** (`ref/`, `decisions/`, `notes/__tasks__/` for task bodies, `notes/journal/` for dailies). Plain files — no DB. |
 | 2 | **Interface** | A Go CLI (`nt <verb>`), **plus** a stdio **MCP server** (`nt mcp`), **plus** a localhost web HTTP API (`nt web`), **plus** a Bubble Tea TUI and a Wails desktop app. Four programmatic surfaces; three are non-interactive. |
 | 3 | **Output format** | Every read/write verb takes `--json` and prints structured JSON to stdout; non-`--json` output is human text. Fully pipeable and scriptable. |
-| 4 | **Read / query** | `nt search "<text>" [--tag T (AND, repeatable)] [--type note\|task\|all] [--json]` (full-text over titles + bodies); `nt ready` (open, unblocked, by urgency); `nt recall [--source --since --json]` (tasks + note **bodies**); `nt status`, `nt log`, `nt links <handle> [--orphans]`, `nt tags`, `nt view <name>`. |
+| 4 | **Read / query** | Index-first progressive disclosure: `nt index [--tag --folder --json]` (a catalog of note **stubs** — id, title, one-line description, tags — plus active tasks, **no bodies**); `nt search "<text>" [--tag] [--limit N] [--json]` (ranked stubs, `--full` for bodies); `nt show <handle>` / `nt_get` (one note's body, optional `section`); plus `nt ready`, `nt status`, `nt log`, `nt links <handle> [--orphans]`, `nt tags`, `nt view <name>`. |
 | 5 | **Write / append** | **Fully non-interactive.** `nt add`, `nt note` (with `--body`, `--folder`, `--field k=v`), `nt done`, `nt update`, `nt tag`, `nt mv`, `nt rm`, `nt archive` — all flag/arg-driven, all with `--json`. No `$EDITOR`/GUI required (`nt edit`/`nt journal` are the *opt-in* interactive verbs). |
 | 6 | **Addressability** | Every entry has a stable **ULID** `id` (e.g. `01KW8N…`). Notes also addressable by slug/title. Any verb accepts the same **handle** (id, slug, or title) it printed. The MCP layer **refuses** positional `task:N` — agents must use stable ids. |
 | 7 | **Storage location & portability** | Global store at `$NT_DIR` (default `~/.local/share/nt`); `nt path` prints it. Fully relocatable via the env var — can point into a repo. `nt git-init` sets up union-merge + `.gitignore` for committing the store. |
@@ -51,9 +51,9 @@ change the design:
 
 1. **`nt` already exposes write tools over MCP** — `nt_add`, `nt_note`,
    `nt_done`, `nt_update`, `nt_tag`, `nt_mv`, `nt_archive` — alongside the read
-   tools `nt_ready`, `nt_status`, `nt_view`, `nt_recall`, `nt_log`, `nt_search`,
-   `nt_links`. Verified end-to-end over stdio JSON-RPC (`tools/list` → 14 tools;
-   `tools/call nt_search` → results).
+   tools `nt_index`, `nt_search`, `nt_get`, `nt_ready`, `nt_status`, `nt_view`,
+   `nt_log`, `nt_links`. Verified end-to-end over stdio JSON-RPC (`tools/list` →
+   15 tools; `tools/call nt_index`/`nt_search`/`nt_get` → results).
 2. **OpenCode is a first-class MCP client.** Its config has a top-level `mcp` key
    for `"type": "local"` (stdio) servers, and the agent calls those tools the
    same way it calls built-ins.
@@ -95,15 +95,15 @@ cost.
 | Concept | Surface | Mechanism | Token cost |
 |---------|---------|-----------|-----------|
 | **Rules** (small, stable, always true) | `instructions` glob → an `nt`-generated markdown file (or `AGENTS.md`) | `nt export --tag rules > .opencode/nt-rules.md`; `"instructions": [".opencode/nt-rules.md"]` | Paid every request — keep it small |
-| **Knowledge base** (large, queried occasionally) | **MCP tools** `nt_search` / `nt_recall` / `nt_links` / `nt_status` | Already registered via `nt mcp install --client opencode` | **Zero until called** (lazy retrieval) |
+| **Knowledge base** (large, queried occasionally) | **MCP tools** `nt_index` → `nt_search` / `nt_get` / `nt_links` / `nt_status` | Already registered via `nt mcp install --client opencode` | **Zero until called** (lazy, index-first) |
 | **Memory write-back** (capture as the agent works) | **MCP tools** `nt_add` / `nt_note` / `nt_done` / `nt_update` | Same registration; agent calls them explicitly | Only when writing |
 | **Curated KB highlights** (optional) | **Agent Skills** | Symlink/export curated notes to `.opencode/skills/<name>/SKILL.md` | Only the skill list is always-loaded; bodies load on demand |
 
 **Token-budget plan.** Always-in-context = the rules file only (and OpenCode's
 skill *list*, if used). Everything else — the whole note corpus, completed-task
 history, link graph — stays behind MCP tools and is fetched on demand. This is
-the brief's §2.3 rule of thumb, and it's exactly what `nt`'s plain-file +
-on-demand-recall design is built for ("read only what's relevant").
+the brief's §2.3 rule of thumb, and it's exactly what `nt`'s plain-file,
+index-first retrieval design is built for ("read only what's relevant").
 
 **Why MCP over a custom OpenCode tool or the web HTTP API:**
 - The MCP tools are typed, default `source` to `claude`, enforce stable ids, and
@@ -135,8 +135,8 @@ Capability report complete; read+write verdict positive.
 
 ### Phase 2 — On-demand KB retrieval ✅ (shipped here)
 - `nt mcp install --client opencode` registers the stdio server; the agent gets
-  `nt_search`, `nt_recall`, `nt_status`, `nt_links`, `nt_view` immediately. No
-  custom tool needed. **Done in this PR.**
+  `nt_index`, `nt_search`, `nt_get`, `nt_status`, `nt_links`, `nt_view`
+  immediately (index-first progressive disclosure). No custom tool needed.
 
 ### Phase 3 — Write-back memory ✅ for the engine; optional automation
 - The write tools (`nt_add`, `nt_note`, `nt_done`, `nt_update`, `nt_tag`,
@@ -164,9 +164,9 @@ Capability report complete; read+write verdict positive.
 - **Always-loaded token cost.** The rules file is billed every request. Keep
   `nt export --tag rules` output to genuinely-stable, must-always-apply rules;
   push everything else behind `nt_search`/Skills.
-- **Synchronous tool latency.** `nt` queries are local-fs and fast, but unbounded
-  `nt_search` on a huge corpus returns large payloads. Bound with `--tag`/`type`
-  and prefer `brief` recall (pointers, then `nt_view` the one note).
+- **Synchronous tool latency.** `nt` queries are local-fs and fast. `nt_search`
+  now returns bounded stubs (default `limit` 8, `truncated` flag) rather than
+  bodies, so payloads stay small; the agent `nt_get`s only the note it needs.
 - **Write concurrency.** flock + atomic writes make concurrent agent/human writes
   safe, but a human editing a note in Obsidian *and* an agent `nt mv`-ing it
   could still surprise the human. The undo journal mitigates; document it.

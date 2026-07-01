@@ -15,7 +15,7 @@ import (
 // cmdExport compiles selected notes (and optionally open tasks) into a single
 // document — the missing primitive for feeding nt content into an always-in-context
 // layer like OpenCode's `instructions` / AGENTS.md or a SKILL.md body. Unlike
-// `nt search`/`nt recall` (shaped for an agent's on-demand reads), export produces
+// `nt search`/`nt index` (shaped for an agent's on-demand reads), export produces
 // one clean, concatenated artifact suitable for a file an editor or agent loads at
 // startup.
 //

@@ -22,6 +22,7 @@ import (
 	"github.com/navbytes/nt/internal/note"
 	"github.com/navbytes/nt/internal/quickadd"
 	"github.com/navbytes/nt/internal/search"
+	"github.com/navbytes/nt/internal/store"
 	"github.com/navbytes/nt/internal/task"
 	"github.com/navbytes/nt/internal/view"
 )
@@ -152,8 +153,10 @@ func (s *server) dispatch(name string, a map[string]any) (string, error) {
 		return s.update(a)
 	case "nt_note":
 		return s.note(a)
-	case "nt_recall":
-		return s.recall(a)
+	case "nt_index":
+		return s.index(a)
+	case "nt_get":
+		return s.get(a)
 	case "nt_log":
 		return s.log(a)
 	case "nt_search":
@@ -533,68 +536,96 @@ func (s *server) note(a map[string]any) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	if desc := strings.TrimSpace(str(a, "description")); desc != "" {
+		n.Extra = append(n.Extra, "description: "+desc)
+		if err := n.Save(); err != nil {
+			return "", err
+		}
+	}
 	return jsonText(noteToOut(n)), nil
 }
 
-func (s *server) recall(a map[string]any) (string, error) {
+// index is the progressive-disclosure entry point: a compact catalog of the
+// knowledge base — one stub per note (id, title, one-line description, tags,
+// folder), NO bodies — plus the active (open+doing, unblocked) task list. An agent
+// loads this cheaply to resume context, then fetches only the notes it needs by id
+// (nt_get) or nt_search. It replaces the old bulk recall, which returned every note
+// body and grew linearly with the whole corpus.
+func (s *server) index(a map[string]any) (string, error) {
 	d, err := s.eng.Read()
 	if err != nil {
 		return "", err
 	}
-	source, since := str(a, "source"), str(a, "since")
-	ws := s.workstream(a)
-	includeDone := boolArg(a, "include_done")
-	var tasks []*task.Task
-	for _, t := range d.Tasks() {
-		if !includeDone && t.Done {
-			continue // recall restores ACTIVE context; finished work lives in nt_log
-		}
-		if !wsVisible(t.Key("ws"), ws) {
-			continue // tasks isolate per workstream; notes below stay shared
-		}
-		if source != "" && t.Source() != source {
-			continue
-		}
-		if since != "" && t.Created != "" && t.Created < since {
-			continue
-		}
-		tasks = append(tasks, t)
-	}
-	allNotes, _ := note.List(s.eng.S)
-	allNotes = note.Active(allNotes) // recall restores active context; archived notes are retired
-	var notes []*note.Note
-	for _, n := range allNotes {
-		if source != "" && n.Source != source {
-			continue
-		}
-		if since != "" && n.Created != "" && shortDate(n.Created) < since {
-			continue
-		}
-		notes = append(notes, n)
-	}
-
-	// Context-cost controls (opt-in, so the default full reload is unchanged):
-	// limit keeps the most recent N of each (the cheap "what was I doing"); brief
-	// drops note bodies → a pointer index the agent can nt_view/nt_links on demand.
-	if limit := intArg(a, "limit"); limit > 0 {
-		if len(tasks) > limit {
-			tasks = tasks[len(tasks)-limit:]
-		}
-		if len(notes) > limit {
-			sort.SliceStable(notes, func(i, j int) bool { return notes[i].Created > notes[j].Created })
-			notes = notes[:limit]
-		}
-	}
-	brief := boolArg(a, "brief")
-	nout := make([]noteOut, 0, len(notes))
+	tag, folder := strings.TrimSpace(str(a, "tag")), strings.Trim(strings.TrimSpace(str(a, "folder")), "/")
+	notes := note.Active(mustList(s.eng.S))
+	stubs := make([]noteStub, 0, len(notes))
 	for _, n := range notes {
-		o := noteToOut(n)
-		if brief {
-			o.Body = ""
+		if folder != "" && !strings.HasPrefix(n.Rel, folder+"/") {
+			continue
 		}
-		nout = append(nout, o)
+		if tag != "" && !contains(n.Tags, tag) {
+			continue
+		}
+		stubs = append(stubs, noteToStub(n, ""))
 	}
-	return jsonText(map[string]any{"tasks": tasksOut(tasks), "notes": nout}), nil
+	sort.SliceStable(stubs, func(i, j int) bool {
+		if stubs[i].Folder != stubs[j].Folder {
+			return stubs[i].Folder < stubs[j].Folder
+		}
+		return stubs[i].Title < stubs[j].Title
+	})
+
+	ws := s.workstream(a)
+	blocked := task.BlockedIDs(d.Tasks())
+	var active []*task.Task
+	for _, t := range d.Tasks() {
+		if t.Done || blocked[t.ID()] || !wsVisible(t.Key("ws"), ws) {
+			continue
+		}
+		if tag != "" && !contains(t.Tags(), tag) {
+			continue
+		}
+		active = append(active, t)
+	}
+	task.SortByUrgency(active)
+	return jsonText(map[string]any{"notes": stubs, "tasks": tasksOut(active)}), nil
+}
+
+// get fetches one note's full content by handle (id/slug/title) — the on-demand
+// half of progressive disclosure. With `section`, it returns only the markdown
+// block under the matching heading, so an agent can pull a slice, not the whole
+// note.
+func (s *server) get(a map[string]any) (string, error) {
+	handle := strings.TrimSpace(str(a, "handle"))
+	if handle == "" {
+		return "", fmt.Errorf("handle is required (a note id, slug, or title)")
+	}
+	notes := mustList(s.eng.S)
+	it, ok := links.Resolve(handle, nil, notes)
+	if !ok || it.Kind != "note" {
+		return "", fmt.Errorf("no note %q", handle)
+	}
+	var n *note.Note
+	for _, cand := range notes {
+		if cand.Path == it.Path {
+			n = cand
+			break
+		}
+	}
+	if n == nil {
+		return "", fmt.Errorf("no note %q", handle)
+	}
+	body := strings.TrimSpace(n.Body)
+	if section := strings.TrimSpace(str(a, "section")); section != "" {
+		body = extractSection(n.Body, section)
+		if body == "" {
+			return "", fmt.Errorf("no section %q in note %q", section, handle)
+		}
+	}
+	return jsonText(map[string]any{
+		"id": n.ID, "title": n.Title, "tags": n.Tags, "folder": pathDir(n.Rel),
+		"source": n.Source, "body": body,
+	}), nil
 }
 
 func (s *server) log(a map[string]any) (string, error) {
@@ -626,6 +657,12 @@ func (s *server) log(a map[string]any) (string, error) {
 	return jsonText(tasksOut(done)), nil
 }
 
+// search is the KB's on-demand retrieval verb. It returns ranked STUBS (id,
+// title, one-line description, a query-context snippet, tags, folder) — NOT full
+// bodies — so a broad query costs a few hundred tokens, not the whole corpus. The
+// agent picks an id and fetches it with nt_get. Ranking: title matches first, then
+// body matches; results are hard-capped by `limit` (default 8). Pass full=true to
+// get bodies inline for the (still limited) hits.
 func (s *server) search(a map[string]any) (string, error) {
 	q := strings.TrimSpace(str(a, "query"))
 	tag := strings.TrimSpace(str(a, "tag"))
@@ -636,21 +673,32 @@ func (s *server) search(a map[string]any) (string, error) {
 	if typ == "" {
 		typ = "all"
 	}
+	limit := intArg(a, "limit")
+	if limit <= 0 {
+		limit = 8
+	}
+	full := boolArg(a, "full")
 	d, err := s.eng.Read()
 	if err != nil {
 		return "", err
 	}
-	notes, _ := note.List(s.eng.S)
-	notes = note.Active(notes) // search returns the working set (body scan below skips archived too)
+	notes := note.Active(mustList(s.eng.S))
 	ql := strings.ToLower(q)
 
-	var nout []noteOut
+	type scored struct {
+		n       *note.Note
+		snippet string
+		rank    int // 0 = title match, 1 = body/tag match — title ranks first
+	}
+	var hits []scored
 	if typ == "all" || typ == "note" {
-		bodyHit := map[string]bool{}
+		bodyHit := map[string]string{} // path → matching-line snippet
 		if q != "" {
-			if hits, e := search.Literal(q, s.eng.S.NotesDir()); e == nil {
-				for _, h := range hits {
-					bodyHit[h.Path] = true
+			if hh, e := search.Literal(q, s.eng.S.NotesDir()); e == nil {
+				for _, h := range hh {
+					if _, ok := bodyHit[h.Path]; !ok {
+						bodyHit[h.Path] = clipLine(h.Text, 160)
+					}
 				}
 			}
 		}
@@ -658,23 +706,61 @@ func (s *server) search(a map[string]any) (string, error) {
 			if tag != "" && !contains(n.Tags, tag) {
 				continue
 			}
-			if q == "" || strings.Contains(strings.ToLower(n.Title), ql) || bodyHit[n.Path] {
-				nout = append(nout, noteToOut(n))
+			switch {
+			case q == "" || strings.Contains(strings.ToLower(n.Title), ql):
+				hits = append(hits, scored{n, "", 0})
+			case bodyHit[n.Path] != "":
+				hits = append(hits, scored{n, bodyHit[n.Path], 1})
 			}
 		}
+		sort.SliceStable(hits, func(i, j int) bool {
+			if hits[i].rank != hits[j].rank {
+				return hits[i].rank < hits[j].rank
+			}
+			return hits[i].n.Rel < hits[j].n.Rel
+		})
 	}
+	noteTotal := len(hits)
+	if len(hits) > limit {
+		hits = hits[:limit]
+	}
+	var noteRes any
+	if full {
+		arr := make([]noteOut, 0, len(hits))
+		for _, h := range hits {
+			arr = append(arr, noteToOut(h.n))
+		}
+		noteRes = arr
+	} else {
+		arr := make([]noteStub, 0, len(hits))
+		for _, h := range hits {
+			arr = append(arr, noteToStub(h.n, h.snippet))
+		}
+		noteRes = arr
+	}
+
 	var tout []taskOut
+	taskTotal := 0
 	if typ == "all" || typ == "task" {
 		for _, t := range d.Tasks() {
 			if tag != "" && !contains(t.Tags(), tag) {
 				continue
 			}
 			if q == "" || strings.Contains(strings.ToLower(t.Text), ql) {
-				tout = append(tout, taskToOut(t))
+				taskTotal++
+				if len(tout) < limit {
+					tout = append(tout, taskToOut(t))
+				}
 			}
 		}
 	}
-	return jsonText(map[string]any{"notes": nout, "tasks": tout}), nil
+	out := map[string]any{"notes": noteRes, "tasks": tout}
+	if noteTotal > len(hits) || taskTotal > len(tout) {
+		// Never cap silently: tell the agent more exist so it can narrow the query.
+		out["truncated"] = true
+		out["totals"] = map[string]int{"notes": noteTotal, "tasks": taskTotal, "limit": limit}
+	}
+	return jsonText(out), nil
 }
 
 func (s *server) links(a map[string]any) (string, error) {
@@ -866,12 +952,97 @@ type noteOut struct {
 	Title    string   `json:"title"`
 	Tags     []string `json:"tags,omitempty"`
 	Source   string   `json:"source,omitempty"`
-	Archived bool     `json:"archived,omitempty"` // retired from recall/search/status
+	Archived bool     `json:"archived,omitempty"` // retired from search/status
 	Body     string   `json:"body,omitempty"`
 }
 
 func noteToOut(n *note.Note) noteOut {
 	return noteOut{ID: n.ID, Rel: n.Rel, Title: n.Title, Tags: n.Tags, Source: n.Source, Archived: n.Archived, Body: strings.TrimSpace(n.Body)}
+}
+
+// noteStub is a note WITHOUT its body — the progressive-disclosure unit returned
+// by nt_index and nt_search. The agent reads the stub (id + description + snippet)
+// to decide whether to nt_get the full note.
+type noteStub struct {
+	ID          string   `json:"id,omitempty"`
+	Rel         string   `json:"rel,omitempty"`
+	Title       string   `json:"title"`
+	Description string   `json:"description,omitempty"`
+	Snippet     string   `json:"snippet,omitempty"` // query-context line (search only)
+	Tags        []string `json:"tags,omitempty"`
+	Folder      string   `json:"folder,omitempty"`
+	Updated     string   `json:"updated,omitempty"`
+}
+
+func noteToStub(n *note.Note, snippet string) noteStub {
+	upd := n.Updated
+	if upd == "" {
+		upd = n.Created
+	}
+	return noteStub{
+		ID: n.ID, Rel: n.Rel, Title: n.Title, Description: n.Description(160),
+		Snippet: snippet, Tags: n.Tags, Folder: pathDir(n.Rel), Updated: shortDate(upd),
+	}
+}
+
+// mustList returns the note list, tolerating a read error (empty on failure) —
+// retrieval verbs prefer a partial answer over an error.
+func mustList(s *store.Store) []*note.Note {
+	ns, _ := note.List(s)
+	return ns
+}
+
+// pathDir is the folder part of a notes/-relative path ("" for a root note).
+func pathDir(rel string) string {
+	if i := strings.LastIndex(rel, "/"); i >= 0 {
+		return rel[:i]
+	}
+	return ""
+}
+
+// clipLine collapses whitespace and truncates to one line ≤max chars.
+func clipLine(s string, max int) string {
+	s = strings.Join(strings.Fields(s), " ")
+	if max > 0 && len(s) > max {
+		return strings.TrimSpace(s[:max-1]) + "…"
+	}
+	return s
+}
+
+// extractSection returns the markdown block under the heading whose text matches
+// name (case-insensitive), up to the next heading of the same or higher level.
+// Returns "" if no such heading exists.
+func extractSection(body, name string) string {
+	lines := strings.Split(body, "\n")
+	want := strings.ToLower(strings.TrimSpace(name))
+	start, level := -1, 0
+	for i, ln := range lines {
+		t := strings.TrimSpace(ln)
+		if !strings.HasPrefix(t, "#") {
+			continue
+		}
+		h := strings.TrimSpace(strings.TrimLeft(t, "#"))
+		lv := len(t) - len(strings.TrimLeft(t, "#"))
+		if strings.ToLower(h) == want {
+			start, level = i, lv
+			break
+		}
+	}
+	if start < 0 {
+		return ""
+	}
+	end := len(lines)
+	for i := start + 1; i < len(lines); i++ {
+		t := strings.TrimSpace(lines[i])
+		if strings.HasPrefix(t, "#") {
+			lv := len(t) - len(strings.TrimLeft(t, "#"))
+			if lv <= level {
+				end = i
+				break
+			}
+		}
+	}
+	return strings.TrimSpace(strings.Join(lines[start:end], "\n"))
 }
 
 // linkOut is one forward link in the nt_links result.

@@ -364,6 +364,7 @@ func cmdNote(args []string) int {
 	body := fs.String("body", "", "note body")
 	source := fs.String("source", "cli", "origin")
 	folder := fs.String("folder", "", "subfolder under notes/ (e.g. work or work/auth)")
+	desc := fs.String("description", "", "one-line summary shown in `nt index`")
 	var fields stringSlice
 	asJSON := fs.Bool("json", false, "print the created note as JSON (id, title, path, …)")
 	fs.Var(&tags, "tag", "tag (repeatable)")
@@ -393,6 +394,9 @@ func cmdNote(args []string) int {
 	n, err := note.Create(e.S, title, *body, tags, *source, fold)
 	if err != nil {
 		return fail(err)
+	}
+	if d := strings.TrimSpace(*desc); d != "" { // --description → a modeled frontmatter key
+		fields = append(fields, "description="+d)
 	}
 	if len(fields) > 0 { // --field key=value → extra frontmatter, preserved verbatim
 		for _, f := range fields {
@@ -798,12 +802,12 @@ func onboard(e *mutate.Engine) {
 		return nil
 	})
 	_, _ = note.Create(e.S, "Welcome to nt",
-		"nt stores tasks in tasks.txt (todo.txt format) and notes here as markdown.\n\nTry:\n- `nt add \"my first task\" --due today`\n- `nt recall` to read items back later\n", []string{"nt"}, "nt", "")
+		"nt stores tasks in tasks.txt (todo.txt format) and notes here as markdown.\n\nTry:\n- `nt add \"my first task\" --due today`\n- `nt index` to see everything at a glance later\n", []string{"nt"}, "nt", "")
 	fmt.Printf(`Welcome to nt. Your store is %s
 
   nt add "title"   add a task
   nt               list your tasks
-  nt recall        read items back (great for AI sessions)
+  nt index         see everything at a glance (great for AI sessions)
 
 `, e.S.Dir)
 }

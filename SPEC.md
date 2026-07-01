@@ -11,7 +11,7 @@ agent (or you) can read back.
 ```
 nt              ← opens the TUI
 nt add "title"  ← adds from anywhere: another terminal, a script, an AI session
-nt recall       ← read back what prior sessions captured
+nt index        ← read back what prior sessions captured (stub catalog)
 ```
 
 Because the data is just text on disk, an AI agent, your `$EDITOR`, `grep`, git, and even a
@@ -31,7 +31,7 @@ plain todo.txt client all read and write it with zero integration work.
 - **CLI and TUI over the same store.** Anything in the TUI is doable from a script and vice
   versa. They never disagree because they read the same files.
 - **AI origin is tracked.** Items carry a `src:` field so you can tell what an agent created
-  from what you typed, and an agent can recall its own prior output.
+  from what you typed, and an agent can read back its own prior output.
 
 ### What changed from the original SQLite design, and why
 
@@ -59,8 +59,9 @@ text, forever readable, and directly writable by an AI agent without an integrat
    separate markdown files.
 3. **Files-only search.** `ripgrep` for note full-text; task list/filter/sort parses the
    whole `tasks.txt` into structs in Go (§7.1). No index, no sync layer that can drift.
-4. **AI durability is core, not an add-on.** The write→recall loop ships in Phase 1, not as
-   a final feature.
+4. **AI durability is core, not an add-on.** The write→read-back loop ships in Phase 1, not as
+   a final feature. Retrieval is index-first progressive disclosure — a small stub catalog
+   (`nt index`) loaded up front, note bodies fetched on demand (`nt show`).
 
 > Note: this is a personal global store by design. We do **not** promise "tasks live next to
 > your code" — that was the v0 framing and has been removed. Multi-machine sync is a
@@ -155,6 +156,7 @@ Markdown files in `notes/` with light YAML frontmatter:
 ---
 id: 01JZ8RTQ2K
 tags: [auth, backend]
+description: Token lifetime & refresh window for JWT auth.
 source: claude
 created: 2026-06-05T10:00:00Z
 ---
@@ -166,6 +168,9 @@ Tokens expire after 24h; refresh window is 7d. See [[oauth-flow]].
 
 - Frontmatter is optional metadata; the body is free markdown (Glamour-rendered in the TUI,
   editable with `$EDITOR`).
+- **`description:`** is a one-line summary convention (set via `nt note --description "…"` or
+  the `nt_note` `description` arg); it's the stub blurb `nt index` shows so an agent can scan
+  the catalog without reading bodies.
 - Filename is a slug of the title (or a datetime when untitled, à la `nb`).
 - Notes may live in **subfolders** of `notes/`. Create into one with
   `nt note "…" --folder work/auth` (or path-style `nt note "work/auth/…"`); the
@@ -297,7 +302,9 @@ mutation writes, atomically and under the same lock, a transaction record:
   local/transient files (`undo.jsonl`, `tasks.txt.lock`, `nt.log`, `.claude-sync.json`), and
   `git init`s the store. Union merges can leave duplicate-ULID lines, so **`nt doctor`**
   reconciles after a merge: it drops duplicate ids (keeping a completed line over an open one)
-  and assigns ids to any id-less line, under the lock. Not journaled — git is the recovery
+  and assigns ids to any id-less line, under the lock. **`nt doctor` also lints notes** —
+  dangling `[[links]]`, notes missing a `description:`, and orphans — alongside this
+  task-ledger reconciliation. Not journaled — git is the recovery
   path; `nt doctor --check` is a non-mutating dry run (exit 1 if issues) for pre-commit/CI.
   This keeps the single greppable `tasks.txt`; per-task file sharding is deferred (§15).
 
@@ -348,13 +355,14 @@ mutation writes, atomically and under the same lock, a transaction record:
 ```bash
 nt                                   # launch the TUI
 nt add "fix auth bug" --pri high --due today --tag backend --project api [--source claude]
-nt note "JWT expiry" --body "..." --tag auth [--folder work] [--source claude]
+nt note "JWT expiry" --body "..." --description "..." --tag auth [--folder work] [--source claude]
 nt list [--status open] [--tag bug] [--project api] [--sort urgency] [--json]   # (ls)
-nt recall [--source claude] [--since 2026-06-01] [--json]   # read back prior items (AI loop)
+nt index [--source claude] [--since 2026-06-01] [--json]   # stub catalog + active tasks — start here (AI loop)
 nt log [--since 2026-06-01] [--days 7] [--source claude] [--json]   # completed tasks, newest first
 nt done <id|task:N>                  # mark done  (do)
 nt update <id|task:N> --status doing --pri med --due +3d     # (up)
-nt search "race condition" [--type note|task]                # (q)
+nt search "race condition" [--type note|task] [--limit 8] [--full]   # ranked stubs (q)
+nt show <id|slug|title> [--section "Heading"]   # one note's full body, on demand
 nt links <id|task:N> [--json]        # forward links + backlinks for an item (§5.1)
 nt archive                           # move done tasks → done.txt
 nt undo                              # revert the last transaction
@@ -363,7 +371,7 @@ nt mv <note> <new-name|folder/path>  # rename/move a note, rewriting all [[links
 nt path                              # print $NT_DIR
 ```
 
-- `--json` on `list`/`recall` emits machine-readable output (stable schema, ULIDs) so AI
+- `--json` on `list`/`index` emits machine-readable output (stable schema, ULIDs) so AI
   agents parse reliably instead of scraping rendered text.
 - Date parsing: `today`, `tomorrow`, weekday names (= next occurrence), `+3d`, `YYYY-MM-DD`.
 
@@ -371,20 +379,23 @@ nt path                              # print $NT_DIR
 
 ## 8. AI session durability (core)
 
-This is the product's reason to exist, so the **write→recall loop is Phase 1**, and the loop
-is closed — agents can both write and reliably read back their own prior output.
+This is the product's reason to exist, so the **write→read-back loop is Phase 1**, and the loop
+is closed — agents can both write and reliably read back their own prior output. Read-back is
+index-first progressive disclosure: an agent loads the compact stub catalog (`nt index`), then
+pulls whole note bodies on demand (`nt show`) rather than dumping everything at once.
 
 ```bash
 # during a session, an agent captures work
 nt add "refactor auth middleware" --source claude --tag backend
-nt note "discovered race condition in token refresh" --source claude
+nt note "discovered race condition in token refresh" --source claude --description "token refresh race"
 
-# a later session recalls what was captured, as structured data
-nt recall --source claude --json
+# a later session reads back what was captured, as structured data
+nt index --source claude --json          # stub catalog + active tasks (start here)
+nt show token-refresh-race               # then fetch a specific note's body on demand
 ```
 
 - **Stable, machine-readable contract:** appending a todo.txt line to `tasks.txt`, or calling
-  `nt add`, with `--json` recall back out. No MCP server, no schema, no auth.
+  `nt add`, with `--json` read back out via `nt index`. No MCP server, no schema, no auth.
 - **`src:`** distinguishes AI-created items; the TUI badges them.
 - **Claude Code polish (Phase 4):** a PostToolUse hook mirroring `TaskCreate`/`TaskUpdate`
   into `nt add`/`nt update`, and a `/nt` skill — built on the Phase 1 loop, not inventing it.
@@ -399,7 +410,7 @@ findings cross-pollinate. A *workstream* is that isolation axis, distinct from
 
 - **Storage:** a task carries `ws:<id>`. The MCP `nt_add` stamps it; nothing
   else does, so CLI/TUI/web tasks (and any pre-workstream task) carry no `ws:`.
-- **Reads scope, notes don't.** `nt_recall`/`nt_ready`/`nt_status`/`nt_log`
+- **Reads scope, notes don't.** `nt_index`/`nt_ready`/`nt_status`/`nt_log`
   show tasks whose `ws:` matches the current workstream **or is absent** (the
   shared human backlog stays visible to everyone); a task stamped with a
   *different* workstream is hidden. Notes are never scoped. `nt_search` and
@@ -426,7 +437,7 @@ findings cross-pollinate. A *workstream* is that isolation axis, distinct from
 - **Logbook** — completed tasks as a work-journal: a TUI tab (`3`) grouped by completion
   date (newest first, with the source of each task), and `nt log` on the CLI — both read the
   same domain rule (`task.CompletedSince`). The tasks list stays clean; a header `✓ N done`
-  chip keeps hidden-done visible. Doubles as the AI recall feed (`nt log --json`).
+  chip keeps hidden-done visible. Doubles as the AI read-back feed (`nt log --json`).
 - **Token activation** — `f` (keyboard follow) or mouse-click a `[[link]]`/`@tag`/`+project`
   to navigate or scope/regroup; **yank** (`y`) copies id/line/text to the clipboard.
 - **Flexible metadata** — tags, project, due, priority, links; use what helps, skip the rest.
@@ -440,7 +451,7 @@ findings cross-pollinate. A *workstream* is that isolation axis, distinct from
 ## 10. Onboarding & install
 
 - **First run** creates `$NT_DIR`, seeds one example task + note, and prints the three
-  commands that matter (`nt add`, `nt`, `nt recall`). No config, no account.
+  commands that matter (`nt add`, `nt`, `nt index`). No config, no account.
 - **`tasks.txt` header**: a leading blank-safe hint line documenting the `key:value`
   conventions so hand-editors aren't lost (kept compatible — not a todo.txt comment).
 - **Install** should offer a plain release binary / `brew` tap in addition to any
@@ -569,12 +580,13 @@ the identical UI in a native window (see `desktop/`, ADR 0001).
   parse→write byte-identical test.
 - **ULID-keyed mutation engine** + flock + atomic rename (§6.1, §6.4).
 - **Undo transaction journal** (§6.3).
-- CLI: `add / list / done / update / note / search / links / archive / undo / edit / path` —
+- CLI: `add / list / done / update / note / index / search / show / links / archive / undo / edit / path` —
   with ULID-first handles (§7.2), structured task filter/sort incl. `--sort urgency`, ripgrep
   note search (§7.1), and `--json` output.
 - **Linking & backlinks** (§5.1): `[[…]]` resolution across tasks + notes, `nt links <id>`
   forward + ripgrep backlinks.
-- **AI loop:** `--source`, `nt recall`, machine-readable `--json` (§8).
+- **AI loop:** `--source`, `nt index` + `nt show` (index-first progressive disclosure),
+  machine-readable `--json` (§8).
 - First-run onboarding (§10).
 
 **Phase 2 — TUI**
@@ -589,9 +601,9 @@ the identical UI in a native window (see `desktop/`, ADR 0001).
 **Phase 4 — Claude Code polish** ✓ *implemented*
 - `nt hook` (PostToolUse) mirrors `TodoWrite` into the store idempotently (per-session
   todo→ULID map, status-mapped, `src:claude`); the bundled `/nt` skill teaches Claude to
-  capture and `nt recall`. Setup: docs/claude-integration.md.
+  capture and `nt index`. Setup: docs/claude-integration.md.
 - `nt mcp` runs a stdio **MCP server** (newline-delimited JSON-RPC 2.0, no SDK dep) exposing
-  typed tools — `nt_ready`/`nt_add`/`nt_done`/`nt_update`/`nt_note`/`nt_recall`/`nt_log` —
+  typed tools — `nt_ready`/`nt_add`/`nt_done`/`nt_update`/`nt_note`/`nt_index`/`nt_get`/`nt_log` —
   for MCP clients. A thin driving adapter over the same engine/domain as the CLI and TUI;
   defaults `source` to `claude` and refuses positional handles.
 

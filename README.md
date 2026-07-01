@@ -34,7 +34,7 @@ nt add "fix token refresh race" --pri high --due today --tag auth   # capture a 
 nt note "Chose flock over SQLite" --folder decisions                # capture a note
 nt                                                                  # open the TUI (just run it)
 nt ready                                                            # what should I do next?
-nt recall --source claude                                          # read back what an AI captured
+nt index                                                            # the KB catalog an AI reads back
 nt web                                                              # browse it all in your browser
 ```
 
@@ -60,12 +60,12 @@ That's it — you're up. `nt help` lists every command; [more install options be
 `nt` is the place that memory lives. Because the store is plain text, an agent doesn't need a special database or a running service to remember — it just reads and writes files. Three ways to wire it up:
 
 - **PostToolUse hook** — `nt hook` mirrors Claude Code's `TodoWrite` list into your store automatically (idempotent, tagged `src:claude`). Wire it once in `~/.claude/settings.json`.
-- **MCP server** — `nt mcp` exposes typed tools (`nt_ready`, `nt_add`, `nt_recall`, `nt_search`, `nt_note`, `nt_view`, …) over stdio. Register it with one command:
+- **MCP server** — `nt mcp` exposes typed tools (`nt_index`, `nt_add`, `nt_search`, `nt_get`, `nt_note`, `nt_ready`, …) over stdio. Register it with one command:
   ```bash
   nt mcp install                    # add nt to Claude Code / Claude Desktop (absolute path, idempotent)
   nt mcp install --client opencode  # …or OpenCode (~/.config/opencode/opencode.json)
   ```
-- **The `/nt` skill + recall loop** — teach the agent to capture as it works and `nt recall` prior context when it resumes.
+- **The `/nt` skill + read-back loop** — teach the agent to capture as it works and load prior context (`nt index`, then fetch on demand) when it resumes.
 
 Beyond Claude Code, any MCP-speaking agent can drive the same store — including **OpenCode**, whose rules / knowledge-base / memory layers map cleanly onto nt. Full mapping & phased plan → **[docs/opencode-integration.md](docs/opencode-integration.md)**.
 
@@ -73,10 +73,10 @@ Beyond Claude Code, any MCP-speaking agent can drive the same store — includin
 # During a session (the hook does this for you, or call it directly):
 nt add "fix token refresh race" --source claude --tag auth
 # A week and three sessions later — read it straight back:
-nt recall --source claude --json
+nt index --json          # the catalog; then nt show <id> / nt search for the details
 ```
 
-**Why plain files beat a vector DB for this:** the model reads the *real* note, not an embedding's best guess (reliability); you open only what's relevant (token cost); and you can `git diff` and roll back its memory (auditability). It's the [Karpathy "LLM wiki" pattern](https://venturebeat.com/data/karpathy-shares-llm-knowledge-base-architecture-that-bypasses-rag-with-an), with tasks and a recall loop on top. Full setup & walkthrough → **[docs/claude-integration.md](docs/claude-integration.md)**.
+**Why plain files beat a vector DB for this:** the model reads the *real* note, not an embedding's best guess (reliability); it loads a cheap **index** and opens only what's relevant (token cost); and you can `git diff` and roll back its memory (auditability). It's the [Karpathy "LLM wiki" pattern](https://venturebeat.com/data/karpathy-shares-llm-knowledge-base-architecture-that-bypasses-rag-with-an) — index-first progressive disclosure, with tasks on top. Full setup & walkthrough → **[docs/claude-integration.md](docs/claude-integration.md)**.
 
 ## 🪟 Three faces, one store
 
@@ -144,7 +144,7 @@ nt view <name>              # saved views    nt view save <name> [list flags]   
 nt ready / today / agenda   # what's next    nt done <id|task:N>     nt update <id> --status doing
 nt review [--stale N]       # weekly triage  nt start <id> … nt stop <id>   (time tracking → spent:)
 nt search <q> [--tag…]      # find           nt tags                 nt tag <note…> +ref -inbox
-nt links <id> [--orphans]   # graph          nt recall [--source] [--json]   nt log [--since|--days N]
+nt links <id> [--orphans]   # graph          nt index [--tag|--folder|--json]   nt log [--since|--days N]
 nt skip <id>                # recurring: next occurrence      nt mv <note> <dest>   (rewrites [[links]])
 nt edit <id|task:N>         # safe $EDITOR round-trip        nt rm <note> [--force]   (→ .trash/)
 nt web [--port N]           # browser app, editing enabled (--detach to run in the background; --status / --stop)

@@ -64,17 +64,33 @@ func TestMCPToolFlow(t *testing.T) {
 		t.Error("nt_done must reject a positional handle")
 	}
 
-	// nt_note + nt_recall round-trips the body.
-	if _, err := s.dispatch("nt_note", map[string]any{"title": "JWT", "body": "root cause auth.go:42"}); err != nil {
+	// nt_note captures a note; it shows up in nt_index as a stub (no body), and
+	// nt_get round-trips the full body by id.
+	nout, err := s.dispatch("nt_note", map[string]any{"title": "JWT", "body": "root cause auth.go:42", "description": "why tokens expire"})
+	if err != nil {
 		t.Fatal(err)
 	}
-	out, _ = s.dispatch("nt_recall", map[string]any{})
-	var rec struct {
-		Notes []noteOut `json:"notes"`
+	var savedNote noteOut
+	json.Unmarshal([]byte(nout), &savedNote)
+
+	out, _ = s.dispatch("nt_index", map[string]any{})
+	var idx struct {
+		Notes []noteStub `json:"notes"`
 	}
-	json.Unmarshal([]byte(out), &rec)
-	if len(rec.Notes) != 1 || !strings.Contains(rec.Notes[0].Body, "auth.go:42") {
-		t.Errorf("nt_recall should include the note body, got %+v", rec.Notes)
+	json.Unmarshal([]byte(out), &idx)
+	if len(idx.Notes) != 1 || idx.Notes[0].Title != "JWT" || idx.Notes[0].Description != "why tokens expire" {
+		t.Fatalf("nt_index should list the note stub with its description, got %+v", idx.Notes)
+	}
+	if strings.Contains(out, "auth.go:42") {
+		t.Errorf("nt_index must NOT include note bodies, got %s", out)
+	}
+
+	gout, err := s.dispatch("nt_get", map[string]any{"handle": savedNote.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(gout, "auth.go:42") {
+		t.Errorf("nt_get should return the full body, got %s", gout)
 	}
 }
 
@@ -104,8 +120,8 @@ func TestMCPAddSplitsLongCapture(t *testing.T) {
 	if !strings.Contains(res.Task.Text, "[[") {
 		t.Errorf("the split task should link its detail note: %q", res.Task.Text)
 	}
-	// The full text is preserved in the note body (retrievable via recall).
-	rout, _ := s.dispatch("nt_recall", map[string]any{})
+	// The full text is preserved in the note body (retrievable via search full=true).
+	rout, _ := s.dispatch("nt_search", map[string]any{"query": "connection pool exhaustion", "full": true})
 	if !strings.Contains(rout, "connection pool exhaustion") {
 		t.Error("the note should hold the full original text")
 	}
@@ -282,8 +298,8 @@ func TestMCPArchive(t *testing.T) {
 	if n := searchKeep(); n != 1 {
 		t.Errorf("after archive, search tag=keep → %d, want 1", n)
 	}
-	if out := must("nt_recall", map[string]any{}); strings.Contains(out, "obsoletemarker") {
-		t.Error("nt_recall must not return an archived note")
+	if out := must("nt_index", map[string]any{}); strings.Contains(out, "Stale Note") {
+		t.Error("nt_index must not list an archived note")
 	}
 	if out := must("nt_links", map[string]any{"handle": "keeper"}); strings.Contains(out, "Stale Note") {
 		t.Errorf("an archived note must not appear as a backlink: %s", out)
@@ -409,9 +425,10 @@ func relsOf(ns []*note.Note) []string {
 	return out
 }
 
-// TestMCPRecallContextControls: brief drops note bodies (pointers only) and
-// limit caps the result — the opt-in levers for keeping recall's context small.
-func TestMCPRecallContextControls(t *testing.T) {
+// TestMCPIndexAndSearch: nt_index returns stubs (no bodies) + active tasks; done
+// tasks are excluded; nt_search returns ranked stubs, caps at limit with
+// truncated=true, and full=true inlines bodies.
+func TestMCPIndexAndSearch(t *testing.T) {
 	s := newServer(t)
 	must := func(name string, a map[string]any) string {
 		t.Helper()
@@ -421,63 +438,71 @@ func TestMCPRecallContextControls(t *testing.T) {
 		}
 		return out
 	}
-	must("nt_note", map[string]any{"title": "Decision A", "folder": "decisions", "body": "long rationale here"})
+	must("nt_note", map[string]any{"title": "Decision A", "folder": "decisions", "body": "long rationale here\nsecond secret line", "description": "why we chose A"})
 	must("nt_note", map[string]any{"title": "Decision B", "folder": "decisions", "body": "more reasoning here"})
 
-	type recallOut struct {
-		Tasks []taskOut `json:"tasks"`
-		Notes []noteOut `json:"notes"`
+	type indexOut struct {
+		Notes []noteStub `json:"notes"`
+		Tasks []taskOut  `json:"tasks"`
 	}
-	var full recallOut
-	json.Unmarshal([]byte(must("nt_recall", map[string]any{})), &full)
-	if len(full.Notes) != 2 || full.Notes[0].Body == "" {
-		t.Fatalf("default recall should include 2 notes with bodies, got %+v", full.Notes)
+	var idx indexOut
+	json.Unmarshal([]byte(must("nt_index", map[string]any{})), &idx)
+	if len(idx.Notes) != 2 {
+		t.Fatalf("index should list 2 note stubs, got %d", len(idx.Notes))
 	}
-
-	var brief recallOut
-	json.Unmarshal([]byte(must("nt_recall", map[string]any{"brief": true})), &brief)
-	if len(brief.Notes) != 2 {
-		t.Fatalf("brief recall should still list 2 notes, got %d", len(brief.Notes))
-	}
-	for _, n := range brief.Notes {
-		if n.Body != "" {
-			t.Fatalf("brief recall must omit bodies, got %q", n.Body)
-		}
+	for _, n := range idx.Notes {
 		if n.Title == "" {
-			t.Fatal("brief recall should still carry titles (pointers)")
+			t.Fatal("index stub must carry a title")
+		}
+		if n.Description == "" {
+			t.Fatalf("index stub should carry a description (explicit or body fallback), got %+v", n)
 		}
 	}
-
-	var limited recallOut
-	// JSON numbers arrive as float64 over the wire — mirror that here.
-	json.Unmarshal([]byte(must("nt_recall", map[string]any{"limit": float64(1)})), &limited)
-	if len(limited.Notes) != 1 {
-		t.Fatalf("limit=1 should return 1 note, got %d", len(limited.Notes))
+	// Stubs carry no body field at all.
+	if strings.Contains(must("nt_index", map[string]any{}), "second secret line") {
+		t.Error("nt_index must not include note bodies")
 	}
 
-	// Completed tasks are omitted from recall by default (active context only),
-	// but include_done brings them back.
+	// Done tasks are excluded from the active list.
 	var added taskOut
 	json.Unmarshal([]byte(must("nt_add", map[string]any{"text": "ship it"})), &added)
 	must("nt_done", map[string]any{"id": added.ID})
-	var afterDone recallOut
-	json.Unmarshal([]byte(must("nt_recall", map[string]any{})), &afterDone)
+	var afterDone indexOut
+	json.Unmarshal([]byte(must("nt_index", map[string]any{})), &afterDone)
 	for _, tk := range afterDone.Tasks {
 		if tk.Status == "done" {
-			t.Fatalf("default recall must omit completed tasks, got %+v", tk)
+			t.Fatalf("nt_index must omit completed tasks, got %+v", tk)
 		}
 	}
-	var withDone recallOut
-	json.Unmarshal([]byte(must("nt_recall", map[string]any{"include_done": true})), &withDone)
-	if len(withDone.Tasks) <= len(afterDone.Tasks) {
-		t.Fatalf("include_done should add the completed task back (%d vs %d)", len(withDone.Tasks), len(afterDone.Tasks))
+
+	// search returns stubs by default (a one-line snippet, not the whole body);
+	// full=true inlines the complete body.
+	sres := must("nt_search", map[string]any{"query": "rationale"})
+	if strings.Contains(sres, "second secret line") {
+		t.Errorf("nt_search default must return stubs, not full bodies: %s", sres)
+	}
+	if !strings.Contains(must("nt_search", map[string]any{"query": "rationale", "full": true}), "second secret line") {
+		t.Error("nt_search full=true should inline the body")
+	}
+
+	// limit caps results and flags truncation.
+	for i := 0; i < 5; i++ {
+		must("nt_note", map[string]any{"title": "Ref note", "folder": "ref", "tags": []any{"bulk"}, "body": "x"})
+	}
+	var capped struct {
+		Notes     []noteStub `json:"notes"`
+		Truncated bool       `json:"truncated"`
+	}
+	json.Unmarshal([]byte(must("nt_search", map[string]any{"tag": "bulk", "limit": float64(2)})), &capped)
+	if len(capped.Notes) != 2 || !capped.Truncated {
+		t.Fatalf("limit=2 should return 2 stubs and truncated=true, got %d truncated=%v", len(capped.Notes), capped.Truncated)
 	}
 }
 
-// helper: collect task texts from a {tasks:[...]} or bare [...] JSON payload.
-func recallTaskTexts(t *testing.T, s *server, args map[string]any) []string {
+// helper: collect active task texts from nt_index's {tasks:[...]} payload.
+func indexTaskTexts(t *testing.T, s *server, args map[string]any) []string {
 	t.Helper()
-	out, err := s.dispatch("nt_recall", args)
+	out, err := s.dispatch("nt_index", args)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -532,7 +557,7 @@ func TestMCPWorkstreamIsolation(t *testing.T) {
 
 	// recall as feat-a: own task + the shared/legacy task, NOT feat-b's task.
 	t.Setenv("NT_WORKSTREAM", "feat-a")
-	got := recallTaskTexts(t, s, map[string]any{})
+	got := indexTaskTexts(t, s, map[string]any{})
 	if !hasText(got, "wire feature A") || !hasText(got, "human backlog item") {
 		t.Errorf("feat-a should see its own + the shared task, got %v", got)
 	}
@@ -540,25 +565,25 @@ func TestMCPWorkstreamIsolation(t *testing.T) {
 		t.Errorf("feat-a must not see feat-b's task, got %v", got)
 	}
 
-	// Notes are shared: feat-b sees the note feat-a wrote.
+	// Notes are shared: feat-b sees the note feat-a wrote (not workstream-scoped).
 	t.Setenv("NT_WORKSTREAM", "feat-b")
-	out, _ := s.dispatch("nt_recall", map[string]any{})
-	if !strings.Contains(out, "shared knowledge") {
+	out, _ := s.dispatch("nt_index", map[string]any{})
+	if !strings.Contains(out, "A finding") {
 		t.Errorf("notes must be shared across workstreams, got %s", out)
 	}
-	gotB := recallTaskTexts(t, s, map[string]any{})
+	gotB := indexTaskTexts(t, s, map[string]any{})
 	if !hasText(gotB, "wire feature B") || hasText(gotB, "wire feature A") {
 		t.Errorf("feat-b should see only its own + shared tasks, got %v", gotB)
 	}
 
 	// "*" widens a read to every workstream's tasks.
-	all := recallTaskTexts(t, s, map[string]any{"workstream": "*"})
+	all := indexTaskTexts(t, s, map[string]any{"workstream": "*"})
 	if !hasText(all, "wire feature A") || !hasText(all, "wire feature B") {
 		t.Errorf(`workstream:"*" should see all tasks, got %v`, all)
 	}
 
 	// The call arg overrides the env identity.
-	override := recallTaskTexts(t, s, map[string]any{"workstream": "feat-a"})
+	override := indexTaskTexts(t, s, map[string]any{"workstream": "feat-a"})
 	if !hasText(override, "wire feature A") || hasText(override, "wire feature B") {
 		t.Errorf("workstream arg should override env, got %v", override)
 	}
@@ -574,7 +599,7 @@ func TestMCPNoWorkstreamUnchanged(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if got := recallTaskTexts(t, s, map[string]any{}); len(got) != 3 {
+	if got := indexTaskTexts(t, s, map[string]any{}); len(got) != 3 {
 		t.Errorf("no workstream should scope nothing, got %v", got)
 	}
 }
@@ -640,7 +665,7 @@ func TestMCPAddStarIsShared(t *testing.T) {
 	}
 	// Visible to a scoped agent (it's shared).
 	t.Setenv("NT_WORKSTREAM", "feat-a")
-	if got := recallTaskTexts(t, s, map[string]any{}); !hasText(got, "spoof") {
+	if got := indexTaskTexts(t, s, map[string]any{}); !hasText(got, "spoof") {
 		t.Errorf("a shared task should be visible to a scoped agent, got %v", got)
 	}
 }
@@ -659,11 +684,11 @@ func TestMCPUpdateClaimsWorkstream(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("NT_WORKSTREAM", "feat-b")
-	if got := recallTaskTexts(t, s, map[string]any{}); hasText(got, "shared chore") {
+	if got := indexTaskTexts(t, s, map[string]any{}); hasText(got, "shared chore") {
 		t.Errorf("after claim into feat-a, feat-b must not see it, got %v", got)
 	}
 	t.Setenv("NT_WORKSTREAM", "feat-a")
-	if got := recallTaskTexts(t, s, map[string]any{}); !hasText(got, "shared chore") {
+	if got := indexTaskTexts(t, s, map[string]any{}); !hasText(got, "shared chore") {
 		t.Errorf("feat-a should see the task it claimed, got %v", got)
 	}
 
@@ -672,7 +697,7 @@ func TestMCPUpdateClaimsWorkstream(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("NT_WORKSTREAM", "feat-b")
-	if got := recallTaskTexts(t, s, map[string]any{}); !hasText(got, "shared chore") {
+	if got := indexTaskTexts(t, s, map[string]any{}); !hasText(got, "shared chore") {
 		t.Errorf("after release, feat-b should see it again, got %v", got)
 	}
 }

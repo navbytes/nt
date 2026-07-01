@@ -21,19 +21,12 @@ func TestAsciiModeTaskStatusIcon(t *testing.T) {
 	}
 }
 
-// TestAsciiModeReportMarker: with NT_ASCII=1 the recall note marker uses the
-// ASCII form, not the unicode glyph.
+// TestAsciiModeReportMarker: with NT_ASCII=1 the note marker glyph uses the ASCII
+// form, not the unicode glyph.
 func TestAsciiModeReportMarker(t *testing.T) {
-	t.Setenv("NT_DIR", t.TempDir())
 	t.Setenv("NT_ASCII", "1")
-	captureRun(t, "note", "Auth design", "--folder", "ref", "--body", "x")
-
-	out := captureRun(t, "recall")
-	if strings.ContainsRune(out, '▤') {
-		t.Fatalf("NT_ASCII recall must not contain the unicode note glyph:\n%s", out)
-	}
-	if !strings.Contains(out, "- ") || !strings.Contains(out, "Auth design") {
-		t.Fatalf("NT_ASCII recall should mark the note with an ASCII '-':\n%s", out)
+	if g := glyphNote(); g != "-" {
+		t.Fatalf("NT_ASCII note glyph should be ASCII '-', got %q", g)
 	}
 }
 
