@@ -110,6 +110,14 @@ func Create(s *store.Store, title, body string, tags []string, source, folder st
 		return nil, err
 	}
 	n.Path = p
+	// Re-assert containment in this function before Save writes the file. claimPath
+	// already guards its own create sink, but a CodeQL barrier guard only sanitizes
+	// sinks in the same control-flow graph — the value flowing on into Save →
+	// store.WriteAtomic (os.Rename) lives in *this* CFG, so the barrier has to be
+	// here too, exactly as the pre-refactor withinDir check was.
+	if !contained(notesDir, n.Path) {
+		return nil, fmt.Errorf("refusing to write note outside notes/: %q", n.Path)
+	}
 	if err := n.Save(); err != nil {
 		return nil, err
 	}
