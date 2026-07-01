@@ -32,6 +32,26 @@ small** (it's always in context), and the **bulk knowledge base stays behind the
 MCP tools** (retrieved on demand). Promoting a reference note into a standing
 rule is a retag (`nt_tag … +rule`), never a copy.
 
+### Learning from past mistakes — the recall loop
+
+The knowledge base is only useful if the agent actually *re-reads* the right note
+at the right moment. A recorded mistake that's never resurfaced is wasted. So this
+setup adds a **lesson** class and a proactive retrieval step, both at zero standing
+token cost:
+
+- Record a mistake/footgun/dead-end as a **lesson** — `nt_note` tagged `lesson`
+  (CLI `nt note … --lesson`), with the *trigger* in the description
+  ("when X, do Y — not Z").
+- At the **start of each task**, the agent calls **`nt_recall`** with a plain-words
+  description of what it's about to do. Unlike `nt_search` (exact substring),
+  `nt_recall` stems and expands dev-concept synonyms, so a *paraphrased* task
+  ("adding parallel request handling") still surfaces the lesson worded differently
+  ("goroutine deadlock") — with recorded **lessons ranked first**.
+
+This closes the learn-from-sessions loop: mistakes are captured as a distinct,
+recall-able class and re-surfaced before they recur — without bloating the
+always-injected block (lessons cost tokens only when `nt_recall` returns them).
+
 This mirrors the emerging best practice for OpenCode memory (e.g. Letta-style
 "memory blocks": small labelled markdown blocks injected into context, plus
 dedicated tools for the agent to maintain them) — except the blocks, tools,
@@ -43,12 +63,12 @@ TUI, web UI, and Obsidian.
 ## The building blocks (what's in this bundle)
 
 ### 1. MCP server — the read/write engine (`mcp.nt`)
-`nt mcp` exposes 17 typed tools. OpenCode is a first-class MCP client, so this
+`nt mcp` exposes 18 typed tools. OpenCode is a first-class MCP client, so this
 *is* the knowledge-base + memory read/write path — no custom OpenCode tool
 needed. Retrieval follows progressive disclosure: `nt_index` (cheap catalog of
 stubs) → `nt_search` (ranked stubs) → `nt_get` (one note's body). No bulk dump.
 
-- **Read:** `nt_index`, `nt_search`, `nt_get`, `nt_ready`, `nt_status`, `nt_links`, `nt_view`, `nt_log`
+- **Read:** `nt_index`, `nt_search`, `nt_recall`, `nt_get`, `nt_ready`, `nt_status`, `nt_links`, `nt_view`, `nt_log`
 - **Write:** `nt_add`, `nt_note`, `nt_done`, `nt_update`, `nt_tag`, `nt_mv`, `nt_archive`, `nt_supersede`, `nt_relink`
 
 Registered (absolute path, idempotent) by:

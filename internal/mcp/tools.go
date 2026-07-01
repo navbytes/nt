@@ -171,6 +171,15 @@ var toolDefs = []toolDef{
 		}),
 	},
 	{
+		Name:        "nt_recall",
+		Description: "Learn from past sessions: given a free-text description of what you're ABOUT to do, return the most relevant notes — lessons/gotchas first — so you don't repeat a recorded mistake. Unlike nt_search (exact substring), recall stems and expands synonyms, so a paraphrase still finds the note. Call this at the start of a task (e.g. context:'adding a cache layer to the API'). Cheap: returns compact stubs, no bodies. Results with lesson:true are recorded mistakes — read them (nt_get) before proceeding.",
+		InputSchema: obj(map[string]any{
+			"context":      sp("what you're about to work on, in plain words — the more specific, the better the recall"),
+			"limit":        it(),
+			"lessons_only": map[string]any{"type": "boolean", "description": "restrict to notes tagged `lesson` (recorded mistakes only)"},
+		}, "context"),
+	},
+	{
 		Name:        "nt_links",
 		Description: "Forward links and backlinks for a note or task — follow the knowledge graph.",
 		InputSchema: obj(map[string]any{"handle": sp("a note handle (slug/title/id) or task id")}, "handle"),

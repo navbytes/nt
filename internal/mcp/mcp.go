@@ -21,6 +21,7 @@ import (
 	"github.com/navbytes/nt/internal/mutate"
 	"github.com/navbytes/nt/internal/note"
 	"github.com/navbytes/nt/internal/quickadd"
+	"github.com/navbytes/nt/internal/recall"
 	"github.com/navbytes/nt/internal/search"
 	"github.com/navbytes/nt/internal/task"
 	"github.com/navbytes/nt/internal/view"
@@ -181,6 +182,8 @@ func (s *server) dispatch(name string, a map[string]any) (string, error) {
 		return s.log(a)
 	case "nt_search":
 		return s.search(a)
+	case "nt_recall":
+		return s.recall(a)
 	case "nt_links":
 		return s.links(a)
 	case "nt_mv":
@@ -1062,6 +1065,41 @@ func (s *server) search(a map[string]any) (string, error) {
 		out["totals"] = map[string]int{"notes": noteTotal, "tasks": taskTotal, "limit": limit}
 	}
 	return jsonText(out), nil
+}
+
+// recall ranks notes by relevance to a free-text task context — lessons/gotchas
+// first — so a resuming session reads what a past session learned before repeating
+// the mistake. Unlike search's substring-AND, it stems and synonym-expands the
+// context so a paraphrase still finds the note. This is the proactive half of the
+// learn-from-sessions loop; the agent calls it at task start.
+func (s *server) recall(a map[string]any) (string, error) {
+	context := strings.TrimSpace(str(a, "context"))
+	if context == "" {
+		return "", fmt.Errorf("context is required: describe what you're about to work on")
+	}
+	limit := intArg(a, "limit")
+	if limit <= 0 {
+		limit = 8
+	}
+	notes := note.Active(s.listNotes())
+	if boolArg(a, "lessons_only") {
+		kept := notes[:0]
+		for _, n := range notes {
+			if contains(n.Tags, recall.LessonTag) {
+				kept = append(kept, n)
+			}
+		}
+		notes = kept
+	}
+	results := recall.Rank(notes, context, limit)
+	stubs := make([]map[string]any, 0, len(results))
+	for _, r := range results {
+		stubs = append(stubs, map[string]any{
+			"id": r.Note.ID, "title": r.Note.Title, "description": r.Note.Description(160),
+			"tags": r.Note.Tags, "folder": pathDir(r.Note.Rel), "lesson": r.Lesson,
+		})
+	}
+	return jsonText(map[string]any{"results": stubs}), nil
 }
 
 func (s *server) links(a map[string]any) (string, error) {

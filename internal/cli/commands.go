@@ -16,6 +16,7 @@ import (
 	"github.com/navbytes/nt/internal/mutate"
 	"github.com/navbytes/nt/internal/note"
 	"github.com/navbytes/nt/internal/quickadd"
+	"github.com/navbytes/nt/internal/recall"
 	"github.com/navbytes/nt/internal/task"
 	"github.com/navbytes/nt/internal/tui"
 	"github.com/navbytes/nt/internal/web"
@@ -437,14 +438,26 @@ func cmdNote(args []string) int {
 	desc := fs.String("description", "", "one-line summary shown in `nt index`")
 	supersede := fs.String("supersede", "", "mark this note as replacing an existing one (its handle) — the old note retires from active views")
 	force := fs.Bool("force", false, "create even if a near-duplicate note already exists")
+	lesson := fs.Bool("lesson", false, "record a durable lesson/gotcha: tags it `lesson` and files it under lessons/ so `nt recall` surfaces it before the mistake recurs")
 	var fields stringSlice
 	asJSON := fs.Bool("json", false, "print the created note as JSON (id, title, path, …)")
 	fs.Var(&tags, "tag", "tag (repeatable)")
 	fs.Var(&fields, "field", "extra frontmatter key=value (repeatable, e.g. status=stable)")
 
-	flags, positional := splitArgs(args, map[string]bool{"json": true, "force": true})
+	flags, positional := splitArgs(args, map[string]bool{"json": true, "force": true, "lesson": true})
 	if err := fs.Parse(flags); err != nil {
 		return 2
+	}
+	// --lesson is shorthand for the lesson convention: tag `lesson` + folder
+	// lessons/ (unless an explicit --folder overrides). Keeps captured mistakes a
+	// distinct, recall-able class rather than indistinguishable KB notes.
+	if *lesson {
+		if !contains(tags, recall.LessonTag) {
+			tags = append(tags, recall.LessonTag)
+		}
+		if *folder == "" {
+			*folder = "lessons"
+		}
 	}
 	title := strings.Join(positional, " ")
 	fold := *folder

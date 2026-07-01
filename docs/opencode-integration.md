@@ -7,7 +7,7 @@ current Anomaly/SST version with a JS server + Go TUI, repo
 
 It is grounded in an audit of this repository's source and runtime, not the
 binary's name. **Headline finding:** `nt` is already a non-interactive,
-JSON-emitting CLI *and* ships a stdio **MCP server** (`nt mcp`) with 17 typed
+JSON-emitting CLI *and* ships a stdio **MCP server** (`nt mcp`) with 18 typed
 read **and write** tools — and OpenCode natively consumes MCP servers. That
 collapses most of what the brief assumed "must be built." The agent-driven
 read/write loop (knowledge-base retrieval **and** write-back memory) needs **no
@@ -51,9 +51,9 @@ change the design:
 
 1. **`nt` already exposes write tools over MCP** — `nt_add`, `nt_note`,
    `nt_done`, `nt_update`, `nt_tag`, `nt_mv`, `nt_archive`, `nt_supersede`, `nt_relink` — alongside the read
-   tools `nt_index`, `nt_search`, `nt_get`, `nt_ready`, `nt_status`, `nt_view`,
+   tools `nt_index`, `nt_search`, `nt_recall`, `nt_get`, `nt_ready`, `nt_status`, `nt_view`,
    `nt_log`, `nt_links`. Verified end-to-end over stdio JSON-RPC (`tools/list` →
-   17 tools; `tools/call nt_index`/`nt_search`/`nt_get` → results).
+   18 tools; `tools/call nt_index`/`nt_search`/`nt_get` → results).
 2. **OpenCode is a first-class MCP client.** Its config has a top-level `mcp` key
    for `"type": "local"` (stdio) servers, and the agent calls those tools the
    same way it calls built-ins.
