@@ -69,6 +69,8 @@ func Run(args []string) int {
 		return cmdUpdate(rest)
 	case "search", "q":
 		return cmdSearch(rest)
+	case "recall":
+		return cmdRecall(rest)
 	case "export":
 		return cmdExport(rest)
 	case "tags":

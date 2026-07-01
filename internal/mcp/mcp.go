@@ -21,6 +21,7 @@ import (
 	"github.com/navbytes/nt/internal/mutate"
 	"github.com/navbytes/nt/internal/note"
 	"github.com/navbytes/nt/internal/quickadd"
+	"github.com/navbytes/nt/internal/recall"
 	"github.com/navbytes/nt/internal/search"
 	"github.com/navbytes/nt/internal/task"
 	"github.com/navbytes/nt/internal/view"
@@ -181,6 +182,8 @@ func (s *server) dispatch(name string, a map[string]any) (string, error) {
 		return s.log(a)
 	case "nt_search":
 		return s.search(a)
+	case "nt_recall":
+		return s.recall(a)
 	case "nt_links":
 		return s.links(a)
 	case "nt_mv":
@@ -610,17 +613,14 @@ func (s *server) note(a map[string]any) (string, error) {
 	tags := strSlice(a, "tags")
 	supersede := strings.TrimSpace(str(a, "supersede"))
 
-	// Dedup-on-write guard: refuse a near-duplicate of an existing note so parallel
-	// agents don't silently fork the same decision. The agent then updates it,
-	// supersedes it, or passes force=true to record a deliberate separate note.
+	// Dedup-on-write is a SOFT signal for agents, not a hard refuse: parallel
+	// agents legitimately record similar-but-distinct findings at the same time,
+	// and refusing would silently DROP a capture (a learning lost). So we always
+	// create the note, and if near-duplicates exist we return them in `similar` so
+	// the agent can choose to consolidate (nt_supersede/nt_update) on its next turn.
+	var similar []*note.Note
 	if supersede == "" && !boolArg(a, "force") {
-		if sim := note.FindSimilar(note.Active(s.listNotes()), title, tags); len(sim) > 0 {
-			ids := make([]string, 0, len(sim))
-			for _, n := range sim {
-				ids = append(ids, fmt.Sprintf("%s (%q)", n.ID, n.Title))
-			}
-			return "", fmt.Errorf("near-duplicate note(s) already exist: %s — update one (nt_tag/nt_mv/nt_get), replace it (supersede=<id>), or set force=true for a deliberate separate note", strings.Join(ids, "; "))
-		}
+		similar = note.FindSimilar(note.Active(s.listNotes()), title, tags)
 	}
 
 	n, err := note.Create(s.eng.S, title, str(a, "body"), tags, source, str(a, "folder"))
@@ -643,6 +643,14 @@ func (s *server) note(a map[string]any) (string, error) {
 	res := toMap(noteToOut(n))
 	if dangling := s.danglingLinks(n); len(dangling) > 0 {
 		res["danglingLinks"] = dangling // bad outbound [[refs]] to fix now
+	}
+	if len(similar) > 0 {
+		sims := make([]map[string]string, 0, len(similar))
+		for _, sn := range similar {
+			sims = append(sims, map[string]string{"id": sn.ID, "title": sn.Title})
+		}
+		// Created anyway (no data loss); consider consolidating if it's a true dup.
+		res["similar"] = sims
 	}
 	if supersede != "" {
 		res["superseded"] = supersede
@@ -826,6 +834,13 @@ func (s *server) index(a map[string]any) (string, error) {
 	if len(recent) > 5 {
 		recent = recent[:5]
 	}
+	// Compact mode: one line per note/task instead of JSON. The session-start
+	// nt_index call is the dominant recurring token cost once the store matures;
+	// compact drops the JSON scaffolding (keys, braces, quotes) an agent doesn't
+	// need to read the catalog. Opt in with format:"compact".
+	if str(a, "format") == "compact" {
+		return compactIndex(stubs, active, recent, noteTotal), nil
+	}
 	out := map[string]any{
 		"notes": stubs, "tasks": tasksOut(active), "recentlyDone": tasksOut(recent),
 	}
@@ -834,6 +849,42 @@ func (s *server) index(a map[string]any) (string, error) {
 		out["noteTotal"] = noteTotal
 	}
 	return jsonText(out), nil
+}
+
+// compactIndex renders the KB catalog as terse plain text — one line per note
+// (shortid · title — description · @tags) and per active task — for the
+// session-start nt_index call. Much cheaper than JSON for the same information.
+func compactIndex(stubs []noteStub, active, recent []*task.Task, noteTotal int) string {
+	var b strings.Builder
+	fmt.Fprintf(&b, "NOTES (%d)\n", noteTotal)
+	for _, n := range stubs {
+		fmt.Fprintf(&b, "%s  %s", shortID(n.ID), n.Title)
+		if n.Description != "" {
+			fmt.Fprintf(&b, " — %s", n.Description)
+		}
+		if len(n.Tags) > 0 {
+			fmt.Fprintf(&b, "  @%s", strings.Join(n.Tags, " @"))
+		}
+		b.WriteByte('\n')
+	}
+	if noteTotal > len(stubs) {
+		fmt.Fprintf(&b, "… %d more (pass a higher limit or a tag/folder filter)\n", noteTotal-len(stubs))
+	}
+	fmt.Fprintf(&b, "\nTASKS (%d open)\n", len(active))
+	for _, t := range active {
+		fmt.Fprintf(&b, "%s  [%s] %s", shortID(t.ID()), t.Status(), t.Text)
+		if due := t.Due(); due != "" {
+			fmt.Fprintf(&b, " (due %s)", due)
+		}
+		b.WriteByte('\n')
+	}
+	if len(recent) > 0 {
+		b.WriteString("\nRECENTLY DONE\n")
+		for _, t := range recent {
+			fmt.Fprintf(&b, "%s  %s\n", shortID(t.ID()), t.Text)
+		}
+	}
+	return b.String()
 }
 
 // get fetches one note's full content by handle (id/slug/title) — the on-demand
@@ -993,7 +1044,14 @@ func (s *server) search(a map[string]any) (string, error) {
 	var tout []taskOut
 	taskTotal := 0
 	if typ == "all" || typ == "task" {
+		ws := s.workstream(a)
 		for _, t := range d.Tasks() {
+			// Scope tasks to the caller's workstream, exactly as nt_index/nt_ready
+			// do — otherwise a parallel agent's search leaks every other agent's
+			// in-flight tasks. Notes stay store-wide (knowledge is shared).
+			if !workstream.Visible(t.Key("ws"), ws) {
+				continue
+			}
 			if tag != "" && !contains(t.Tags(), tag) {
 				continue
 			}
@@ -1012,6 +1070,41 @@ func (s *server) search(a map[string]any) (string, error) {
 		out["totals"] = map[string]int{"notes": noteTotal, "tasks": taskTotal, "limit": limit}
 	}
 	return jsonText(out), nil
+}
+
+// recall ranks notes by relevance to a free-text task context — lessons/gotchas
+// first — so a resuming session reads what a past session learned before repeating
+// the mistake. Unlike search's substring-AND, it stems and synonym-expands the
+// context so a paraphrase still finds the note. This is the proactive half of the
+// learn-from-sessions loop; the agent calls it at task start.
+func (s *server) recall(a map[string]any) (string, error) {
+	context := strings.TrimSpace(str(a, "context"))
+	if context == "" {
+		return "", fmt.Errorf("context is required: describe what you're about to work on")
+	}
+	limit := intArg(a, "limit")
+	if limit <= 0 {
+		limit = 8
+	}
+	notes := note.Active(s.listNotes())
+	if boolArg(a, "lessons_only") {
+		kept := notes[:0]
+		for _, n := range notes {
+			if contains(n.Tags, recall.LessonTag) {
+				kept = append(kept, n)
+			}
+		}
+		notes = kept
+	}
+	results := recall.Rank(notes, context, limit)
+	stubs := make([]map[string]any, 0, len(results))
+	for _, r := range results {
+		stubs = append(stubs, map[string]any{
+			"id": r.Note.ID, "title": r.Note.Title, "description": r.Note.Description(160),
+			"tags": r.Note.Tags, "folder": pathDir(r.Note.Rel), "lesson": r.Lesson,
+		})
+	}
+	return jsonText(map[string]any{"results": stubs}), nil
 }
 
 func (s *server) links(a map[string]any) (string, error) {
@@ -1407,8 +1500,11 @@ func requireID(a map[string]any) (string, error) {
 	return id, nil
 }
 
+// jsonText serializes a tool result. MCP payloads are consumed by the model, not
+// read by a human, so we emit COMPACT JSON (no indentation) — the 2-space pretty
+// print was ~24% pure whitespace on every read, billed on every retrieval.
 func jsonText(v any) string {
-	b, err := json.MarshalIndent(v, "", "  ")
+	b, err := json.Marshal(v)
 	if err != nil {
 		return fmt.Sprintf("error encoding result: %v", err)
 	}
@@ -1416,8 +1512,20 @@ func jsonText(v any) string {
 }
 
 func str(a map[string]any, k string) string {
-	if v, ok := a[k].(string); ok {
+	switch v := a[k].(type) {
+	case string:
 		return v
+	case []any:
+		// Tolerate an LLM passing an array (e.g. tag: ["auth"]) where a string is
+		// expected. Fall back to the FIRST string element — these single-value args
+		// (tag/folder) take one value, so this still filters. Without it the type
+		// assertion silently fails, the filter no-ops, and nt_index/nt_search return
+		// the FULL store — the worst-case token blast from a natural arg shape.
+		if len(v) > 0 {
+			if s, ok := v[0].(string); ok {
+				return s
+			}
+		}
 	}
 	return ""
 }

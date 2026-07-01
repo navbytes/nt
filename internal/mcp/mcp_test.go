@@ -345,7 +345,7 @@ func TestMCPView(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(out, `"views": []`) {
+	if !strings.Contains(out, `"views":[]`) {
 		t.Fatalf("empty views list, got %s", out)
 	}
 
@@ -358,7 +358,7 @@ func TestMCPView(t *testing.T) {
 
 	// Listing names it with its filter summary.
 	out, _ = s.dispatch("nt_view", map[string]any{})
-	if !strings.Contains(out, `"name": "backend"`) || !strings.Contains(out, "--tag backend") {
+	if !strings.Contains(out, `"name":"backend"`) || !strings.Contains(out, "--tag backend") {
 		t.Fatalf("views list should name the view + filter, got %s", out)
 	}
 
@@ -748,9 +748,10 @@ func TestMCPUpdateClaimsWorkstream(t *testing.T) {
 	}
 }
 
-// TestMCPDedupSupersedeAndDanglingLinks: nt_note refuses a near-duplicate,
-// force bypasses it, nt_supersede retires a note from the index, and a note with
-// an unresolved [[link]] reports danglingLinks.
+// TestMCPDedupSupersedeAndDanglingLinks: nt_note flags a near-duplicate SOFTLY
+// (creates the note, returns `similar`) so parallel agents never lose a capture;
+// nt_supersede retires a note from the index; a note with an unresolved [[link]]
+// reports danglingLinks.
 func TestMCPDedupSupersedeAndDanglingLinks(t *testing.T) {
 	s := newServer(t)
 	must := func(name string, a map[string]any) string {
@@ -764,13 +765,16 @@ func TestMCPDedupSupersedeAndDanglingLinks(t *testing.T) {
 	var first noteOut
 	json.Unmarshal([]byte(must("nt_note", map[string]any{"title": "Refresh token rotation", "tags": []any{"auth"}, "body": "single-use"})), &first)
 
-	// Near-duplicate is refused.
-	if _, err := s.dispatch("nt_note", map[string]any{"title": "Refresh token rotation strategy", "tags": []any{"auth"}}); err == nil {
-		t.Error("nt_note should refuse a near-duplicate")
+	// Near-duplicate is CREATED (no data loss) and flags the original in `similar`.
+	dupOut := must("nt_note", map[string]any{"title": "Refresh token rotation strategy", "tags": []any{"auth"}})
+	if !strings.Contains(dupOut, "similar") || !strings.Contains(dupOut, first.ID) {
+		t.Errorf("near-duplicate should be created with a `similar` hint: %s", dupOut)
 	}
-	// force bypasses.
 	var forked noteOut
-	json.Unmarshal([]byte(must("nt_note", map[string]any{"title": "Refresh token rotation strategy", "tags": []any{"auth"}, "force": true})), &forked)
+	json.Unmarshal([]byte(dupOut), &forked)
+	if forked.ID == "" || forked.ID == first.ID {
+		t.Errorf("near-duplicate should be a distinct new note, got %q", forked.ID)
+	}
 
 	// nt_supersede retires the fork; nt_index no longer lists it.
 	must("nt_supersede", map[string]any{"handle": forked.ID, "by": first.ID})
@@ -805,7 +809,7 @@ func TestMCPTaskOverlapWarning(t *testing.T) {
 	}
 	// A near-duplicate task on the same project → flagged as similar (non-blocking).
 	dup := must("nt_add", map[string]any{"text": "normalize timestamps UTC for watermark", "project": "pipeline"})
-	if !strings.Contains(dup, "similar") || !strings.Contains(dup, "\"kind\": \"task\"") {
+	if !strings.Contains(dup, "similar") || !strings.Contains(dup, "\"kind\":\"task\"") {
 		t.Errorf("near-duplicate task should be flagged as similar: %s", dup)
 	}
 	// An unrelated task is not flagged.
@@ -816,7 +820,78 @@ func TestMCPTaskOverlapWarning(t *testing.T) {
 	// A decision note on the topic → a task on it is flagged to link, not duplicate.
 	must("nt_note", map[string]any{"title": "Config precedence order", "tags": []any{"clitool"}, "body": "flags > env > file"})
 	tsk := must("nt_add", map[string]any{"text": "Config precedence order test", "tags": []any{"clitool"}})
-	if !strings.Contains(tsk, "\"kind\": \"note\"") {
+	if !strings.Contains(tsk, "\"kind\":\"note\"") {
 		t.Errorf("a task restating a decision note should surface it: %s", tsk)
+	}
+}
+
+// TestMCPIndexCompactFormat: format:"compact" returns terse one-line text, not
+// JSON — the cheap session-start load — and still lists notes and tasks.
+func TestMCPIndexCompactFormat(t *testing.T) {
+	s := newServer(t)
+	s.dispatch("nt_note", map[string]any{"title": "Auth design", "description": "24h JWTs", "folder": "ref", "tags": []any{"auth"}})
+	s.dispatch("nt_add", map[string]any{"text": "refactor middleware", "tags": []any{"backend"}})
+
+	compact, err := s.dispatch("nt_index", map[string]any{"format": "compact"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.HasPrefix(strings.TrimSpace(compact), "{") {
+		t.Errorf("compact format must not be JSON:\n%s", compact)
+	}
+	for _, want := range []string{"NOTES", "Auth design", "24h JWTs", "TASKS", "refactor middleware"} {
+		if !strings.Contains(compact, want) {
+			t.Errorf("compact index missing %q:\n%s", want, compact)
+		}
+	}
+	// Compact is materially smaller than JSON for the same catalog.
+	full, _ := s.dispatch("nt_index", map[string]any{})
+	if len(compact) >= len(full) {
+		t.Errorf("compact (%d) should be smaller than JSON (%d)", len(compact), len(full))
+	}
+}
+
+// TestMCPScopeArgArrayCoercion: an LLM passing tag/folder as a single-element
+// array must still filter — not silently no-op into a full-store dump.
+func TestMCPScopeArgArrayCoercion(t *testing.T) {
+	s := newServer(t)
+	s.dispatch("nt_note", map[string]any{"title": "Kept", "tags": []any{"auth"}, "body": "x"})
+	s.dispatch("nt_note", map[string]any{"title": "Other", "tags": []any{"misc"}, "body": "y"})
+
+	out, err := s.dispatch("nt_index", map[string]any{"tag": []any{"auth"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "Kept") || strings.Contains(out, "Other") {
+		t.Errorf("array-form tag arg should filter to the tagged note only:\n%s", out)
+	}
+}
+
+// TestMCPSearchTaskWorkstreamIsolation: nt_search task results are scoped to the
+// caller's workstream (like nt_index/nt_ready) so parallel agents don't leak
+// in-flight tasks to each other; notes remain shared.
+func TestMCPSearchTaskWorkstreamIsolation(t *testing.T) {
+	s := newServer(t)
+	t.Setenv("NT_WORKSTREAM", "feat-a")
+	s.dispatch("nt_add", map[string]any{"text": "wire widget alpha"})
+	t.Setenv("NT_WORKSTREAM", "feat-b")
+
+	out, err := s.dispatch("nt_search", map[string]any{"query": "widget", "type": "all"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var res struct {
+		Tasks []taskOut `json:"tasks"`
+	}
+	json.Unmarshal([]byte(out), &res)
+	if len(res.Tasks) != 0 {
+		t.Errorf("feat-b must not see feat-a's task via search, got %v", res.Tasks)
+	}
+	// The owner still finds it.
+	t.Setenv("NT_WORKSTREAM", "feat-a")
+	out, _ = s.dispatch("nt_search", map[string]any{"query": "widget", "type": "all"})
+	json.Unmarshal([]byte(out), &res)
+	if len(res.Tasks) != 1 {
+		t.Errorf("owner should find its own task, got %v", res.Tasks)
 	}
 }

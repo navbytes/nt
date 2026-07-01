@@ -67,18 +67,24 @@ fi
 
 # 6. Seed the always-in-context folders + an initial rules export. These notes are
 #    examples you can edit or delete; the folders are what matter.
+#    Guard on the JSON empty-array marker: `nt notes --folder X` prints the human
+#    string "no notes" (non-empty) on an empty store, so a `[ -z ... ]` test is
+#    FALSE and would SKIP seeding on the very first run — shipping an empty injected
+#    block. `--json` returns "[]" on an empty folder, which we can test reliably.
 echo "→ seeding nt rules/ and memory/ folders (examples — edit or remove)"
-"$nt" search --tag rule --type note >/dev/null 2>&1 || true
-if ! "$nt" notes --folder rules >/dev/null 2>&1 || [ -z "$("$nt" notes --folder rules 2>/dev/null)" ]; then
+is_empty_folder() { [ "$("$nt" notes --folder "$1" --json 2>/dev/null | tr -d '[:space:]')" = "[]" ]; }
+if is_empty_folder rules; then
   "$nt" note "Output style: terse factual bullets" \
+    --description "How the agent should phrase answers by default" \
     --body "- Answer in bullet points, not prose.
 - Plain, direct words. No filler, hedging, or fancy phrasing.
 - Lead with the fact/answer; skip preamble and restating the question.
 - Elaborate only when asked." \
     --folder rules --tag rule --source opencode >/dev/null || true
 fi
-if [ -z "$("$nt" notes --folder memory 2>/dev/null)" ]; then
+if is_empty_folder memory; then
   "$nt" note "Project + user facts the agent should always know" \
+    --description "Durable user preferences and project conventions (edit me)" \
     --body "Edit this note (or add siblings tagged memory-core) with durable preferences and conventions." \
     --folder memory --tag memory-core --source opencode >/dev/null || true
 fi
