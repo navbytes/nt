@@ -613,17 +613,14 @@ func (s *server) note(a map[string]any) (string, error) {
 	tags := strSlice(a, "tags")
 	supersede := strings.TrimSpace(str(a, "supersede"))
 
-	// Dedup-on-write guard: refuse a near-duplicate of an existing note so parallel
-	// agents don't silently fork the same decision. The agent then updates it,
-	// supersedes it, or passes force=true to record a deliberate separate note.
+	// Dedup-on-write is a SOFT signal for agents, not a hard refuse: parallel
+	// agents legitimately record similar-but-distinct findings at the same time,
+	// and refusing would silently DROP a capture (a learning lost). So we always
+	// create the note, and if near-duplicates exist we return them in `similar` so
+	// the agent can choose to consolidate (nt_supersede/nt_update) on its next turn.
+	var similar []*note.Note
 	if supersede == "" && !boolArg(a, "force") {
-		if sim := note.FindSimilar(note.Active(s.listNotes()), title, tags); len(sim) > 0 {
-			ids := make([]string, 0, len(sim))
-			for _, n := range sim {
-				ids = append(ids, fmt.Sprintf("%s (%q)", n.ID, n.Title))
-			}
-			return "", fmt.Errorf("near-duplicate note(s) already exist: %s — update one (nt_tag/nt_mv/nt_get), replace it (supersede=<id>), or set force=true for a deliberate separate note", strings.Join(ids, "; "))
-		}
+		similar = note.FindSimilar(note.Active(s.listNotes()), title, tags)
 	}
 
 	n, err := note.Create(s.eng.S, title, str(a, "body"), tags, source, str(a, "folder"))
@@ -646,6 +643,14 @@ func (s *server) note(a map[string]any) (string, error) {
 	res := toMap(noteToOut(n))
 	if dangling := s.danglingLinks(n); len(dangling) > 0 {
 		res["danglingLinks"] = dangling // bad outbound [[refs]] to fix now
+	}
+	if len(similar) > 0 {
+		sims := make([]map[string]string, 0, len(similar))
+		for _, sn := range similar {
+			sims = append(sims, map[string]string{"id": sn.ID, "title": sn.Title})
+		}
+		// Created anyway (no data loss); consider consolidating if it's a true dup.
+		res["similar"] = sims
 	}
 	if supersede != "" {
 		res["superseded"] = supersede
@@ -1511,11 +1516,12 @@ func str(a map[string]any, k string) string {
 	case string:
 		return v
 	case []any:
-		// Tolerate an LLM passing a single-element array (e.g. tag: ["auth"])
-		// where a string is expected. Without this the type assertion silently
-		// fails, the filter no-ops, and nt_index/nt_search return the FULL store
-		// — the worst-case token blast from a natural arg shape.
-		if len(v) == 1 {
+		// Tolerate an LLM passing an array (e.g. tag: ["auth"]) where a string is
+		// expected. Fall back to the FIRST string element — these single-value args
+		// (tag/folder) take one value, so this still filters. Without it the type
+		// assertion silently fails, the filter no-ops, and nt_index/nt_search return
+		// the FULL store — the worst-case token blast from a natural arg shape.
+		if len(v) > 0 {
 			if s, ok := v[0].(string); ok {
 				return s
 			}

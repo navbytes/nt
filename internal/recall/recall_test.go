@@ -54,6 +54,38 @@ func TestRankDropsNoise(t *testing.T) {
 	}
 }
 
+// stem must be self-consistent: a plural/verb form and its root fold together, so
+// a query word matches a differently-inflected note word.
+func TestStemSymmetry(t *testing.T) {
+	pairs := [][2]string{
+		{"races", "race"}, {"retries", "retry"}, {"caches", "cache"},
+		{"deploys", "deploy"}, {"boxes", "box"}, {"invoices", "invoice"},
+		{"migrations", "migration"}, {"goroutines", "goroutine"},
+	}
+	for _, p := range pairs {
+		if stem(p[0]) != stem(p[1]) {
+			t.Errorf("stem(%q)=%q != stem(%q)=%q", p[0], stem(p[0]), p[1], stem(p[1]))
+		}
+	}
+	// "class" must not lose its double-s.
+	if stem("class") != "class" {
+		t.Errorf("stem(class)=%q", stem("class"))
+	}
+}
+
+// A cross-domain word (CSS "column"/"overflow") must not pull an unrelated domain
+// (DB migration) — the synonym-collision the adversarial pass caught.
+func TestRankNoCrossDomainBleed(t *testing.T) {
+	notes := []*note.Note{
+		mk("Flexbox columns overflow their container", "set min-width:0 on flex items", "lesson", "css"),
+		mk("Postgres migration needs lock_timeout", "an ALTER blocked all writes", "lesson", "migration"),
+	}
+	got := Rank(notes, "my flex layout columns overflow the viewport", 3)
+	if len(got) == 0 || got[0].Note.Title != "Flexbox columns overflow their container" {
+		t.Errorf("CSS query should surface the CSS lesson first, got %v", titles(got))
+	}
+}
+
 func titles(rs []Result) []string {
 	out := make([]string, len(rs))
 	for i, r := range rs {

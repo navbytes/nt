@@ -458,6 +458,9 @@ func FindSimilar(notes []*Note, title string, tags []string) []*Note {
 	slug := Slug(title)
 	tagset := map[string]bool{}
 	for _, t := range tags {
+		if structuralTag[t] {
+			continue // class markers (lesson/rule/memory-core) aren't a topical match
+		}
 		tagset[t] = true
 	}
 	var out []*Note
@@ -483,6 +486,14 @@ func FindSimilar(notes []*Note, title string, tags []string) []*Note {
 // stopword tokens — the similarity heuristic behind duplicate detection, exported
 // so task-side dedup can reuse the exact same notion nt uses for notes.
 func TitleOverlap(a, b string) float64 { return jaccard(titleTokens(a), titleTokens(b)) }
+
+// structuralTag marks tags that classify a note (which memory layer it belongs
+// to) rather than describe its topic. They're excluded from similarity's
+// shared-tag test so that every note tagged `lesson` isn't treated as topically
+// related to every other lesson — which would collapse dedup to pure title
+// overlap across the whole corpus and mis-flag distinct lessons as duplicates
+// (the failure mode that silently dropped parallel agents' captures).
+var structuralTag = map[string]bool{"lesson": true, "rule": true, "memory-core": true}
 
 var titleStopwords = map[string]bool{
 	"the": true, "and": true, "for": true, "over": true, "via": true, "with": true,

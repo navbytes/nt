@@ -80,19 +80,47 @@ export const NtMemory: Plugin = async ({ $ }) => {
       nt(["export", "--tag", CONFIG.memoryTag, "--title", "Memory", "--no-provenance", "--no-header"]),
     ])
     const out = [rules.trim(), memory.trim()].filter(Boolean).join("\n\n")
-    if (out.length <= CONFIG.maxInjectChars) return out
+    const max = CONFIG.maxInjectChars
+    if (out.length <= max) return out
     // Over budget. NEVER slice mid-note (that silently truncates a rule's body and
     // drops the next rule with no signal — the agent then violates a rule it was
-    // never shown). Instead cut at the last note boundary that fits and report how
-    // many whole notes were omitted, both inline and to the console.
-    const cut = out.lastIndexOf("\n## ", CONFIG.maxInjectChars)
-    const kept = cut > 0 ? out.slice(0, cut) : out.slice(0, CONFIG.maxInjectChars)
-    const omitted = (out.slice(kept.length).match(/\n## /g) || []).length
-    console.warn(
-      `[nt-memory] rules+memory (${out.length} chars) exceed NT_INJECT_MAX=${CONFIG.maxInjectChars}; ` +
-        `omitted ${omitted} whole note(s). Trim rules/memory-core notes or raise NT_INJECT_MAX.`,
-    )
-    return kept.trimEnd() + `\n\n<!-- nt: ${omitted} note(s) omitted to fit NT_INJECT_MAX=${CONFIG.maxInjectChars}; trim rules/memory notes -->`
+    // never shown). Split at heading boundaries and greedily keep every WHOLE note
+    // that fits; if not even the first rule fits, keep it explicitly truncated
+    // (never an empty block); report how many notes were omitted.
+    const blocks = out.split(/\n(?=#{1,2} )/) // each block = a heading + its body
+    const isNote = (b: string) => /^## /.test(b)
+    const kept: string[] = []
+    let used = 0
+    let omitted = 0
+    let truncatedOne = false
+    for (const b of blocks) {
+      const add = (used > 0 ? 1 : 0) + b.length // +1 for the "\n" join
+      if (used + add <= max) {
+        kept.push(b)
+        used += add
+      } else if (isNote(b) && !kept.some(isNote) && !truncatedOne) {
+        // Nothing substantive kept yet and this note alone overflows: keep it
+        // truncated so a lone oversized rule is still (partly) shown, not dropped.
+        const room = Math.max(0, max - used - 48)
+        kept.push(b.slice(0, room).trimEnd() + "\n<!-- nt: rule truncated to fit NT_INJECT_MAX -->")
+        used = max
+        truncatedOne = true
+      } else if (isNote(b)) {
+        omitted++
+      }
+    }
+    if (omitted > 0 || truncatedOne) {
+      console.warn(
+        `[nt-memory] rules+memory (${out.length} chars) exceed NT_INJECT_MAX=${max}; ` +
+          `omitted ${omitted} whole note(s)${truncatedOne ? " and truncated 1" : ""}. ` +
+          `Trim rules/memory-core notes or raise NT_INJECT_MAX.`,
+      )
+    }
+    let result = kept.join("\n")
+    if (omitted > 0) {
+      result += `\n\n<!-- nt: ${omitted} note(s) omitted to fit NT_INJECT_MAX=${max}; trim rules/memory notes -->`
+    }
+    return result
   }
 
   return {

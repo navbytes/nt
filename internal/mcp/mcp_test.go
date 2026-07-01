@@ -748,9 +748,10 @@ func TestMCPUpdateClaimsWorkstream(t *testing.T) {
 	}
 }
 
-// TestMCPDedupSupersedeAndDanglingLinks: nt_note refuses a near-duplicate,
-// force bypasses it, nt_supersede retires a note from the index, and a note with
-// an unresolved [[link]] reports danglingLinks.
+// TestMCPDedupSupersedeAndDanglingLinks: nt_note flags a near-duplicate SOFTLY
+// (creates the note, returns `similar`) so parallel agents never lose a capture;
+// nt_supersede retires a note from the index; a note with an unresolved [[link]]
+// reports danglingLinks.
 func TestMCPDedupSupersedeAndDanglingLinks(t *testing.T) {
 	s := newServer(t)
 	must := func(name string, a map[string]any) string {
@@ -764,13 +765,16 @@ func TestMCPDedupSupersedeAndDanglingLinks(t *testing.T) {
 	var first noteOut
 	json.Unmarshal([]byte(must("nt_note", map[string]any{"title": "Refresh token rotation", "tags": []any{"auth"}, "body": "single-use"})), &first)
 
-	// Near-duplicate is refused.
-	if _, err := s.dispatch("nt_note", map[string]any{"title": "Refresh token rotation strategy", "tags": []any{"auth"}}); err == nil {
-		t.Error("nt_note should refuse a near-duplicate")
+	// Near-duplicate is CREATED (no data loss) and flags the original in `similar`.
+	dupOut := must("nt_note", map[string]any{"title": "Refresh token rotation strategy", "tags": []any{"auth"}})
+	if !strings.Contains(dupOut, "similar") || !strings.Contains(dupOut, first.ID) {
+		t.Errorf("near-duplicate should be created with a `similar` hint: %s", dupOut)
 	}
-	// force bypasses.
 	var forked noteOut
-	json.Unmarshal([]byte(must("nt_note", map[string]any{"title": "Refresh token rotation strategy", "tags": []any{"auth"}, "force": true})), &forked)
+	json.Unmarshal([]byte(dupOut), &forked)
+	if forked.ID == "" || forked.ID == first.ID {
+		t.Errorf("near-duplicate should be a distinct new note, got %q", forked.ID)
+	}
 
 	// nt_supersede retires the fork; nt_index no longer lists it.
 	must("nt_supersede", map[string]any{"handle": forked.ID, "by": first.ID})

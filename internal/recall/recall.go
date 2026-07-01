@@ -16,6 +16,7 @@
 package recall
 
 import (
+	"math"
 	"sort"
 	"strings"
 
@@ -36,18 +37,30 @@ type Result struct {
 // synGroups cluster words that mean the same thing to a coding agent. Matching any
 // member expands to the whole group, so a paraphrased query still reaches a note
 // worded differently. Small and dev-focused on purpose — precision matters too.
+//
+// Groups are kept NARROW and non-overlapping: ambiguous cross-domain tokens
+// (column, index, origin, lock, database) are deliberately NOT grouped, because
+// one overloaded word ("column" → migration) would otherwise drag a whole wrong
+// domain into an unrelated query (a CSS-column question surfacing DB migrations).
+// nil/null and panic/crash are separate groups so distinct failure modes don't
+// collapse into one bucket.
 var synGroups = [][]string{
-	{"concurrency", "concurrent", "goroutine", "parallel", "async", "await", "race", "deadlock", "mutex", "lock", "thread", "singleflight"},
-	{"deploy", "deployment", "release", "ship", "production", "prod", "rollout", "publish"},
-	{"migration", "migrate", "schema", "database", "ddl", "alter", "column", "index"},
-	{"auth", "authentication", "authorization", "login", "token", "jwt", "session", "oauth", "credential"},
-	{"cors", "options", "preflight", "origin", "browser"},
-	{"test", "testing", "flaky", "isolation", "fixture", "mock", "stub", "assertion"},
-	{"cache", "caching", "invalidation", "ttl", "stale", "memoize"},
-	{"timeout", "retry", "backoff", "deadline", "latency", "slow", "hang"},
-	{"config", "configuration", "env", "environment", "flag", "setting", "variable"},
-	{"error", "panic", "crash", "exception", "failure", "bug", "nil", "null"},
-	{"memory", "leak", "allocation", "gc", "oom", "buffer"},
+	{"concurrency", "concurrent", "goroutine", "parallel", "async", "await", "race", "deadlock", "mutex", "semaphore", "thread", "singleflight"},
+	{"deploy", "deployment", "release", "ship", "production", "prod", "rollout", "canary"},
+	{"migration", "migrate", "schema", "ddl", "alter"},
+	{"auth", "authentication", "authorization", "login", "jwt", "oauth", "credential"},
+	{"cors", "preflight"},
+	{"test", "testing", "flaky", "fixture", "mock", "stub"},
+	{"cache", "caching", "invalidation", "memoize", "redis"},
+	{"timeout", "retry", "backoff", "deadline", "latency"},
+	{"config", "configuration", "setting", "dotenv"},
+	{"panic", "crash", "segfault", "stacktrace"},
+	{"nil", "null", "nullpointer", "npe", "nullptr"},
+	{"leak", "oom", "allocation", "gc"},
+	// Domains a coding agent hits that the map was previously blind to:
+	{"css", "flexbox", "flex", "grid", "layout", "overflow", "responsive", "viewport", "zindex"},
+	{"billing", "payment", "invoice", "charge", "webhook", "idempotency", "refund", "stripe", "subscription"},
+	{"i18n", "l10n", "locale", "translation", "rtl", "localization"},
 }
 
 // conceptOf maps a stemmed word to its group id ("g0", "g1", …) if it belongs to a
@@ -72,13 +85,27 @@ var stop = map[string]bool{
 	"about": true, "into": true, "from": true, "at": true, "by": true, "as": true, "not": true,
 }
 
-// stem is a naive suffix stripper: enough to fold deploys→deploy, deadlocked→
-// deadlock, testing→test without a real stemmer's cost or surprises.
+// stem is a light suffix stripper — enough to fold plural/verb forms to a common
+// root so a query word matches a note's differently-inflected word. It is applied
+// to BOTH query and note text, so it only needs to be self-consistent (map both
+// "races" and "race" to the same token), not linguistically perfect.
 func stem(w string) string {
-	for _, suf := range []string{"ing", "ed", "es", "s"} {
-		if len(w) > len(suf)+2 && strings.HasSuffix(w, suf) {
-			return w[:len(w)-len(suf)]
-		}
+	switch {
+	case len(w) > 4 && strings.HasSuffix(w, "ies"):
+		w = w[:len(w)-3] + "y" // retries→retry, libraries→library
+	case len(w) > 4 && strings.HasSuffix(w, "es"):
+		w = w[:len(w)-2] // boxes→box, matches→match, caches→cach (canonicalized below)
+	case len(w) > 4 && strings.HasSuffix(w, "ing"):
+		w = w[:len(w)-3]
+	case len(w) > 4 && strings.HasSuffix(w, "ed"):
+		w = w[:len(w)-2]
+	case len(w) > 3 && strings.HasSuffix(w, "s") && !strings.HasSuffix(w, "ss"):
+		w = w[:len(w)-1]
+	}
+	// Canonicalize a trailing 'e' so cache/caches and race/races fold to the same
+	// token (English -es is inconsistent; folding both sides makes stem stable).
+	if len(w) > 3 && strings.HasSuffix(w, "e") {
+		w = w[:len(w)-1]
 	}
 	return w
 }
@@ -132,51 +159,90 @@ func Rank(notes []*note.Note, context string, limit int) []Result {
 	if len(q.words) == 0 {
 		return nil
 	}
-	type scored struct {
-		Result
-		exact int // # of exact-word matches — the tie-breaker
+	// Pass 1: build each note's bags and tally document frequency per concept, so a
+	// common word ("database", "test") counts less than a rare, discriminating one.
+	type cand struct {
+		n            *note.Note
+		strong, weak bag
+		lesson       bool
 	}
-	var out []scored
+	var cands []cand
+	df := map[string]int{}
 	for _, n := range notes {
 		if n.Reserved() {
 			continue
 		}
-		strong := newBag(n.Title + " " + strings.Join(n.Tags, " ") + " " + n.Description(240))
-		weak := newBag(n.Body)
-		score, exact := 0, 0
-		for w := range q.words {
-			c := conceptID(w)
-			switch {
-			case strong.words[w]: // exact word in a high-signal field — strongest
-				score += 4
-				exact++
-			case strong.concepts[c]: // synonym of it in a high-signal field
-				score += 2
-			case weak.words[w]: // exact word in the body
-				score += 2
-				exact++
-			case weak.concepts[c]: // synonym in the body — weakest
-				score++
-			}
+		c := cand{
+			n:      n,
+			strong: newBag(n.Title + " " + strings.Join(n.Tags, " ") + " " + n.Description(240)),
+			weak:   newBag(n.Body),
 		}
-		if score == 0 {
-			continue
-		}
-		isLesson := false
 		for _, t := range n.Tags {
 			if t == LessonTag {
-				isLesson = true
+				c.lesson = true
 				break
 			}
 		}
-		if isLesson {
-			score += 5 // surface recorded mistakes above adjacent reference notes
+		seen := map[string]bool{}
+		for k := range c.strong.concepts {
+			seen[k] = true
 		}
-		out = append(out, scored{Result{Note: n, Score: score, Lesson: isLesson}, exact})
+		for k := range c.weak.concepts {
+			seen[k] = true
+		}
+		for k := range seen {
+			df[k]++
+		}
+		cands = append(cands, c)
+	}
+	n := len(cands)
+	idf := func(concept string) float64 {
+		d := df[concept]
+		if d < 1 {
+			d = 1
+		}
+		return math.Log(1 + float64(n)/float64(d))
+	}
+	// Pass 2: score. Per query concept: exact word in a high-signal field is
+	// strongest, then a synonym there, then the body — each weighted by the
+	// concept's IDF. The lesson boost is MULTIPLICATIVE (not a flat add), so it
+	// tilts ties toward recorded mistakes without letting a one-concept lesson
+	// outrank a genuinely more-relevant note.
+	type scored struct {
+		Result
+		f     float64
+		exact int
+	}
+	var out []scored
+	for _, cd := range cands {
+		var f float64
+		exact := 0
+		for w := range q.words {
+			c := conceptID(w)
+			var base float64
+			switch {
+			case cd.strong.words[w]:
+				base, exact = 4, exact+1
+			case cd.strong.concepts[c]:
+				base = 2
+			case cd.weak.words[w]:
+				base, exact = 2, exact+1
+			case cd.weak.concepts[c]:
+				base = 1
+			}
+			f += base * idf(c)
+		}
+		if f == 0 {
+			continue
+		}
+		if cd.lesson {
+			f *= 1.6 // surface recorded mistakes, without swamping relevance
+		}
+		out = append(out, scored{Result{Note: cd.n, Score: int(f*100 + 0.5), Lesson: cd.lesson}, f, exact})
 	}
 	sort.SliceStable(out, func(i, j int) bool {
-		if out[i].Score != out[j].Score {
-			return out[i].Score > out[j].Score
+		if out[i].f != out[j].f {
+			return out[i].f > out[j].f
 		}
 		if out[i].exact != out[j].exact {
 			return out[i].exact > out[j].exact // more exact-word hits wins the tie
