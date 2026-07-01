@@ -95,7 +95,12 @@ func Create(s *store.Store, title, body string, tags []string, source, folder st
 	if clean, err := cleanFolder(folder); err != nil {
 		return nil, err
 	} else if clean != "" {
-		dir = filepath.Join(dir, filepath.FromSlash(clean))
+		dir = filepath.Clean(filepath.Join(dir, filepath.FromSlash(clean)))
+		// Containment barrier before the mkdir sink: the folder is untrusted (web
+		// input), so assert the resolved dir stays under notes/ before creating it.
+		if !contained(notesDir, dir) {
+			return nil, fmt.Errorf("refusing to create folder outside notes/: %q", dir)
+		}
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return nil, fmt.Errorf("create folder: %w", err)
 		}
@@ -129,13 +134,20 @@ func cleanFolder(folder string) (string, error) {
 	return f, nil
 }
 
+// contained reports whether target (already Cleaned) stays inside root — the
+// path-traversal barrier guarding every filesystem sink that consumes untrusted
+// (title/folder/web) input. Both args are Cleaned so the prefix compare is exact.
+func contained(root, target string) bool {
+	root = filepath.Clean(root)
+	return target == root || strings.HasPrefix(target, root+string(os.PathSeparator))
+}
+
 // claimPath atomically reserves a free note path for a slug under the notes root.
 // It O_EXCL-creates an empty placeholder so two concurrent processes can never pick
 // — and then clobber — the same filename (a stat-then-write race that silently loses
 // one write). Save later rewrites the placeholder we now own. On a collision it
 // advances the "-N" suffix, exactly like the old uniquePath.
 func claimPath(root, dir, slug string) (string, error) {
-	root = filepath.Clean(root)
 	for i := 1; i < 1_000_000; i++ {
 		name := slug + ".md"
 		if i > 1 {
@@ -146,7 +158,7 @@ func claimPath(root, dir, slug string) (string, error) {
 		// under notes/. Slug strips titles to [a-z0-9-] and cleanFolder rejects
 		// ".."/absolute folders, so this can't fail in practice — but asserting it
 		// here defeats any path traversal from untrusted (e.g. web) input.
-		if p != root && !strings.HasPrefix(p, root+string(os.PathSeparator)) {
+		if !contained(root, p) {
 			return "", fmt.Errorf("refusing note path outside notes/: %q", p)
 		}
 		f, err := os.OpenFile(p, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
