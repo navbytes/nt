@@ -142,12 +142,17 @@ func cleanFolder(folder string) (string, error) {
 	return f, nil
 }
 
-// contained reports whether target (already Cleaned) stays inside root — the
+// contained reports whether target resolves inside root (no "../" escape) — the
 // path-traversal barrier guarding every filesystem sink that consumes untrusted
-// (title/folder/web) input. Both args are Cleaned so the prefix compare is exact.
+// (title/folder/web) input. It uses the filepath.Rel + ".." idiom that CodeQL's
+// TaintedPath query recognizes as a sanitizing guard (a strings.HasPrefix compare
+// is not recognized), so placing it in a sink's own function sanitizes that sink.
 func contained(root, target string) bool {
-	root = filepath.Clean(root)
-	return target == root || strings.HasPrefix(target, root+string(os.PathSeparator))
+	rel, err := filepath.Rel(root, target)
+	if err != nil {
+		return false
+	}
+	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
 // claimPath atomically reserves a free note path for a slug under the notes root.
