@@ -18,8 +18,8 @@ distinguishable from what the user typed by hand.
 > `nt_*` tools over shelling out** — they go through the same store, default
 > `source` to `claude`, and avoid CLI-string mistakes. Capture: `nt_add`,
 > `nt_note`, `nt_done`, `nt_update`, `nt_tag`, `nt_mv`. Retrieve: `nt_index`,
-> `nt_search`, `nt_get`, `nt_ready`, `nt_links`, `nt_log`. Fall back to the `nt`
-> commands below when the tools aren't available — the workflow is identical.
+> `nt_search`, `nt_recall`, `nt_get`, `nt_ready`, `nt_links`, `nt_log`. Fall back
+> to the `nt` commands below when the tools aren't available — the workflow is identical.
 
 ## Start here: `nt index` + `nt ready`
 
@@ -36,6 +36,23 @@ nt ready --json                     # open, UNBLOCKED tasks by urgency
 creating anything, retrieve first** (`nt index` / `nt search`) so you don't
 duplicate an item that already exists. To read a specific note, `nt show <id>`
 (MCP: `nt_get`); to find one, `nt search <q>` returns ranked stubs.
+
+## Before a task: `nt recall` — don't repeat past mistakes
+
+When you're about to start something, describe it to `nt recall` and read what a
+past session learned — **recorded lessons surface first**, even when your wording
+differs (it's paraphrase-aware, unlike substring `nt search`):
+
+```bash
+nt recall "adding concurrent token refresh"    # MCP: nt_recall(context: "...")
+```
+
+When you hit a mistake, footgun, or dead-end, capture it as a **lesson** so the
+next session recalls it — put the trigger in the description ("when X, do Y — not Z"):
+
+```bash
+nt note "single-flight the refresh; parallel calls double-spend" --lesson --source claude
+```
 
 ## Capture tasks
 

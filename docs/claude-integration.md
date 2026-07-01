@@ -118,15 +118,16 @@ nt mcp install --print                  # show what it would do, change nothing
 For any other client (Cursor, a project `.mcp.json`, …), `nt mcp install --print`
 emits the snippet to paste.
 
-Tools exposed (**15**) — **capture:** `nt_add`, `nt_note` (with `folder` and
-`description`), `nt_done`, `nt_update`, `nt_tag`, `nt_mv`, `nt_archive` (retire
-stale notes, reversible); **retrieve:** `nt_index` (start here — a compact
+Tools exposed (**18**) — **capture:** `nt_add`, `nt_note` (with `folder` and
+`description`; add tag `lesson` to record a mistake), `nt_done`, `nt_update`, `nt_tag`, `nt_mv`, `nt_archive` (retire
+stale notes, reversible), `nt_supersede`/`nt_relink` (reconcile duplicates/obsolete notes); **retrieve:** `nt_index` (start here — a compact
 catalog of note stubs plus the active tasks, no bodies), `nt_get` (fetch one
 note's full body by id/slug/title, optional `section`), `nt_ready`,
 `nt_status` (one-call project/area state), `nt_view` (recall the user's saved
 smart views — list them by calling it bare), `nt_log`, `nt_search` (ranked
-stubs, text and/or tag; `full:true` inlines bodies), `nt_links` (forward links +
-backlinks). They go through the same locked, journaled engine as the CLI,
+stubs, text and/or tag; `full:true` inlines bodies), `nt_recall` (lessons-first,
+paraphrase-aware retrieval for a free-text task context — surfaces past mistakes
+before you repeat them), `nt_links` (forward links + backlinks). They go through the same locked, journaled engine as the CLI,
 default `source` to `claude`, and require **stable task ids** (positional
 `task:N` is refused — the index isn't safe for an agent). Retrieval is
 index-first progressive disclosure: load the small stub catalog, then fetch

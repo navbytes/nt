@@ -362,6 +362,8 @@ nt log [--since 2026-06-01] [--days 7] [--source claude] [--json]   # completed 
 nt done <id|task:N>                  # mark done  (do)
 nt update <id|task:N> --status doing --pri med --due +3d     # (up)
 nt search "race condition" [--type note|task] [--limit 8] [--full]   # ranked stubs (q)
+nt recall "adding a cache layer" [--lessons-only] [--limit 8]   # relevant notes, lessons first (paraphrase-aware)
+nt note "gotcha" --lesson             # record a mistake/dead-end (tag lesson, folder lessons/)
 nt show <id|slug|title> [--section "Heading"]   # one note's full body, on demand
 nt links <id|task:N> [--json]        # forward links + backlinks for an item (§5.1)
 nt archive                           # move done tasks → done.txt
@@ -603,7 +605,7 @@ the identical UI in a native window (see `desktop/`, ADR 0001).
   todo→ULID map, status-mapped, `src:claude`); the bundled `/nt` skill teaches Claude to
   capture and `nt index`. Setup: docs/claude-integration.md.
 - `nt mcp` runs a stdio **MCP server** (newline-delimited JSON-RPC 2.0, no SDK dep) exposing
-  typed tools — `nt_ready`/`nt_add`/`nt_done`/`nt_update`/`nt_note`/`nt_index`/`nt_get`/`nt_log` —
+  typed tools — `nt_ready`/`nt_add`/`nt_done`/`nt_update`/`nt_note`/`nt_index`/`nt_search`/`nt_recall`/`nt_get`/`nt_log` —
   for MCP clients. A thin driving adapter over the same engine/domain as the CLI and TUI;
   defaults `source` to `claude` and refuses positional handles.
 
