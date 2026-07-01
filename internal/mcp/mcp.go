@@ -22,7 +22,6 @@ import (
 	"github.com/navbytes/nt/internal/note"
 	"github.com/navbytes/nt/internal/quickadd"
 	"github.com/navbytes/nt/internal/search"
-	"github.com/navbytes/nt/internal/store"
 	"github.com/navbytes/nt/internal/task"
 	"github.com/navbytes/nt/internal/view"
 )
@@ -35,12 +34,28 @@ func Serve(version string) error {
 	if err != nil {
 		return err
 	}
-	return (&server{eng: e, version: version}).loop(os.Stdin, os.Stdout)
+	return (&server{eng: e, version: version, cache: note.NewCache()}).loop(os.Stdin, os.Stdout)
 }
 
 type server struct {
 	eng     *mutate.Engine
 	version string
+	cache   *note.Cache // parse cache for read handlers: re-stat every call, re-parse only what changed
+}
+
+// listNotes returns all notes via the per-server parse cache. It stats every note
+// file each call (so reads stay fresh and read-your-writes holds) but re-parses
+// only files that changed since the last call — turning the O(notes) re-parse that
+// each read tool used to do into an O(changed) one. Falls back to an empty slice
+// on error (retrieval prefers a partial answer over failing). Read handlers only:
+// write handlers mutate notes and must not touch cache-shared pointers.
+func (s *server) listNotes() []*note.Note {
+	if s.cache == nil {
+		ns, _ := note.List(s.eng.S)
+		return ns
+	}
+	ns, _ := s.cache.List(s.eng.S)
+	return ns
 }
 
 type request struct {
@@ -252,8 +267,7 @@ func (s *server) status(a map[string]any) (string, error) {
 	}
 	project, tag := strings.TrimSpace(str(a, "project")), strings.TrimSpace(str(a, "tag"))
 	ws := s.workstream(a)
-	notes, _ := note.List(s.eng.S)
-	notes = note.Active(notes) // a resuming agent gets the working set, not retired memory
+	notes := note.Active(s.listNotes()) // a resuming agent gets the working set, not retired memory
 	blocked := task.BlockedIDs(d.Tasks())
 
 	inScope := func(t *task.Task) bool {
@@ -557,7 +571,7 @@ func (s *server) index(a map[string]any) (string, error) {
 		return "", err
 	}
 	tag, folder := strings.TrimSpace(str(a, "tag")), strings.Trim(strings.TrimSpace(str(a, "folder")), "/")
-	notes := note.Active(mustList(s.eng.S))
+	notes := note.Active(s.listNotes())
 	stubs := make([]noteStub, 0, len(notes))
 	for _, n := range notes {
 		if folder != "" && !strings.HasPrefix(n.Rel, folder+"/") {
@@ -600,16 +614,23 @@ func (s *server) get(a map[string]any) (string, error) {
 	if handle == "" {
 		return "", fmt.Errorf("handle is required (a note id, slug, or title)")
 	}
-	notes := mustList(s.eng.S)
-	it, ok := links.Resolve(handle, nil, notes)
-	if !ok || it.Kind != "note" {
-		return "", fmt.Errorf("no note %q", handle)
-	}
+	notes := s.listNotes() // refreshes the cache's id index used by ByID below
+	// Fast path: a bare id resolves via the cache's id index in O(1), skipping the
+	// slug/title resolve scan. Falls through to Resolve for slug/title handles.
 	var n *note.Note
-	for _, cand := range notes {
-		if cand.Path == it.Path {
-			n = cand
-			break
+	if s.cache != nil {
+		n = s.cache.ByID(handle)
+	}
+	if n == nil {
+		it, ok := links.Resolve(handle, nil, notes)
+		if !ok || it.Kind != "note" {
+			return "", fmt.Errorf("no note %q", handle)
+		}
+		for _, cand := range notes {
+			if cand.Path == it.Path {
+				n = cand
+				break
+			}
 		}
 	}
 	if n == nil {
@@ -682,7 +703,7 @@ func (s *server) search(a map[string]any) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	notes := note.Active(mustList(s.eng.S))
+	notes := note.Active(s.listNotes())
 	ql := strings.ToLower(q)
 
 	type scored struct {
@@ -772,7 +793,7 @@ func (s *server) links(a map[string]any) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	notes, _ := note.List(s.eng.S)
+	notes := s.listNotes()
 
 	forward := func(raws []string) []linkOut {
 		out := make([]linkOut, 0, len(raws))
@@ -983,13 +1004,6 @@ func noteToStub(n *note.Note, snippet string) noteStub {
 		ID: n.ID, Rel: n.Rel, Title: n.Title, Description: n.Description(160),
 		Snippet: snippet, Tags: n.Tags, Folder: pathDir(n.Rel), Updated: shortDate(upd),
 	}
-}
-
-// mustList returns the note list, tolerating a read error (empty on failure) —
-// retrieval verbs prefer a partial answer over an error.
-func mustList(s *store.Store) []*note.Note {
-	ns, _ := note.List(s)
-	return ns
 }
 
 // pathDir is the folder part of a notes/-relative path ("" for a root note).

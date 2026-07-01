@@ -16,7 +16,7 @@ func newServer(t *testing.T) *server {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return &server{eng: e, version: "test"}
+	return &server{eng: e, version: "test", cache: note.NewCache()}
 }
 
 func TestMCPToolFlow(t *testing.T) {
@@ -423,6 +423,41 @@ func relsOf(ns []*note.Note) []string {
 		out[i] = n.Rel
 	}
 	return out
+}
+
+// TestMCPGetByIDAndCacheFreshness: nt_get resolves by id via the cache fast path,
+// and the parse cache stays fresh — a mutation through a write handler (nt_tag) is
+// visible to the next read (the cache re-stats every call).
+func TestMCPGetByIDAndCacheFreshness(t *testing.T) {
+	s := newServer(t)
+	must := func(name string, a map[string]any) string {
+		t.Helper()
+		out, err := s.dispatch(name, a)
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		return out
+	}
+	var saved noteOut
+	json.Unmarshal([]byte(must("nt_note", map[string]any{"title": "Cache note", "body": "hello", "tags": []any{"a"}})), &saved)
+	if saved.ID == "" {
+		t.Fatal("note should have an id")
+	}
+
+	// get-by-id fast path returns the right note.
+	got := must("nt_get", map[string]any{"handle": saved.ID})
+	if !strings.Contains(got, "hello") || !strings.Contains(got, saved.ID) {
+		t.Fatalf("nt_get by id should return the note: %s", got)
+	}
+
+	// A write handler mutates the note; the next read must see it (no stale cache).
+	must("nt_tag", map[string]any{"handle": saved.ID, "add": []any{"fresh"}})
+	if !strings.Contains(must("nt_get", map[string]any{"handle": saved.ID}), "fresh") {
+		t.Error("cache served stale data: the new tag should be visible after nt_tag")
+	}
+	if !strings.Contains(must("nt_index", map[string]any{}), "fresh") {
+		t.Error("nt_index should reflect the retag (cache re-stat)")
+	}
 }
 
 // TestMCPIndexAndSearch: nt_index returns stubs (no bodies) + active tasks; done
