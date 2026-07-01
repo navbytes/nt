@@ -1105,13 +1105,6 @@ func contains(ss []string, want string) bool {
 	return false
 }
 
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
-
 // --- JSON output ---------------------------------------------------------
 
 type taskJSON struct {

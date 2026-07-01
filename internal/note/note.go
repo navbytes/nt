@@ -100,32 +100,15 @@ func Create(s *store.Store, title, body string, tags []string, source, folder st
 			return nil, fmt.Errorf("create folder: %w", err)
 		}
 	}
-	p, err := claimPath(dir, Slug(title))
+	p, err := claimPath(notesDir, dir, Slug(title))
 	if err != nil {
 		return nil, err
 	}
 	n.Path = p
-	// Defense in depth against path traversal: cleanFolder rejects ".."/absolute
-	// folders and Slug strips the title to [a-z0-9-], so the path can't escape
-	// notes/ — but with a web endpoint feeding untrusted input we assert it
-	// explicitly rather than trust those barriers transitively.
-	if !withinDir(notesDir, n.Path) {
-		_ = os.Remove(n.Path)
-		return nil, fmt.Errorf("refusing to write note outside notes/: %q", n.Path)
-	}
 	if err := n.Save(); err != nil {
 		return nil, err
 	}
 	return n, nil
-}
-
-// withinDir reports whether target resolves inside base (no "../" escape).
-func withinDir(base, target string) bool {
-	rel, err := filepath.Rel(base, target)
-	if err != nil {
-		return false
-	}
-	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
 // cleanFolder normalizes a slash-separated subfolder and refuses paths that
@@ -146,18 +129,26 @@ func cleanFolder(folder string) (string, error) {
 	return f, nil
 }
 
-// claimPath atomically reserves a free note path for a slug. It O_EXCL-creates an
-// empty placeholder so two concurrent processes can never pick — and then clobber —
-// the same filename (a stat-then-write race that silently loses one write). Save
-// later rewrites the placeholder we now own. On a collision it advances the "-N"
-// suffix, exactly like the old uniquePath.
-func claimPath(dir, slug string) (string, error) {
+// claimPath atomically reserves a free note path for a slug under the notes root.
+// It O_EXCL-creates an empty placeholder so two concurrent processes can never pick
+// — and then clobber — the same filename (a stat-then-write race that silently loses
+// one write). Save later rewrites the placeholder we now own. On a collision it
+// advances the "-N" suffix, exactly like the old uniquePath.
+func claimPath(root, dir, slug string) (string, error) {
+	root = filepath.Clean(root)
 	for i := 1; i < 1_000_000; i++ {
 		name := slug + ".md"
 		if i > 1 {
 			name = fmt.Sprintf("%s-%d.md", slug, i)
 		}
-		p := filepath.Join(dir, name)
+		p := filepath.Clean(filepath.Join(dir, name))
+		// Containment barrier before the create sink: the resolved path must stay
+		// under notes/. Slug strips titles to [a-z0-9-] and cleanFolder rejects
+		// ".."/absolute folders, so this can't fail in practice — but asserting it
+		// here defeats any path traversal from untrusted (e.g. web) input.
+		if p != root && !strings.HasPrefix(p, root+string(os.PathSeparator)) {
+			return "", fmt.Errorf("refusing note path outside notes/: %q", p)
+		}
 		f, err := os.OpenFile(p, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
 		if err == nil {
 			_ = f.Close()
@@ -476,7 +467,7 @@ var titleStopwords = map[string]bool{
 func titleTokens(s string) map[string]bool {
 	out := map[string]bool{}
 	for _, w := range strings.FieldsFunc(strings.ToLower(s), func(r rune) bool {
-		return !(r >= 'a' && r <= 'z' || r >= '0' && r <= '9')
+		return (r < 'a' || r > 'z') && (r < '0' || r > '9')
 	}) {
 		if len(w) >= 3 && !titleStopwords[w] {
 			out[w] = true

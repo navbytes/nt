@@ -194,16 +194,18 @@ func TestSavePreservesUnknownFrontmatter(t *testing.T) {
 	}
 }
 
-func TestWithinDir(t *testing.T) {
-	base := "/store/notes"
-	if !withinDir(base, "/store/notes/work/x.md") {
-		t.Error("a path inside notes/ should be allowed")
+// claimPath must keep the resolved path under the notes root (the containment
+// barrier before the create sink), refusing any dir that escapes it.
+func TestClaimPathContainment(t *testing.T) {
+	root := t.TempDir()
+	// A dir inside the root → succeeds and returns a path under root.
+	p, err := claimPath(root, root, "ok")
+	if err != nil || !strings.HasPrefix(p, root) {
+		t.Fatalf("in-root claim should succeed: p=%q err=%v", p, err)
 	}
-	if withinDir(base, "/store/secrets.txt") {
-		t.Error("a sibling path must be rejected")
-	}
-	if withinDir(base, "/store/notes/../../etc/passwd") {
-		t.Error("a traversal path must be rejected")
+	// A dir outside the root (its parent) → refused.
+	if _, err := claimPath(root, filepath.Dir(root), "x"); err == nil {
+		t.Error("claimPath must refuse a path outside the notes root")
 	}
 }
 
