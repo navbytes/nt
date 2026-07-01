@@ -1,0 +1,18 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "mcp": {
+    "nt": {
+      "type": "local",
+      "command": ["nt", "mcp"],
+      "enabled": true,
+      "environment": {
+        "NT_WORKSTREAM": "auto"
+      }
+    }
+  },
+  "permission": {
+    "skill": {
+      "nt": "allow"
+    }
+  }
+}

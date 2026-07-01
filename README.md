@@ -62,9 +62,12 @@ That's it — you're up. `nt help` lists every command; [more install options be
 - **PostToolUse hook** — `nt hook` mirrors Claude Code's `TodoWrite` list into your store automatically (idempotent, tagged `src:claude`). Wire it once in `~/.claude/settings.json`.
 - **MCP server** — `nt mcp` exposes typed tools (`nt_ready`, `nt_add`, `nt_recall`, `nt_search`, `nt_note`, `nt_view`, …) over stdio. Register it with one command:
   ```bash
-  nt mcp install              # add nt to Claude Code / Claude Desktop (absolute path, idempotent)
+  nt mcp install                    # add nt to Claude Code / Claude Desktop (absolute path, idempotent)
+  nt mcp install --client opencode  # …or OpenCode (~/.config/opencode/opencode.json)
   ```
 - **The `/nt` skill + recall loop** — teach the agent to capture as it works and `nt recall` prior context when it resumes.
+
+Beyond Claude Code, any MCP-speaking agent can drive the same store — including **OpenCode**, whose rules / knowledge-base / memory layers map cleanly onto nt. Full mapping & phased plan → **[docs/opencode-integration.md](docs/opencode-integration.md)**.
 
 ```bash
 # During a session (the hook does this for you, or call it directly):

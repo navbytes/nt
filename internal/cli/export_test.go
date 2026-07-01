@@ -1,0 +1,95 @@
+package cli
+
+import (
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+func TestExportMarkdownConcatenatesTaggedNotes(t *testing.T) {
+	t.Setenv("NT_DIR", t.TempDir())
+	captureRun(t, "note", "Run gofmt", "--body", "Always format before commit.", "--folder", "rules", "--tag", "rule")
+	captureRun(t, "note", "Table tests", "--body", "One case per row.", "--folder", "rules", "--tag", "rule")
+	captureRun(t, "note", "JWT design", "--body", "Refresh 7d.", "--folder", "ref", "--tag", "auth")
+
+	out := captureRun(t, "export", "--tag", "rule", "--title", "Rules")
+
+	if !strings.Contains(out, "# Rules") {
+		t.Errorf("missing title heading:\n%s", out)
+	}
+	for _, want := range []string{"## Run gofmt", "Always format before commit.", "## Table tests", "One case per row."} {
+		if !strings.Contains(out, want) {
+			t.Errorf("export missing %q:\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "JWT design") {
+		t.Errorf("tag filter leaked an untagged note:\n%s", out)
+	}
+	if !strings.Contains(out, "<!-- nt:") {
+		t.Errorf("expected nt:id provenance comments:\n%s", out)
+	}
+}
+
+func TestExportFolderFilterAndNoProvenance(t *testing.T) {
+	t.Setenv("NT_DIR", t.TempDir())
+	captureRun(t, "note", "Run gofmt", "--body", "Format first.", "--folder", "rules", "--tag", "rule")
+	captureRun(t, "note", "JWT design", "--body", "Refresh 7d.", "--folder", "ref", "--tag", "auth")
+
+	out := captureRun(t, "export", "--folder", "rules", "--no-provenance")
+	if !strings.Contains(out, "## Run gofmt") {
+		t.Errorf("folder export missing in-folder note:\n%s", out)
+	}
+	if strings.Contains(out, "JWT design") {
+		t.Errorf("folder filter leaked a note from another folder:\n%s", out)
+	}
+	if strings.Contains(out, "<!-- nt:") {
+		t.Errorf("--no-provenance should drop id comments:\n%s", out)
+	}
+}
+
+func TestExportJSONShape(t *testing.T) {
+	t.Setenv("NT_DIR", t.TempDir())
+	captureRun(t, "note", "Run gofmt", "--body", "Format first.", "--folder", "rules", "--tag", "rule")
+
+	out := captureRun(t, "export", "--tag", "rule", "--format", "json")
+	var payload struct {
+		Notes []struct {
+			ID    string `json:"id"`
+			Title string `json:"title"`
+			Body  string `json:"body"`
+		} `json:"notes"`
+	}
+	if err := json.Unmarshal([]byte(out), &payload); err != nil {
+		t.Fatalf("json output did not parse: %v\n%s", err, out)
+	}
+	if len(payload.Notes) != 1 || payload.Notes[0].Title != "Run gofmt" || payload.Notes[0].ID == "" {
+		t.Fatalf("unexpected json payload: %+v", payload.Notes)
+	}
+}
+
+func TestExportToFileReportsAndWrites(t *testing.T) {
+	t.Setenv("NT_DIR", t.TempDir())
+	captureRun(t, "note", "Run gofmt", "--body", "Format first.", "--folder", "rules", "--tag", "rule")
+
+	dest := filepath.Join(t.TempDir(), "rules.md")
+	out := captureRun(t, "export", "--tag", "rule", "--out", dest)
+	if !strings.Contains(out, dest) {
+		t.Errorf("export --out should report the path:\n%s", out)
+	}
+	data, err := os.ReadFile(dest)
+	if err != nil {
+		t.Fatalf("read exported file: %v", err)
+	}
+	if !strings.Contains(string(data), "## Run gofmt") {
+		t.Errorf("exported file missing content:\n%s", data)
+	}
+}
+
+func TestExportRejectsBadFormat(t *testing.T) {
+	t.Setenv("NT_DIR", t.TempDir())
+	if _, code := runWithStdout("export", "--format", "yaml"); code == 0 {
+		t.Fatal("expected non-zero exit for bad --format")
+	}
+}
