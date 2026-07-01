@@ -591,6 +591,10 @@ func (s *server) index(a map[string]any) (string, error) {
 		}
 		return stubs[i].Title < stubs[j].Title
 	})
+	noteTotal := len(stubs)
+	if lim := intArg(a, "limit"); lim > 0 && len(stubs) > lim {
+		stubs = stubs[:lim]
+	}
 
 	ws := s.workstream(a)
 	blocked := task.BlockedIDs(d.Tasks())
@@ -614,9 +618,14 @@ func (s *server) index(a map[string]any) (string, error) {
 	if len(recent) > 5 {
 		recent = recent[:5]
 	}
-	return jsonText(map[string]any{
+	out := map[string]any{
 		"notes": stubs, "tasks": tasksOut(active), "recentlyDone": tasksOut(recent),
-	}), nil
+	}
+	if noteTotal > len(stubs) {
+		out["truncated"] = true
+		out["noteTotal"] = noteTotal
+	}
+	return jsonText(out), nil
 }
 
 // get fetches one note's full content by handle (id/slug/title) — the on-demand
@@ -1019,6 +1028,15 @@ func noteToStub(n *note.Note, snippet string) noteStub {
 	}
 }
 
+// shortID is the last 6 chars of a ULID — the human-facing handle nt prints
+// (the entropy tail; the timestamp prefix is shared by same-second ids).
+func shortID(id string) string {
+	if len(id) <= 6 {
+		return id
+	}
+	return id[len(id)-6:]
+}
+
 // pathDir is the folder part of a notes/-relative path ("" for a root note).
 func pathDir(rel string) string {
 	if i := strings.LastIndex(rel, "/"); i >= 0 {
@@ -1127,7 +1145,14 @@ func backlinksOut(hits []search.Hit, notes []*note.Note) []map[string]string {
 			seen[hk] = true
 			out = append(out, map[string]string{"kind": "note", "handle": hk, "title": n.Title})
 		} else {
-			out = append(out, map[string]string{"kind": "task", "text": strings.TrimSpace(h.Text)})
+			// A task backlink: parse the raw todo.txt line into a clean reference
+			// (short id + display text) instead of leaking `id:<ULID>`/link markup.
+			row := map[string]string{"kind": "task", "text": strings.TrimSpace(h.Text)}
+			if t, ok := task.ParseLine(h.Text); ok && t.ID() != "" {
+				row["id"] = shortID(t.ID())
+				row["text"] = t.Display()
+			}
+			out = append(out, row)
 		}
 	}
 	return out

@@ -18,6 +18,7 @@ import (
 	"github.com/navbytes/nt/internal/task"
 	"github.com/navbytes/nt/internal/tui"
 	"github.com/navbytes/nt/internal/web"
+	"github.com/navbytes/nt/internal/workstream"
 )
 
 // cmdWeb starts the localhost notes viewer (SPEC §12.1). Read-only browse/render
@@ -153,6 +154,12 @@ func cmdAdd(args []string) int {
 			t.SetKey("due", dueVal)
 		}
 		t.SetKey("src", *source)
+		// Stamp the workstream when NT_WORKSTREAM is set, so a human's CLI writes
+		// isolate the same way an agent's MCP writes do (symmetric; unset = the
+		// shared backlog, unchanged). "*" is a read-only widener, never stamped.
+		if ws := workstream.Env(); ws != "" && ws != "*" {
+			t.SetKey("ws", ws)
+		}
 		if estVal != "" {
 			t.SetKey("est", estVal)
 		}

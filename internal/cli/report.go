@@ -680,7 +680,14 @@ func cmdLinks(args []string) int {
 			continue
 		}
 		rel, _ := filepath.Rel(e.S.Dir, h.Path)
-		backs = append(backs, backRef{Path: rel, Line: h.Line, Text: strings.TrimSpace(h.Text)})
+		text := strings.TrimSpace(h.Text)
+		// A task line: render short id + clean text so the raw `id:<ULID>` and
+		// link markup don't leak into "linked from". Note prose lines have no id
+		// and are left as-is.
+		if t, ok := task.ParseLine(h.Text); ok && t.ID() != "" {
+			text = shortID(t.ID()) + "  " + t.Display()
+		}
+		backs = append(backs, backRef{Path: rel, Line: h.Line, Text: text})
 	}
 
 	// Task structure & dependencies — discovered-from/here, blocks/blocked-by, and

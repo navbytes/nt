@@ -240,9 +240,14 @@ func TestMCPRetrievalTools(t *testing.T) {
 		t.Error("nt_search should require query or tag")
 	}
 
-	// nt_links: forward (note) + backlink (task).
-	if out := mustDispatch("nt_links", map[string]any{"handle": "auth-design"}); !strings.Contains(out, "Token Rotation") || !strings.Contains(out, "implement [[auth-design]]") {
-		t.Fatalf("nt_links missing forward/backlink: %s", out)
+	// nt_links: forward (note) + backlink (task). The task backlink is rendered as
+	// a clean reference — short id + display text — with the [[wiki-link]] markup
+	// stripped, not the raw todo.txt line.
+	if out := mustDispatch("nt_links", map[string]any{"handle": "auth-design"}); !strings.Contains(out, "Token Rotation") || !strings.Contains(out, "implement @auth") {
+		t.Fatalf("nt_links missing forward/clean backlink: %s", out)
+	}
+	if out := mustDispatch("nt_links", map[string]any{"handle": "auth-design"}); strings.Contains(out, "implement [[auth-design]]") {
+		t.Errorf("task backlink should not expose raw [[link]] markup: %s", out)
 	}
 
 	// nt_mv: refile, and dest is required.

@@ -94,3 +94,23 @@ func TestDoctorHealthyStoreWithGoodLinks(t *testing.T) {
 		t.Errorf("no dangling links expected:\n%s", out)
 	}
 }
+
+// nt index --limit caps the catalog and flags truncation.
+func TestIndexLimitTruncates(t *testing.T) {
+	t.Setenv("NT_DIR", t.TempDir())
+	for i := 0; i < 5; i++ {
+		captureRun(t, "note", "Note", "--folder", "ref", "--description", "d", "--body", "b")
+	}
+	out := captureRun(t, "index", "--limit", "2", "--json")
+	var p struct {
+		Notes     []map[string]any `json:"notes"`
+		Truncated bool             `json:"truncated"`
+		NoteTotal int              `json:"noteTotal"`
+	}
+	if err := json.Unmarshal([]byte(out), &p); err != nil {
+		t.Fatal(err)
+	}
+	if len(p.Notes) != 2 || !p.Truncated || p.NoteTotal != 5 {
+		t.Fatalf("limit=2 → shown=%d truncated=%v total=%d", len(p.Notes), p.Truncated, p.NoteTotal)
+	}
+}

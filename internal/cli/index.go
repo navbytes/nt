@@ -49,6 +49,7 @@ func cmdIndex(args []string) int {
 	folder := fs.String("folder", "", "only notes under this folder")
 	asJSON := fs.Bool("json", false, "machine-readable output")
 	noTasks := fs.Bool("no-tasks", false, "omit the active-task section")
+	limit := fs.Int("limit", 0, "cap the note catalog to N (0 = all); scope with --tag/--folder for large stores")
 	var tags stringSlice
 	fs.Var(&tags, "tag", "only notes with this tag (repeatable, AND)")
 	flags, _ := splitArgs(args, map[string]bool{"json": true, "no-tasks": true})
@@ -95,6 +96,10 @@ func cmdIndex(args []string) int {
 		}
 		return stubs[i].Title < stubs[j].Title
 	})
+	noteTotal := len(stubs)
+	if *limit > 0 && len(stubs) > *limit {
+		stubs = stubs[:*limit]
+	}
 
 	// Active tasks (open + doing, unblocked, by urgency) plus a few recent
 	// completions so a resuming reader sees what's already handled, not only what's
@@ -130,6 +135,10 @@ func cmdIndex(args []string) int {
 
 	if *asJSON {
 		payload := map[string]any{"notes": stubs}
+		if noteTotal > len(stubs) {
+			payload["truncated"] = true
+			payload["noteTotal"] = noteTotal
+		}
 		if !*noTasks {
 			payload["tasks"] = tasksToJSON(active, map[*task.Task]int{})
 			payload["recentlyDone"] = tasksToJSON(recent, map[*task.Task]int{})
@@ -137,7 +146,11 @@ func cmdIndex(args []string) int {
 		return printJSON(payload)
 	}
 
-	fmt.Printf("<!-- nt index — %d notes, %d active tasks — fetch a note with `nt show <id>` -->\n", len(stubs), len(active))
+	if noteTotal > len(stubs) {
+		fmt.Printf("<!-- nt index — %d of %d notes (--limit), %d active tasks — narrow with --tag/--folder -->\n", len(stubs), noteTotal, len(active))
+	} else {
+		fmt.Printf("<!-- nt index — %d notes, %d active tasks — fetch a note with `nt show <id>` -->\n", len(stubs), len(active))
+	}
 	if len(stubs) > 0 {
 		fmt.Println("\n# Knowledge base")
 		lastFolder := "\x00"

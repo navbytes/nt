@@ -147,7 +147,7 @@ the returned id directly with `nt links` / `nt tag` / `nt mv` / `nt rm`.
 When several agents share one store (e.g. parallel git worktrees), tasks are
 **isolated per workstream** so your in-flight work doesn't mix with another
 session's, while **notes stay shared** so knowledge cross-pollinates. This is
-automatic via the MCP tools when `NT_WORKSTREAM` is set (grove/CI/harness export
+automatic via the MCP tools and CLI `nt add` when `NT_WORKSTREAM` is set (grove/CI/harness export
 it; `auto` derives it from the git branch). You don't stamp anything — `nt_add`
 records it, and `nt_index`/`nt_ready`/`nt_status`/`nt_log` scope to it.
 

@@ -116,6 +116,7 @@ var toolDefs = []toolDef{
 		InputSchema: obj(map[string]any{
 			"tag":        sp("only notes/tasks with this tag"),
 			"folder":     sp("only notes under this folder, e.g. ref"),
+			"limit":      map[string]any{"type": "integer", "description": "cap the note catalog to N (truncated=true when more exist); scope with tag/folder for big stores"},
 			"workstream": wsArg,
 		}),
 	},
