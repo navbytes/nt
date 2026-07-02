@@ -25,17 +25,19 @@ if ! command -v "$nt" >/dev/null 2>&1; then
 fi
 
 echo "→ OpenCode config dir: $cfg"
-mkdir -p "$cfg/plugins" "$cfg/skills/nt"
+mkdir -p "$cfg/plugins" "$cfg/skills/nt" "$cfg/commands"
 
 # 1. Register the MCP server (writes the absolute nt path, idempotent).
 echo "→ registering nt MCP server with OpenCode"
 "$nt" mcp install --client opencode
 
-# 2 + 3. Plugin and skill.
+# 2 + 3. Plugin, skill, and the /learn command.
 echo "→ installing plugin  → $cfg/plugins/nt-memory.ts"
 cp "$here/plugins/nt-memory.ts" "$cfg/plugins/nt-memory.ts"
 echo "→ installing skill   → $cfg/skills/nt/SKILL.md"
 cp "$here/skills/nt/SKILL.md" "$cfg/skills/nt/SKILL.md"
+echo "→ installing command → $cfg/commands/learn.md   (/learn — session review & capture)"
+cp "$here/commands/learn.md" "$cfg/commands/learn.md"
 
 # 4. AGENTS.md — never clobber an existing one.
 if [ -f "$cfg/AGENTS.md" ]; then

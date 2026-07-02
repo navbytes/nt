@@ -323,7 +323,7 @@ export const NtMemory: Plugin = async ({ $, client }) => {
             await (client as any)?.tui
               ?.showToast?.({
                 body: {
-                  message: "nt: nothing captured this session — worth saving a note or lesson? (nt_note / nt_add)",
+                  message: "nt: nothing captured this session — run /learn to review & save learnings",
                   variant: "info",
                 },
               })
