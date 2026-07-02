@@ -47,6 +47,10 @@ token cost:
   `nt_recall` stems and expands dev-concept synonyms, so a *paraphrased* task
   ("adding parallel request handling") still surfaces the lesson worded differently
   ("goroutine deadlock") — with recorded **lessons ranked first**.
+- And the plugin makes the loop fire even when the agent forgets: a **failed bash
+  command triggers a lessons-only recall automatically** and pipes the hits into
+  the next request, and lessons survive **context compaction** (see the plugin
+  section below).
 
 This closes the learn-from-sessions loop: mistakes are captured as a distinct,
 recall-able class and re-surfaced before they recur — without bloating the
@@ -81,7 +85,7 @@ which writes OpenCode's schema into `~/.config/opencode/opencode.json`:
                    "environment": { "NT_WORKSTREAM": "auto" } } } }
 ```
 
-### 2. Plugin — always-in-context injection (`plugins/nt-memory.ts`)
+### 2. Plugin — injection + the automated learning loop (`plugins/nt-memory.ts`)
 Injects the **rules + core-memory** block into the system prompt, recompiled
 **live from nt every session** via the `experimental.chat.system.transform`
 hook. Edit a note in nt → the next session sees it. No exported file to go stale.
@@ -95,6 +99,24 @@ Three modes (set env on the OpenCode process):
   your OpenCode build lacks the experimental hook). Add to `opencode.json`:
   `"instructions": ["nt-rules.md"]`.
 - `NT_INJECT=off` — inject nothing; rely on `AGENTS.md` + on-demand MCP.
+
+The plugin also closes the learning loop automatically (each on by default,
+independently switchable):
+
+- **Compaction survival** (`NT_COMPACT=0` to disable) — on
+  `experimental.session.compacting` it pushes the open nt tasks and a
+  "re-`nt_recall` before resuming" directive into the compaction context, so
+  summarization doesn't drop the in-flight work or the memory workflow.
+- **Error-triggered recall** (`NT_ERROR_RECALL=0` to disable) — when a bash tool
+  call exits non-zero, the plugin runs `nt recall --lessons-only` on the command
+  + error tail and injects any matching lessons into the **next** model request
+  as an `<nt-lessons>` block. Recorded mistakes stop relying on the agent
+  remembering to ask — the failure summons its own antidote. One recall per
+  distinct failing command; the block is injected once, then cleared (a single
+  prompt-cache miss per failure, no standing token cost).
+- **Idle capture nudge** (`NT_IDLE_NUDGE=0` to disable) — if a session used
+  tools but never wrote to nt, a one-time TUI toast suggests capturing a note or
+  lesson. User-facing only; never injected into the model context.
 
 Optional: `NT_MIRROR_TODOS=1` mirrors OpenCode's todo list into nt tasks on
 `todo.updated` (the OpenCode analog of Claude Code's `nt hook`). Off by default —
@@ -183,5 +205,9 @@ does **not** depend on OpenCode's hosted ("Zen") models.
 ## Requirements
 - `nt` on PATH (or `NT_BIN`).
 - OpenCode with MCP support (all current versions). Live injection needs the
-  `experimental.chat.system.transform` hook; if absent, use `NT_INJECT=file`.
+  `experimental.chat.system.transform` hook (error-triggered recall rides the
+  same hook); compaction survival needs `experimental.session.compacting`. Both
+  are experimental OpenCode APIs — if your build lacks them the plugin degrades
+  gracefully (use `NT_INJECT=file` for the rules path). The idle nudge and todo
+  mirror use only stable event hooks.
 - `node` is used only by `install.sh` to merge one config key; optional.
