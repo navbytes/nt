@@ -25,17 +25,21 @@ if ! command -v "$nt" >/dev/null 2>&1; then
 fi
 
 echo "→ OpenCode config dir: $cfg"
-mkdir -p "$cfg/plugins" "$cfg/skills/nt"
+mkdir -p "$cfg/plugins" "$cfg/skills/nt" "$cfg/commands"
 
 # 1. Register the MCP server (writes the absolute nt path, idempotent).
 echo "→ registering nt MCP server with OpenCode"
 "$nt" mcp install --client opencode
 
-# 2 + 3. Plugin and skill.
+# 2 + 3. Plugin, skill, and the /learn command.
 echo "→ installing plugin  → $cfg/plugins/nt-memory.ts"
 cp "$here/plugins/nt-memory.ts" "$cfg/plugins/nt-memory.ts"
 echo "→ installing skill   → $cfg/skills/nt/SKILL.md"
 cp "$here/skills/nt/SKILL.md" "$cfg/skills/nt/SKILL.md"
+echo "→ installing command → $cfg/commands/learn.md   (/learn — session review & capture)"
+cp "$here/commands/learn.md" "$cfg/commands/learn.md"
+echo "→ installing command → $cfg/commands/recall.md  (/recall — on-demand memory brief)"
+cp "$here/commands/recall.md" "$cfg/commands/recall.md"
 
 # 4. AGENTS.md — never clobber an existing one.
 if [ -f "$cfg/AGENTS.md" ]; then
@@ -107,4 +111,9 @@ Modes (env on the OpenCode process, e.g. via the plugin):
   NT_INJECT=system  (default) inject live into the system prompt
   NT_INJECT=file    refresh $cfg/nt-rules.md and load it via "instructions"
   NT_INJECT=off     rely on AGENTS.md + on-demand MCP only
+
+Learning-loop automation (all ON by default; set =0 to disable):
+  NT_COMPACT        carry open nt tasks + recall directive through compaction
+  NT_ERROR_RECALL   failed bash → auto nt recall --lessons-only into next turn
+  NT_IDLE_NUDGE     toast when a session ends without capturing anything
 EOF

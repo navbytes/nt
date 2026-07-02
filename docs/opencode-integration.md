@@ -138,15 +138,25 @@ Capability report complete; read+write verdict positive.
   `nt_index`, `nt_search`, `nt_get`, `nt_status`, `nt_links`, `nt_view`
   immediately (index-first progressive disclosure). No custom tool needed.
 
-### Phase 3 — Write-back memory ✅ for the engine; optional automation
+### Phase 3 — Write-back memory ✅ engine + automation (shipped)
 - The write tools (`nt_add`, `nt_note`, `nt_done`, `nt_update`, `nt_tag`,
   `nt_mv`, `nt_archive`, `nt_supersede`, `nt_relink`) are live the moment the MCP server is registered — the
   agent captures memory by calling them. **No `nt_save` to build.**
-- *Optional automation* (OpenCode-side, no `nt` change): a small OpenCode
-  **plugin** on `session.idle` or `session.compacted` that shells out to
-  `nt note`/`nt add` to snapshot context, and on `session.created` re-runs
-  `nt export` so Phase 1's rules file is fresh each session. This mirrors the
-  existing Claude Code PostToolUse `nt hook` pattern.
+- **Automation (shipped in the `nt-memory` plugin, each on by default):**
+  - *Compaction survival* — `experimental.session.compacting` pushes open nt
+    tasks + a re-`nt_recall` directive into the compaction context, so
+    summarization doesn't drop in-flight work or the memory workflow
+    (`NT_COMPACT=0` disables).
+  - *Error-triggered recall* — a failed bash call runs
+    `nt recall --lessons-only` on the command + error and injects matching
+    lessons into the next request; recorded mistakes resurface exactly when
+    they're about to repeat (`NT_ERROR_RECALL=0` disables).
+  - *Idle capture nudge* — a session that used tools but wrote nothing to nt
+    gets a one-time TUI toast suggesting a note/lesson (`NT_IDLE_NUDGE=0`
+    disables).
+  - In file mode, `session.created` still re-runs `nt export` so Phase 1's
+    rules file is fresh each session; `NT_MIRROR_TODOS=1` optionally mirrors
+    OpenCode todos into nt (the analog of Claude Code's PostToolUse `nt hook`).
 
 ### Phase 4 — Service + governance (optional)
 - **Multi-client service.** If several OpenCode clients should share one store
@@ -196,7 +206,9 @@ Capability report complete; read+write verdict positive.
 - `nt export` — compiles tagged/foldered notes (and open tasks) into one md/json
   document for the always-in-context layer. Delivers Phase 1's compile step.
 - **[`integrations/opencode/`](../integrations/opencode/)** — a ready-to-use
-  bundle: the `nt-memory` plugin (live rules/memory injection), the `nt` skill,
+  bundle: the `nt-memory` plugin (live rules/memory injection + the automated
+  learning loop), the `/recall` command (on-demand memory briefing), the
+  `/learn` command (human-gated session harvest), the `nt` skill,
   a thin `AGENTS.md`, an example `opencode.json`, and an idempotent `install.sh`.
   Its README is the full architecture + best-practices write-up and the
   folder/tag conventions (`rules/`+`rule`, `memory/`+`memory-core`, everything
