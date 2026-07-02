@@ -38,6 +38,8 @@ echo "→ installing skill   → $cfg/skills/nt/SKILL.md"
 cp "$here/skills/nt/SKILL.md" "$cfg/skills/nt/SKILL.md"
 echo "→ installing command → $cfg/commands/learn.md   (/learn — session review & capture)"
 cp "$here/commands/learn.md" "$cfg/commands/learn.md"
+echo "→ installing command → $cfg/commands/recall.md  (/recall — on-demand memory brief)"
+cp "$here/commands/recall.md" "$cfg/commands/recall.md"
 
 # 4. AGENTS.md — never clobber an existing one.
 if [ -f "$cfg/AGENTS.md" ]; then

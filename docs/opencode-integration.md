@@ -207,7 +207,8 @@ Capability report complete; read+write verdict positive.
   document for the always-in-context layer. Delivers Phase 1's compile step.
 - **[`integrations/opencode/`](../integrations/opencode/)** — a ready-to-use
   bundle: the `nt-memory` plugin (live rules/memory injection + the automated
-  learning loop), the `/learn` command (human-gated session harvest), the `nt` skill,
+  learning loop), the `/recall` command (on-demand memory briefing), the
+  `/learn` command (human-gated session harvest), the `nt` skill,
   a thin `AGENTS.md`, an example `opencode.json`, and an idempotent `install.sh`.
   Its README is the full architecture + best-practices write-up and the
   folder/tag conventions (`rules/`+`rule`, `memory/`+`memory-core`, everything

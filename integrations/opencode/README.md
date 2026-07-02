@@ -2,8 +2,8 @@
 
 This bundle turns [`nt`](../../README.md) into the **memory, rules, and
 knowledge-base backend** for [OpenCode](https://opencode.ai), wired up the way
-OpenCode is designed to be extended: an MCP server, a plugin, a `/learn`
-command, a skill, and a thin `AGENTS.md`. The result is a coding agent whose memory survives across
+OpenCode is designed to be extended: an MCP server, a plugin, two commands
+(`/recall` in, `/learn` out), a skill, and a thin `AGENTS.md`. The result is a coding agent whose memory survives across
 sessions, lives in plain files you can `grep`/`git diff`/open in Obsidian, and
 costs the right number of tokens for each kind of content.
 
@@ -122,7 +122,18 @@ Optional: `NT_MIRROR_TODOS=1` mirrors OpenCode's todo list into nt tasks on
 `todo.updated` (the OpenCode analog of Claude Code's `nt hook`). Off by default —
 the agent already captures tasks via `nt_add`.
 
-### 3. `/learn` command — human-gated session harvest (`commands/learn.md`)
+### 3. `/recall` command — on-demand memory briefing (`commands/recall.md`)
+The read-side twin of `/learn`. Run **`/recall <topic>`** at the start of a task
+(or mid-session on a topic switch, or after compaction) and the agent builds a
+compact **task-priming brief**: recorded lessons opened in full (they're short
+and they're the payload), related decisions/notes as stubs with at most 2
+opened, and related open tasks — under a ~1–2K-token budget, stub-first by
+design. Run **`/recall`** bare for a *resume brief* ("where was I?"): open
+tasks by urgency, recent completions, recently-touched notes — then pick a
+thread and it primes for that. Deliberate context-loading as one keystroke,
+zero standing cost.
+
+### 4. `/learn` command — human-gated session harvest (`commands/learn.md`)
 A user-invoked slash command: run `/learn` (optionally `/learn <focus>`) at any
 point and the agent reviews the session, extracts candidate learnings in five
 buckets — **lesson**, **rule**, **memory-core**, **note**, **task** — dedups
@@ -134,17 +145,17 @@ approval gate is what keeps the injected core small and high-signal — the
 opposite failure mode of silent auto-capture. The idle nudge (below) points at
 this command.
 
-### 4. Skill — the workflow (`skills/nt/SKILL.md`)
+### 5. Skill — the workflow (`skills/nt/SKILL.md`)
 Teaches the agent the recall-first / capture-the-why loop and the folder+tag
 conventions, loaded on demand via OpenCode's `skill` tool (its description sits
 in context; the body loads only when relevant — progressive disclosure).
 
-### 5. `AGENTS.md` — the thin always-on nudge
+### 6. `AGENTS.md` — the thin always-on nudge
 A tiny file telling the agent it *has* nt memory, to `nt_index`/`nt_ready` at
 the start, capture as it works, and how to lazy-load `@`-references (OpenCode does
 not auto-expand them). The substance lives in nt, not here.
 
-### 6. `nt export` — the compile primitive
+### 7. `nt export` — the compile primitive
 `nt export [--tag T] [--folder F] [--type note|task|all] [--format md|json]
 [--out FILE] [--no-provenance]` concatenates selected notes (and optionally open
 tasks) into one document — what the plugin uses to build the injected block and
@@ -177,9 +188,11 @@ nt note "Auth uses 24h JWTs, 7d refresh" --folder ref --tag auth               #
 The agent reads rules+memory every session automatically, and finds the KB note
 only when it `nt_search`es for "jwt".
 
-At the end of a working session, run **`/learn`** in OpenCode: the agent
-proposes the session's learnings (deduped against the store) and saves only
-what you approve.
+Bracket a working session with the two commands: **`/recall <topic>`** at the
+start (or bare `/recall` to see where things stand) loads the relevant lessons,
+notes, and open tasks as a compact brief; **`/learn`** at the end proposes the
+session's learnings (deduped against the store) and saves only what you
+approve.
 
 ---
 
