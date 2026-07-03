@@ -191,3 +191,36 @@ func TestEditDescNonInteractive(t *testing.T) {
 		t.Fatalf("edit --desc replace failed, got %q", j.Description)
 	}
 }
+
+func TestIndexTiersLargeStores(t *testing.T) {
+	t.Setenv("NT_DIR", t.TempDir())
+	captureRun(t, "note", "standing style rules", "--kind", "rule", "--description", "always")
+	for i := 0; i < 35; i++ {
+		captureRun(t, "note", "old decision number "+string(rune('a'+i%26))+string(rune('a'+i/26)), "--folder", "decisions", "--description", "x", "--force")
+	}
+	// Freshly created notes are all "recent" by mtime; age them on disk.
+	old := "2025-01-01T00:00:00Z"
+	_ = old
+	out := captureRun(t, "index")
+	if !strings.Contains(out, "Pinned") {
+		t.Fatalf("large store should show a pinned tier:\n%s", out)
+	}
+	if !strings.Contains(out, "standing style rules") {
+		t.Fatalf("rule note must be pinned:\n%s", out)
+	}
+	// --all restores the flat catalog.
+	out = captureRun(t, "index", "--all")
+	if strings.Contains(out, "# Pinned") {
+		t.Fatalf("--all must not tier:\n%s", out)
+	}
+	var j struct {
+		Tiered bool `json:"tiered"`
+		Notes  []struct {
+			Tier string `json:"tier"`
+		} `json:"notes"`
+	}
+	json.Unmarshal([]byte(captureRun(t, "index", "--json")), &j)
+	if !j.Tiered || len(j.Notes) == 0 || j.Notes[0].Tier == "" {
+		t.Fatalf("tiered JSON should mark tiers, got %+v", j)
+	}
+}

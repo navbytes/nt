@@ -32,6 +32,12 @@ nt index --json                     # KB catalog: note stubs (id·title·descrip
 nt ready --json                     # open, UNBLOCKED tasks by urgency
 ```
 
+On large stores the index is **tiered**: pinned standing notes (rules/, memory/,
+ref/, or tag `pin`) + everything changed in the last 14 days, with the older
+remainder as per-folder counts. Expand a folder with `--folder <f>`, or pass
+`--all` for every stub. Standing knowledge belongs in the pinned layers — file
+it with `--kind rule|ref` (or tag `pin`) so every future session sees it.
+
 `nt index` is your "what's here" catalog; `nt ready` is the task feed. **Before
 creating anything, retrieve first** (`nt index` / `nt search`) so you don't
 duplicate an item that already exists. To read a specific note, `nt show <id>`

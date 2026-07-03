@@ -920,7 +920,7 @@ func (s *server) index(a map[string]any) (string, error) {
 		}
 	}
 	notes := note.Active(s.listNotes())
-	stubs := make([]noteStub, 0, len(notes))
+	var filtered []*note.Note
 	for _, n := range notes {
 		if n.Reserved() {
 			continue // task-detail notes aren't part of the KB catalog
@@ -934,15 +934,42 @@ func (s *server) index(a map[string]any) (string, error) {
 		if since != "" && noteChangedDate(n) < since {
 			continue // "what changed since T"
 		}
-		stubs = append(stubs, noteToStub(n, ""))
+		filtered = append(filtered, n)
 	}
-	sort.SliceStable(stubs, func(i, j int) bool {
-		if stubs[i].Folder != stubs[j].Folder {
-			return stubs[i].Folder < stubs[j].Folder
+
+	// Tier the DEFAULT view of a large store (see note.TierIndex): pinned +
+	// recent stubs in full, the long tail as per-folder counts. Explicit scoping
+	// (all/tag/folder/updated_since) shows every match, as before.
+	tiered := note.Tiers{Recent: filtered}
+	if !boolArg(a, "all") && tag == "" && folder == "" && since == "" {
+		tiered = note.TierIndex(filtered, time.Now())
+	}
+	stubs := make([]noteStub, 0, len(tiered.Pinned)+len(tiered.Recent))
+	if tiered.Tiered {
+		pinned := tiered.Pinned
+		sort.SliceStable(pinned, func(i, j int) bool { return pinned[i].Rel < pinned[j].Rel })
+		for _, n := range pinned {
+			st := noteToStub(n, "")
+			st.Tier = "pinned"
+			stubs = append(stubs, st)
 		}
-		return stubs[i].Title < stubs[j].Title
-	})
-	noteTotal := len(stubs)
+		for _, n := range tiered.Recent { // newest first, from TierIndex
+			st := noteToStub(n, "")
+			st.Tier = "recent"
+			stubs = append(stubs, st)
+		}
+	} else {
+		for _, n := range filtered {
+			stubs = append(stubs, noteToStub(n, ""))
+		}
+		sort.SliceStable(stubs, func(i, j int) bool {
+			if stubs[i].Folder != stubs[j].Folder {
+				return stubs[i].Folder < stubs[j].Folder
+			}
+			return stubs[i].Title < stubs[j].Title
+		})
+	}
+	noteTotal := len(filtered)
 	if lim := intArg(a, "limit"); lim > 0 && len(stubs) > lim {
 		stubs = stubs[:lim]
 	}
@@ -974,12 +1001,18 @@ func (s *server) index(a map[string]any) (string, error) {
 	// compact drops the JSON scaffolding (keys, braces, quotes) an agent doesn't
 	// need to read the catalog. Opt in with format:"compact".
 	if str(a, "format") == "compact" {
-		return compactIndex(stubs, active, recent, noteTotal), nil
+		return compactIndex(stubs, active, recent, noteTotal, tiered), nil
 	}
 	out := map[string]any{
 		"notes": stubs, "tasks": tasksOut(active), "recentlyDone": tasksOut(recent),
 	}
-	if noteTotal > len(stubs) {
+	if tiered.Tiered {
+		out["tiered"] = true
+		out["olderByFolder"] = tiered.OlderByFolder
+		out["olderTotal"] = tiered.OlderTotal
+		out["noteTotal"] = noteTotal
+		out["hint"] = "tiered catalog: pinned (standing rules/memory/ref) + notes changed in the last 14d; olderByFolder counts the rest — expand with folder/tag filters or all:true"
+	} else if noteTotal > len(stubs) {
 		out["truncated"] = true
 		out["noteTotal"] = noteTotal
 	}
@@ -989,10 +1022,19 @@ func (s *server) index(a map[string]any) (string, error) {
 // compactIndex renders the KB catalog as terse plain text — one line per note
 // (shortid · title — description · @tags) and per active task — for the
 // session-start nt_index call. Much cheaper than JSON for the same information.
-func compactIndex(stubs []noteStub, active, recent []*task.Task, noteTotal int) string {
+func compactIndex(stubs []noteStub, active, recent []*task.Task, noteTotal int, tiered note.Tiers) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "NOTES (%d)\n", noteTotal)
+	lastTier := ""
 	for _, n := range stubs {
+		if n.Tier != lastTier && n.Tier != "" {
+			label := "PINNED — standing rules/memory/ref"
+			if n.Tier == "recent" {
+				label = "RECENT — newest first"
+			}
+			fmt.Fprintf(&b, "-- %s --\n", label)
+			lastTier = n.Tier
+		}
 		fmt.Fprintf(&b, "%s  %s", shortID(n.ID), n.Title)
 		if n.Description != "" {
 			fmt.Fprintf(&b, " — %s", n.Description)
@@ -1002,7 +1044,20 @@ func compactIndex(stubs []noteStub, active, recent []*task.Task, noteTotal int) 
 		}
 		b.WriteByte('\n')
 	}
-	if noteTotal > len(stubs) {
+	if tiered.Tiered && tiered.OlderTotal > 0 {
+		folders := make([]string, 0, len(tiered.OlderByFolder))
+		for f := range tiered.OlderByFolder {
+			folders = append(folders, f)
+		}
+		sort.Strings(folders)
+		fmt.Fprintf(&b, "-- OLDER (%d — expand with folder/tag filters, or all:true) --\n", tiered.OlderTotal)
+		for _, f := range folders {
+			if f == "" {
+				f = "(root)"
+			}
+			fmt.Fprintf(&b, "%s: %d\n", f, tiered.OlderByFolder[f])
+		}
+	} else if noteTotal > len(stubs) {
 		fmt.Fprintf(&b, "… %d more (pass a higher limit or a tag/folder filter)\n", noteTotal-len(stubs))
 	}
 	fmt.Fprintf(&b, "\nTASKS (%d open)\n", len(active))
@@ -1435,6 +1490,7 @@ type noteStub struct {
 	Folder      string   `json:"folder,omitempty"`
 	Source      string   `json:"source,omitempty"` // author/agent — ownership on a shared store
 	Updated     string   `json:"updated,omitempty"`
+	Tier        string   `json:"tier,omitempty"` // "pinned"|"recent" on a tiered nt_index catalog
 }
 
 func noteToStub(n *note.Note, snippet string) noteStub {

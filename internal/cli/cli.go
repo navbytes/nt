@@ -394,6 +394,8 @@ USAGE
                               (--days 0 = just today's plan)
   nt review [--stale N]       weekly digest: overdue, stale, undated, stuck projects
   nt index [--tag|--folder]   compact KB catalog (ids+titles+descriptions) + active tasks — start here
+                              (large stores tier: pinned rules/memory/ref + last-14d notes
+                               + per-folder counts of the rest; --all = every stub)
   nt log [--since|--days N]    completed tasks, newest first (the Logbook)
   nt done <id|task:N>         mark a task done       (alias: do)
   nt skip <id|task:N>         move a recurring task to its next occurrence

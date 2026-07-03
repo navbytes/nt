@@ -401,6 +401,7 @@ type noteLint struct {
 	MissingDesc []string // handles of active notes with no explicit `description:`
 	Orphans     []string // handles of active notes nothing links to (informational)
 	NearDups    []string // "a ≈ b" pairs of active notes with near-duplicate titles
+	PinnedCount int      // notes in the always-shown index tier (rules/memory/ref/pin)
 }
 
 // lintNotes scans notes and tasks for KB-graph health: unresolved [[links]]
@@ -441,6 +442,9 @@ func lintNotes(e *mutate.Engine) noteLint {
 			continue // machine task-detail notes aren't held to KB hygiene
 		}
 		rep.NoteCount++
+		if n.Pinned() {
+			rep.PinnedCount++
+		}
 		handle := shortID(n.ID) + " " + n.Rel
 		if !hasExplicitDescription(n) {
 			rep.MissingDesc = append(rep.MissingDesc, handle)
@@ -528,6 +532,12 @@ func printNoteHygiene(nl noteLint) {
 	}
 	if len(nl.NearDups) > 0 {
 		fmt.Printf("  near-duplicates (consolidate with `nt supersede <old> --by <new>`): %s\n", sampleList(nl.NearDups, 6))
+	}
+	// "Always shown" invites dumping — make the pinned tier's cost legible once
+	// it outgrows what a session-start load should pay for.
+	if nl.PinnedCount > note.TierPinnedWarn {
+		fmt.Printf("  pinned tier is %d notes (≈%d tokens shown at EVERY session start) — demote stale rules/memory/ref notes (nt archive) or consolidate\n",
+			nl.PinnedCount, nl.PinnedCount*60)
 	}
 }
 

@@ -109,10 +109,11 @@ var toolDefs = []toolDef{
 	},
 	{
 		Name:        "nt_index",
-		Description: "Resuming work: the KB catalog. One stub per note (id, title, one-line description, tags, folder) — NO bodies — plus active (open+doing) tasks and a few recent completions (recentlyDone). Load this first, then nt_get the few notes you need or nt_search by topic. Cheap and bounded; replaces dumping every note. Scope with tag/folder.",
+		Description: "Resuming work: the KB catalog. One stub per note (id, title, one-line description, tags, folder) — NO bodies — plus active (open+doing) tasks and a few recent completions (recentlyDone). Load this first, then nt_get the few notes you need or nt_search by topic. Cheap and bounded: large stores return a TIERED catalog (tiered=true) — pinned standing notes + stubs changed in the last 14d, with the older remainder as olderByFolder counts; expand a folder with the folder filter, or pass all:true for every stub. Scope with tag/folder.",
 		InputSchema: obj(map[string]any{
 			"tag":           sp("only notes/tasks with this tag"),
 			"folder":        sp("only notes under this folder, e.g. ref"),
+			"all":           map[string]any{"type": "boolean", "description": "full catalog: every note stub, no tiering (large stores tier by default)"},
 			"limit":         map[string]any{"type": "integer", "description": "cap the note catalog to N (truncated=true when more exist); scope with tag/folder for big stores"},
 			"updated_since": sp("only notes changed on/after this date (today|tomorrow|fri|+3d|YYYY-MM-DD) — 'what changed since last session'"),
 			"format": map[string]any{
