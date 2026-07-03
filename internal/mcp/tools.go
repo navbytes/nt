@@ -103,6 +103,19 @@ var toolDefs = []toolDef{
 		}, "title"),
 	},
 	{
+		Name:        "nt_note_edit",
+		Description: "Fix an EXISTING note in place — no new id, no retired-note churn (unlike nt_note supersede:, which replaces it with a brand new note). Exactly one of append / body / old_string+new_string per call: append adds to the end; body replaces the whole thing (build the full text yourself and send it — there's no partial form of body); old_string+new_string patches ONE exact match (must appear exactly once in the current body, or the call is refused — include more surrounding text to disambiguate). description replaces the one-line summary and can be combined with any of the three.",
+		InputSchema: obj(map[string]any{
+			"handle":      sp("note id, slug, or title"),
+			"id":          sp("alias for handle — pass a stub's id directly"),
+			"append":      sp("markdown to add to the end of the body"),
+			"body":        sp("replace the whole body with this literal text"),
+			"old_string":  sp("exact existing text in the body to replace — must match exactly once"),
+			"new_string":  sp("replacement for old_string (empty deletes the matched text); required together with old_string"),
+			"description": sp("replace the note's one-line description (frontmatter)"),
+		}),
+	},
+	{
 		Name:        "nt_relink",
 		Description: "Fix a wrong outbound [[link]] in a note's body: rewrite [[old]] → [[new]] (nt_mv only fixes inbound links on rename). Use it to repair a dangling reference nt_note flagged.",
 		InputSchema: obj(map[string]any{

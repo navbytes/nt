@@ -1246,3 +1246,102 @@ func TestMCPNoteProjectFrontmatter(t *testing.T) {
 		t.Fatalf("project: frontmatter should trigger the recall project boost: %s", out)
 	}
 }
+
+// nt_note_edit is the MCP counterpart of `nt edit`: it fixes an EXISTING note
+// in place instead of nt_note's create-or-supersede (new id) path — the gap
+// MCP-only agents hit hardest when a note needed a small correction.
+func TestMCPNoteEditModes(t *testing.T) {
+	s := newServer(t)
+	created, err := s.dispatch("nt_note", map[string]any{"title": "edit target", "body": "original body"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var n noteOut
+	json.Unmarshal([]byte(created), &n)
+
+	// append
+	out, err := s.dispatch("nt_note_edit", map[string]any{"handle": n.ID, "append": "more detail"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "more detail") || !strings.Contains(out, "original body") {
+		t.Fatalf("append should keep the original body and add to it: %s", out)
+	}
+
+	// full body replace
+	out, err = s.dispatch("nt_note_edit", map[string]any{"handle": n.ID, "body": "replaced entirely"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "replaced entirely") || strings.Contains(out, "original body") {
+		t.Fatalf("body should fully replace, got %s", out)
+	}
+
+	// targeted old_string/new_string patch
+	if _, err := s.dispatch("nt_note_edit", map[string]any{"handle": n.ID, "body": "the cach layer needs work"}); err != nil {
+		t.Fatal(err)
+	}
+	out, err = s.dispatch("nt_note_edit", map[string]any{"handle": n.ID, "old_string": "cach layer", "new_string": "cache layer"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "cache layer") || strings.Contains(out, "cach layer") {
+		t.Fatalf("targeted patch didn't apply cleanly: %s", out)
+	}
+
+	// description alongside a body edit
+	out, err = s.dispatch("nt_note_edit", map[string]any{"handle": n.ID, "append": "note", "description": "a fresh summary"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var edited struct {
+		Description string `json:"description"`
+	}
+	json.Unmarshal([]byte(out), &edited)
+	if edited.Description != "a fresh summary" {
+		t.Fatalf("description should update alongside a body edit, got %q", edited.Description)
+	}
+}
+
+func TestMCPNoteEditOldStringAmbiguousRefuses(t *testing.T) {
+	s := newServer(t)
+	created, _ := s.dispatch("nt_note", map[string]any{"title": "dup text note", "body": "foo bar\nfoo bar"})
+	var n noteOut
+	json.Unmarshal([]byte(created), &n)
+	_, err := s.dispatch("nt_note_edit", map[string]any{"handle": n.ID, "old_string": "foo bar", "new_string": "baz"})
+	if err == nil {
+		t.Fatal("an old_string matching twice must be refused, not guessed at")
+	}
+	if !strings.Contains(err.Error(), "2 times") {
+		t.Fatalf("refusal should say how many times it matched: %v", err)
+	}
+}
+
+func TestMCPNoteEditRequiresPairAndOneMode(t *testing.T) {
+	s := newServer(t)
+	created, _ := s.dispatch("nt_note", map[string]any{"title": "pairing note", "body": "some text"})
+	var n noteOut
+	json.Unmarshal([]byte(created), &n)
+
+	if _, err := s.dispatch("nt_note_edit", map[string]any{"handle": n.ID, "old_string": "some text"}); err == nil {
+		t.Fatal("old_string without new_string must be rejected")
+	}
+	if _, err := s.dispatch("nt_note_edit", map[string]any{"handle": n.ID, "append": "x", "body": "y"}); err == nil {
+		t.Fatal("mixing append and body must be rejected")
+	}
+	if _, err := s.dispatch("nt_note_edit", map[string]any{"handle": n.ID}); err == nil {
+		t.Fatal("a call with nothing to edit must be rejected")
+	}
+}
+
+// nt_note_edit accepts an "id" alias for "handle", matching nt_get's pattern —
+// agents naturally reuse the id field name a stub just handed them.
+func TestMCPNoteEditAcceptsIDAlias(t *testing.T) {
+	s := newServer(t)
+	created, _ := s.dispatch("nt_note", map[string]any{"title": "id alias note", "body": "text"})
+	var n noteOut
+	json.Unmarshal([]byte(created), &n)
+	if _, err := s.dispatch("nt_note_edit", map[string]any{"id": n.ID, "append": "more"}); err != nil {
+		t.Fatalf("id should work as a handle alias: %v", err)
+	}
+}

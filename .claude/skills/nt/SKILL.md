@@ -17,7 +17,9 @@ distinguishable from what the user typed by hand.
 > If the `nt` MCP server is registered with your client, **prefer the typed
 > `nt_*` tools over shelling out** — they go through the same store, default
 > `source` to `claude`, and avoid CLI-string mistakes. Capture: `nt_add`,
-> `nt_note` (`kind` files it), `nt_update` (status:"done" completes), `nt_tag`,
+> `nt_note` (`kind` files it), `nt_note_edit` (fix an EXISTING note in place —
+> `append`/`body`/`old_string`+`new_string`/`description` — no new id, unlike
+> `nt_note supersede:`), `nt_update` (status:"done" completes), `nt_tag`,
 > `nt_mv`, `nt_archive` (supersede), `nt_relink`, `nt_rm` (tasks). Retrieve:
 > `nt_index`, `nt_search`, `nt_recall`, `nt_get` (handle or id), `nt_status`,
 > `nt_links`, `nt_view`. Fall back
@@ -117,8 +119,16 @@ tool takes the same **`kind`**/**`folder`** arguments.
 
 To fix or extend a note later **without an editor**: `nt edit <note> --append
 "Resolved in commit abc123"`, `--append-file notes.md` (or `-` for stdin — use
-this for multi-line/backtick appends), `--body-file new.md` (replace the body),
-or `--desc "…"` (set the one-line summary).
+this for multi-line/backtick appends), `--body <text>` (replace the whole body
+inline, no temp file needed), `--body-file new.md` (replace the body from a
+file — for long/multi-line content), `--old-string "..." --new-string "..."`
+(patch ONE exact match in place — the targeted fix for a longer note; refuses
+if the match isn't unique, so make it longer to disambiguate), or `--desc "…"`
+(set the one-line summary). These are mutually exclusive per call — pick one
+way to change the body. MCP: `nt_note_edit` takes the same
+`append`/`body`/`old_string`+`new_string`/`description` fields; it's the
+in-place counterpart to `nt_note`, which only ever creates (`supersede:` mints
+a *new* id rather than editing in place).
 
 Tag a note with **`--project <name>`** when it's specific to one codebase in a
 shared multi-project store — `nt recall --project <name>` (default: your

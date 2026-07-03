@@ -125,9 +125,11 @@ nt mcp install --print                  # show what it would do, change nothing
 For any other client (Cursor, a project `.mcp.json`, …), `nt mcp install --print`
 emits the snippet to paste.
 
-Tools exposed (**15**) — **capture:** `nt_add`, `nt_note` (with `folder`,
+Tools exposed (**16**) — **capture:** `nt_add`, `nt_note` (with `folder`,
 `description`, and `kind: lesson|decision|ref|rule|memory` — canonical tag +
-folder; always give a `description`, it's what `nt_index` shows), `nt_update` (status:"done" completes; the response echoes what `changed`), `nt_rm` (remove a
+folder; always give a `description`, it's what `nt_index` shows), `nt_note_edit`
+(fix an EXISTING note in place — `append`/`body`/`old_string`+`new_string`/
+`description`; no new id, unlike `nt_note supersede:`), `nt_update` (status:"done" completes; the response echoes what `changed`), `nt_rm` (remove a
 mistaken task — journaled, `nt undo` restores), `nt_tag`, `nt_mv`, `nt_archive` (retire
 stale notes — set `superseded_by` to reconcile duplicates), `nt_relink` (fix a wrong outbound link); **retrieve:** `nt_index` (start here — a compact
 catalog of note stubs plus the active tasks and recent completions — tiered on

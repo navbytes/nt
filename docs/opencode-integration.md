@@ -50,12 +50,15 @@ memory must be built"** (a custom `nt_save` tool and/or a plugin). Two facts
 change the design:
 
 1. **`nt` already exposes write tools over MCP** — `nt_add`, `nt_note`,
-   `nt_update`, `nt_rm`, `nt_tag`, `nt_mv`, `nt_archive`, `nt_relink` — alongside
-   the read tools `nt_index`, `nt_search`, `nt_recall`, `nt_get`, `nt_status`,
-   `nt_view`, `nt_links`. Verified end-to-end over stdio JSON-RPC (`tools/list` →
-   15 tools; `tools/call nt_index`/`nt_search`/`nt_get` → results). Unknown tool
-   parameters are rejected, not ignored — a misspelled arg fails loudly instead
-   of silently dropping intent.
+   `nt_note_edit`, `nt_update`, `nt_rm`, `nt_tag`, `nt_mv`, `nt_archive`,
+   `nt_relink` — alongside the read tools `nt_index`, `nt_search`, `nt_recall`,
+   `nt_get`, `nt_status`, `nt_view`, `nt_links`. Verified end-to-end over stdio
+   JSON-RPC (`tools/list` → 16 tools; `tools/call nt_index`/`nt_search`/`nt_get`
+   → results). Unknown tool parameters are rejected, not ignored — a
+   misspelled arg fails loudly instead of silently dropping intent.
+   `nt_note_edit` fixes an existing note in place (append/body/
+   old_string+new_string) so a small correction doesn't need `nt_note
+   supersede:`'s new-id churn.
 2. **OpenCode is a first-class MCP client.** Its config has a top-level `mcp` key
    for `"type": "local"` (stdio) servers, and the agent calls those tools the
    same way it calls built-ins.
@@ -98,7 +101,7 @@ cost.
 |---------|---------|-----------|-----------|
 | **Rules** (small, stable, always true) | `instructions` glob → an `nt`-generated markdown file (or `AGENTS.md`) | `nt export --tag rule > .opencode/nt-rules.md`; `"instructions": [".opencode/nt-rules.md"]` | Paid every request — keep it small |
 | **Knowledge base** (large, queried occasionally) | **MCP tools** `nt_index` → `nt_search` / `nt_get` / `nt_links` / `nt_status` | Already registered via `nt mcp install --client opencode` | **Zero until called** (lazy, index-first) |
-| **Memory write-back** (capture as the agent works) | **MCP tools** `nt_add` / `nt_note` / `nt_update` | Same registration; agent calls them explicitly | Only when writing |
+| **Memory write-back** (capture as the agent works) | **MCP tools** `nt_add` / `nt_note` / `nt_note_edit` / `nt_update` | Same registration; agent calls them explicitly | Only when writing |
 | **Curated KB highlights** (optional) | **Agent Skills** | Symlink/export curated notes to `.opencode/skills/<name>/SKILL.md` | Only the skill list is always-loaded; bodies load on demand |
 
 **Token-budget plan.** Always-in-context = the rules file only (and OpenCode's
@@ -141,9 +144,10 @@ Capability report complete; read+write verdict positive.
   immediately (index-first progressive disclosure). No custom tool needed.
 
 ### Phase 3 — Write-back memory ✅ engine + automation (shipped)
-- The write tools (`nt_add`, `nt_note`, `nt_update`, `nt_rm`, `nt_tag`,
-  `nt_mv`, `nt_archive`, `nt_relink`) are live the moment the MCP server is registered — the
-  agent captures memory by calling them. **No `nt_save` to build.**
+- The write tools (`nt_add`, `nt_note`, `nt_note_edit`, `nt_update`, `nt_rm`,
+  `nt_tag`, `nt_mv`, `nt_archive`, `nt_relink`) are live the moment the MCP
+  server is registered — the agent captures memory by calling them. **No
+  `nt_save` to build.**
 - **Automation (shipped in the `nt-memory` plugin, each on by default):**
   - *Compaction survival* — `experimental.session.compacting` pushes open nt
     tasks + a re-`nt_recall` directive into the compaction context, so

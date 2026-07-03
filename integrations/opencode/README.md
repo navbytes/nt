@@ -70,13 +70,13 @@ TUI, web UI, and Obsidian.
 ## The building blocks (what's in this bundle)
 
 ### 1. MCP server — the read/write engine (`mcp.nt`)
-`nt mcp` exposes 15 typed tools — deliberately few, so tool selection stays unambiguous. OpenCode is a first-class MCP client, so this
+`nt mcp` exposes 16 typed tools — deliberately few, so tool selection stays unambiguous. OpenCode is a first-class MCP client, so this
 *is* the knowledge-base + memory read/write path — no custom OpenCode tool
 needed. Retrieval follows progressive disclosure: `nt_index` (cheap catalog of
 stubs) → `nt_search` (ranked stubs) → `nt_get` (one note's body). No bulk dump.
 
 - **Read:** `nt_index`, `nt_search`, `nt_recall`, `nt_get`, `nt_status`, `nt_links`, `nt_view`
-- **Write:** `nt_add`, `nt_note`, `nt_update`, `nt_tag`, `nt_mv`, `nt_archive`, `nt_relink`, `nt_rm`
+- **Write:** `nt_add`, `nt_note`, `nt_note_edit`, `nt_update`, `nt_tag`, `nt_mv`, `nt_archive`, `nt_relink`, `nt_rm`
 
 Registered (absolute path, idempotent) by:
 ```bash

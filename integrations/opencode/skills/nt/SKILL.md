@@ -90,6 +90,11 @@ create is distinguishable from the user's hand-entered items.
 
 - `nt_mv` — refile/rename a note (rewrites every `[[link]]`).
 - `nt_tag` — add/remove tags (e.g. promote a `ref` note into `rule` once it's stable).
+- `nt_note_edit` — fix an EXISTING note in place: `append` (add to the end),
+  `body` (replace it wholesale), or `old_string`+`new_string` (patch ONE exact
+  match — refuses if it's not unique, so include more context to disambiguate).
+  No new id, unlike `nt_note supersede:`, which retires the old note. Combine
+  with `description` to also update the one-line summary.
 - `nt_archive` — retire a stale note from index/search/recall (reversible;
   `undo:true` restores). Pass `superseded_by:<id>` when another note replaces
   it — the old one leaves the index with a pointer.
@@ -97,8 +102,9 @@ create is distinguishable from the user's hand-entered items.
   (e.g. after superseding, redirect references to the canonical note).
 - `nt_rm` — permanently remove a mistaken/duplicate task by stable id (journaled;
   `nt undo` restores). CLI `nt gc` reclaims superseded stubs and stranded task
-  notes >30d → `.trash/` (dry-run by default; `--yes` applies);
-  `nt edit <id> --append/--desc/--body-file` repairs a note without an editor.
+  notes >30d → `.trash/` (dry-run by default; `--yes` applies); CLI equivalent
+  of `nt_note_edit` is `nt edit <id> --append/--desc/--body/--body-file/
+  --old-string+--new-string`.
 
 **Dedup signal:** `nt_note` always creates the note; when near-duplicates exist
 the response carries a `similar` list — check it, and if you truly doubled an

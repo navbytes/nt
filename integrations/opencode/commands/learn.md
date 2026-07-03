@@ -58,7 +58,8 @@ Then ask the user which to save (all, numbers like "1 3 4", edits, or none) and
   work with `discovered_from`).
 - `nt_note` always creates; if its response includes a `similar` list, check
   whether you just doubled an existing note — if so, consolidate: extend the
-  original (CLI `nt edit --append`) or retire the duplicate with `nt_archive`
+  original (`nt_note_edit` with `append` or `old_string`+`new_string`; CLI
+  `nt edit --append`) or retire the duplicate with `nt_archive`
   `superseded_by=<kept id>`. (The CLI fallback `nt note` does refuse
   near-duplicates — follow its printed guidance.)
 - Finish with a short receipt: each saved item's id and where it went.

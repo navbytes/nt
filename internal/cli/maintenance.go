@@ -198,7 +198,10 @@ func cmdEdit(args []string) int {
 	fs := flag.NewFlagSet("edit", flag.ContinueOnError)
 	appendTxt := fs.String("append", "", "append markdown to the note body without an editor (agent-safe)")
 	appendFile := fs.String("append-file", "", "append the contents of a file ('-' = stdin) to the note body")
+	body := fs.String("body", "", "replace the whole note body with this literal text — no temp file needed; use --body-file for long/multi-line content")
 	bodyFile := fs.String("body-file", "", "replace the note body from a file ('-' = stdin); immune to shell quoting")
+	oldString := fs.String("old-string", "", "exact existing text in the body to replace — must match exactly once; pair with --new-string for a targeted fix without resending the whole body")
+	newString := fs.String("new-string", "", "replacement text for --old-string (empty deletes the matched text)")
 	desc := fs.String("desc", "", "set the note's one-line description (frontmatter) without an editor")
 	fs.StringVar(desc, "description", "", "alias for --desc")
 	flags, positional := splitArgs(args, nil)
@@ -213,8 +216,31 @@ func cmdEdit(args []string) int {
 	if aerr != nil {
 		return usageErr(fmt.Errorf("edit: %w", aerr))
 	}
-	if appendVal != "" && strings.TrimSpace(*bodyFile) != "" {
-		return usageErr(fmt.Errorf("edit: --append and --body-file are mutually exclusive"))
+	bodyVal, berr := resolveBody(*body, *bodyFile)
+	if berr != nil {
+		return usageErr(fmt.Errorf("edit: %w", berr))
+	}
+	// --old-string/--new-string only make sense as a pair: one alone has no
+	// target (new-string) or nothing to put in its place (old-string), and
+	// --new-string legitimately being "" (a deletion) means we can't use
+	// emptiness to infer whether it was passed — check what was actually set.
+	set := map[string]bool{}
+	fs.Visit(func(f *flag.Flag) { set[f.Name] = true })
+	replacing := set["old-string"] || set["new-string"]
+	if set["old-string"] != set["new-string"] {
+		return usageErr(fmt.Errorf("edit: --old-string and --new-string must be given together"))
+	}
+	if replacing && strings.TrimSpace(*oldString) == "" {
+		return usageErr(fmt.Errorf("edit: --old-string cannot be empty — there's no text to search for"))
+	}
+	editModes := 0
+	for _, on := range []bool{appendVal != "", bodyVal != "", replacing} {
+		if on {
+			editModes++
+		}
+	}
+	if editModes > 1 {
+		return usageErr(fmt.Errorf("edit: --append, --body/--body-file, and --old-string/--new-string are mutually exclusive — pick one way to change the body per call"))
 	}
 	e, ok := engine()
 	if !ok {
@@ -224,10 +250,11 @@ func cmdEdit(args []string) int {
 	// explicit note: prefix or any bare note handle (slug/title/short id), the same
 	// handle every other note verb takes.
 	notes, _ := note.List(e.S)
-	// Non-interactive edits (--append / --body-file / --desc): the agent path. A
-	// mangled or growing note used to be fixable only via $EDITOR or a whole-note
-	// supersede (which churns the id and every inbound link); this edits in place.
-	if appendVal != "" || strings.TrimSpace(*bodyFile) != "" || strings.TrimSpace(*desc) != "" {
+	// Non-interactive edits (--append / --body / --body-file / --old-string+
+	// --new-string / --desc): the agent path. A mangled or growing note used to
+	// be fixable only via $EDITOR or a whole-note supersede (which churns the id
+	// and every inbound link); this edits in place.
+	if appendVal != "" || bodyVal != "" || replacing || strings.TrimSpace(*desc) != "" {
 		n, nerr := resolveNote(notes, strings.TrimPrefix(handle, "note:"))
 		if nerr != nil {
 			return fail(fmt.Errorf("edit: %w (non-interactive edits apply to notes; for tasks use `nt update`)", nerr))
@@ -235,19 +262,26 @@ func cmdEdit(args []string) int {
 		verb := ""
 		switch {
 		case appendVal != "":
-			body := strings.TrimRight(n.Body, "\n")
-			if body != "" {
-				body += "\n\n"
+			b := strings.TrimRight(n.Body, "\n")
+			if b != "" {
+				b += "\n\n"
 			}
-			n.Body = body + strings.TrimSpace(appendVal) + "\n"
+			n.Body = b + strings.TrimSpace(appendVal) + "\n"
 			verb = "appended to"
-		case strings.TrimSpace(*bodyFile) != "":
-			nb, rerr := resolveBody("", *bodyFile)
-			if rerr != nil {
-				return usageErr(fmt.Errorf("edit: %w", rerr))
-			}
-			n.Body = nb
+		case bodyVal != "":
+			n.Body = bodyVal
 			verb = "replaced body of"
+		case replacing:
+			count := strings.Count(n.Body, *oldString)
+			switch count {
+			case 0:
+				return fail(fmt.Errorf("edit: --old-string not found in %s's body — run `nt show %s` to see the current text", shortID(n.ID), shortID(n.ID)))
+			case 1:
+				n.Body = strings.Replace(n.Body, *oldString, *newString, 1)
+				verb = "edited"
+			default:
+				return fail(fmt.Errorf("edit: --old-string matches %d times in %s's body — make it longer/more specific so the match is unambiguous", count, shortID(n.ID)))
+			}
 		}
 		if d := strings.TrimSpace(*desc); d != "" {
 			setNoteDescription(n, d)

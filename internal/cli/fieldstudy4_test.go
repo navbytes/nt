@@ -220,3 +220,95 @@ func TestNoteProjectFlagRecallBoost(t *testing.T) {
 		t.Fatalf("--project frontmatter should fire recall's project boost, got %+v", res)
 	}
 }
+
+// `nt edit --body` replaces the whole body with LITERAL text — no temp file
+// needed, unlike --body-file. This is the gap agents hit hardest: fixing a
+// note used to mean either $EDITOR or writing the entire new body to a file.
+func TestEditBodyInlineReplace(t *testing.T) {
+	t.Setenv("NT_DIR", t.TempDir())
+	captureRun(t, "note", "inline body test", "--body", "original")
+	out := captureRun(t, "edit", "inline body test", "--body", "brand new body")
+	if !strings.Contains(out, "replaced body of") {
+		t.Fatalf("edit --body should report a replace, got %q", out)
+	}
+	shown := captureRun(t, "show", "inline body test")
+	if !strings.Contains(shown, "brand new body") || strings.Contains(shown, "original") {
+		t.Fatalf("body should be fully replaced:\n%s", shown)
+	}
+}
+
+// `nt edit --old-string/--new-string` patches one exact match in the body
+// in place — the targeted fix a longer note needs, without resending the
+// whole body (the second real gap: --append only adds, never corrects).
+func TestEditOldStringNewStringTargetedPatch(t *testing.T) {
+	t.Setenv("NT_DIR", t.TempDir())
+	captureRun(t, "note", "typo note", "--body", "Intro.\n\nThe cach layer needs work.\n\nConclusion.")
+	out := captureRun(t, "edit", "typo note", "--old-string", "cach layer", "--new-string", "cache layer")
+	if !strings.Contains(out, "edited") {
+		t.Fatalf("edit --old-string/--new-string should report a patch, got %q", out)
+	}
+	shown := captureRun(t, "show", "typo note")
+	if !strings.Contains(shown, "cache layer") || strings.Contains(shown, "cach layer") {
+		t.Fatalf("targeted patch didn't apply cleanly:\n%s", shown)
+	}
+	if !strings.Contains(shown, "Intro.") || !strings.Contains(shown, "Conclusion.") {
+		t.Fatalf("the rest of the body must survive untouched:\n%s", shown)
+	}
+}
+
+// An ambiguous --old-string (matches more than once) refuses rather than
+// guessing which occurrence to patch — the same discipline as this
+// environment's own file-editing tool.
+func TestEditOldStringAmbiguousRefuses(t *testing.T) {
+	t.Setenv("NT_DIR", t.TempDir())
+	captureRun(t, "note", "dup text note", "--body", "foo bar\nfoo bar")
+	_, stderr, code := runWithStderr("edit", "dup text note", "--old-string", "foo bar", "--new-string", "baz")
+	if code == 0 {
+		t.Fatal("an --old-string matching twice must be refused, not guessed at")
+	}
+	if !strings.Contains(stderr, "2 times") {
+		t.Fatalf("refusal should say how many times it matched:\n%s", stderr)
+	}
+	shown := captureRun(t, "show", "dup text note")
+	if !strings.Contains(shown, "foo bar\nfoo bar") {
+		t.Fatalf("an ambiguous match must leave the body untouched:\n%s", shown)
+	}
+}
+
+// --old-string with no match, and the incomplete-pair case, both fail loudly
+// rather than silently no-op-ing.
+func TestEditOldStringNotFoundAndUnpaired(t *testing.T) {
+	t.Setenv("NT_DIR", t.TempDir())
+	captureRun(t, "note", "plain note", "--body", "some text here")
+
+	_, stderr, code := runWithStderr("edit", "plain note", "--old-string", "nonexistent", "--new-string", "x")
+	if code == 0 {
+		t.Fatal("a non-matching --old-string must be refused")
+	}
+	if !strings.Contains(stderr, "not found") {
+		t.Fatalf("refusal should say the text wasn't found:\n%s", stderr)
+	}
+
+	_, stderr, code = runWithStderr("edit", "plain note", "--old-string", "some text")
+	if code == 0 {
+		t.Fatal("--old-string without --new-string must be rejected as a usage error")
+	}
+	if !strings.Contains(stderr, "together") {
+		t.Fatalf("refusal should explain the pair requirement:\n%s", stderr)
+	}
+}
+
+// --body/--body-file/--old-string+--new-string are three different ways to
+// change a body; mixing them in one call is refused rather than silently
+// picking one.
+func TestEditBodyModesAreMutuallyExclusive(t *testing.T) {
+	t.Setenv("NT_DIR", t.TempDir())
+	captureRun(t, "note", "mixed modes note", "--body", "text")
+	_, stderr, code := runWithStderr("edit", "mixed modes note", "--append", "more", "--body", "replace")
+	if code == 0 {
+		t.Fatal("mixing --append and --body must be rejected")
+	}
+	if !strings.Contains(stderr, "mutually exclusive") {
+		t.Fatalf("refusal should explain the conflict:\n%s", stderr)
+	}
+}

@@ -623,11 +623,13 @@ the identical UI in a native window (see `desktop/`, ADR 0001).
   todo→ULID map, status-mapped, `src:claude`); the bundled `/nt` skill teaches Claude to
   capture and `nt index`. Setup: docs/claude-integration.md.
 - `nt mcp` runs a stdio **MCP server** (newline-delimited JSON-RPC 2.0, no SDK dep) exposing
-  typed tools (**15**: nt_status, nt_view, nt_add, nt_update, nt_note, nt_relink, nt_index,
-  nt_get, nt_search, nt_recall, nt_links, nt_mv, nt_tag, nt_archive, nt_rm) with strict
-  unknown-param rejection, for MCP clients. A thin driving adapter over the same
-  engine/domain as the CLI and TUI; defaults `source` to `claude` and refuses positional
-  handles.
+  typed tools (**16**: nt_status, nt_view, nt_add, nt_update, nt_note, nt_note_edit,
+  nt_relink, nt_index, nt_get, nt_search, nt_recall, nt_links, nt_mv, nt_tag, nt_archive,
+  nt_rm) with strict unknown-param rejection, for MCP clients. A thin driving adapter over
+  the same engine/domain as the CLI and TUI; defaults `source` to `claude` and refuses
+  positional handles. nt_note_edit fixes an existing note in place (append/body/
+  old_string+new_string/description) — the MCP counterpart of `nt edit`, so an MCP-only
+  agent isn't limited to nt_note's create-or-supersede (new id) path for a small correction.
 
 ---
 

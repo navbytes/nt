@@ -196,6 +196,8 @@ func (s *server) dispatch(name string, a map[string]any) (string, error) {
 		return s.update(a)
 	case "nt_note":
 		return s.note(a)
+	case "nt_note_edit":
+		return s.noteEdit(a)
 	case "nt_relink":
 		return s.relink(a)
 	case "nt_index":
@@ -235,7 +237,7 @@ var retiredToolHints = map[string]string{
 	"nt_gc":        "store gc is CLI-only — run `nt gc` (dry-run) then `nt gc --yes`",
 	"nt_doctor":    "health checks are CLI-only — run `nt doctor`",
 	"nt_supersede": "use nt_archive with superseded_by:<new-id> (or nt_note supersede:<old-id>)",
-	"nt_edit":      "in-place note repair is CLI-only (nt edit <note> --append/--desc); to replace a note use nt_note supersede:",
+	"nt_edit":      "use nt_note_edit (in-place append/body/old_string+new_string/description); to replace a note wholesale with a new id use nt_note supersede:",
 	"nt_undo":      "undo/redo are CLI-only — run `nt undo` / `nt redo`",
 	"nt_redo":      "undo/redo are CLI-only — run `nt redo`",
 	"nt_show":      "use nt_get (note body) or nt_status (task state)",
@@ -909,6 +911,124 @@ func (s *server) note(a map[string]any) (string, error) {
 		res["superseded"] = supersede
 	}
 	return jsonText(res), nil
+}
+
+// noteEdit fixes an EXISTING note's body/description in place — the MCP
+// counterpart of `nt edit`. nt_note only ever creates (supersede: mints a new
+// id and retires the old note), which left MCP-only agents no way to correct
+// a typo or extend a note without full-note churn; this closes that gap with
+// the same three edit modes the CLI offers: append, a literal full body
+// replace, or an old_string/new_string patch of exactly one match.
+func (s *server) noteEdit(a map[string]any) (string, error) {
+	handle := strings.TrimSpace(str(a, "handle"))
+	if handle == "" {
+		handle = strings.TrimSpace(str(a, "id")) // stubs expose `id`; accept it here too
+	}
+	if handle == "" {
+		return "", fmt.Errorf("handle is required (a note id, slug, or title)")
+	}
+	notes := s.listNotes()
+	var n *note.Note
+	if s.cache != nil {
+		n = s.cache.ByID(handle)
+	}
+	if n == nil {
+		it, ok := links.Resolve(handle, nil, notes)
+		if !ok || it.Kind != "note" {
+			return "", fmt.Errorf("no note %q", handle)
+		}
+		for _, cand := range notes {
+			if cand.Path == it.Path {
+				n = cand
+				break
+			}
+		}
+	}
+	if n == nil {
+		return "", fmt.Errorf("no note %q", handle)
+	}
+
+	appendVal := strings.TrimSpace(str(a, "append"))
+	bodyVal := strings.TrimSpace(str(a, "body"))
+	_, hasOld := a["old_string"]
+	_, hasNew := a["new_string"]
+	replacing := hasOld || hasNew
+	if hasOld != hasNew {
+		return "", fmt.Errorf("old_string and new_string must be given together")
+	}
+	oldString, newString := str(a, "old_string"), str(a, "new_string")
+	if replacing && strings.TrimSpace(oldString) == "" {
+		return "", fmt.Errorf("old_string cannot be empty — there's no text to search for")
+	}
+	modes := 0
+	for _, on := range []bool{appendVal != "", bodyVal != "", replacing} {
+		if on {
+			modes++
+		}
+	}
+	if modes > 1 {
+		return "", fmt.Errorf("append, body, and old_string/new_string are mutually exclusive — pick one way to change the body per call")
+	}
+
+	verb := ""
+	switch {
+	case appendVal != "":
+		b := strings.TrimRight(n.Body, "\n")
+		if b != "" {
+			b += "\n\n"
+		}
+		n.Body = b + appendVal + "\n"
+		verb = "appended to"
+	case bodyVal != "":
+		n.Body = bodyVal
+		verb = "replaced body of"
+	case replacing:
+		count := strings.Count(n.Body, oldString)
+		switch count {
+		case 0:
+			return "", fmt.Errorf("old_string not found in %s's body — nt_get %s to see the current text", n.ID, n.ID)
+		case 1:
+			n.Body = strings.Replace(n.Body, oldString, newString, 1)
+			verb = "edited"
+		default:
+			return "", fmt.Errorf("old_string matches %d times in %s's body — make it longer/more specific so the match is unambiguous", count, n.ID)
+		}
+	}
+	if d := strings.TrimSpace(str(a, "description")); d != "" {
+		mcpSetNoteDescription(n, d)
+		if verb == "" {
+			verb = "set description of"
+		}
+	}
+	if verb == "" {
+		return "", fmt.Errorf("nothing to edit — pass append, body, old_string+new_string, and/or description")
+	}
+	n.Updated = time.Now().Format(time.RFC3339)
+	if err := n.Save(); err != nil {
+		return "", err
+	}
+	res := toMap(noteToOut(n))
+	res["edited"] = verb
+	if desc := n.Description(1 << 20); desc != "" {
+		res["description"] = desc
+	}
+	if dangling := s.danglingLinks(n); len(dangling) > 0 {
+		res["danglingLinks"] = dangling
+	}
+	return jsonText(res), nil
+}
+
+// mcpSetNoteDescription sets or replaces the `description:` frontmatter line
+// (kept in Extra, since nt doesn't model the key) — the mcp-package twin of
+// the cli package's unexported setNoteDescription.
+func mcpSetNoteDescription(n *note.Note, d string) {
+	for i, line := range n.Extra {
+		if k, _, ok := strings.Cut(line, ":"); ok && strings.EqualFold(strings.TrimSpace(k), "description") {
+			n.Extra[i] = "description: " + d
+			return
+		}
+	}
+	n.Extra = append(n.Extra, "description: "+d)
 }
 
 // toMap flattens a struct to a map via its JSON tags, so extra keys can be added
