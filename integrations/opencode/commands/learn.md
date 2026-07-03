@@ -52,14 +52,18 @@ Then ask the user which to save (all, numbers like "1 3 4", edits, or none) and
 ## 4. Write the approved items
 
 - Notes/rules/memory/lessons → `nt_note` (title, `description`, `body` with the
-  detail, `folder`, `tags`; lessons via the lesson flag/tag). Apply any edits
-  the user gave.
+  detail; `kind:"lesson"|"rule"|"decision"|"ref"|"memory"` applies the canonical
+  tag+folder). Set `source:"opencode"`. Apply any edits the user gave.
 - Tasks → `nt_add` (verb-first title ≤ ~60 chars, detail in `body`, link related
   work with `discovered_from`).
-- If `nt_note` rejects a near-duplicate, follow its guidance: update or
-  supersede the existing note rather than forcing.
+- `nt_note` always creates; if its response includes a `similar` list, check
+  whether you just doubled an existing note — if so, consolidate: extend the
+  original (CLI `nt edit --append`) or retire the duplicate with `nt_archive`
+  `superseded_by=<kept id>`. (The CLI fallback `nt note` does refuse
+  near-duplicates — follow its printed guidance.)
 - Finish with a short receipt: each saved item's id and where it went.
 
 If the `nt_*` MCP tools are unavailable, fall back to the `nt` CLI over bash
-(`nt note …`, `nt add …`, `nt recall …`); if that's missing too, tell the user
+(`nt note …`, `nt add …`, `nt recall …`; multi-line or backtick-laden bodies:
+`--body-file -` with the body piped in); if that's missing too, tell the user
 to run `nt mcp install --client opencode` and stop.

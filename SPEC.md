@@ -11,7 +11,7 @@ agent (or you) can read back.
 ```
 nt              ← opens the TUI
 nt add "title"  ← adds from anywhere: another terminal, a script, an AI session
-nt index        ← read back what prior sessions captured (stub catalog)
+nt index        ← read back what prior sessions captured (tiered stub catalog)
 ```
 
 Because the data is just text on disk, an AI agent, your `$EDITOR`, `grep`, git, and even a
@@ -61,7 +61,9 @@ text, forever readable, and directly writable by an AI agent without an integrat
    whole `tasks.txt` into structs in Go (§7.1). No index, no sync layer that can drift.
 4. **AI durability is core, not an add-on.** The write→read-back loop ships in Phase 1, not as
    a final feature. Retrieval is index-first progressive disclosure — a small stub catalog
-   (`nt index`) loaded up front, note bodies fetched on demand (`nt show`).
+   (`nt index`) loaded up front — **tiered** on large stores (pinned standing notes +
+   last-14-days recent + per-folder counts; `--all` for the flat catalog; scoped
+   `--tag`/`--folder` views are complete) — note bodies fetched on demand (`nt show`).
 
 > Note: this is a personal global store by design. We do **not** promise "tasks live next to
 > your code" — that was the v0 framing and has been removed. Multi-machine sync is a
@@ -79,6 +81,7 @@ text, forever readable, and directly writable by an AI agent without an integrat
 ├── views.json                # saved smart views — `nt view save/recall` (optional)
 ├── web.pid / web.log         # a backgrounded `nt web --detach` server + its output (optional)
 ├── tasks.txt.lock            # advisory lock file (§6.4)
+├── .trash/                   # gc + rm destination (recoverable)
 ├── notes/
 │   ├── jwt-token-lifetime.md
 │   └── 2026-06-05-standup.md
@@ -303,7 +306,9 @@ mutation writes, atomically and under the same lock, a transaction record:
   `git init`s the store. Union merges can leave duplicate-ULID lines, so **`nt doctor`**
   reconciles after a merge: it drops duplicate ids (keeping a completed line over an open one)
   and assigns ids to any id-less line, under the lock. **`nt doctor` also lints notes** —
-  dangling `[[links]]`, notes missing a `description:`, and orphans — alongside this
+  dangling `[[links]]`, missing `description:`s, orphans (standalone kinds —
+  lessons/decisions/rules — are exempt), **near-duplicate pairs**, and an oversized pinned
+  tier (oldest listed), pointing at `nt supersede`/`nt gc` for the fix — alongside this
   task-ledger reconciliation. Not journaled — git is the recovery
   path; `nt doctor --check` is a non-mutating dry run (exit 1 if issues) for pre-commit/CI.
   This keeps the single greppable `tasks.txt`; per-task file sharding is deferred (§15).
@@ -357,17 +362,20 @@ nt                                   # launch the TUI
 nt add "fix auth bug" --pri high --due today --tag backend --project api [--source claude]
 nt note "JWT expiry" --body "..." --description "..." --tag auth [--folder work] [--source claude]
 nt list [--status open] [--tag bug] [--project api] [--sort urgency] [--json]   # (ls)
-nt index [--source claude] [--since 2026-06-01] [--json]   # stub catalog + active tasks — start here (AI loop)
+nt ready [--json]                    # open, unblocked work by urgency — the actionable feed
+nt index [--all] [--tag t] [--folder f] [--since 14d] [--json]   # tiered stub catalog + active tasks — start here (AI loop)
 nt log [--since 2026-06-01] [--days 7] [--source claude] [--json]   # completed tasks, newest first
 nt done <id|task:N>                  # mark done  (do)
 nt update <id|task:N> --status doing --pri med --due +3d     # (up)
 nt search "race condition" [--type note|task] [--limit 8] [--full]   # ranked stubs (q)
-nt recall "adding a cache layer" [--lessons-only] [--limit 8]   # relevant notes, lessons first (paraphrase-aware)
-nt note "gotcha" --lesson             # record a mistake/dead-end (tag lesson, folder lessons/)
+nt recall "adding a cache layer" [--lessons-only] [--project p]   # lessons ⚑ first, paraphrase-aware, precision floor (empty = nothing relevant), soft same-project boost (NT_WORKSTREAM default; 'none' disables)
+nt note "gotcha" --kind lesson --description "trigger"   # taxonomy: lesson|decision|ref|rule|memory → canonical tag + folder (--lesson = --kind lesson)
 nt show <id|slug|title> [--section "Heading"]   # one note's full body, on demand
 nt links <id|task:N> [--json]        # forward links + backlinks for an item (§5.1)
 nt archive                           # move done tasks → done.txt
-nt undo                              # revert the last transaction
+nt gc [--older-than 30d] [--yes]     # sweep superseded stubs + stranded __tasks__ notes → .trash/ (dry-run default)
+nt export --tag rule                 # compile the standing rules layer (CLAUDE.md / AGENTS.md)
+nt undo / redo                       # transactional; workstream-safe (--force overrides)
 nt edit <id|task:N> | nt edit note:<slug>   # safe edit via temp file (§6.2)
 nt mv <note> <new-name|folder/path>  # rename/move a note, rewriting all [[links]] to it
 nt path                              # print $NT_DIR
@@ -392,7 +400,8 @@ nt add "refactor auth middleware" --source claude --tag backend
 nt note "discovered race condition in token refresh" --source claude --description "token refresh race"
 
 # a later session reads back what was captured, as structured data
-nt index --source claude --json          # stub catalog + active tasks (start here)
+nt index --json                          # tiered stub catalog + active tasks (start here)
+nt recall "token refresh race"           # lessons ⚑ first, before touching the code
 nt show token-refresh-race               # then fetch a specific note's body on demand
 ```
 
@@ -401,6 +410,11 @@ nt show token-refresh-race               # then fetch a specific note's body on 
 - **`src:`** distinguishes AI-created items; the TUI badges them.
 - **Claude Code polish (Phase 4):** a PostToolUse hook mirroring `TaskCreate`/`TaskUpdate`
   into `nt add`/`nt update`, and a `/nt` skill — built on the Phase 1 loop, not inventing it.
+
+**Capture hygiene.** `nt note` refuses a near-duplicate of an active note (echoing repair
+commands: `nt edit --append`, `--supersede`; `--force` overrides; parallel-project siblings
+are exempt) — the MCP `nt_note` instead always creates and returns a non-blocking `similar`
+list.
 
 ### 8.1 Workstreams (parallel agents, one store)
 
@@ -412,10 +426,12 @@ findings cross-pollinate. A *workstream* is that isolation axis, distinct from
 
 - **Storage:** a task carries `ws:<id>`. The MCP `nt_add` stamps it; nothing
   else does, so CLI/TUI/web tasks (and any pre-workstream task) carry no `ws:`.
-- **Reads scope, notes don't.** `nt_index`/`nt_status`
+- **Reads scope, notes don't.** Reads scope across surfaces —
+  `list`/`ready`/`log`/`review`/`index` (CLI) and `nt_index`/`nt_status` (MCP)
   show tasks whose `ws:` matches the current workstream **or is absent** (the
   shared human backlog stays visible to everyone); a task stamped with a
-  *different* workstream is hidden. Notes are never scoped. `nt_search` and
+  *different* workstream is hidden. `undo`/`redo` refuse another workstream's
+  transaction unless `--force`. Notes are never scoped. `nt_search` and
   `nt_view` stay store-wide — knowledge discovery is shared.
 - **Identity resolution (first hit wins):** explicit `workstream` call arg →
   `NT_WORKSTREAM` env → (when either is the literal `auto`) the git branch, else
@@ -445,15 +461,17 @@ findings cross-pollinate. A *workstream* is that isolation axis, distinct from
 - **Flexible metadata** — tags, project, due, priority, links; use what helps, skip the rest.
 - **Recurring tasks** — `rec:weekly` / `rec:3d`; completing one spawns the next occurrence
   (advancing the due date) in the same undo transaction.
-- **Dependencies** — `--blocks task:5`; blocked tasks hide from the default list and show ⊘,
-  `nt list --show-blocked` (CLI) / `b` (TUI) reveals them.
+- **Dependencies** — `--blocked-by <id>` on the waiting task (or `--blocks <id>` on the
+  gating one; `none` clears); cycles are detected and warned in `ready`/`doctor`. Blocked
+  tasks hide from the default list and show ⊘, `nt list --show-blocked` (CLI) / `b` (TUI)
+  reveals them.
 
 ---
 
 ## 10. Onboarding & install
 
 - **First run** creates `$NT_DIR`, seeds one example task + note, and prints the three
-  commands that matter (`nt add`, `nt`, `nt index`). No config, no account.
+  commands that matter (`nt add`, `nt ready`, `nt index`). No config, no account.
 - **`tasks.txt` header**: a leading blank-safe hint line documenting the `key:value`
   conventions so hand-editors aren't lost (kept compatible — not a todo.txt comment).
 - **Install** should offer a plain release binary / `brew` tap in addition to any
@@ -605,9 +623,11 @@ the identical UI in a native window (see `desktop/`, ADR 0001).
   todo→ULID map, status-mapped, `src:claude`); the bundled `/nt` skill teaches Claude to
   capture and `nt index`. Setup: docs/claude-integration.md.
 - `nt mcp` runs a stdio **MCP server** (newline-delimited JSON-RPC 2.0, no SDK dep) exposing
-  typed tools — `nt_status`/`nt_add`/`nt_update`/`nt_note`/`nt_index`/`nt_search`/`nt_recall`/`nt_get` —
-  for MCP clients. A thin driving adapter over the same engine/domain as the CLI and TUI;
-  defaults `source` to `claude` and refuses positional handles.
+  typed tools (**15**: nt_status, nt_view, nt_add, nt_update, nt_note, nt_relink, nt_index,
+  nt_get, nt_search, nt_recall, nt_links, nt_mv, nt_tag, nt_archive, nt_rm) with strict
+  unknown-param rejection, for MCP clients. A thin driving adapter over the same
+  engine/domain as the CLI and TUI; defaults `source` to `claude` and refuses positional
+  handles.
 
 ---
 

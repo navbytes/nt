@@ -48,7 +48,8 @@ token cost:
   description of what it's about to do. Unlike `nt_search` (exact substring),
   `nt_recall` stems and expands dev-concept synonyms, so a *paraphrased* task
   ("adding parallel request handling") still surfaces the lesson worded differently
-  ("goroutine deadlock") — with recorded **lessons ranked first**.
+  ("goroutine deadlock") — with recorded **lessons ranked first**, and, when
+  `NT_WORKSTREAM` is set, a soft boost for the same project's notes.
 - And the plugin makes the loop fire even when the agent forgets: a **failed bash
   command triggers a lessons-only recall automatically** and pipes the hits into
   the next request, and lessons survive **context compaction** (see the plugin
@@ -69,13 +70,13 @@ TUI, web UI, and Obsidian.
 ## The building blocks (what's in this bundle)
 
 ### 1. MCP server — the read/write engine (`mcp.nt`)
-`nt mcp` exposes 14 typed tools — deliberately few, so tool selection stays unambiguous. OpenCode is a first-class MCP client, so this
+`nt mcp` exposes 15 typed tools — deliberately few, so tool selection stays unambiguous. OpenCode is a first-class MCP client, so this
 *is* the knowledge-base + memory read/write path — no custom OpenCode tool
 needed. Retrieval follows progressive disclosure: `nt_index` (cheap catalog of
 stubs) → `nt_search` (ranked stubs) → `nt_get` (one note's body). No bulk dump.
 
 - **Read:** `nt_index`, `nt_search`, `nt_recall`, `nt_get`, `nt_status`, `nt_links`, `nt_view`
-- **Write:** `nt_add`, `nt_note`, `nt_update`, `nt_tag`, `nt_mv`, `nt_archive`, `nt_relink`
+- **Write:** `nt_add`, `nt_note`, `nt_update`, `nt_tag`, `nt_mv`, `nt_archive`, `nt_relink`, `nt_rm`
 
 Registered (absolute path, idempotent) by:
 ```bash
@@ -159,7 +160,7 @@ not auto-expand them). The substance lives in nt, not here.
 
 ### 7. `nt export` — the compile primitive
 `nt export [--tag T] [--folder F] [--type note|task|all] [--format md|json]
-[--out FILE] [--no-provenance]` concatenates selected notes (and optionally open
+[--out FILE] [--no-provenance] [--no-header]` concatenates selected notes (and optionally open
 tasks) into one document — what the plugin uses to build the injected block and
 what file-mode writes to `nt-rules.md`. Each note carries a
 `<!-- nt:<id> <path> -->` provenance line (suppressed with `--no-provenance`) so
@@ -190,9 +191,9 @@ and you should see a `<nt-memory>` block influencing its behavior.
 
 ### Daily use
 ```bash
-nt note "Always prefer table-driven tests" --folder rules  --tag rule          # a rule
-nt note "User deploys via 'make ship', not CI" --folder memory --tag memory-core  # core memory
-nt note "Auth uses 24h JWTs, 7d refresh" --folder ref --tag auth               # KB (on-demand)
+nt note "Always prefer table-driven tests" --kind rule --description "…"           # a rule
+nt note "User deploys via 'make ship', not CI" --kind memory --description "…"     # core memory
+nt note "Auth uses 24h JWTs, 7d refresh" --kind ref --tag auth --description "Token lifetimes"  # KB (on-demand)
 ```
 The agent reads rules+memory every session automatically, and finds the KB note
 only when it `nt_search`es for "jwt".

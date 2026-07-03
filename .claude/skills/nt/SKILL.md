@@ -17,8 +17,10 @@ distinguishable from what the user typed by hand.
 > If the `nt` MCP server is registered with your client, **prefer the typed
 > `nt_*` tools over shelling out** — they go through the same store, default
 > `source` to `claude`, and avoid CLI-string mistakes. Capture: `nt_add`,
-> `nt_note`, `nt_update` (status:"done" completes), `nt_tag`, `nt_mv`. Retrieve:
-> `nt_index`, `nt_search`, `nt_recall`, `nt_get`, `nt_status`, `nt_links`. Fall back
+> `nt_note` (`kind` files it), `nt_update` (status:"done" completes), `nt_tag`,
+> `nt_mv`, `nt_archive` (supersede), `nt_relink`, `nt_rm` (tasks). Retrieve:
+> `nt_index`, `nt_search`, `nt_recall`, `nt_get` (handle or id), `nt_status`,
+> `nt_links`, `nt_view`. Fall back
 > to the `nt` commands below when the tools aren't available — the workflow is identical.
 
 ## Start here: `nt index` + `nt ready`
@@ -40,8 +42,12 @@ it with `--kind rule|ref` (or tag `pin`) so every future session sees it.
 
 `nt index` is your "what's here" catalog; `nt ready` is the task feed. **Before
 creating anything, retrieve first** (`nt index` / `nt search`) so you don't
-duplicate an item that already exists. To read a specific note, `nt show <id>`
-(MCP: `nt_get`); to find one, `nt search <q>` returns ranked stubs.
+duplicate an item that already exists. If `nt note` refuses with "a
+near-duplicate already exists", follow its hint: `nt edit <id> --append`, or
+`--supersede <id>`, or rerun with `--force` only if genuinely distinct. (The MCP
+`nt_note` instead always creates and returns a `similar` list — consolidate
+afterwards.) To read a specific note — or a task and its linked detail —
+`nt show <id>` (MCP: `nt_get`); to find one, `nt search <q>` returns ranked stubs.
 
 ## Before a task: `nt recall` — don't repeat past mistakes
 
@@ -52,6 +58,9 @@ differs (it's paraphrase-aware, unlike substring `nt search`):
 ```bash
 nt recall "adding concurrent token refresh"    # MCP: nt_recall(context: "...")
 ```
+
+An empty result means nothing relevant is recorded (recall has a precision
+floor) — proceed, don't retry with looser words.
 
 When `NT_WORKSTREAM` is set, your own project's notes get a soft ranking
 preference (`projectMatch: true` in JSON) — cross-project results stay visible
@@ -69,14 +78,15 @@ nt recall --lessons-only                     # bare: list every recorded lesson
 
 ```bash
 nt add "refactor auth middleware" --source claude --pri high --due today --tag backend --project api
-nt add "fix refresh race" --source claude --body "repro: two parallel calls…"   # detail → auto-linked note
+nt add "fix refresh race" --source claude --body "repro: two parallel calls…"   # detail → auto-linked note under notes/__tasks__/ (re-using --body on the same task appends)
 ```
 
 Keep the title short and verb-first; put detail/reasoning/steps in `--body` —
 it's saved as the task's linked note. Flags: `--pri high|med|low`,
 `--due today|tomorrow|fri|+3d|YYYY-MM-DD`, `--tag NAME` (repeatable; `--tags a,b`),
 `--project NAME`, `--blocked-by <id>` (this task waits for `<id>`), `--blocks <id>`
-(the reverse), `--discovered-from <id>`, `--recur weekly|3d|…`, `--note <slug>`
+(the reverse; pass `none` to `--blocks` on the blocking task to clear an edge),
+`--discovered-from <id>`, `--recur weekly|3d|…`, `--note <slug>`
 (link an existing note; also on `nt update` to attach one later).
 
 ## Capture notes — and file them into folders
@@ -84,7 +94,7 @@ it's saved as the task's linked note. Flags: `--pri high|med|low`,
 For findings, context, decisions — anything longer than a task line:
 
 ```bash
-nt note "JWT tokens expire after 24h" --body "Refresh window is 7d. See auth.go." --source claude --tag auth
+nt note "JWT tokens expire after 24h" --description "Access 24h, refresh 7d — see auth.go" --body "Refresh window is 7d. See auth.go." --source claude --tag auth
 ```
 
 **Bodies with backticks, `$()`, or multiple lines: never inline them in the shell
@@ -96,9 +106,10 @@ nt note "Decision: flock over SQLite" --kind decision --body-file /tmp/body.md -
 printf '%s\n' "the body…" | nt note "…" --body-file - --source claude
 ```
 
-**File notes by class with `--kind lesson|decision|ref|rule`** — it applies the
-canonical tag + folder (`lessons/`, `decisions/`, `ref/`, `rules/`) so every
-session converges on one layout. An explicit `--folder` (or path-style
+**File notes by class with `--kind lesson|decision|ref|rule|memory`** — it applies the
+canonical tag + folder (`lessons/`, `decisions/`, `ref/`, `rules/`, `memory/`) so every
+session converges on one layout (`--kind memory` files under `memory/` with tag
+`memory-core` — the always-loaded core-memory layer). An explicit `--folder` (or path-style
 `nt note "decisions/Chose flock"`) still wins for bespoke foldering. Bare
 `[[name]]` links resolve across folders by shortest path-suffix, so foldering
 never breaks linking — and you can refile later with `nt mv`. The `nt_note` MCP
@@ -155,6 +166,9 @@ Keep the KB tidy as it grows — no `$EDITOR` needed:
 nt mv <note> ref/auth              # refile/rename, rewriting every [[link]] to it
 nt tag <note> +reviewed -inbox     # add/remove tags
 nt rm <note>                       # delete → .trash/ (refuses if inbound [[links]] would dangle; --force overrides)
+nt doctor                          # store health: dangling [[links]], near-duplicates, oversized pinned tier
+nt archive <note>                  # retire a stale note from index/search/recall (reversible)
+nt supersede <old> --by <new>      # (or nt note … --supersede <old>) — replace a note; the old one retires with a pointer
 nt gc                              # plan: superseded stubs + stranded task notes >30d old
 nt gc --yes                        # reclaim them → .trash/ (recoverable)
 ```
@@ -180,7 +194,10 @@ the returned id directly with `nt links` / `nt tag` / `nt mv` / `nt rm`.
 - **Always** `--source claude` on items you create.
 - Retrieve (`index`/`search`) before creating, to avoid duplicates.
 - Tasks are one line; put anything longer in a note and link to it.
-- Organize notes into folders (`ref/`, `decisions/`, `inbox/`) rather than a flat root.
+- Always give notes a `--description` — it's the one-line summary `nt index`
+  shows; `nt show` prints it and export folds it in.
+- File notes by class with `--kind` (`lessons/`, `decisions/`, `ref/`, `rules/`,
+  `memory/`); use bespoke folders (`--folder`) only when no kind fits.
 - The store is global at `$NT_DIR` (default `~/.local/share/nt`); `nt path` prints it.
 
 ## Workstreams (parallel sessions, shared store)

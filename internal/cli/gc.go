@@ -4,6 +4,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"regexp"
 	"strings"
 	"time"
 
@@ -60,6 +61,10 @@ func gcCandidates(e *mutate.Engine, cutoff string) []gcCandidate {
 	}
 	return out
 }
+
+// pastRelRe matches a past-relative day count: "30d" or "-30d" = 30 days ago
+// (the same form dateparse.PastDate accepts for --updated-since).
+var pastRelRe = regexp.MustCompile(`^-?(\d+)d$`)
 
 // cmdGc reclaims dead weight: superseded stubs and stranded task-detail notes
 // move to .trash/ (recoverable — same mechanism as `nt rm` on a note). Dry-run

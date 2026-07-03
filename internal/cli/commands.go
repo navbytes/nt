@@ -137,7 +137,7 @@ func cmdAdd(args []string) int {
 	fs := flag.NewFlagSet("add", flag.ContinueOnError)
 	var tags stringSlice
 	pri := fs.String("pri", defPri, "priority high|med|low")
-	due := fs.String("due", "", "due date")
+	due := fs.String("due", "", "due date (today|tomorrow|fri|+3d|YYYY-MM-DD)")
 	project := fs.String("project", "", "project")
 	source := fs.String("source", defSource, "origin")
 	parent := fs.String("parent", "", "parent task id")
@@ -166,11 +166,16 @@ func cmdAdd(args []string) int {
 	if bodyErr != nil {
 		return usageErr(fmt.Errorf("add: %w", bodyErr))
 	}
+	// "--blocked-by none" is a natural guess for clearing a dependency, but the
+	// edge lives on the BLOCKER (blocks:). Teach the real clearing move.
+	if *blockedBy == "none" || *blockedBy == "-" {
+		return usageErr(fmt.Errorf("add: --blocked-by takes a task id; to clear a dependency run nt update <blocker-id> --blocks none (nt links <id> shows the blocker)"))
+	}
 	var p byte
 	if *pri != "" {
 		b, ok := parsePriority(*pri)
 		if !ok {
-			return usageErr(fmt.Errorf("add: invalid priority %q", *pri))
+			return usageErr(fmt.Errorf("add: invalid priority %q (use high|med|low)", *pri))
 		}
 		p = b
 	}
@@ -178,7 +183,7 @@ func cmdAdd(args []string) int {
 	if *due != "" {
 		v, ok := parseDate(*due)
 		if !ok {
-			return usageErr(fmt.Errorf("add: invalid due date %q", *due))
+			return usageErr(fmt.Errorf("add: invalid due date %q (use today|tomorrow|fri|+3d|YYYY-MM-DD)", *due))
 		}
 		dueVal = v
 	}
@@ -551,15 +556,15 @@ func cmdStop(args []string) int {
 func cmdNote(args []string) int {
 	fs := flag.NewFlagSet("note", flag.ContinueOnError)
 	var tags stringSlice
-	body := fs.String("body", "", "note body")
+	body := fs.String("body", "", "note body (markdown); use --body-file - for long bodies (immune to shell quoting)")
 	bodyFile := fs.String("body-file", "", "read the body from a file ('-' = stdin); immune to shell quoting")
 	source := fs.String("source", "cli", "origin")
 	folder := fs.String("folder", "", "subfolder under notes/ (e.g. work or work/auth)")
-	desc := fs.String("description", "", "one-line summary shown in `nt index`")
+	desc := fs.String("description", "", "one-line summary shown in 'nt index'")
 	supersede := fs.String("supersede", "", "mark this note as replacing an existing one (its handle) — the old note retires from active views")
 	force := fs.Bool("force", false, "create even if a near-duplicate note already exists")
-	lesson := fs.Bool("lesson", false, "record a durable lesson/gotcha: tags it `lesson` and files it under lessons/ so `nt recall` surfaces it before the mistake recurs")
-	kind := fs.String("kind", "", "note class: lesson|decision|ref|rule — tags it and files it in the canonical folder (multi-agent stores converge instead of inventing taxonomies)")
+	lesson := fs.Bool("lesson", false, "record a durable lesson/gotcha: tags it 'lesson' and files it under lessons/ so 'nt recall' surfaces it before the mistake recurs")
+	kind := fs.String("kind", "", "note class: lesson|decision|ref|rule|memory — tags it and files it in the canonical folder (memory files under memory/ with tag memory-core — the always-loaded core-memory layer)")
 	var fields stringSlice
 	asJSON := fs.Bool("json", false, "print the created note as JSON (id, title, path, …)")
 	fs.Var(&tags, "tag", "tag (repeatable)")
@@ -590,16 +595,15 @@ func cmdNote(args []string) int {
 	// folders and two lesson locations in one day — steering at write time is what
 	// makes a shared store converge.
 	if *kind != "" {
-		kindFolder := map[string]string{"lesson": "lessons", "decision": "decisions", "ref": "ref", "rule": "rules"}
-		fold, okKind := kindFolder[*kind]
+		meta, okKind := note.Kinds[*kind]
 		if !okKind {
-			return usageErr(fmt.Errorf("note: --kind must be lesson|decision|ref|rule, got %q", *kind))
+			return usageErr(fmt.Errorf("note: --kind must be lesson|decision|ref|rule|memory, got %q", *kind))
 		}
-		if !contains(tags, *kind) {
-			tags = append(tags, *kind)
+		if !contains(tags, meta.Tag) {
+			tags = append(tags, meta.Tag)
 		}
 		if *folder == "" {
-			*folder = fold
+			*folder = meta.Folder
 		}
 	}
 	title := strings.Join(positional, " ")
@@ -878,15 +882,15 @@ func completeAndSpawn(d *task.Doc, rec *mutate.Recorder, t *task.Task) *task.Tas
 func cmdUpdate(args []string) int {
 	fs := flag.NewFlagSet("update", flag.ContinueOnError)
 	status := fs.String("status", "", "open|doing|blocked|done")
-	pri := fs.String("pri", "", "priority")
-	due := fs.String("due", "", "due date")
+	pri := fs.String("pri", "", "priority high|med|low")
+	due := fs.String("due", "", "due date (today|tomorrow|fri|+3d|YYYY-MM-DD)")
 	recur := fs.String("recur", "", "recurrence (stored; Phase 3)")
 	parent := fs.String("parent", "", "parent id ('none' clears)")
 	blocks := fs.String("blocks", "", "id of a task THIS task blocks ('none' clears the edge)")
-	blockedBy := fs.String("blocked-by", "", "id of a task that must complete first (the reverse of --blocks)")
+	blockedBy := fs.String("blocked-by", "", "id of a task that must complete first (reverse of --blocks; clear with --blocks none on the blocking task)")
 	noteSlug := fs.String("note", "", "link an existing note to the task(s) (slug/title/id)")
 	body := fs.String("body", "", "attach detail (markdown) — saved as the task's linked note")
-	bodyFile := fs.String("body-file", "", "read --body from a file ('-' = stdin)")
+	bodyFile := fs.String("body-file", "", "read the body from a file ('-' = stdin); immune to shell quoting")
 	est := fs.String("est", "", "time estimate (90m, 2h; 'none' clears)")
 	title := fs.String("title", "", "replace the task's description (keeps tags/project/links)")
 	project := fs.String("project", "", "set the +project ('none' clears)")
@@ -906,11 +910,16 @@ func cmdUpdate(args []string) int {
 	handles := positional // bulk: apply the same changes to every id given
 
 	// Validate parseable flags before locking.
+	if *blockedBy == "none" || *blockedBy == "-" {
+		// The dependency edge lives on the BLOCKER (blocks:) — teach the real
+		// clearing move instead of failing with "no task \"none\"".
+		return usageErr(fmt.Errorf("update: --blocked-by takes a task id; to clear a dependency run nt update <blocker-id> --blocks none (nt links <id> shows the blocker)"))
+	}
 	var priByte byte
 	if *pri != "" {
 		b, ok := parsePriority(*pri)
 		if !ok {
-			return usageErr(fmt.Errorf("update: invalid priority %q", *pri))
+			return usageErr(fmt.Errorf("update: invalid priority %q (use high|med|low)", *pri))
 		}
 		priByte = b
 	}
@@ -918,7 +927,7 @@ func cmdUpdate(args []string) int {
 	if *due != "" {
 		v, ok := parseDate(*due)
 		if !ok {
-			return usageErr(fmt.Errorf("update: invalid due %q", *due))
+			return usageErr(fmt.Errorf("update: invalid due %q (use today|tomorrow|fri|+3d|YYYY-MM-DD)", *due))
 		}
 		dueVal = v
 	}
@@ -1228,7 +1237,7 @@ func cmdRm(args []string) int {
 		fmt.Printf("removed %d (nt undo to restore)\n", count)
 	}
 	for _, dn := range strandedDetail {
-		fmt.Fprintf(os.Stderr, "note: %s was this task's detail note and is now stranded — `nt rm %s -y` to trash it (keep it if you might undo)\n", dn.Rel, shortID(dn.ID))
+		fmt.Fprintf(os.Stderr, "note: %s was this task's detail note and is now stranded — `nt rm %s -y` to trash it (keep it if you might undo) — or let `nt gc` collect it after 30d\n", dn.Rel, shortID(dn.ID))
 	}
 	return 0
 }

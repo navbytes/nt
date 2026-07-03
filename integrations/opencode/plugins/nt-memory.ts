@@ -26,7 +26,8 @@
  *
  * The knowledge base (everything in nt outside the small rules/memory core) is
  * NOT injected — it stays behind the nt MCP tools (nt_index / nt_search /
- * nt_get / nt_links), fetched on demand so it costs zero tokens until used.
+ * nt_recall / nt_get / nt_links), fetched on demand so it costs zero tokens
+ * until used.
  * Register those once with:  nt mcp install --client opencode
  *
  * Everything here is wrapped so a missing or broken nt can never break a session.
@@ -86,7 +87,7 @@ const CONFIG = {
 
 // MCP write tools, matched by suffix so both `nt_note` and a server-prefixed
 // `nt_nt_note` count (OpenCode names MCP tools `<server>_<tool>`).
-const NT_WRITE_TOOL = /(^|_)nt_(add|note|done|update|tag|mv|archive|supersede|relink)$/
+const NT_WRITE_TOOL = /(^|_)nt_(add|note|update|tag|mv|rm|archive|relink)$/
 
 export const NtMemory: Plugin = async ({ $, client }) => {
   // Run an nt subcommand, returning stdout (empty string on any failure).

@@ -83,8 +83,8 @@ func archiveNotes(e *mutate.Engine, handles []string, unarchive bool) int {
 	return 0
 }
 
-func cmdUndo(args []string) int  { return runReversal(args, false) }
-func cmdRedo(args []string) int  { return runReversal(args, true) }
+func cmdUndo(args []string) int { return runReversal(args, false) }
+func cmdRedo(args []string) int { return runReversal(args, true) }
 
 // runReversal implements `nt undo` and `nt redo`. On a shared multi-agent store
 // the journal interleaves every writer's transactions, so the last change is
@@ -145,7 +145,7 @@ func cmdEdit(args []string) int {
 	fs := flag.NewFlagSet("edit", flag.ContinueOnError)
 	appendTxt := fs.String("append", "", "append markdown to the note body without an editor (agent-safe)")
 	appendFile := fs.String("append-file", "", "append the contents of a file ('-' = stdin) to the note body")
-	bodyFile := fs.String("body-file", "", "replace the note body from a file ('-' = stdin)")
+	bodyFile := fs.String("body-file", "", "replace the note body from a file ('-' = stdin); immune to shell quoting")
 	desc := fs.String("desc", "", "set the note's one-line description (frontmatter) without an editor")
 	fs.StringVar(desc, "description", "", "alias for --desc")
 	flags, positional := splitArgs(args, nil)
@@ -408,10 +408,10 @@ func cmdDoctor(args []string) int {
 // noteLint is the KB-side health report `nt doctor` produces alongside the task
 // reconciliation.
 type noteLint struct {
-	Dangling    []string // "[[target]] in <source>" — an unresolved wiki-link (a real break)
-	NoteCount   int
-	MissingDesc []string // handles of active notes with no explicit `description:`
-	Orphans     []string // handles of active notes nothing links to (informational)
+	Dangling     []string // "[[target]] in <source>" — an unresolved wiki-link (a real break)
+	NoteCount    int
+	MissingDesc  []string // handles of active notes with no explicit `description:`
+	Orphans      []string // handles of active notes nothing links to (informational)
 	NearDups     []string // "a ≈ b" pairs of active notes with near-duplicate titles
 	PinnedCount  int      // notes in the always-shown index tier (rules/memory/ref/pin)
 	OldestPinned []string // "handle (aged Nd)" — staleness candidates when the tier is oversized

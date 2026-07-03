@@ -8,7 +8,7 @@ This roadmap synthesizes four expert audits (web UX, TUI, task-management produc
 
 The original gap — "nt is a task *list*, not a task *manager*" — is **closed**, and so is essentially the rest of the audit backlog. Across v0.1→v0.6 the planner (start/defer dates, Today/Agenda, recurrence, sub-tasks, dependency-cycle detection, time-of-day, full A–Z priority, time tracking, weekly review), the web app (CodeMirror editor, ranked search, daily-notes journal, mobile/PWA, command palette, a11y, force-graph, notes grid, move-between-folders), the TUI (command palette, vim counts, fuzzy jump, in-pane capture, redo, light theme), and the infrastructure (incremental read-model, in-memory search, shared query/DTO layer, config file, bounded payloads, god-file splits, cross-platform file locking) all shipped over the same plain-text store.
 
-What's left is a **short polish/scale tail** — no remaining item is load-bearing for the core thesis: partial refinements (tasks in web search, web property editing, fuzzy filter ranking, more concurrency tests, TUI self-write de-flicker) and one deliberately-deferred scale item (**E2** persisted index, which only pays off past ~10k notes). With **T4** (saved smart views) now shipped, there is no net-new *feature* left on the backlog.
+What's left is a **short polish/scale tail** — no remaining item is load-bearing for the core thesis: partial refinements (tasks in web search, web property editing, fuzzy filter ranking, more concurrency tests, TUI self-write de-flicker) and one deliberately-deferred scale item (**E2** persisted index, which only pays off past ~10k notes). With **T4** (saved smart views) shipped and the **agent memory loop** (see Shipped, below) now landed, the original audit backlog holds no net-new feature — new work since has gone into the memory loop itself.
 
 ## 🧭 Next up — grouped roadmap (2026-06-11)
 
@@ -53,6 +53,16 @@ surface, sized S/M/L, and sequenced so each lands as its own green-CI PR.
 Sequencing: D1–D3 (one PR, done) → D4+R1+R2 (one PR) → T10(+T11) → W10 → W11 → W12 → W9 → D5/D6/R3 as time allows. Each PR merges only on green CI.
 
 ## ✅ Shipped
+
+**Agent memory loop** ✅ Shipped
+- paraphrase-aware `nt recall` with a precision floor (returns nothing when nothing is relevant) and a soft same-project boost (never a filter)
+- `--kind` taxonomy — `lesson|decision|ref|rule|memory` → canonical tag + folder (incl. `memory/` + `memory-core`)
+- the tiered index (stub catalog) — pinned standing notes + recent stubs + per-folder counts on large stores; `--all` = flat
+- capture-dedup guards — CLI `nt note` refuses near-duplicates (with repair commands); MCP `nt_add`/`nt_note` are advisory (`similar` list)
+- workstreams (tasks isolated, notes shared) + workstream-safe `undo`/`redo` (`--force` overrides)
+- `nt export` — compiles the standing rules layer into CLAUDE.md/AGENTS.md
+- the `supersede → archive → gc` curation lifecycle (gc dry-run by default, `.trash/` recoverable) + `nt doctor` near-dup/orphan/pinned-tier checks
+- the OpenCode bundle — `nt opencode install`: MCP + `nt-memory` plugin + skill + `/learn` + `/recall`
 
 **Foundation / correctness**
 - **F1** undo correctness — post-image validation, no-resurrect, durable ordering + store dir-fsync + first `store` tests

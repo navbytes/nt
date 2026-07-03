@@ -46,7 +46,7 @@ func cmdShow(args []string) int {
 		}
 	}
 	if len(positional) == 0 {
-		return usageErr(fmt.Errorf("show: need a note handle (slug/title/id)"))
+		return usageErr(fmt.Errorf("show: need a note or task handle (slug/title/id)"))
 	}
 	e, ok := engine()
 	if !ok {

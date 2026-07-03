@@ -228,10 +228,26 @@ func (s *server) dispatch(name string, a map[string]any) (string, error) {
 // but never shipped to the real tool that covers the need — so an agent that
 // read stale docs recovers in one turn instead of flailing.
 var retiredToolHints = map[string]string{
-	"nt_ready":  "use nt_status (in-progress + ready tasks) or nt_index",
-	"nt_log":    "use nt_status (includes recent completions) or nt_index (recentlyDone)",
-	"nt_done":   `use nt_update with status:"done"`,
-	"nt_delete": "use nt_rm (removes a task; `nt undo` restores it) or nt_archive (retires a note)",
+	"nt_ready":     "use nt_status (in-progress + ready tasks) or nt_index",
+	"nt_log":       "use nt_status (includes recent completions) or nt_index (recentlyDone)",
+	"nt_done":      `use nt_update with status:"done"`,
+	"nt_delete":    "use nt_rm (removes a task; `nt undo` restores it) or nt_archive (retires a note)",
+	"nt_gc":        "store gc is CLI-only — run `nt gc` (dry-run) then `nt gc --yes`",
+	"nt_doctor":    "health checks are CLI-only — run `nt doctor`",
+	"nt_supersede": "use nt_archive with superseded_by:<new-id> (or nt_note supersede:<old-id>)",
+	"nt_edit":      "in-place note repair is CLI-only (nt edit <note> --append/--desc); to replace a note use nt_note supersede:",
+	"nt_undo":      "undo/redo are CLI-only — run `nt undo` / `nt redo`",
+	"nt_redo":      "undo/redo are CLI-only — run `nt redo`",
+	"nt_show":      "use nt_get (note body) or nt_status (task state)",
+}
+
+// paramAliases maps the parameter names agents habitually guess to the real
+// one, consulted before the edit-distance fallback (which can't bridge e.g.
+// content→body). Keyed by tool name; "" applies to every tool.
+var paramAliases = map[string]map[string]string{
+	"":          {"content": "body"},
+	"nt_note":   {"text": "title"},
+	"nt_recall": {"query": "context"},
 }
 
 // rejectUnknownParams validates a tool call's argument NAMES against the
@@ -253,6 +269,17 @@ func rejectUnknownParams(name string, a map[string]any) error {
 	for k := range a {
 		if _, ok := props[k]; ok {
 			continue
+		}
+		// Known alias? A hand-written nudge beats edit distance for the habitual
+		// misnames (content: for body:), which are too far apart to fuzzy-match.
+		alias := paramAliases[name][k]
+		if alias == "" {
+			alias = paramAliases[""][k]
+		}
+		if alias != "" {
+			if _, ok := props[alias]; ok {
+				return fmt.Errorf("unknown parameter %q for %s — did you mean %q? (accepted: %s)", k, name, alias, paramList(props))
+			}
 		}
 		best, bestDist := "", -1
 		for p := range props {
@@ -493,6 +520,13 @@ func (s *server) add(a map[string]any) (string, error) {
 	if source == "" {
 		source = "claude"
 	}
+	blockedBy := strings.TrimSpace(str(a, "blocked_by"))
+	blocksArg := strings.TrimSpace(str(a, "blocks"))
+	if blockedBy == "none" || blockedBy == "-" {
+		// A natural guess for clearing a dependency, but the edge lives on the
+		// BLOCKER (blocks:) — teach the real clearing move.
+		return "", fmt.Errorf("--blocked-by takes a task id; to clear a dependency run nt update <blocker-id> --blocks none (nt links <id> shows the blocker)")
+	}
 
 	// A task's detail belongs in a linked note ("body"). Three ways here, all
 	// filing the note under notes/__tasks__/ so these machine-made notes don't clutter
@@ -546,6 +580,27 @@ func (s *server) add(a map[string]any) (string, error) {
 			if dt, amb := d.Resolve(df); dt != nil && !amb {
 				t.SetKey("discovered", dt.ID())
 			}
+		}
+		// Dependency edges fail LOUDLY on an unresolvable id (same contract as the
+		// CLI): silently dropping the edge is how an agent ends up trusting a
+		// ready feed that lies to it.
+		if blocksArg != "" {
+			bt, amb := d.Resolve(blocksArg)
+			if bt == nil || amb {
+				return fmt.Errorf("blocks: no unique task %q — ids come from nt_status, nt_index, or nt_search", blocksArg)
+			}
+			t.SetKey("blocks", bt.ID())
+		}
+		if blockedBy != "" {
+			bt, amb := d.Resolve(blockedBy)
+			if bt == nil || amb {
+				return fmt.Errorf("blocked_by: no unique task %q — ids come from nt_status, nt_index, or nt_search", blockedBy)
+			}
+			if cur := bt.Blocks(); cur != "" {
+				return fmt.Errorf("blocked_by: task %s already blocks %s — a task can hold one blocks: edge; chain them instead (this task blocked_by %s)", shortID(bt.ID()), shortID(cur), shortID(cur))
+			}
+			rec.Before(bt)
+			bt.SetKey("blocks", t.ID())
 		}
 		d.Append(t)
 		rec.Added(t)
@@ -635,11 +690,18 @@ func (s *server) update(a map[string]any) (string, error) {
 	dueStr := str(a, "due")
 	pri, ok := dateparse.Priority(priStr)
 	if !ok {
-		return "", fmt.Errorf("invalid priority %q", priStr)
+		return "", fmt.Errorf("invalid priority %q (use high|med|low)", priStr)
 	}
 	due, ok := dateparse.Date(dueStr)
 	if !ok {
 		return "", fmt.Errorf("invalid due date %q", dueStr)
+	}
+	blockedBy := strings.TrimSpace(str(a, "blocked_by"))
+	blocksArg := strings.TrimSpace(str(a, "blocks"))
+	if blockedBy == "none" || blockedBy == "-" {
+		// The dependency edge lives on the BLOCKER (blocks:) — teach the real
+		// clearing move instead of failing with a bare "no task \"none\"".
+		return "", fmt.Errorf("--blocked-by takes a task id; to clear a dependency run nt update <blocker-id> --blocks none (nt links <id> shows the blocker)")
 	}
 
 	var out *task.Task
@@ -674,6 +736,33 @@ func (s *server) update(a map[string]any) (string, error) {
 		if due != "" {
 			t.SetKey("due", due)
 			changed["due"] = due
+		}
+		// Dependency edges mirror the CLI's --blocks/--blocked-by semantics: loud
+		// on an unresolvable id, blocks:"none" clears, one blocks: edge per task.
+		if blocksArg != "" {
+			if blocksArg == "none" || blocksArg == "-" {
+				t.SetKey("blocks", "") // clears the dependency edge
+				changed["blocks"] = ""
+			} else {
+				bt, amb := d.Resolve(blocksArg)
+				if bt == nil || amb {
+					return fmt.Errorf("blocks: no unique task %q — ids come from nt_status, nt_index, or nt_search", blocksArg)
+				}
+				t.SetKey("blocks", bt.ID())
+				changed["blocks"] = bt.ID()
+			}
+		}
+		if blockedBy != "" {
+			bt, amb := d.Resolve(blockedBy)
+			if bt == nil || amb {
+				return fmt.Errorf("blocked_by: no unique task %q — ids come from nt_status, nt_index, or nt_search", blockedBy)
+			}
+			if cur := bt.Blocks(); cur != "" && cur != t.ID() {
+				return fmt.Errorf("blocked_by: task %s already blocks %s — a task can hold one blocks: edge; chain them instead", shortID(bt.ID()), shortID(cur))
+			}
+			rec.Before(bt)
+			bt.SetKey("blocks", t.ID())
+			changed["blocked_by"] = bt.ID()
 		}
 		// Claim/reassign: only an EXPLICIT arg moves a task between workstreams —
 		// never the ambient identity, so updating a shared task's status doesn't
@@ -750,19 +839,18 @@ func (s *server) note(a map[string]any) (string, error) {
 	folder := str(a, "folder")
 
 	// kind steers taxonomy at write time (multi-agent stores converge on one
-	// layout instead of inventing folders): canonical tag + folder per class,
-	// with an explicit folder still winning.
+	// layout instead of inventing folders): canonical tag + folder per class
+	// (note.Kinds, shared with the CLI), with an explicit folder still winning.
 	if kind := strings.TrimSpace(str(a, "kind")); kind != "" {
-		kindFolder := map[string]string{"lesson": "lessons", "decision": "decisions", "ref": "ref", "rule": "rules"}
-		fold, ok := kindFolder[kind]
+		meta, ok := note.Kinds[kind]
 		if !ok {
-			return "", fmt.Errorf("invalid kind %q (use lesson|decision|ref|rule)", kind)
+			return "", fmt.Errorf("invalid kind %q (use lesson|decision|ref|rule|memory)", kind)
 		}
-		if !contains(tags, kind) {
-			tags = append(tags, kind)
+		if !contains(tags, meta.Tag) {
+			tags = append(tags, meta.Tag)
 		}
 		if folder == "" {
-			folder = fold
+			folder = meta.Folder
 		}
 	}
 
@@ -913,11 +1001,21 @@ func (s *server) index(a map[string]any) (string, error) {
 		return "", err
 	}
 	tag, folder := strings.TrimSpace(str(a, "tag")), strings.Trim(strings.TrimSpace(str(a, "folder")), "/")
-	since := ""
-	if s := strings.TrimSpace(str(a, "updated_since")); s != "" {
-		if d, ok := dateparse.Date(s); ok {
-			since = d
+	since, warning := "", ""
+	if sv := strings.TrimSpace(str(a, "updated_since")); sv != "" {
+		// Same grammar as the CLI's --updated-since (dateparse.PastDate): Nd = N
+		// days AGO. An unparseable value errors loudly — silently dropping the
+		// filter used to return the FULL store.
+		dd, ok := dateparse.PastDate(sv)
+		if !ok {
+			return "", fmt.Errorf("invalid updated_since %q (use 14d = last 14 days, today, or YYYY-MM-DD)", sv)
 		}
+		if dd > time.Now().Format("2006-01-02") {
+			// A future cutoff matches nothing — the "+14d means last 14 days,
+			// right?" trap. Still filter, but say so.
+			warning = "updated_since resolves to a future date — every note predates it; use 14d for the last 14 days"
+		}
+		since = dd
 	}
 	notes := note.Active(s.listNotes())
 	rootOnly := folder == "." // "." expands the "(root)" rollup
@@ -1011,7 +1109,7 @@ func (s *server) index(a map[string]any) (string, error) {
 
 	ws := s.workstream(a)
 	blocked := task.BlockedIDs(d.Tasks())
-	var active, scoped []*task.Task
+	var active, blockedT, scoped []*task.Task
 	for _, t := range d.Tasks() {
 		if !workstream.Visible(t.Key("ws"), ws) {
 			continue
@@ -1020,8 +1118,14 @@ func (s *server) index(a map[string]any) (string, error) {
 			continue
 		}
 		scoped = append(scoped, t)
-		if !t.Done && !blocked[t.ID()] {
-			active = append(active, t)
+		if !t.Done {
+			if blocked[t.ID()] {
+				// A resumer reading only the index must still learn blocked work
+				// exists — otherwise the plan looks smaller than it is.
+				blockedT = append(blockedT, t)
+			} else {
+				active = append(active, t)
+			}
 		}
 	}
 	task.SortByUrgency(active)
@@ -1036,10 +1140,16 @@ func (s *server) index(a map[string]any) (string, error) {
 	// compact drops the JSON scaffolding (keys, braces, quotes) an agent doesn't
 	// need to read the catalog. Opt in with format:"compact".
 	if str(a, "format") == "compact" {
-		return compactIndex(stubs, active, recent, noteTotal, tiered), nil
+		return compactIndex(stubs, active, blockedT, recent, noteTotal, tiered, warning), nil
 	}
 	out := map[string]any{
 		"notes": stubs, "tasks": tasksOut(active), "recentlyDone": tasksOut(recent),
+	}
+	if len(blockedT) > 0 {
+		out["blocked"] = tasksOut(blockedT)
+	}
+	if warning != "" {
+		out["warning"] = warning
 	}
 	out["noteTotal"] = noteTotal // always present: lets an agent confirm completeness
 	if tiered.Tiered {
@@ -1056,8 +1166,11 @@ func (s *server) index(a map[string]any) (string, error) {
 // compactIndex renders the KB catalog as terse plain text — one line per note
 // (shortid · title — description · @tags) and per active task — for the
 // session-start nt_index call. Much cheaper than JSON for the same information.
-func compactIndex(stubs []noteStub, active, recent []*task.Task, noteTotal int, tiered note.Tiers) string {
+func compactIndex(stubs []noteStub, active, blockedT, recent []*task.Task, noteTotal int, tiered note.Tiers, warning string) string {
 	var b strings.Builder
+	if warning != "" {
+		fmt.Fprintf(&b, "warning: %s\n\n", warning)
+	}
 	fmt.Fprintf(&b, "NOTES (%d)\n", noteTotal)
 	lastTier := ""
 	for _, n := range stubs {
@@ -1105,6 +1218,12 @@ func compactIndex(stubs []noteStub, active, recent []*task.Task, noteTotal int, 
 			fmt.Fprintf(&b, " (due %s)", due)
 		}
 		b.WriteByte('\n')
+	}
+	if len(blockedT) > 0 {
+		fmt.Fprintf(&b, "\nBLOCKED (%d)\n", len(blockedT))
+		for _, t := range blockedT {
+			fmt.Fprintf(&b, "%s  %s\n", shortID(t.ID()), t.Text)
+		}
 	}
 	if len(recent) > 0 {
 		b.WriteString("\nRECENTLY DONE\n")
@@ -1290,7 +1409,8 @@ func (s *server) search(a map[string]any) (string, error) {
 // learn-from-sessions loop; the agent calls it at task start.
 func (s *server) recall(a map[string]any) (string, error) {
 	context := strings.TrimSpace(str(a, "context"))
-	if context == "" {
+	lessonsOnly := boolArg(a, "lessons_only")
+	if context == "" && !lessonsOnly {
 		return "", fmt.Errorf("context is required: describe what you're about to work on")
 	}
 	limit := intArg(a, "limit")
@@ -1298,7 +1418,7 @@ func (s *server) recall(a map[string]any) (string, error) {
 		limit = 8
 	}
 	notes := note.Active(s.listNotes())
-	if boolArg(a, "lessons_only") {
+	if lessonsOnly {
 		kept := notes[:0]
 		for _, n := range notes {
 			if contains(n.Tags, recall.LessonTag) {
@@ -1307,17 +1427,40 @@ func (s *server) recall(a map[string]any) (string, error) {
 		}
 		notes = kept
 	}
-	// Same-project preference: explicit `project` arg, else the workstream
-	// identity ("*" widen sentinel means none). A soft boost, never a filter.
-	proj := strings.TrimSpace(str(a, "project"))
-	if proj == "" {
-		if ws := s.workstream(a); ws != "*" {
-			proj = ws
+	var results []recall.Result
+	if context == "" {
+		// Bare lessons_only: enumerate the whole lesson book, newest first — the
+		// discoverable "what mistakes are on record?" read (mirrors the CLI's bare
+		// `nt recall --lessons-only`).
+		for _, n := range notes {
+			results = append(results, recall.Result{Note: n, Lesson: true})
 		}
-	} else if proj == "none" || proj == "-" || proj == "*" {
-		proj = ""
+		sort.SliceStable(results, func(i, j int) bool {
+			ui, uj := results[i].Note.Updated, results[j].Note.Updated
+			if ui == "" {
+				ui = results[i].Note.Created
+			}
+			if uj == "" {
+				uj = results[j].Note.Created
+			}
+			return ui > uj
+		})
+		if len(results) > limit {
+			results = results[:limit]
+		}
+	} else {
+		// Same-project preference: explicit `project` arg, else the workstream
+		// identity ("*" widen sentinel means none). A soft boost, never a filter.
+		proj := strings.TrimSpace(str(a, "project"))
+		if proj == "" {
+			if ws := s.workstream(a); ws != "*" {
+				proj = ws
+			}
+		} else if proj == "none" || proj == "-" || proj == "*" {
+			proj = ""
+		}
+		results = recall.RankProject(notes, context, limit, proj)
 	}
-	results := recall.RankProject(notes, context, limit, proj)
 	stubs := make([]map[string]any, 0, len(results))
 	for _, r := range results {
 		row := map[string]any{

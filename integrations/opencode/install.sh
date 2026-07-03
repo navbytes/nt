@@ -11,9 +11,10 @@
 #   1. register nt's MCP server with OpenCode (absolute path)        → mcp.nt
 #   2. copy the nt-memory plugin into ~/.config/opencode/plugins/
 #   3. copy the `nt` skill into     ~/.config/opencode/skills/nt/
-#   4. install a tiny AGENTS.md      (only if you don't already have one)
-#   5. merge permission.skill.nt=allow into opencode.json
-#   6. seed the rules/ and memory/ nt folders and an initial export
+#   4. copy the /learn + /recall commands into ~/.config/opencode/commands/
+#   5. install a tiny AGENTS.md      (only if you don't already have one)
+#   6. merge permission.skill.nt=allow into opencode.json
+#   7. seed the rules/ and memory/ nt folders and an initial export
 #
 # Usage:  ./install.sh            # global install (~/.config/opencode)
 #         NT_BIN=/path/to/nt ./install.sh
@@ -36,7 +37,7 @@ mkdir -p "$cfg/plugins" "$cfg/skills/nt" "$cfg/commands"
 echo "→ registering nt MCP server with OpenCode"
 "$nt" mcp install --client opencode
 
-# 2 + 3. Plugin, skill, and the /learn command.
+# 2–4. Plugin, skill, and the /learn + /recall commands.
 echo "→ installing plugin  → $cfg/plugins/nt-memory.ts"
 cp "$here/plugins/nt-memory.ts" "$cfg/plugins/nt-memory.ts"
 echo "→ installing skill   → $cfg/skills/nt/SKILL.md"
@@ -46,7 +47,7 @@ cp "$here/commands/learn.md" "$cfg/commands/learn.md"
 echo "→ installing command → $cfg/commands/recall.md  (/recall — on-demand memory brief)"
 cp "$here/commands/recall.md" "$cfg/commands/recall.md"
 
-# 4. AGENTS.md — never clobber an existing one.
+# 5. AGENTS.md — never clobber an existing one.
 if [ -f "$cfg/AGENTS.md" ]; then
   echo "→ keeping your existing $cfg/AGENTS.md (see integrations/opencode/AGENTS.md to merge)"
 else
@@ -54,7 +55,7 @@ else
   cp "$here/AGENTS.md" "$cfg/AGENTS.md"
 fi
 
-# 5. Merge permission.skill.nt = allow into opencode.json without touching the
+# 6. Merge permission.skill.nt = allow into opencode.json without touching the
 #    rest. Uses node if available; otherwise prints a manual hint.
 ocjson="$cfg/opencode.json"
 if command -v node >/dev/null 2>&1; then
@@ -74,7 +75,7 @@ else
   echo "  (node not found — add \"permission\": { \"skill\": { \"nt\": \"allow\" } } to $ocjson by hand)"
 fi
 
-# 6. Seed the always-in-context folders + an initial rules export. These notes are
+# 7. Seed the always-in-context folders + an initial rules export. These notes are
 #    examples you can edit or delete; the folders are what matter.
 #    Guard on the JSON empty-array marker: `nt notes --folder X` prints the human
 #    string "no notes" (non-empty) on an empty store, so a `[ -z ... ]` test is
@@ -107,8 +108,8 @@ cat <<EOF
 ✓ Done. Restart OpenCode (or reload MCP) to pick up nt.
 
 Next:
-  • Edit your rules:   nt note "<rule>" --folder rules  --tag rule
-  • Edit core memory:  nt note "<fact>" --folder memory --tag memory-core
+  • Edit your rules:   nt note "<rule>" --kind rule --description "…"
+  • Edit core memory:  nt note "<fact>" --kind memory --description "…"
   • Everything else is normal nt notes, retrieved on demand via the nt_* tools.
   • Inspect what gets injected:  nt export --tag rule --title Rules
 

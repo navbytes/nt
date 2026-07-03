@@ -21,6 +21,25 @@ var weekdays = map[string]time.Weekday{
 
 var isoDateTimeRe = regexp.MustCompile(`^(\d{4}-\d{2}-\d{2})[ tT](\d{1,2}:\d{2})$`)
 
+// pastRelRe matches the past-relative day forms of an "updated since" value:
+// "14d" or "-14d" = 14 days ago. The shared Date grammar's +Nd is future-anchored
+// (built for due dates), which made "the last 14 days" unexpressible.
+var pastRelRe = regexp.MustCompile(`^-?(\d+)d$`)
+
+// PastDate parses an "updated since" style value: Nd/-Nd as N days AGO, else the
+// shared Date grammar (today|fri|YYYY-MM-DD|+Nd…). Used by the CLI's
+// --updated-since and the MCP updated_since so both surfaces agree.
+func PastDate(s string) (string, bool) {
+	if m := pastRelRe.FindStringSubmatch(strings.TrimSpace(s)); m != nil {
+		n := 0
+		for _, c := range m[1] {
+			n = n*10 + int(c-'0')
+		}
+		return time.Now().AddDate(0, 0, -n).Format("2006-01-02"), true
+	}
+	return Date(s)
+}
+
 // Date accepts today, tomorrow, weekday names, +Nd, and YYYY-MM-DD, optionally
 // with a time-of-day: an ISO "YYYY-MM-DD[T ]HH:MM", or a clock appended to any
 // of the keyword forms ("today 5pm", "fri 17:00", "tomorrow 9am"). A timed value

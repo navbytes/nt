@@ -5,12 +5,11 @@ import (
 	"fmt"
 	"os"
 	"path"
-	"regexp"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 
+	"github.com/navbytes/nt/internal/dateparse"
 	"github.com/navbytes/nt/internal/note"
 	"github.com/navbytes/nt/internal/task"
 	"github.com/navbytes/nt/internal/workstream"
@@ -27,22 +26,6 @@ func shortDate(s string) string {
 // noteFolder is the directory a note lives in, relative to notes/ ("" = root).
 func noteFolder(n *note.Note) string {
 	return path.Dir(n.Rel)
-}
-
-// pastRelRe matches the past-relative day forms of --updated-since: "14d" or
-// "-14d" = 14 days ago. The shared date parser's +Nd is future-anchored (built
-// for due dates), which made "the last 14 days" unexpressible — and `+14d`
-// silently matched nothing.
-var pastRelRe = regexp.MustCompile(`^-?(\d+)d$`)
-
-// parsePastDate parses a --updated-since value: Nd/-Nd as N days AGO, else the
-// shared date grammar (today|fri|YYYY-MM-DD|+Nd…).
-func parsePastDate(s string) (string, bool) {
-	if m := pastRelRe.FindStringSubmatch(s); m != nil {
-		n, _ := strconv.Atoi(m[1])
-		return time.Now().AddDate(0, 0, -n).Format("2006-01-02"), true
-	}
-	return parseDate(s)
 }
 
 type indexNote struct {
@@ -81,14 +64,14 @@ func noteChangedDate(n *note.Note, frontmatter string) string {
 //	nt index --folder ref    # scope to a folder
 func cmdIndex(args []string) int {
 	fs := flag.NewFlagSet("index", flag.ContinueOnError)
-	folder := fs.String("folder", "", "only notes under this folder")
+	folder := fs.String("folder", "", `only notes under this folder, e.g. ref ("." = root notes)`)
 	asJSON := fs.Bool("json", false, "machine-readable output")
 	noTasks := fs.Bool("no-tasks", false, "omit the active-task section")
 	all := fs.Bool("all", false, "full catalog: every note stub, no tiering (large stores tier by default)")
 	limit := fs.Int("limit", 0, "cap the note catalog to N (0 = all); scope with --tag/--folder for large stores")
-	updatedSince := fs.String("updated-since", "", "only notes changed on/after this date (today|fri|+3d|YYYY-MM-DD) — 'what's new since last session'")
-	sinceAlias := fs.String("since", "", "alias for --updated-since (matches `nt log --since`)")
-	ws := fs.String("workstream", "", `scope tasks to a workstream (default: NT_WORKSTREAM; "*" = all)`)
+	updatedSince := fs.String("updated-since", "", "only notes changed on/after this date (14d = last 14 days | today | YYYY-MM-DD) — 'what's new since last session'")
+	sinceAlias := fs.String("since", "", "alias for --updated-since (matches 'nt log --since')")
+	ws := fs.String("workstream", "", `scope to a workstream (default: NT_WORKSTREAM; "*" = all)`)
 	var tags stringSlice
 	fs.Var(&tags, "tag", "only notes with this tag (repeatable, AND)")
 	flags, _ := splitArgs(args, map[string]bool{"json": true, "no-tasks": true, "all": true})
@@ -100,7 +83,7 @@ func cmdIndex(args []string) int {
 	}
 	since := ""
 	if s := strings.TrimSpace(*updatedSince); s != "" {
-		d, ok := parsePastDate(s)
+		d, ok := dateparse.PastDate(s)
 		if !ok {
 			return usageErr(fmt.Errorf("index: --updated-since: unrecognized date %q (try 14d = 14 days ago, today, or YYYY-MM-DD)", s))
 		}
@@ -355,7 +338,12 @@ func cmdIndex(args []string) int {
 			}
 			sort.Strings(folders)
 			for _, f := range folders {
-				fmt.Printf("- %s — %d note(s)\n", folderLabel(f), tiers.OlderByFolder[f])
+				label := folderLabel(f)
+				if f == "" || f == "." {
+					// Only in the rollup: "(root)" alone doesn't say HOW to expand it.
+					label = "(root — expand with --folder .)"
+				}
+				fmt.Printf("- %s — %d note(s)\n", label, tiers.OlderByFolder[f])
 			}
 		}
 	case noteTotal > len(stubs):

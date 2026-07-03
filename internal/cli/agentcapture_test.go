@@ -163,7 +163,7 @@ func TestNoteKindSteersTaxonomy(t *testing.T) {
 	t.Setenv("NT_DIR", t.TempDir())
 	captureRun(t, "note", "chose sentinel error over bool", "--kind", "decision", "--description", "x")
 	var j struct {
-		Path string `json:"path"`
+		Path string   `json:"path"`
 		Tags []string `json:"tags"`
 	}
 	json.Unmarshal([]byte(captureRun(t, "show", "chose sentinel error over bool", "--json")), &j)
