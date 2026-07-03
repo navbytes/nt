@@ -51,7 +51,8 @@ func viewSave(args []string) int {
 
 	fs := flag.NewFlagSet("view save", flag.ContinueOnError)
 	status := fs.String("status", "", "open|doing|blocked|done")
-	tag := fs.String("tag", "", "filter by tag")
+	var tags stringSlice
+	fs.Var(&tags, "tag", "filter by tag (repeatable, AND)")
 	project := fs.String("project", "", "filter by project")
 	sortBy := fs.String("sort", "", "urgency|due|created")
 	all := fs.Bool("all", false, "include done tasks")
@@ -62,7 +63,7 @@ func viewSave(args []string) int {
 	}
 	spec := view.Spec{
 		Status:      *status,
-		Tag:         *tag,
+		Tags:        tags,
 		Project:     *project,
 		Sort:        *sortBy,
 		All:         *all,

@@ -8,8 +8,10 @@ sessions, lives in plain files you can `grep`/`git diff`/open in Obsidian, and
 costs the right number of tokens for each kind of content.
 
 ```bash
-./install.sh        # global install into ~/.config/opencode
+nt opencode install   # complete setup from any installed nt binary (--print to preview)
 ```
+
+(From a repo checkout, `./install.sh` performs the same steps.)
 
 ---
 
@@ -67,13 +69,13 @@ TUI, web UI, and Obsidian.
 ## The building blocks (what's in this bundle)
 
 ### 1. MCP server — the read/write engine (`mcp.nt`)
-`nt mcp` exposes 18 typed tools. OpenCode is a first-class MCP client, so this
+`nt mcp` exposes 14 typed tools — deliberately few, so tool selection stays unambiguous. OpenCode is a first-class MCP client, so this
 *is* the knowledge-base + memory read/write path — no custom OpenCode tool
 needed. Retrieval follows progressive disclosure: `nt_index` (cheap catalog of
 stubs) → `nt_search` (ranked stubs) → `nt_get` (one note's body). No bulk dump.
 
-- **Read:** `nt_index`, `nt_search`, `nt_recall`, `nt_get`, `nt_ready`, `nt_status`, `nt_links`, `nt_view`, `nt_log`
-- **Write:** `nt_add`, `nt_note`, `nt_done`, `nt_update`, `nt_tag`, `nt_mv`, `nt_archive`, `nt_supersede`, `nt_relink`
+- **Read:** `nt_index`, `nt_search`, `nt_recall`, `nt_get`, `nt_status`, `nt_links`, `nt_view`
+- **Write:** `nt_add`, `nt_note`, `nt_update`, `nt_tag`, `nt_mv`, `nt_archive`, `nt_relink`
 
 Registered (absolute path, idempotent) by:
 ```bash
@@ -151,7 +153,7 @@ conventions, loaded on demand via OpenCode's `skill` tool (its description sits
 in context; the body loads only when relevant — progressive disclosure).
 
 ### 6. `AGENTS.md` — the thin always-on nudge
-A tiny file telling the agent it *has* nt memory, to `nt_index`/`nt_ready` at
+A tiny file telling the agent it *has* nt memory, to `nt_index`/`nt_status` at
 the start, capture as it works, and how to lazy-load `@`-references (OpenCode does
 not auto-expand them). The substance lives in nt, not here.
 
@@ -168,15 +170,22 @@ the compiled output traces back to its source note by **stable nt id**.
 ## Install & verify
 
 ```bash
+nt opencode install               # from any installed binary (no checkout needed)
+nt opencode install --print       # preview every step without writing
+```
+Or, from a repo checkout (e.g. while iterating on the plugin):
+```bash
 cd integrations/opencode
 ./install.sh                      # or: NT_BIN=/abs/path/to/nt ./install.sh
 ```
+Both are idempotent; re-running `nt opencode install` after an nt upgrade
+refreshes the plugin/skill/commands to the versions that binary ships.
 Then restart OpenCode (or reload MCP). Verify:
 ```bash
 nt export --tag rule --title Rules     # exactly what gets injected as rules
 nt mcp install --client opencode --print   # the MCP entry, without writing
 ```
-In an OpenCode session, the agent should be able to call `nt_ready` / `nt_search`
+In an OpenCode session, the agent should be able to call `nt_status` / `nt_search`
 and you should see a `<nt-memory>` block influencing its behavior.
 
 ### Daily use

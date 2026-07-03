@@ -17,8 +17,8 @@ distinguishable from what the user typed by hand.
 > If the `nt` MCP server is registered with your client, **prefer the typed
 > `nt_*` tools over shelling out** — they go through the same store, default
 > `source` to `claude`, and avoid CLI-string mistakes. Capture: `nt_add`,
-> `nt_note`, `nt_done`, `nt_update`, `nt_tag`, `nt_mv`. Retrieve: `nt_index`,
-> `nt_search`, `nt_recall`, `nt_get`, `nt_ready`, `nt_links`, `nt_log`. Fall back
+> `nt_note`, `nt_update` (status:"done" completes), `nt_tag`, `nt_mv`. Retrieve:
+> `nt_index`, `nt_search`, `nt_recall`, `nt_get`, `nt_status`, `nt_links`. Fall back
 > to the `nt` commands below when the tools aren't available — the workflow is identical.
 
 ## Start here: `nt index` + `nt ready`
@@ -166,7 +166,7 @@ When several agents share one store (e.g. parallel git worktrees), tasks are
 session's, while **notes stay shared** so knowledge cross-pollinates. This is
 automatic via the MCP tools and CLI `nt add` when `NT_WORKSTREAM` is set (grove/CI/harness export
 it; `auto` derives it from the git branch). You don't stamp anything — `nt_add`
-records it, and `nt_index`/`nt_ready`/`nt_status`/`nt_log` scope to it.
+records it, and `nt_index`/`nt_status` scope to it.
 
 - Tasks with no workstream (the human's CLI/TUI/web backlog) stay visible to
   everyone — only *another* agent's stamped tasks are hidden.

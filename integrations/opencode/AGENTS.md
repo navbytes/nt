@@ -19,7 +19,7 @@ it on demand.
 
 ## Start of session
 - Call **`nt_index`** for the KB catalog (note stubs + active tasks — no bodies)
-  and **`nt_ready`** for the task feed before starting substantive work. Prefer
+  and **`nt_status`** for the task feed before starting substantive work. Prefer
   `nt_index` with `format:"compact"` — same catalog, far fewer tokens. Don't
   re-derive what a past session recorded, and don't bulk-load note bodies.
 

@@ -105,6 +105,8 @@ func Run(args []string) int {
 			return fail(err)
 		}
 		return 0
+	case "opencode":
+		return cmdOpencode(rest)
 	case "web":
 		return cmdWeb(rest)
 	case "version", "--version", "-v":
@@ -127,11 +129,11 @@ func Run(args []string) int {
 // match on a typo. Kept in sync with the switch in the dispatcher above.
 var knownCommands = []string{
 	"add", "a", "note", "notes", "show", "cat", "journal", "j", "list", "ls",
-	"view", "views", "ready", "today", "agenda", "review", "index", "log",
+	"view", "views", "ready", "agenda", "review", "index", "log",
 	"done", "do", "skip", "start", "stop", "update", "up", "search", "q",
-	"tags", "tag", "links", "mv", "rename", "rm", "delete", "archive", "undo",
-	"edit", "path", "doctor", "git-init", "hook", "mcp", "web", "version", "help",
-	"supersede", "relink",
+	"recall", "export", "tags", "tag", "links", "mv", "rename", "rm", "delete",
+	"archive", "undo", "edit", "path", "doctor", "git-init", "hook", "mcp",
+	"opencode", "web", "version", "help", "supersede", "relink",
 }
 
 // suggestCommand returns the closest known command to cmd within a small edit
@@ -313,6 +315,21 @@ func handleArgs(cmd string, args []string) ([]string, error) {
 	return positional, nil
 }
 
+// handleArgsJSON is handleArgs plus a --json flag — the shared arg shape of the
+// simple task-state mutators (done/skip/start/stop), so they can emit the
+// updated task(s) as JSON exactly like `nt update --json` does.
+func handleArgsJSON(cmd string, args []string) (handles []string, asJSON bool, err error) {
+	flags, positional := splitArgs(args, map[string]bool{"json": true})
+	for _, f := range flags {
+		if f == "--json" || f == "-json" {
+			asJSON = true
+			continue
+		}
+		return nil, false, fmt.Errorf("%s: unknown flag %q", cmd, f)
+	}
+	return positional, asJSON, nil
+}
+
 // stringSlice is a repeatable string flag (e.g. --tag a --tag b).
 type stringSlice []string
 
@@ -365,8 +382,8 @@ USAGE
   nt list [flags]             list tasks            (alias: ls)
   nt view <name>              run a saved view; save/list/rm to manage them
   nt ready [flags]            open, unblocked tasks by urgency — start here
-  nt today [flags]            overdue + due-today + just-started, grouped
   nt agenda [--days N]        the next N days, grouped Overdue/Today/Upcoming
+                              (--days 0 = just today's plan)
   nt review [--stale N]       weekly digest: overdue, stale, undated, stuck projects
   nt index [--tag|--folder]   compact KB catalog (ids+titles+descriptions) + active tasks — start here
   nt log [--since|--days N]    completed tasks, newest first (the Logbook)
@@ -376,6 +393,8 @@ USAGE
   nt update <id…> [flags]     change one or more tasks (bulk)  (alias: up)
   nt list --tree              show sub-tasks indented under their parent
   nt search "query" [--tag T]  full-text + tag search (AND terms; "phrase"; --json) (alias: q)
+  nt recall "what I'm doing"  relevant notes for a task, lessons first — paraphrase-aware
+                              (--lessons-only to see recorded mistakes only)
   nt export [--tag|--folder]  compile notes into one md/json doc (rules/instructions, SKILL.md)
   nt tags                     list the tag vocabulary with counts
   nt tag <id|note…> +x -y     retag tasks or notes (no $EDITOR; preserves frontmatter)
@@ -397,8 +416,12 @@ USAGE
                               (dangling [[links]], missing descriptions, orphans)
   nt hook                     sync a Claude Code TodoWrite event (PostToolUse hook)
   nt mcp                      run the MCP server (stdio) — typed tools for agents
-  nt mcp install [--client]   register nt with an AI client (claude-code|claude-desktop|opencode)
+  nt mcp install [--client]   register nt's MCP server with an AI client
+                              (claude-code|claude-desktop|opencode)
                               --print/--dry-run shows what would change without writing
+  nt opencode install         full OpenCode integration: MCP server + memory plugin +
+                              nt skill + /learn + /recall commands + AGENTS.md +
+                              seeded rules/ and memory/ folders (--print supported)
   nt web [--port N]           browse and edit notes in a browser (localhost only)
   nt web --detach             run the viewer in the background (--status / --stop to manage)
 

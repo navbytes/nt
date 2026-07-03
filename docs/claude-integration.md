@@ -119,8 +119,8 @@ For any other client (Cursor, a project `.mcp.json`, …), `nt mcp install --pri
 emits the snippet to paste.
 
 Tools exposed (**18**) — **capture:** `nt_add`, `nt_note` (with `folder` and
-`description`; add tag `lesson` to record a mistake), `nt_done`, `nt_update`, `nt_tag`, `nt_mv`, `nt_archive` (retire
-stale notes, reversible), `nt_supersede`/`nt_relink` (reconcile duplicates/obsolete notes); **retrieve:** `nt_index` (start here — a compact
+`description`; add tag `lesson` to record a mistake), `nt_update` (status:"done" completes), `nt_tag`, `nt_mv`, `nt_archive` (retire
+stale notes — set `superseded_by` to reconcile duplicates), `nt_relink` (fix a wrong outbound link); **retrieve:** `nt_index` (start here — a compact
 catalog of note stubs plus the active tasks, no bodies), `nt_get` (fetch one
 note's full body by id/slug/title, optional `section`), `nt_ready`,
 `nt_status` (one-call project/area state), `nt_view` (recall the user's saved

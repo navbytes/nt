@@ -412,7 +412,7 @@ findings cross-pollinate. A *workstream* is that isolation axis, distinct from
 
 - **Storage:** a task carries `ws:<id>`. The MCP `nt_add` stamps it; nothing
   else does, so CLI/TUI/web tasks (and any pre-workstream task) carry no `ws:`.
-- **Reads scope, notes don't.** `nt_index`/`nt_ready`/`nt_status`/`nt_log`
+- **Reads scope, notes don't.** `nt_index`/`nt_status`
   show tasks whose `ws:` matches the current workstream **or is absent** (the
   shared human backlog stays visible to everyone); a task stamped with a
   *different* workstream is hidden. Notes are never scoped. `nt_search` and
@@ -605,7 +605,7 @@ the identical UI in a native window (see `desktop/`, ADR 0001).
   todo→ULID map, status-mapped, `src:claude`); the bundled `/nt` skill teaches Claude to
   capture and `nt index`. Setup: docs/claude-integration.md.
 - `nt mcp` runs a stdio **MCP server** (newline-delimited JSON-RPC 2.0, no SDK dep) exposing
-  typed tools — `nt_ready`/`nt_add`/`nt_done`/`nt_update`/`nt_note`/`nt_index`/`nt_search`/`nt_recall`/`nt_get`/`nt_log` —
+  typed tools — `nt_status`/`nt_add`/`nt_update`/`nt_note`/`nt_index`/`nt_search`/`nt_recall`/`nt_get` —
   for MCP clients. A thin driving adapter over the same engine/domain as the CLI and TUI;
   defaults `source` to `claude` and refuses positional handles.
 

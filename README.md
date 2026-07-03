@@ -49,7 +49,7 @@ That's it — you're up. `nt help` lists every command; [more install options be
 - **🔗 Wikilinks & backlinks.** `[[link]]` any task or note to any other; "linked from" is computed on demand by scanning files — no index to corrupt. Rename a note and every link follows.
 - **🧩 Obsidian-compatible.** Notes are plain `.md` + frontmatter, so you can point an Obsidian vault at the `notes/` folder and use it as your GUI while `nt` owns tasks, the CLI/TUI, and the AI loop.
 - **⛓️ Real task semantics.** Full A–Z priorities, due dates (with optional time-of-day), start/defer dates, projects, tags, recurrence, sub-tasks and dependencies (`blocks:`/`parent:`) with **cycle detection**, time **estimates + start/stop tracking**, and typed provenance (`discovered-from`).
-- **🗓️ A planner, not just a list.** `nt today` / `nt agenda` group your work by date, `nt review` is a weekly triage (overdue · stale · undated · stuck projects), and **daily notes** (`nt journal`) give you a dated log your agents can append to.
+- **🗓️ A planner, not just a list.** `nt agenda` groups your work by date, `nt review` is a weekly triage (overdue · stale · undated · stuck projects), and **daily notes** (`nt journal`) give you a dated log your agents can append to.
 - **🔒 Safe by construction.** Every write goes through one locking, atomic, ULID-keyed engine with transactional **undo/redo** — so a concurrent `nt add` from an AI session is never clobbered. Lossless todo.txt round-trip is enforced by test.
 - **🌿 Git-native.** `nt git-init` sets up `merge=union` so branches don't conflict on every add; `nt doctor` reconciles after a merge.
 
@@ -60,10 +60,12 @@ That's it — you're up. `nt help` lists every command; [more install options be
 `nt` is the place that memory lives. Because the store is plain text, an agent doesn't need a special database or a running service to remember — it just reads and writes files. Three ways to wire it up:
 
 - **PostToolUse hook** — `nt hook` mirrors Claude Code's `TodoWrite` list into your store automatically (idempotent, tagged `src:claude`). Wire it once in `~/.claude/settings.json`.
-- **MCP server** — `nt mcp` exposes typed tools (`nt_index`, `nt_add`, `nt_search`, `nt_recall`, `nt_get`, `nt_note`, `nt_ready`, …) over stdio. Register it with one command:
+- **MCP server** — `nt mcp` exposes typed tools (`nt_index`, `nt_add`, `nt_search`, `nt_recall`, `nt_get`, `nt_note`, `nt_status`, …) over stdio. Register it with one command:
   ```bash
   nt mcp install                    # add nt to Claude Code / Claude Desktop (absolute path, idempotent)
   nt mcp install --client opencode  # …or OpenCode (~/.config/opencode/opencode.json)
+  nt opencode install               # …or the FULL OpenCode integration: MCP + memory plugin +
+                                    #    skill + /learn + /recall + AGENTS.md + seeded rules/memory
   ```
 - **The `/nt` skill + read-back loop** — teach the agent to capture as it works and load prior context (`nt index`, then fetch on demand) when it resumes.
 - **Learn from past mistakes** — record a footgun or dead-end as a **lesson** (`nt note … --lesson`), then `nt recall "<what you're about to do>"` surfaces the relevant lessons *first* — even when your wording differs from the note's — so the next session doesn't repeat them. See [durable memory](#-durable-memory-for-your-ai-agents) below.

@@ -60,7 +60,13 @@ func cmdMcpInstall(args []string) int {
 		if err != nil {
 			return fail(err)
 		}
-		return installOpencode(path, bin, printOnly)
+		code := installOpencode(path, bin, printOnly)
+		if code == 0 && !printOnly {
+			// This registers the MCP tools only; the full memory system (plugin,
+			// skill, /learn + /recall, AGENTS.md, seeded folders) is one command.
+			fmt.Println("tip: `nt opencode install` sets up the complete integration (plugin, skill, commands).")
+		}
+		return code
 	default:
 		return usageErr(fmt.Errorf("unknown client %q (supported: claude-code, claude-desktop, opencode; or use --print)", *client))
 	}
@@ -246,17 +252,9 @@ func mergeMCPEntry(path, name string, entry map[string]any) (changed bool, prev 
 // (and parent dirs) when missing. Returns whether the file was changed and the
 // previous entry (nil if none existed). The write is atomic (temp + rename).
 func mergeNamedEntry(path, topKey, name string, entry map[string]any, schemaURL string) (changed bool, prev map[string]any, err error) {
-	root := map[string]any{}
-	fresh := true
-	if data, rerr := os.ReadFile(path); rerr == nil {
-		fresh = false
-		if len(data) > 0 {
-			if jerr := json.Unmarshal(data, &root); jerr != nil {
-				return false, nil, fmt.Errorf("%s is not valid JSON (%v); fix it or use --print and edit by hand", path, jerr)
-			}
-		}
-	} else if !os.IsNotExist(rerr) {
-		return false, nil, fmt.Errorf("read %s: %w", path, rerr)
+	root, fresh, err := readConfigMap(path)
+	if err != nil {
+		return false, nil, err
 	}
 
 	servers, _ := root[topKey].(map[string]any)
@@ -281,30 +279,59 @@ func mergeNamedEntry(path, topKey, name string, entry map[string]any, schemaURL 
 	servers[name] = entry
 	root[topKey] = servers
 
+	if err := writeConfigAtomic(path, root); err != nil {
+		return false, prev, err
+	}
+	return true, prev, nil
+}
+
+// readConfigMap loads the JSON object at path. fresh reports that the file
+// doesn't exist yet; a present-but-unparseable file is an error (we never
+// clobber a config we can't read).
+func readConfigMap(path string) (root map[string]any, fresh bool, err error) {
+	root = map[string]any{}
+	data, rerr := os.ReadFile(path)
+	if rerr != nil {
+		if os.IsNotExist(rerr) {
+			return root, true, nil
+		}
+		return nil, false, fmt.Errorf("read %s: %w", path, rerr)
+	}
+	if len(data) > 0 {
+		if jerr := json.Unmarshal(data, &root); jerr != nil {
+			return nil, false, fmt.Errorf("%s is not valid JSON (%v); fix it or use --print and edit by hand", path, jerr)
+		}
+	}
+	return root, false, nil
+}
+
+// writeConfigAtomic writes root as indented JSON via temp + rename, creating
+// parent directories as needed.
+func writeConfigAtomic(path string, root map[string]any) error {
 	out, merr := json.MarshalIndent(root, "", "  ")
 	if merr != nil {
-		return false, prev, fmt.Errorf("encode config: %w", merr)
+		return fmt.Errorf("encode config: %w", merr)
 	}
 	out = append(out, '\n')
 
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return false, prev, fmt.Errorf("create config dir: %w", err)
+		return fmt.Errorf("create config dir: %w", err)
 	}
 	tmp, err := os.CreateTemp(filepath.Dir(path), ".nt-mcp-*.tmp")
 	if err != nil {
-		return false, prev, fmt.Errorf("write config: %w", err)
+		return fmt.Errorf("write config: %w", err)
 	}
 	tmpName := tmp.Name()
 	defer func() { _ = os.Remove(tmpName) }()
 	if _, err := tmp.Write(out); err != nil {
 		_ = tmp.Close()
-		return false, prev, fmt.Errorf("write config: %w", err)
+		return fmt.Errorf("write config: %w", err)
 	}
 	if err := tmp.Close(); err != nil {
-		return false, prev, fmt.Errorf("write config: %w", err)
+		return fmt.Errorf("write config: %w", err)
 	}
 	if err := os.Rename(tmpName, path); err != nil {
-		return false, prev, fmt.Errorf("install config: %w", err)
+		return fmt.Errorf("install config: %w", err)
 	}
-	return true, prev, nil
+	return nil
 }

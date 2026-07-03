@@ -3,6 +3,7 @@ package cli
 import (
 	"flag"
 	"fmt"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -21,6 +22,17 @@ import (
 // tasks/notes (list, ready, today, agenda, recall, search, links, log). Split out
 // of commands.go, which keeps the mutating verbs + shared helpers (E6).
 
+// tagsMatch reports whether a task's tags carry every wanted tag (AND);
+// an empty want list matches everything.
+func tagsMatch(have, want []string) bool {
+	for _, w := range want {
+		if !contains(have, w) {
+			return false
+		}
+	}
+	return true
+}
+
 // freshHint returns a getting-started nudge to append to an empty-state message
 // when the store has never been written to — so a brand-new user (whose first
 // command might be `nt ready` or `nt today`, not the no-arg TUI) learns the next
@@ -35,7 +47,8 @@ func freshHint(e *mutate.Engine) string {
 func cmdList(args []string) int {
 	fs := flag.NewFlagSet("list", flag.ContinueOnError)
 	status := fs.String("status", "", "open|doing|blocked|done")
-	tag := fs.String("tag", "", "filter by tag")
+	var tags stringSlice
+	fs.Var(&tags, "tag", "filter by tag (repeatable, AND)")
 	project := fs.String("project", "", "filter by project")
 	source := fs.String("source", "", "filter by source (e.g. claude)")
 	sortBy := fs.String("sort", "", "urgency|due|created")
@@ -51,7 +64,7 @@ func cmdList(args []string) int {
 	}
 	return runListSource(view.Spec{
 		Status:      *status,
-		Tag:         *tag,
+		Tags:        tags,
 		Project:     *project,
 		Sort:        *sortBy,
 		All:         *all,
@@ -166,7 +179,8 @@ func printTaskTree(rows []*task.Task, idx map[*task.Task]int, blocked map[string
 func cmdReady(args []string) int {
 	fs := flag.NewFlagSet("ready", flag.ContinueOnError)
 	source := fs.String("source", "", "filter by source (e.g. claude)")
-	tag := fs.String("tag", "", "filter by tag")
+	var tags stringSlice
+	fs.Var(&tags, "tag", "filter by tag (repeatable, AND)")
 	project := fs.String("project", "", "filter by project")
 	ws := fs.String("workstream", "", `scope to a workstream (default: NT_WORKSTREAM; "*" = all)`)
 	asJSON := fs.Bool("json", false, "machine-readable output")
@@ -192,7 +206,7 @@ func cmdReady(args []string) int {
 	var rows []*task.Task
 	for _, t := range all {
 		// keep with all=false, showBlocked=false drops done + dependency-blocked.
-		if !view.Keep(t, view.Spec{Tag: *tag, Project: *project}, blocked) {
+		if !view.Keep(t, view.Spec{Tags: tags, Project: *project}, blocked) {
 			continue
 		}
 		if cur != "" && !workstream.Visible(t.Key("ws"), cur) {
@@ -221,9 +235,13 @@ func cmdReady(args []string) int {
 	return 0
 }
 
-// cmdToday is the day's actionable plan: overdue + due-today + just-became-
-// actionable (start today). Shorthand for `agenda --days 0`.
-func cmdToday(args []string) int { return runAgenda(args, 0) }
+// cmdToday is a back-compat alias for `agenda --days 0`. It was demoted from a
+// first-class verb in the surface audit (a literal subset of agenda confused
+// more than it helped); existing scripts keep working, with a pointer.
+func cmdToday(args []string) int {
+	fmt.Fprintln(os.Stderr, "note: `nt today` is `nt agenda --days 0` — prefer `nt agenda`")
+	return runAgenda(args, 0)
+}
 
 // cmdAgenda shows the date-windowed plan — overdue, today, and the next N days —
 // grouped by bucket and urgency-sorted, so nt is a planner, not just a list. It
@@ -239,7 +257,8 @@ func cmdAgenda(args []string) int {
 func runAgenda(args []string, defDays int) int {
 	fs := flag.NewFlagSet("agenda", flag.ContinueOnError)
 	days := fs.Int("days", defDays, "horizon: include tasks due within N days")
-	tag := fs.String("tag", "", "filter by tag")
+	var tags stringSlice
+	fs.Var(&tags, "tag", "filter by tag (repeatable, AND)")
 	project := fs.String("project", "", "filter by project")
 	source := fs.String("source", "", "filter by source")
 	asJSON := fs.Bool("json", false, "machine-readable output")
@@ -269,7 +288,7 @@ func runAgenda(args []string, defDays int) int {
 		if t.Done || (blocked[t.ID()] && !t.Done) || isFutureStart(t, today) {
 			continue
 		}
-		if *tag != "" && !contains(t.Tags(), *tag) {
+		if !tagsMatch(t.Tags(), tags) {
 			continue
 		}
 		if *project != "" && !contains(t.Projects(), *project) {

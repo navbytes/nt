@@ -1,5 +1,5 @@
 // Package mcp serves nt over the Model Context Protocol (stdio, JSON-RPC 2.0),
-// so an agent uses typed tools (nt_ready, nt_add, …) instead of constructing CLI
+// so an agent uses typed tools (nt_status, nt_add, …) instead of constructing CLI
 // shell strings. It is a thin driving adapter: every tool reuses the same
 // mutate.Engine + task/note domain as the CLI and TUI. No SDK dependency — the
 // stdio transport is newline-delimited JSON-RPC, handled here directly.
@@ -156,30 +156,22 @@ func errResult(msg string) map[string]any {
 
 func (s *server) dispatch(name string, a map[string]any) (string, error) {
 	switch name {
-	case "nt_ready":
-		return s.ready(a)
 	case "nt_status":
 		return s.status(a)
 	case "nt_view":
 		return s.view(a)
 	case "nt_add":
 		return s.add(a)
-	case "nt_done":
-		return s.done(a)
 	case "nt_update":
 		return s.update(a)
 	case "nt_note":
 		return s.note(a)
-	case "nt_supersede":
-		return s.supersede(a)
 	case "nt_relink":
 		return s.relink(a)
 	case "nt_index":
 		return s.index(a)
 	case "nt_get":
 		return s.get(a)
-	case "nt_log":
-		return s.log(a)
 	case "nt_search":
 		return s.search(a)
 	case "nt_recall":
@@ -198,37 +190,6 @@ func (s *server) dispatch(name string, a map[string]any) (string, error) {
 }
 
 // --- tools ---------------------------------------------------------------
-
-func (s *server) ready(a map[string]any) (string, error) {
-	d, err := s.eng.Read()
-	if err != nil {
-		return "", err
-	}
-	source, tag, project := str(a, "source"), str(a, "tag"), str(a, "project")
-	ws := s.workstream(a)
-	blocked := task.BlockedIDs(d.Tasks())
-	var rows []*task.Task
-	for _, t := range d.Tasks() {
-		if t.Done || (blocked[t.ID()] && !t.Done) {
-			continue // done or dependency-blocked → not ready
-		}
-		if !workstream.Visible(t.Key("ws"), ws) {
-			continue // another agent's parallel work; shared/own tasks stay visible
-		}
-		if source != "" && t.Source() != source {
-			continue
-		}
-		if tag != "" && !contains(t.Tags(), tag) {
-			continue
-		}
-		if project != "" && !contains(t.Projects(), project) {
-			continue
-		}
-		rows = append(rows, t)
-	}
-	task.SortByUrgency(rows)
-	return jsonText(tasksOut(rows)), nil
-}
 
 // view recalls a saved smart view by name through the same view.Apply the CLI
 // and web use — the user's own named queries, never re-derived. Without a name
@@ -520,27 +481,6 @@ func (s *server) similarToTask(created *task.Task) []map[string]string {
 	return out
 }
 
-func (s *server) done(a map[string]any) (string, error) {
-	id, err := requireID(a)
-	if err != nil {
-		return "", err
-	}
-	var out *task.Task
-	err = s.eng.Apply("done", func(d *task.Doc, rec *mutate.Recorder) error {
-		t, e := resolve(d, id)
-		if e != nil {
-			return e
-		}
-		mutate.Complete(d, rec, t, mutate.Today()) // spawns next if recurring
-		out = t
-		return nil
-	})
-	if err != nil {
-		return "", err
-	}
-	return jsonText(taskToOut(out)), nil
-}
-
 func (s *server) update(a map[string]any) (string, error) {
 	id, err := requireID(a)
 	if err != nil {
@@ -617,7 +557,7 @@ func (s *server) note(a map[string]any) (string, error) {
 	// agents legitimately record similar-but-distinct findings at the same time,
 	// and refusing would silently DROP a capture (a learning lost). So we always
 	// create the note, and if near-duplicates exist we return them in `similar` so
-	// the agent can choose to consolidate (nt_supersede/nt_update) on its next turn.
+	// the agent can choose to consolidate (nt_archive superseded_by=…) on its next turn.
 	var similar []*note.Note
 	if supersede == "" && !boolArg(a, "force") {
 		similar = note.FindSimilar(note.Active(s.listNotes()), title, tags)
@@ -665,24 +605,6 @@ func toMap(v any) map[string]any {
 	m := map[string]any{}
 	_ = json.Unmarshal(b, &m)
 	return m
-}
-
-// supersede marks one note as replaced by another (nt_supersede).
-func (s *server) supersede(a map[string]any) (string, error) {
-	oldH := strings.TrimSpace(str(a, "handle"))
-	by := strings.TrimSpace(str(a, "by"))
-	if oldH == "" || by == "" {
-		return "", fmt.Errorf("handle and by are required (the old note, and the note that replaces it)")
-	}
-	notes := s.listNotes()
-	newNote, ok := resolveNoteMCP(notes, by)
-	if !ok {
-		return "", fmt.Errorf("no note %q (by)", by)
-	}
-	if err := s.markSuperseded(oldH, newNote.ID); err != nil {
-		return "", err
-	}
-	return jsonText(map[string]any{"superseded": oldH, "canonical": newNote.ID}), nil
 }
 
 // relink rewrites a wrong outbound [[link]] inside a note's body (nt_relink).
@@ -931,35 +853,6 @@ func (s *server) get(a map[string]any) (string, error) {
 	}), nil
 }
 
-func (s *server) log(a map[string]any) (string, error) {
-	d, err := s.eng.Read()
-	if err != nil {
-		return "", err
-	}
-	bound := str(a, "since")
-	if days := intArg(a, "days"); days > 0 {
-		if cut := time.Now().AddDate(0, 0, -days).Format("2006-01-02"); bound == "" || cut > bound {
-			bound = cut
-		}
-	}
-	done := task.CompletedSince(d.Tasks(), bound)
-	source, ws := str(a, "source"), s.workstream(a)
-	if source != "" || (ws != "" && ws != "*") {
-		kept := done[:0]
-		for _, t := range done {
-			if source != "" && t.Source() != source {
-				continue
-			}
-			if !workstream.Visible(t.Key("ws"), ws) {
-				continue
-			}
-			kept = append(kept, t)
-		}
-		done = kept
-	}
-	return jsonText(tasksOut(done)), nil
-}
-
 // search is the KB's on-demand retrieval verb. It returns ranked STUBS (id,
 // title, one-line description, a query-context snippet, tags, folder) — NOT full
 // bodies — so a broad query costs a few hundred tokens, not the whole corpus. The
@@ -1046,7 +939,7 @@ func (s *server) search(a map[string]any) (string, error) {
 	if typ == "all" || typ == "task" {
 		ws := s.workstream(a)
 		for _, t := range d.Tasks() {
-			// Scope tasks to the caller's workstream, exactly as nt_index/nt_ready
+			// Scope tasks to the caller's workstream, exactly as nt_index/nt_status
 			// do — otherwise a parallel agent's search leaks every other agent's
 			// in-flight tasks. Notes stay store-wide (knowledge is shared).
 			if !workstream.Visible(t.Key("ws"), ws) {
@@ -1219,6 +1112,18 @@ func (s *server) archive(a map[string]any) (string, error) {
 	handle := strings.TrimSpace(str(a, "handle"))
 	if handle == "" {
 		return "", fmt.Errorf("handle is required")
+	}
+	// superseded_by retires the note with a pointer to its replacement instead
+	// of a plain archive — the reconcile-duplicates flow (was nt_supersede).
+	if by := strings.TrimSpace(str(a, "superseded_by")); by != "" {
+		newNote, ok := resolveNoteMCP(s.listNotes(), by)
+		if !ok {
+			return "", fmt.Errorf("no note %q (superseded_by)", by)
+		}
+		if err := s.markSuperseded(handle, newNote.ID); err != nil {
+			return "", err
+		}
+		return jsonText(map[string]any{"superseded": handle, "canonical": newNote.ID}), nil
 	}
 	unarchive := boolArg(a, "undo")
 	notes, _ := note.List(s.eng.S)

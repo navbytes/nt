@@ -17,7 +17,7 @@ user (or you, later) can `nt_get` on demand.
 2. `nt_search` the topic's key terms (and obvious synonyms) for related
    decisions/reference notes. Keep results as stubs; `nt_get` at most the **2**
    that look genuinely load-bearing for the task.
-3. Scan `nt_ready` for open tasks related to the topic.
+3. Scan `nt_status` for open tasks related to the topic.
 4. Present the brief, tersely:
    - **Lessons** — each quoted with its trigger ("when X, do Y — not Z").
    - **Relevant notes** — stubs (id · title · one-liner), marking the ones you
@@ -31,8 +31,7 @@ user (or you, later) can `nt_get` on demand.
 If the conversation above already makes the current task obvious, treat that as
 the topic and run the task-priming brief instead. Otherwise:
 
-1. `nt_ready` — open, unblocked tasks by urgency (top ~8).
-2. `nt_log` for the last few days — what recent sessions completed.
+1. `nt_status` — in-progress/blocked/open tasks by urgency, plus recent completions.
 3. `nt_index` — note stubs only; surface the handful most recently updated.
 4. Present a short "where things stand" brief: open tasks, recent completions,
    recently-touched notes (stubs). End by asking which thread to pick up — and

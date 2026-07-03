@@ -42,18 +42,8 @@ var wsArg = sp(`workstream id; omit to use NT_WORKSTREAM. "*" reads all workstre
 // behavioral cues and value formats are kept.
 var toolDefs = []toolDef{
 	{
-		Name:        "nt_ready",
-		Description: "Resuming work: open, unblocked tasks by urgency. Returns stable ids for nt_done/nt_update.",
-		InputSchema: obj(map[string]any{
-			"source":     st(),
-			"tag":        st(),
-			"project":    st(),
-			"workstream": wsArg,
-		}),
-	},
-	{
 		Name:        "nt_status",
-		Description: "Resuming a project/area: in-progress + blocked first, then open by urgency, recent completions, and linked notes. Scope with project and/or tag (omit both for everything).",
+		Description: "Resuming work on a project/area: in-progress + blocked first, then open unblocked tasks by urgency, recent completions, and linked notes — one call for the full picture. Scope with project and/or tag (omit both for everything). Returns stable task ids for nt_update.",
 		InputSchema: obj(map[string]any{
 			"project":    st(),
 			"tag":        st(),
@@ -83,18 +73,13 @@ var toolDefs = []toolDef{
 		}, "text"),
 	},
 	{
-		Name:        "nt_done",
-		Description: "Complete a task by id (spawns next occurrence if recurring).",
-		InputSchema: obj(map[string]any{"id": st()}, "id"),
-	},
-	{
 		Name:        "nt_update",
-		Description: "Change a task's status, priority, or due by id.",
+		Description: "Change a task's status, priority, or due by id. status:\"done\" completes it (and spawns the next occurrence if recurring).",
 		InputSchema: obj(map[string]any{
 			"id":         st(),
 			"status":     enum("open", "doing", "blocked", "done"),
 			"priority":   enum("high", "med", "low"),
-			"due":        sp("today|+3d|YYYY-MM-DD"),
+			"due":        sp("today|tomorrow|fri|+3d|YYYY-MM-DD"),
 			"workstream": sp(`reassign to a workstream; "*" releases to the shared backlog`),
 		}, "id"),
 	},
@@ -113,14 +98,6 @@ var toolDefs = []toolDef{
 		}, "title"),
 	},
 	{
-		Name:        "nt_supersede",
-		Description: "Reconcile duplicate/obsolete notes: mark one note as replaced by another. The old note retires from nt_index/nt_search (so a resume sees only the current decision) while a superseded_by pointer preserves the trail.",
-		InputSchema: obj(map[string]any{
-			"handle": sp("the note being replaced (id/slug/title)"),
-			"by":     sp("the note that replaces it (id/slug/title)"),
-		}, "handle", "by"),
-	},
-	{
 		Name:        "nt_relink",
 		Description: "Fix a wrong outbound [[link]] in a note's body: rewrite [[old]] → [[new]] (nt_mv only fixes inbound links on rename). Use it to repair a dangling reference nt_note flagged.",
 		InputSchema: obj(map[string]any{
@@ -136,7 +113,7 @@ var toolDefs = []toolDef{
 			"tag":           sp("only notes/tasks with this tag"),
 			"folder":        sp("only notes under this folder, e.g. ref"),
 			"limit":         map[string]any{"type": "integer", "description": "cap the note catalog to N (truncated=true when more exist); scope with tag/folder for big stores"},
-			"updated_since": sp("only notes changed on/after this date (today|+3d|YYYY-MM-DD) — 'what changed since last session'"),
+			"updated_since": sp("only notes changed on/after this date (today|tomorrow|fri|+3d|YYYY-MM-DD) — 'what changed since last session'"),
 			"format":        sp("'compact' for terse one-line-per-item text (cheaper — prefer for the session-start load); default is JSON"),
 			"workstream":    wsArg,
 		}),
@@ -150,23 +127,13 @@ var toolDefs = []toolDef{
 		}, "handle"),
 	},
 	{
-		Name:        "nt_log",
-		Description: "Completed tasks, newest first.",
-		InputSchema: obj(map[string]any{
-			"since":      sp("on/after YYYY-MM-DD"),
-			"days":       it(),
-			"source":     st(),
-			"workstream": wsArg,
-		}),
-	},
-	{
 		Name:        "nt_search",
-		Description: "Find notes and tasks by text and/or tag — the KB's retrieval verb. Returns ranked STUBS (id, title, description, snippet) not bodies; nt_get the id you want. Title matches rank first; results are capped by limit (default 8) with truncated=true when more exist. Pass query, tag, or both; full=true to inline bodies.",
+		Description: "Find notes and tasks by EXACT text and/or tag — reach for it when you know the words that appear in the note (use nt_recall for paraphrased/conceptual matching, nt_index for the whole catalog). Returns ranked STUBS (id, title, description, snippet) not bodies; nt_get the id you want. Title matches rank first; truncated=true when more exist. At least one of query/tag is required; full=true to inline bodies.",
 		InputSchema: obj(map[string]any{
 			"query": sp("text to match in titles + bodies (optional if tag is set)"),
 			"tag":   sp("only items with this tag"),
 			"type":  enum("note", "task", "all"),
-			"limit": it(),
+			"limit": map[string]any{"type": "integer", "description": "max results (default 8)"},
 			"full":  map[string]any{"type": "boolean", "description": "return full note bodies instead of stubs"},
 		}),
 	},
@@ -175,7 +142,7 @@ var toolDefs = []toolDef{
 		Description: "Learn from past sessions: given a free-text description of what you're ABOUT to do, return the most relevant notes — lessons/gotchas first — so you don't repeat a recorded mistake. Unlike nt_search (exact substring), recall stems and expands synonyms, so a paraphrase still finds the note. Call this at the start of a task (e.g. context:'adding a cache layer to the API'). Cheap: returns compact stubs, no bodies. Results with lesson:true are recorded mistakes — read them (nt_get) before proceeding.",
 		InputSchema: obj(map[string]any{
 			"context":      sp("what you're about to work on, in plain words — the more specific, the better the recall"),
-			"limit":        it(),
+			"limit":        map[string]any{"type": "integer", "description": "max results (default 8)"},
 			"lessons_only": map[string]any{"type": "boolean", "description": "restrict to notes tagged `lesson` (recorded mistakes only)"},
 		}, "context"),
 	},
@@ -194,7 +161,7 @@ var toolDefs = []toolDef{
 	},
 	{
 		Name:        "nt_tag",
-		Description: "Add/remove tags on a note during curation (preserves other frontmatter).",
+		Description: "Add/remove tags on a note during curation (preserves other frontmatter). At least one of add/remove is required.",
 		InputSchema: obj(map[string]any{
 			"handle": sp("the note (slug/title/id)"),
 			"add":    at(),
@@ -203,10 +170,11 @@ var toolDefs = []toolDef{
 	},
 	{
 		Name:        "nt_archive",
-		Description: "Retire a stale/superseded note from recall/search/status — reversible, file stays on disk. Set undo to bring it back.",
+		Description: "Retire a stale note from index/search/recall/status — reversible, the file stays on disk. Set superseded_by when another note replaces it (reconciling duplicates): the old note retires with a pointer preserving the trail. Set undo to bring an archived note back.",
 		InputSchema: obj(map[string]any{
-			"handle": sp("the note to archive (slug/title/id)"),
-			"undo":   map[string]any{"type": "boolean", "description": "unarchive instead"},
+			"handle":        sp("the note to retire (slug/title/id)"),
+			"superseded_by": sp("optional: the note that replaces this one (id/slug/title) — records a superseded_by pointer instead of a plain archive"),
+			"undo":          map[string]any{"type": "boolean", "description": "unarchive instead"},
 		}, "handle"),
 	},
 }
