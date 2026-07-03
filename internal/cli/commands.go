@@ -348,6 +348,24 @@ func warnDuplicateTask(e *mutate.Engine, created *task.Task) {
 	}
 }
 
+// taskDetailNote returns the task's linked machine detail note (the one under
+// notes/__tasks__/ that add/update --body maintains), or nil if it has none.
+func taskDetailNote(e *mutate.Engine, d *task.Doc, t *task.Task) *note.Note {
+	notes := mustNotes(e)
+	for _, raw := range t.Links() {
+		it, ok := links.Resolve(raw, d, notes)
+		if !ok || it.Kind != "note" {
+			continue
+		}
+		for _, n := range notes {
+			if n.Path == it.Path && n.Reserved() {
+				return n
+			}
+		}
+	}
+	return nil
+}
+
 // recurNote renders the "next occurrence" suffix for a completion line when a
 // recurring task spawned a fresh occurrence (nil ⇒ empty string, no suffix).
 func recurNote(spawned *task.Task) string {
@@ -957,11 +975,27 @@ func cmdUpdate(args []string) int {
 		if rerr != nil {
 			return fail(fmt.Errorf("update: %w", rerr))
 		}
-		n, nerr := note.Create(e.S, t0.Display(), bodyVal, nil, "cli", note.TaskNoteFolder)
-		if nerr != nil {
-			return fail(fmt.Errorf("update: saving the body note: %w", nerr))
+		// A task that already carries a detail note gets the new body APPENDED to
+		// it — a second create would mint slug-2.md with the same title and steal
+		// the task's title-link, hiding the original detail (field-study round 3).
+		if existing := taskDetailNote(e, d0, t0); existing != nil {
+			b := strings.TrimRight(existing.Body, "\n")
+			if b != "" {
+				b += "\n\n"
+			}
+			existing.Body = b + strings.TrimSpace(bodyVal) + "\n"
+			existing.Updated = time.Now().Format(time.RFC3339)
+			if err := existing.Save(); err != nil {
+				return fail(fmt.Errorf("update: appending to the detail note: %w", err))
+			}
+			fmt.Printf("appended detail to [[%s]]\n", existing.Title)
+		} else {
+			n, nerr := note.Create(e.S, t0.Display(), bodyVal, nil, "cli", note.TaskNoteFolder)
+			if nerr != nil {
+				return fail(fmt.Errorf("update: saving the body note: %w", nerr))
+			}
+			linkTitle = n.Title
 		}
-		linkTitle = n.Title
 	}
 	count := 0
 	var single, recurMsg string
@@ -1156,6 +1190,18 @@ func cmdRm(args []string) int {
 		}
 	}
 
+	// Machine detail notes (notes/__tasks__/) exist only to hold a task's body;
+	// removing the task strands them invisibly (index/search skip that folder).
+	// Collect them now so we can point at the leftovers after the delete.
+	var strandedDetail []*note.Note
+	for _, h := range taskHandles {
+		if t, err := resolveHandle(d, h); err == nil {
+			if dn := taskDetailNote(e, d, t); dn != nil {
+				strandedDetail = append(strandedDetail, dn)
+			}
+		}
+	}
+
 	count := 0
 	var single string
 	err := e.Apply("delete", func(d *task.Doc, rec *mutate.Recorder) error {
@@ -1180,6 +1226,9 @@ func cmdRm(args []string) int {
 		fmt.Println(single)
 	} else {
 		fmt.Printf("removed %d (nt undo to restore)\n", count)
+	}
+	for _, dn := range strandedDetail {
+		fmt.Fprintf(os.Stderr, "note: %s was this task's detail note and is now stranded — `nt rm %s -y` to trash it (keep it if you might undo)\n", dn.Rel, shortID(dn.ID))
 	}
 	return 0
 }

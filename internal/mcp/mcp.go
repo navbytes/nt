@@ -178,6 +178,13 @@ func errResult(msg string) map[string]any {
 }
 
 func (s *server) dispatch(name string, a map[string]any) (string, error) {
+	// Strict args: silently ignoring an unknown parameter loses data (an agent
+	// passing content: instead of body: got an empty note with no warning). The
+	// advertised schema is the contract — reject what isn't in it, with a nudge
+	// toward the nearest real parameter.
+	if err := rejectUnknownParams(name, a); err != nil {
+		return "", err
+	}
 	switch name {
 	case "nt_status":
 		return s.status(a)
@@ -225,6 +232,50 @@ var retiredToolHints = map[string]string{
 	"nt_log":    "use nt_status (includes recent completions) or nt_index (recentlyDone)",
 	"nt_done":   `use nt_update with status:"done"`,
 	"nt_delete": "use nt_rm (removes a task; `nt undo` restores it) or nt_archive (retires a note)",
+}
+
+// rejectUnknownParams validates a tool call's argument NAMES against the
+// advertised inputSchema. Unknown tool names pass through (dispatch's default
+// arm owns that error). Value types are left to each handler — this guards only
+// against the silent-drop case, where a misnamed parameter (content: for body:)
+// vanishes without a trace.
+func rejectUnknownParams(name string, a map[string]any) error {
+	var props map[string]any
+	for _, td := range toolDefs {
+		if td.Name == name {
+			props, _ = td.InputSchema["properties"].(map[string]any)
+			break
+		}
+	}
+	if props == nil {
+		return nil
+	}
+	for k := range a {
+		if _, ok := props[k]; ok {
+			continue
+		}
+		best, bestDist := "", -1
+		for p := range props {
+			if d := editDistance(k, p); bestDist < 0 || d < bestDist {
+				best, bestDist = p, d
+			}
+		}
+		if best != "" && bestDist <= len(k)/2+1 {
+			return fmt.Errorf("unknown parameter %q for %s — did you mean %q? (accepted: %s)", k, name, best, paramList(props))
+		}
+		return fmt.Errorf("unknown parameter %q for %s (accepted: %s)", k, name, paramList(props))
+	}
+	return nil
+}
+
+// paramList renders a schema's property names, sorted, for error messages.
+func paramList(props map[string]any) string {
+	names := make([]string, 0, len(props))
+	for p := range props {
+		names = append(names, p)
+	}
+	sort.Strings(names)
+	return strings.Join(names, ", ")
 }
 
 // unknownToolHint returns recovery guidance for an unknown tool name: a
@@ -662,6 +713,13 @@ func (s *server) rm(a map[string]any) (string, error) {
 	err = s.eng.Apply("rm", func(d *task.Doc, rec *mutate.Recorder) error {
 		t, e := resolve(d, id)
 		if e != nil {
+			// The id might be a NOTE's — redirect instead of a bare "no task".
+			want := strings.TrimPrefix(id, "note:")
+			for _, n := range s.listNotes() {
+				if n.ID == want || (len(want) >= 6 && strings.HasSuffix(n.ID, want)) {
+					return fmt.Errorf("%q is a note (%s) — nt_rm removes tasks; retire the note with nt_archive (or delete it with the CLI: nt rm %s)", id, n.Rel, id)
+				}
+			}
 			return e
 		}
 		removed = t

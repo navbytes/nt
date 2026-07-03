@@ -145,6 +145,8 @@ func cmdEdit(args []string) int {
 	appendTxt := fs.String("append", "", "append markdown to the note body without an editor (agent-safe)")
 	appendFile := fs.String("append-file", "", "append the contents of a file ('-' = stdin) to the note body")
 	bodyFile := fs.String("body-file", "", "replace the note body from a file ('-' = stdin)")
+	desc := fs.String("desc", "", "set the note's one-line description (frontmatter) without an editor")
+	fs.StringVar(desc, "description", "", "alias for --desc")
 	flags, positional := splitArgs(args, nil)
 	if err := fs.Parse(flags); err != nil {
 		return 2
@@ -168,36 +170,42 @@ func cmdEdit(args []string) int {
 	// explicit note: prefix or any bare note handle (slug/title/short id), the same
 	// handle every other note verb takes.
 	notes, _ := note.List(e.S)
-	// Non-interactive body edits (--append / --body-file): the agent path. A
+	// Non-interactive edits (--append / --body-file / --desc): the agent path. A
 	// mangled or growing note used to be fixable only via $EDITOR or a whole-note
 	// supersede (which churns the id and every inbound link); this edits in place.
-	if appendVal != "" || strings.TrimSpace(*bodyFile) != "" {
+	if appendVal != "" || strings.TrimSpace(*bodyFile) != "" || strings.TrimSpace(*desc) != "" {
 		n, nerr := resolveNote(notes, strings.TrimPrefix(handle, "note:"))
 		if nerr != nil {
 			return fail(fmt.Errorf("edit: %w (non-interactive edits apply to notes; for tasks use `nt update`)", nerr))
 		}
-		if appendVal != "" {
+		verb := ""
+		switch {
+		case appendVal != "":
 			body := strings.TrimRight(n.Body, "\n")
 			if body != "" {
 				body += "\n\n"
 			}
 			n.Body = body + strings.TrimSpace(appendVal) + "\n"
-		} else {
+			verb = "appended to"
+		case strings.TrimSpace(*bodyFile) != "":
 			nb, rerr := resolveBody("", *bodyFile)
 			if rerr != nil {
 				return usageErr(fmt.Errorf("edit: %w", rerr))
 			}
 			n.Body = nb
+			verb = "replaced body of"
+		}
+		if d := strings.TrimSpace(*desc); d != "" {
+			setNoteDescription(n, d)
+			if verb == "" {
+				verb = "set description of"
+			}
 		}
 		n.Updated = time.Now().Format(time.RFC3339)
 		if err := n.Save(); err != nil {
 			return fail(err)
 		}
 		warnDanglingLinks(e, n)
-		verb := "replaced body of"
-		if appendVal != "" {
-			verb = "appended to"
-		}
 		fmt.Printf("%s %s  %s\n", verb, shortID(n.ID), n.Rel)
 		return 0
 	}
@@ -470,6 +478,18 @@ func standaloneKind(n *note.Note) bool {
 		}
 	}
 	return false
+}
+
+// setNoteDescription sets or replaces the `description:` frontmatter line (kept
+// in Extra, since nt doesn't model the key).
+func setNoteDescription(n *note.Note, d string) {
+	for i, line := range n.Extra {
+		if k, _, ok := strings.Cut(line, ":"); ok && strings.EqualFold(strings.TrimSpace(k), "description") {
+			n.Extra[i] = "description: " + d
+			return
+		}
+	}
+	n.Extra = append(n.Extra, "description: "+d)
 }
 
 // hasExplicitDescription reports whether a note carries a `description:` line in

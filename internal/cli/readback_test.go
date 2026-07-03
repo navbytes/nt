@@ -148,3 +148,46 @@ func TestReadyAnnotatesOpenSubtasks(t *testing.T) {
 		t.Fatalf("ready should warn that the parent has open subtasks:\n%s", out)
 	}
 }
+
+func TestUpdateBodyAppendsToExistingDetailNote(t *testing.T) {
+	t.Setenv("NT_DIR", t.TempDir())
+	captureRun(t, "add", "task with detail", "--body", "first detail")
+	var listed []struct {
+		ID string `json:"id"`
+	}
+	json.Unmarshal([]byte(captureRun(t, "list", "--json")), &listed)
+	// Second --body must APPEND to the existing detail note, not mint slug-2.md.
+	captureRun(t, "update", listed[0].ID, "--body", "second detail")
+	shown := captureRun(t, "show", listed[0].ID)
+	if !strings.Contains(shown, "first detail") || !strings.Contains(shown, "second detail") {
+		t.Fatalf("update --body should append to the existing detail note:\n%s", shown)
+	}
+	var notes []struct {
+		Title string `json:"title"`
+	}
+	json.Unmarshal([]byte(captureRun(t, "notes", "--json")), &notes)
+	for _, n := range notes {
+		if strings.HasSuffix(n.Title, "-2") {
+			t.Fatalf("a duplicate detail note was created: %q", n.Title)
+		}
+	}
+}
+
+func TestEditDescNonInteractive(t *testing.T) {
+	t.Setenv("NT_DIR", t.TempDir())
+	captureRun(t, "note", "needs a summary", "--body", "long body here")
+	captureRun(t, "edit", "needs a summary", "--desc", "the one-line summary")
+	var j struct {
+		Description string `json:"description"`
+	}
+	json.Unmarshal([]byte(captureRun(t, "show", "needs a summary", "--json")), &j)
+	if j.Description != "the one-line summary" {
+		t.Fatalf("edit --desc failed, got %q", j.Description)
+	}
+	// Replacing an existing description keeps a single frontmatter line.
+	captureRun(t, "edit", "needs a summary", "--desc", "revised summary")
+	json.Unmarshal([]byte(captureRun(t, "show", "needs a summary", "--json")), &j)
+	if j.Description != "revised summary" {
+		t.Fatalf("edit --desc replace failed, got %q", j.Description)
+	}
+}

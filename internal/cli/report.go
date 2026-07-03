@@ -114,6 +114,38 @@ func runListSource(spec view.Spec, source, ws string, asJSON bool) int {
 		rows = kept
 	}
 
+	// Blocked tasks are hidden by default — but silence reads as "gone" to an
+	// agent auditing the list, so count what's hidden and say so (stderr, keeping
+	// stdout/JSON shape stable).
+	if !spec.ShowBlocked && !spec.All && spec.Status == "" {
+		hidden := 0
+		cur := workstream.Scope(ws)
+		for _, t := range all3 {
+			if t.Done || !blocked[t.ID()] {
+				continue
+			}
+			if source != "" && t.Source() != source {
+				continue
+			}
+			if cur != "" && !workstream.Visible(t.Key("ws"), cur) {
+				continue
+			}
+			match := spec.Project == "" || contains(t.Projects(), spec.Project)
+			for _, want := range spec.Tags {
+				if !contains(t.Tags(), want) {
+					match = false
+					break
+				}
+			}
+			if match {
+				hidden++
+			}
+		}
+		if hidden > 0 {
+			fmt.Fprintf(os.Stderr, "(+%d blocked task(s) hidden — --show-blocked to include)\n", hidden)
+		}
+	}
+
 	if asJSON {
 		return printJSON(tasksToJSON(rows, idx))
 	}
