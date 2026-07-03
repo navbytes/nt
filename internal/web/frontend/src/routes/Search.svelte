@@ -225,11 +225,7 @@
     padding: 0 1px;
   }
 
-  /* empty/error art variants (the shared .empty--hero shell lives in app.css) */
-  .empty__art--err {
-    color: var(--red);
-    background: color-mix(in srgb, var(--red) 13%, transparent);
-  }
+  /* empty/error art variants (the shared .empty--hero shell + --err live in app.css) */
   .empty__art--quiet {
     color: var(--muted);
     background: var(--fill);

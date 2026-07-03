@@ -1288,8 +1288,17 @@
     .newnote__open {
       margin-left: 0;
     }
+    /* Tags used to be hidden here outright; instead let the row wrap and give
+       the tag chips their own full-width line so they stay visible (and still
+       tappable as filters) on a phone. */
+    .noterow {
+      flex-wrap: wrap;
+      row-gap: 2px;
+    }
     .noterow__tags {
-      display: none;
+      order: 1;
+      flex: 1 1 100%;
+      max-width: none;
     }
   }
 </style>

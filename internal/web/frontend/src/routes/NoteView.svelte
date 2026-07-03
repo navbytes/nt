@@ -24,6 +24,7 @@
   let moveTarget = $state("");
   let moveErr = $state("");
   let moveBusy = $state(false);
+  let moveInput: HTMLInputElement | undefined = $state();
 
   // Existing folders, for the picker's autocomplete (you can also type a new one).
   const folders = $derived.by(() => {
@@ -39,6 +40,9 @@
     moveErr = "";
     moveTarget = $noteQ.data?.folder ?? "";
     moving = true;
+    // Focus lands in the fresh bar (it may be opened from the command palette,
+    // which restores focus to its opener on close).
+    queueMicrotask(() => moveInput?.focus());
   }
 
   // Open the move picker when the command palette requests it.
@@ -101,6 +105,14 @@
   let confirmingDelete = $state(false);
   let deleteBusy = $state(false);
   let deleteErr = $state("");
+  let deleteCancelBtn: HTMLButtonElement | undefined = $state();
+
+  function openDelete() {
+    deleteErr = "";
+    confirmingDelete = true;
+    // Focus the safe action, not a destructive default.
+    queueMicrotask(() => deleteCancelBtn?.focus());
+  }
 
   async function doDelete(mode: "" | "unlink" | "force") {
     deleteErr = "";
@@ -125,6 +137,12 @@
   let taskText = $state("");
   let taskErr = $state("");
   let taskBusy = $state(false);
+  let taskInput: HTMLInputElement | undefined = $state();
+
+  function toggleAddTask() {
+    addingTask = !addingTask;
+    if (addingTask) queueMicrotask(() => taskInput?.focus());
+  }
 
   async function doAddTask() {
     const body = taskText.trim();
@@ -221,7 +239,8 @@
 {:else if $noteQ.isPending}
   <p class="muted">Loading…</p>
 {:else if $noteQ.error}
-  <div class="empty">
+  <div class="empty empty--hero">
+    <span class="empty__art empty__art--err"><Icon name="warning" size={24} /></span>
     <p class="empty__lead">Note not found.</p>
     <p class="muted">This note may have been moved, renamed, or deleted.</p>
     <a class="btn btn--ghost btn--sm" href="/notes">Back to notes</a>
@@ -250,7 +269,7 @@
             ><Icon name="star" filled={n.favorite} size={16} /></button>
           </div>
           <div class="pillbar">
-            <button class="pillbar__btn" onclick={() => (addingTask = !addingTask)} title="Task"><Icon name="plus" size={15} /> <span class="pillbar__btn-label">Task</span></button>
+            <button class="pillbar__btn" onclick={toggleAddTask} title="Task"><Icon name="plus" size={15} /> <span class="pillbar__btn-label">Task</span></button>
             <span class="pillbar__sep"></span>
             <button class="pillbar__btn" onclick={openMove} title="Move"><Icon name="folder" size={15} /> <span class="pillbar__btn-label">Move</span></button>
             <span class="pillbar__sep"></span>
@@ -261,7 +280,7 @@
             <button class="pillbar__btn" onclick={() => (editing = true)} title="Edit"><Icon name="edit" size={15} /> <span class="pillbar__btn-label">Edit</span></button>
           </div>
           <div class="pillbar">
-            <button class="pillbar__btn pillbar__btn--danger" onclick={() => { deleteErr = ""; confirmingDelete = true; }} title="Delete"><Icon name="trash" size={15} /> <span class="pillbar__btn-label">Delete</span></button>
+            <button class="pillbar__btn pillbar__btn--danger" onclick={openDelete} title="Delete"><Icon name="trash" size={15} /> <span class="pillbar__btn-label">Delete</span></button>
           </div>
         </div>
       </div>
@@ -277,7 +296,7 @@
             <span class="movebar__label">Delete “{n.title}”? Moves it to .trash/.</span>
             <button class="btn btn--sm btn--danger" onclick={() => doDelete("")} disabled={deleteBusy}>Delete</button>
           {/if}
-          <button class="btn btn--ghost btn--sm" onclick={() => (confirmingDelete = false)}>Cancel</button>
+          <button class="btn btn--ghost btn--sm" bind:this={deleteCancelBtn} onclick={() => (confirmingDelete = false)}>Cancel</button>
           {#if deleteErr}<span class="error small" role="alert">{deleteErr}</span>{/if}
         </div>
       {/if}
@@ -286,6 +305,7 @@
           <span class="movebar__label">New task</span>
           <input
             class="movebar__input"
+            bind:this={taskInput}
             bind:value={taskText}
             placeholder="what needs doing? (linked to this note)"
             onkeydown={(e) => e.key === "Enter" && doAddTask()}
@@ -301,6 +321,7 @@
           <input
             class="movebar__input"
             list="note-folders"
+            bind:this={moveInput}
             bind:value={moveTarget}
             placeholder="(root)"
             onkeydown={(e) => e.key === "Enter" && doMove()}

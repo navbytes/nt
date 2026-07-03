@@ -145,15 +145,27 @@
     text-transform: uppercase;
     color: var(--muted);
   }
+  /* Glass select, matching the filter chrome on Notes/Tasks (this was the one
+     flat-fill filter control left in the app). */
   .ahead__filter {
     flex: none;
     font: inherit;
     font-size: var(--text-body);
     padding: 5px 10px;
-    background: var(--fill);
-    border: 0.5px solid var(--separator-strong);
+    background: color-mix(in srgb, var(--bg-elevated) 70%, transparent);
+    -webkit-backdrop-filter: saturate(var(--glass-saturate)) blur(var(--glass-blur));
+    backdrop-filter: saturate(var(--glass-saturate)) blur(var(--glass-blur));
+    border: 0.5px solid var(--separator);
     border-radius: var(--radius-sm);
+    box-shadow: var(--glass-hairline);
+    color: var(--label-secondary);
+    transition:
+      border-color var(--motion-fast) var(--ease),
+      color var(--motion-fast) var(--ease);
+  }
+  .ahead__filter:hover {
     color: var(--fg);
+    border-color: var(--separator-strong);
   }
 
   /* ── timeline ────────────────────────────────────────────────────────────── */
@@ -295,11 +307,6 @@
     font-size: var(--text-subhead);
     color: var(--muted);
   }
-  .empty__art--err {
-    color: var(--red);
-    background: color-mix(in srgb, var(--red) 13%, transparent);
-  }
-
   @media (max-width: 640px) {
     .ahead {
       flex-direction: column;

@@ -45,7 +45,8 @@
 {#if $tagsQ.isPending}
   <p class="muted">Loading…</p>
 {:else if $tagsQ.error}
-  <div class="empty">
+  <div class="empty empty--hero">
+    <span class="empty__art empty__art--err"><Icon name="warning" size={24} /></span>
     <p class="empty__lead">Couldn't load tags</p>
     <button class="btn btn--ghost btn--sm" onclick={() => $tagsQ.refetch()}>Try again</button>
   </div>

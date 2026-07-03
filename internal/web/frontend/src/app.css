@@ -1310,6 +1310,10 @@ body.resizing {
   color: var(--accent-color);
   background: var(--accent-tint);
 }
+.empty__art--err {
+  color: var(--red);
+  background: color-mix(in srgb, var(--red) 13%, transparent);
+}
 .empty code {
   font-family: var(--font-mono);
   font-size: 0.85em;
