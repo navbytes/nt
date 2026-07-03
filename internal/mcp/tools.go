@@ -85,7 +85,7 @@ var toolDefs = []toolDef{
 	},
 	{
 		Name:        "nt_note",
-		Description: "Save a note (finding/decision/dead-end) — capture the WHY. Set description to a one-line summary; it's what nt_index shows. Guarded against near-duplicates: if a similar note exists it errors — update that one, supersede it, or set force=true. Use supersede=<id> to replace an existing note (the old one retires from views).",
+		Description: "Save a note (finding/decision/dead-end) — capture the WHY. Set description to a one-line summary; it's what nt_index shows. The note is always created; if near-duplicates exist the response includes a `similar` list — check it, and consolidate with nt_archive superseded_by=<id> if you truly doubled one. Use supersede=<id> to replace an existing note (the old one retires from views).",
 		InputSchema: obj(map[string]any{
 			"title":       st(),
 			"body":        sp("markdown"),

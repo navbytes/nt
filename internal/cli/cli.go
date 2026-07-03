@@ -87,6 +87,8 @@ func Run(args []string) int {
 		return cmdArchive(rest)
 	case "undo":
 		return cmdUndo(rest)
+	case "redo":
+		return cmdRedo(rest)
 	case "edit":
 		return cmdEdit(rest)
 	case "path":
@@ -132,7 +134,7 @@ var knownCommands = []string{
 	"view", "views", "ready", "agenda", "review", "index", "log",
 	"done", "do", "skip", "start", "stop", "update", "up", "search", "q",
 	"recall", "export", "tags", "tag", "links", "mv", "rename", "rm", "delete",
-	"archive", "undo", "edit", "path", "doctor", "git-init", "hook", "mcp",
+	"archive", "undo", "redo", "edit", "path", "doctor", "git-init", "hook", "mcp",
 	"opencode", "web", "version", "help", "supersede", "relink",
 }
 
@@ -408,7 +410,8 @@ USAGE
                               -y/--yes skips the confirm prompt
   nt archive                  move done tasks to done.txt
   nt archive <note> [--undo]  retire a note from the active views (reversible; still on disk)
-  nt undo                     revert the last change
+  nt undo / redo              revert / re-apply the last change (workstream-safe:
+                              refuses another agent's change unless --force)
   nt path                     print the store directory
   nt version                  print the nt version (alias: -v, --version)
   nt git-init                 set up the store for git (union-merge + .gitignore)

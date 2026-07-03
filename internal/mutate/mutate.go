@@ -14,6 +14,7 @@ import (
 	"github.com/navbytes/nt/internal/store"
 	"github.com/navbytes/nt/internal/task"
 	"github.com/navbytes/nt/internal/undo"
+	"github.com/navbytes/nt/internal/workstream"
 )
 
 // Engine owns the store and serializes all task-file writes.
@@ -114,8 +115,10 @@ func (e *Engine) Apply(op string, fn func(d *task.Doc, rec *Recorder) error) err
 		return nil // nothing changed; don't journal or rewrite
 	}
 	// Journal BEFORE the forward write (SPEC §6.3): a crash between the two
-	// leaves a benign orphan entry, never a mutation without its inverse.
-	if err := undo.Append(e.S, undo.Txn{Op: op, TS: time.Now().Format(time.RFC3339), Changes: changes}); err != nil {
+	// leaves a benign orphan entry, never a mutation without its inverse. The
+	// transaction carries the writer's workstream so undo can tell "my change"
+	// from another agent's on a shared store.
+	if err := undo.Append(e.S, undo.Txn{Op: op, TS: time.Now().Format(time.RFC3339), WS: workstream.Env(), Changes: changes}); err != nil {
 		return err
 	}
 	return store.WriteAtomic(e.S.TasksFile(), d.Render(), 0o644)

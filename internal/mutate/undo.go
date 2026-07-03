@@ -24,50 +24,118 @@ import (
 // The returned op label names what was undone; did is false when there is
 // nothing to undo.
 func (e *Engine) Undo() (op string, did bool, err error) {
+	txn, did, err := e.UndoScoped("", true)
+	return txn.Op, did, err
+}
+
+// UndoScoped is Undo with workstream ownership enforced, for shared stores
+// where several agents write concurrently: when ws is non-empty and the pending
+// transaction was written by a DIFFERENT workstream (or by an unscoped writer),
+// it refuses — unless force — so one agent can't silently revert another's
+// work. The check runs under the same lock as the revert, so the answer can't
+// go stale between look and act. The reverted transaction is returned so the
+// caller can show exactly what changed.
+func (e *Engine) UndoScoped(ws string, force bool) (undo.Txn, bool, error) {
+	return e.applyReversal(ws, force, false)
+}
+
+// Redo re-applies the most recently undone transaction (the swapped "redo:"
+// entry Undo leaves on the journal). did is false when the pending entry is not
+// a redo — i.e. there is nothing to redo. Ownership is enforced like UndoScoped.
+func (e *Engine) Redo(ws string, force bool) (undo.Txn, bool, error) {
+	return e.applyReversal(ws, force, true)
+}
+
+// applyReversal implements Undo/Redo: the journal's top entry toggles between
+// the forward image and its inverse, so both operations apply the same way —
+// redo just insists the pending entry IS a redo entry, and undo that it isn't.
+func (e *Engine) applyReversal(ws string, force, wantRedo bool) (undo.Txn, bool, error) {
 	h, err := lock.Acquire(e.S.LockFile(), lock.DefaultTimeout)
 	if err != nil {
-		return "", false, err
+		return undo.Txn{}, false, err
 	}
 	defer h.Release()
 
 	data, err := store.ReadFile(e.S.TasksFile())
 	if err != nil {
-		return "", false, err
+		return undo.Txn{}, false, err
 	}
 	d := task.Parse(data)
 
 	// Peek (don't remove) so a later failure leaves the journal intact.
 	txn, ok, err := undo.Peek(e.S)
 	if err != nil || !ok {
-		return "", false, err
+		return undo.Txn{}, false, err
+	}
+	if isRedoEntry(txn.Op) != wantRedo {
+		if wantRedo {
+			return undo.Txn{}, false, nil // top entry is a forward op: nothing to redo
+		}
+		// Top entry is a redo entry; plain undo would re-apply (redo) it, which is
+		// not what "undo" means. Redo entries only sit on top immediately after an
+		// undo, so tell the caller which verb they want.
+		return undo.Txn{}, false, fmt.Errorf("the last operation was an undo — `nt redo` re-applies it; there is nothing further to undo")
+	}
+	if !force && ws != "" && txn.WS != ws {
+		owner := "an unscoped writer (no workstream)"
+		if txn.WS != "" {
+			owner = fmt.Sprintf("workstream %q", txn.WS)
+		}
+		verb := "undo"
+		if wantRedo {
+			verb = "redo"
+		}
+		return undo.Txn{}, false, fmt.Errorf("the last change (%s, %s) was made by %s, not yours (%q) — on a shared store reverting another agent's work loses data; rerun `nt %s --force` if you really mean it", displayOp(txn.Op), txn.TS, owner, ws, verb)
 	}
 
 	// Validate the post-image: every touched task must still be exactly as the
 	// forward op left it. Otherwise a concurrent writer moved underneath us.
 	if err := validatePostImage(d, txn); err != nil {
-		return "", false, err
+		return undo.Txn{}, false, err
 	}
 
 	for _, c := range txn.Changes {
 		if err := applyInverse(d, c); err != nil {
-			return "", false, err
+			return undo.Txn{}, false, err
 		}
 	}
 
 	// Tasks first: if this fails, the journal still holds the txn (retryable).
 	if err := store.WriteAtomic(e.S.TasksFile(), d.Render(), 0o644); err != nil {
-		return "", false, err
+		return undo.Txn{}, false, err
 	}
 
 	// Journal second: drop the undone txn and push its swapped redo, atomically.
-	redo := undo.Txn{Op: "redo:" + txn.Op, TS: time.Now().Format(time.RFC3339)}
+	// The swapped entry keeps the original writer's workstream so ownership
+	// survives an undo/redo round-trip.
+	redo := undo.Txn{Op: "redo:" + txn.Op, TS: time.Now().Format(time.RFC3339), WS: txn.WS}
 	for _, c := range txn.Changes {
 		redo.Changes = append(redo.Changes, undo.Change{ID: c.ID, Before: c.After, After: c.Before})
 	}
 	if err := undo.ReplaceLast(e.S, redo); err != nil {
-		return "", false, err
+		return undo.Txn{}, false, err
 	}
-	return txn.Op, true, nil
+	return txn, true, nil
+}
+
+// isRedoEntry reports whether an op label marks a pending redo: undo/redo swap
+// the top entry back and forth, each pass prefixing "redo:", so an odd number
+// of prefixes means the entry re-applies a previously undone op.
+func isRedoEntry(op string) bool {
+	n := 0
+	for strings.HasPrefix(op, "redo:") {
+		op = op[len("redo:"):]
+		n++
+	}
+	return n%2 == 1
+}
+
+// displayOp strips the internal redo: prefixes off an op label for messages.
+func displayOp(op string) string {
+	for strings.HasPrefix(op, "redo:") {
+		op = op[len("redo:"):]
+	}
+	return op
 }
 
 // PeekUndo reports what the next reversal targets, without changing anything: the

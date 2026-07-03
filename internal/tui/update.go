@@ -862,7 +862,7 @@ func (m *Model) redo() {
 		m.setStatus("nothing to redo")
 		return
 	}
-	if _, did, err := m.eng.Undo(); err != nil { // Undo() toggles: applying a redo entry redoes it
+	if _, did, err := m.eng.Redo("", true); err != nil {
 		m.setStatus("redo failed: " + err.Error())
 	} else if did {
 		m.setStatus("redid: " + label + " — u to undo")

@@ -15,6 +15,8 @@ import (
 	"github.com/navbytes/nt/internal/mutate"
 	"github.com/navbytes/nt/internal/note"
 	"github.com/navbytes/nt/internal/task"
+	"github.com/navbytes/nt/internal/undo"
+	"github.com/navbytes/nt/internal/workstream"
 )
 
 // Store-maintenance and housekeeping commands: archive, undo, edit, path,
@@ -80,28 +82,84 @@ func archiveNotes(e *mutate.Engine, handles []string, unarchive bool) int {
 	return 0
 }
 
-func cmdUndo(args []string) int {
+func cmdUndo(args []string) int  { return runReversal(args, false) }
+func cmdRedo(args []string) int  { return runReversal(args, true) }
+
+// runReversal implements `nt undo` and `nt redo`. On a shared multi-agent store
+// the journal interleaves every writer's transactions, so the last change is
+// often NOT yours: when NT_WORKSTREAM is set, reverting another workstream's
+// transaction is refused unless --force. Either way the affected tasks are
+// printed, so a reversal is never silent about what it touched.
+func runReversal(args []string, isRedo bool) int {
+	verb, past := "undo", "undid"
+	if isRedo {
+		verb, past = "redo", "redid"
+	}
+	fs := flag.NewFlagSet(verb, flag.ContinueOnError)
+	force := fs.Bool("force", false, "revert even if the last change belongs to another workstream")
+	ws := fs.String("workstream", "", "act as this workstream (default: NT_WORKSTREAM)")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
 	e, ok := engine()
 	if !ok {
 		return 1
 	}
-	op, did, err := e.Undo()
+	cur := workstream.Scope(*ws)
+	var txn undo.Txn
+	var did bool
+	var err error
+	if isRedo {
+		txn, did, err = e.Redo(cur, *force)
+	} else {
+		txn, did, err = e.UndoScoped(cur, *force)
+	}
 	if err != nil {
 		return fail(err)
 	}
 	if !did {
-		fmt.Println("nothing to undo")
+		fmt.Printf("nothing to %s\n", verb)
 		return 0
 	}
-	fmt.Printf("undid: %s\n", op)
+	op := txn.Op
+	for strings.HasPrefix(op, "redo:") {
+		op = strings.TrimPrefix(op, "redo:")
+	}
+	fmt.Printf("%s: %s (%d task(s) affected)\n", past, op, len(txn.Changes))
+	for _, c := range txn.Changes {
+		// After the reversal each task's live line is the change's Before image
+		// (redo swaps images when journaling, so Before is always "what it is now").
+		line, verbed := c.Before, "restored"
+		if line == "" {
+			line, verbed = c.After, "removed"
+		}
+		if t, ok := task.ParseLine(line); ok {
+			fmt.Printf("  %s %s  %s\n", verbed, shortID(c.ID), t.Text)
+		}
+	}
 	return 0
 }
 
 func cmdEdit(args []string) int {
-	if len(args) == 0 {
+	fs := flag.NewFlagSet("edit", flag.ContinueOnError)
+	appendTxt := fs.String("append", "", "append markdown to the note body without an editor (agent-safe)")
+	appendFile := fs.String("append-file", "", "append the contents of a file ('-' = stdin) to the note body")
+	bodyFile := fs.String("body-file", "", "replace the note body from a file ('-' = stdin)")
+	flags, positional := splitArgs(args, nil)
+	if err := fs.Parse(flags); err != nil {
+		return 2
+	}
+	if len(positional) == 0 {
 		return usageErr(fmt.Errorf("edit: need an id (or note:slug)"))
 	}
-	handle := args[0]
+	handle := positional[0]
+	appendVal, aerr := resolveBody(*appendTxt, *appendFile)
+	if aerr != nil {
+		return usageErr(fmt.Errorf("edit: %w", aerr))
+	}
+	if appendVal != "" && strings.TrimSpace(*bodyFile) != "" {
+		return usageErr(fmt.Errorf("edit: --append and --body-file are mutually exclusive"))
+	}
 	e, ok := engine()
 	if !ok {
 		return 1
@@ -110,6 +168,39 @@ func cmdEdit(args []string) int {
 	// explicit note: prefix or any bare note handle (slug/title/short id), the same
 	// handle every other note verb takes.
 	notes, _ := note.List(e.S)
+	// Non-interactive body edits (--append / --body-file): the agent path. A
+	// mangled or growing note used to be fixable only via $EDITOR or a whole-note
+	// supersede (which churns the id and every inbound link); this edits in place.
+	if appendVal != "" || strings.TrimSpace(*bodyFile) != "" {
+		n, nerr := resolveNote(notes, strings.TrimPrefix(handle, "note:"))
+		if nerr != nil {
+			return fail(fmt.Errorf("edit: %w (non-interactive edits apply to notes; for tasks use `nt update`)", nerr))
+		}
+		if appendVal != "" {
+			body := strings.TrimRight(n.Body, "\n")
+			if body != "" {
+				body += "\n\n"
+			}
+			n.Body = body + strings.TrimSpace(appendVal) + "\n"
+		} else {
+			nb, rerr := resolveBody("", *bodyFile)
+			if rerr != nil {
+				return usageErr(fmt.Errorf("edit: %w", rerr))
+			}
+			n.Body = nb
+		}
+		n.Updated = time.Now().Format(time.RFC3339)
+		if err := n.Save(); err != nil {
+			return fail(err)
+		}
+		warnDanglingLinks(e, n)
+		verb := "replaced body of"
+		if appendVal != "" {
+			verb = "appended to"
+		}
+		fmt.Printf("%s %s  %s\n", verb, shortID(n.ID), n.Rel)
+		return 0
+	}
 	if strings.HasPrefix(handle, "note:") {
 		want := strings.TrimPrefix(handle, "note:")
 		if n, nerr := resolveNote(notes, want); nerr == nil {

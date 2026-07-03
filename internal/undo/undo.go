@@ -26,9 +26,10 @@ type Change struct {
 
 // Txn is a single undoable transaction.
 type Txn struct {
-	Op      string   `json:"op"`      // human label, e.g. "add", "done", "archive"
-	TS      string   `json:"ts"`      // RFC3339 timestamp
-	Changes []Change `json:"changes"` // ULID-keyed before/after lines
+	Op      string   `json:"op"`           // human label, e.g. "add", "done", "archive"
+	TS      string   `json:"ts"`           // RFC3339 timestamp
+	WS      string   `json:"ws,omitempty"` // workstream that made the change ("" = unscoped/human)
+	Changes []Change `json:"changes"`      // ULID-keyed before/after lines
 }
 
 // Append writes a transaction to the journal. Caller holds the lock.

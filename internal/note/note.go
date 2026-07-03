@@ -452,7 +452,12 @@ func (n *Note) Reserved() bool { return strings.HasPrefix(n.Rel, "__tasks__/") }
 // a note with the given title and tags — a guard against concurrent forks (two
 // agents independently recording the same decision). A candidate matches when it
 // has the identical slug, OR it shares a tag AND its title word-set overlaps
-// heavily (Jaccard ≥ 0.5). This is a cheap heuristic, not semantic dedup.
+// heavily (Jaccard ≥ 0.5) — UNLESS the pair is a "parallel sibling": each note
+// carries a distinguishing tag the other lacks that also appears in its own
+// title ("taskly repo map" @taskly vs "ratelim repo map" @ratelim). Multi-project
+// stores legitimately hold same-shaped notes per project; the project tag in the
+// title is how the pair self-identifies as distinct. This is a cheap heuristic,
+// not semantic dedup.
 func FindSimilar(notes []*Note, title string, tags []string) []*Note {
 	want := titleTokens(title)
 	slug := Slug(title)
@@ -475,11 +480,39 @@ func FindSimilar(notes []*Note, title string, tags []string) []*Note {
 				break
 			}
 		}
-		if Slug(n.Title) == slug || (sharedTag && jaccard(want, titleTokens(n.Title)) >= 0.5) {
+		if Slug(n.Title) == slug {
+			out = append(out, n)
+			continue
+		}
+		if sharedTag && jaccard(want, titleTokens(n.Title)) >= 0.5 && !parallelSiblings(title, tags, n) {
 			out = append(out, n)
 		}
 	}
 	return out
+}
+
+// parallelSiblings reports whether the (title, tags) pair and note n look like
+// the same kind of note for two DIFFERENT projects: each side has a tag the
+// other lacks, and that tag appears as a word in its own title but not the
+// other's. Such pairs share their title shape ("X repo map" / "Y repo map") yet
+// are deliberately distinct — refusing them as duplicates was the dedup guard's
+// worst failure mode in multi-project field use.
+func parallelSiblings(title string, tags []string, n *Note) bool {
+	aTokens, bTokens := titleTokens(title), titleTokens(n.Title)
+	distinguishes := func(ownTags []string, otherTags []string, ownTokens, otherTokens map[string]bool) bool {
+		other := map[string]bool{}
+		for _, t := range otherTags {
+			other[t] = true
+		}
+		for _, t := range ownTags {
+			tok := normTitleToken(t)
+			if !other[t] && ownTokens[tok] && !otherTokens[tok] {
+				return true
+			}
+		}
+		return false
+	}
+	return distinguishes(tags, n.Tags, aTokens, bTokens) && distinguishes(n.Tags, tags, bTokens, aTokens)
 }
 
 // TitleOverlap is the word-set Jaccard (0..1) of two titles, ignoring short and
@@ -498,6 +531,18 @@ var structuralTag = map[string]bool{"lesson": true, "rule": true, "memory-core":
 var titleStopwords = map[string]bool{
 	"the": true, "and": true, "for": true, "over": true, "via": true, "with": true,
 	"vs": true, "not": true, "use": true, "using": true, "into": true, "from": true,
+}
+
+// normTitleToken folds a tag into the token form titleTokens produces, so a tag
+// like "Rate-Lim" can be looked up against title words ("ratelim").
+func normTitleToken(s string) string {
+	var b strings.Builder
+	for _, r := range strings.ToLower(s) {
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
 }
 
 func titleTokens(s string) map[string]bool {

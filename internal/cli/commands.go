@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -84,6 +85,46 @@ func buildText(title string, tags []string, project, noteSlug string) string {
 	return strings.Join(parts, " ")
 }
 
+// resolveBody merges the --body / --body-file pair every capture verb offers.
+// --body-file wins ("-" reads stdin); it exists because long bodies with
+// backticks/`$()` on a shell command line get silently mangled by the shell —
+// the #1 capture footgun agents hit. The two flags are mutually exclusive.
+func resolveBody(body, bodyFile string) (string, error) {
+	bf := strings.TrimSpace(bodyFile)
+	if bf == "" {
+		return body, nil
+	}
+	if strings.TrimSpace(body) != "" {
+		return "", fmt.Errorf("--body and --body-file are mutually exclusive")
+	}
+	if bf == "-" {
+		b, err := io.ReadAll(os.Stdin)
+		if err != nil {
+			return "", fmt.Errorf("--body-file -: reading stdin: %w", err)
+		}
+		return string(b), nil
+	}
+	b, err := os.ReadFile(bf)
+	if err != nil {
+		return "", fmt.Errorf("--body-file: %w", err)
+	}
+	return string(b), nil
+}
+
+// expandCommas splits any comma-carrying entries of a repeatable flag, so both
+// `--tag a --tag b` and `--tags a,b` land as ["a","b"].
+func expandCommas(vals []string) []string {
+	var out []string
+	for _, v := range vals {
+		for _, p := range strings.Split(v, ",") {
+			if p = strings.TrimSpace(p); p != "" {
+				out = append(out, p)
+			}
+		}
+	}
+	return out
+}
+
 func cmdAdd(args []string) int {
 	// Config [defaults] priority/source set the flag defaults; explicit flags win.
 	cfg := loadConfig()
@@ -101,21 +142,30 @@ func cmdAdd(args []string) int {
 	project := fs.String("project", "", "project")
 	source := fs.String("source", defSource, "origin")
 	parent := fs.String("parent", "", "parent task id")
-	blocks := fs.String("blocks", "", "blocks task id")
+	blocks := fs.String("blocks", "", "id of a task THIS new task blocks (that task waits for this one)")
+	blockedBy := fs.String("blocked-by", "", "id of a task that must complete first (the reverse of --blocks)")
 	discovered := fs.String("discovered-from", "", "task this was discovered while working on")
 	recur := fs.String("recur", "", "recurrence: weekly|3d|… (prefix + for strict, e.g. +monthly)")
 	noteSlug := fs.String("note", "", "link to a note slug")
+	body := fs.String("body", "", "detail/reasoning/steps (markdown) — saved as the task's linked note so the title stays short")
+	bodyFile := fs.String("body-file", "", "read the body from a file ('-' = stdin); immune to shell quoting")
 	est := fs.String("est", "", "time estimate (90m, 2h, 1h30m)")
 	asJSON := fs.Bool("json", false, "print the created task as JSON (id, text, status, …)")
 	fs.Var(&tags, "tag", "tag (repeatable)")
+	fs.Var(&tags, "tags", "alias for --tag; accepts comma-separated values")
 
 	flags, positional := splitArgs(args, map[string]bool{"json": true})
 	if err := fs.Parse(flags); err != nil {
 		return 2
 	}
+	tags = expandCommas(tags)
 	title := strings.Join(positional, " ")
 	if strings.TrimSpace(title) == "" {
 		return usageErr(fmt.Errorf("add: a title is required"))
+	}
+	bodyVal, bodyErr := resolveBody(*body, *bodyFile)
+	if bodyErr != nil {
+		return usageErr(fmt.Errorf("add: %w", bodyErr))
 	}
 	var p byte
 	if *pri != "" {
@@ -146,9 +196,22 @@ func cmdAdd(args []string) int {
 	if !ok2 {
 		return 1
 	}
+	// A body becomes the task's linked detail note (same contract as the MCP
+	// nt_add tool): the note is filed under notes/__tasks__/ so machine detail
+	// doesn't clutter the human KB, and the task line carries just the [[link]].
+	text := title
+	detailNote := ""
+	if strings.TrimSpace(bodyVal) != "" {
+		n, nerr := note.Create(e.S, title, bodyVal, nil, *source, note.TaskNoteFolder)
+		if nerr != nil {
+			return fail(fmt.Errorf("add: saving the body note: %w", nerr))
+		}
+		text = title + " [[" + n.Title + "]]"
+		detailNote = n.Title
+	}
 	var created *task.Task
 	err := e.Apply("add", func(d *task.Doc, rec *mutate.Recorder) error {
-		t := quickadd.New(buildText(title, tags, *project, *noteSlug))
+		t := quickadd.New(buildText(text, tags, *project, *noteSlug))
 		if p != 0 {
 			t.SetPriority(p)
 		}
@@ -168,20 +231,40 @@ func cmdAdd(args []string) int {
 		if *recur != "" {
 			t.SetKey("rec", *recur)
 		}
+		// Reference flags fail LOUDLY on an unresolvable id: silently dropping a
+		// dependency edge is exactly how an agent ends up trusting a `ready` feed
+		// that lies to it.
 		if *parent != "" {
-			if pt, amb := d.Resolve(*parent); pt != nil && !amb {
-				t.SetKey("parent", pt.ID())
+			pt, amb := d.Resolve(*parent)
+			if pt == nil || amb {
+				return fmt.Errorf("add: --parent: no unique task %q (use the id from `nt list`)", *parent)
 			}
+			t.SetKey("parent", pt.ID())
 		}
 		if *blocks != "" {
-			if bt, amb := d.Resolve(*blocks); bt != nil && !amb {
-				t.SetKey("blocks", bt.ID())
+			bt, amb := d.Resolve(*blocks)
+			if bt == nil || amb {
+				return fmt.Errorf("add: --blocks: no unique task %q (use the id from `nt list`)", *blocks)
 			}
+			t.SetKey("blocks", bt.ID())
+		}
+		if *blockedBy != "" {
+			bt, amb := d.Resolve(*blockedBy)
+			if bt == nil || amb {
+				return fmt.Errorf("add: --blocked-by: no unique task %q (use the id from `nt list`)", *blockedBy)
+			}
+			if cur := bt.Blocks(); cur != "" {
+				return fmt.Errorf("add: --blocked-by: task %s already blocks %s — a task can hold one blocks: edge; chain them instead (this task --blocked-by %s)", shortID(bt.ID()), shortID(cur), shortID(cur))
+			}
+			rec.Before(bt)
+			bt.SetKey("blocks", t.ID())
 		}
 		if *discovered != "" {
-			if dt, amb := d.Resolve(*discovered); dt != nil && !amb {
-				t.SetKey("discovered", dt.ID())
+			dt, amb := d.Resolve(*discovered)
+			if dt == nil || amb {
+				return fmt.Errorf("add: --discovered-from: no unique task %q (use the id from `nt list`)", *discovered)
 			}
+			t.SetKey("discovered", dt.ID())
 		}
 		d.Append(t)
 		rec.Added(t)
@@ -201,7 +284,11 @@ func cmdAdd(args []string) int {
 		// so an agent on the CLI path can capture-then-reference.
 		return printJSON(tasksToJSON([]*task.Task{created}, nil)[0])
 	}
-	fmt.Printf("added %s  %s\n", shortID(created.ID()), title)
+	if detailNote != "" {
+		fmt.Printf("added %s  %s (detail saved as linked note [[%s]])\n", shortID(created.ID()), title, detailNote)
+	} else {
+		fmt.Printf("added %s  %s\n", shortID(created.ID()), title)
+	}
 	return 0
 }
 
@@ -448,6 +535,7 @@ func cmdNote(args []string) int {
 	fs := flag.NewFlagSet("note", flag.ContinueOnError)
 	var tags stringSlice
 	body := fs.String("body", "", "note body")
+	bodyFile := fs.String("body-file", "", "read the body from a file ('-' = stdin); immune to shell quoting")
 	source := fs.String("source", "cli", "origin")
 	folder := fs.String("folder", "", "subfolder under notes/ (e.g. work or work/auth)")
 	desc := fs.String("description", "", "one-line summary shown in `nt index`")
@@ -457,11 +545,17 @@ func cmdNote(args []string) int {
 	var fields stringSlice
 	asJSON := fs.Bool("json", false, "print the created note as JSON (id, title, path, …)")
 	fs.Var(&tags, "tag", "tag (repeatable)")
+	fs.Var(&tags, "tags", "alias for --tag; accepts comma-separated values")
 	fs.Var(&fields, "field", "extra frontmatter key=value (repeatable, e.g. status=stable)")
 
 	flags, positional := splitArgs(args, map[string]bool{"json": true, "force": true, "lesson": true})
 	if err := fs.Parse(flags); err != nil {
 		return 2
+	}
+	tags = expandCommas(tags)
+	bodyVal, bodyErr := resolveBody(*body, *bodyFile)
+	if bodyErr != nil {
+		return usageErr(fmt.Errorf("note: %w", bodyErr))
 	}
 	// --lesson is shorthand for the lesson convention: tag `lesson` + folder
 	// lessons/ (unless an explicit --folder overrides). Keeps captured mistakes a
@@ -499,11 +593,12 @@ func cmdNote(args []string) int {
 			for _, s := range sim {
 				fmt.Fprintf(os.Stderr, "  %s  %s  %s\n", shortID(s.ID), s.Rel, s.Title)
 			}
-			fmt.Fprintf(os.Stderr, "→ edit it (nt edit <id>), replace it (nt note … --supersede <id>), or force a new one (--force)\n")
+			fmt.Fprintf(os.Stderr, "→ append to it (nt edit %s --append \"…\"), replace it (nt note … --supersede %s),\n", shortID(sim[0].ID), shortID(sim[0].ID))
+			fmt.Fprintf(os.Stderr, "  or, if it's genuinely distinct, rerun this exact command with --force\n")
 			return 1
 		}
 	}
-	n, err := note.Create(e.S, title, *body, tags, *source, fold)
+	n, err := note.Create(e.S, title, bodyVal, tags, *source, fold)
 	if err != nil {
 		return fail(err)
 	}
@@ -752,8 +847,12 @@ func cmdUpdate(args []string) int {
 	pri := fs.String("pri", "", "priority")
 	due := fs.String("due", "", "due date")
 	recur := fs.String("recur", "", "recurrence (stored; Phase 3)")
-	parent := fs.String("parent", "", "parent id")
-	blocks := fs.String("blocks", "", "blocks id")
+	parent := fs.String("parent", "", "parent id ('none' clears)")
+	blocks := fs.String("blocks", "", "id of a task THIS task blocks ('none' clears the edge)")
+	blockedBy := fs.String("blocked-by", "", "id of a task that must complete first (the reverse of --blocks)")
+	noteSlug := fs.String("note", "", "link an existing note to the task(s) (slug/title/id)")
+	body := fs.String("body", "", "attach detail (markdown) — saved as the task's linked note")
+	bodyFile := fs.String("body-file", "", "read --body from a file ('-' = stdin)")
 	est := fs.String("est", "", "time estimate (90m, 2h; 'none' clears)")
 	title := fs.String("title", "", "replace the task's description (keeps tags/project/links)")
 	project := fs.String("project", "", "set the +project ('none' clears)")
@@ -811,6 +910,43 @@ func cmdUpdate(args []string) int {
 	if !ok {
 		return 1
 	}
+	bodyVal, bodyErr := resolveBody(*body, *bodyFile)
+	if bodyErr != nil {
+		return usageErr(fmt.Errorf("update: %w", bodyErr))
+	}
+	// --note / --body both end in a [[link]] appended to the task line: --note
+	// links an existing note (resolved up front so a typo fails loudly), --body
+	// creates the detail note the same way `nt add --body` does. This removes the
+	// add-only asymmetry that forced agents into a rigid notes-before-tasks order.
+	linkTitle := ""
+	if strings.TrimSpace(*noteSlug) != "" {
+		n, nerr := resolveNote(mustNotes(e), *noteSlug)
+		if nerr != nil {
+			return fail(fmt.Errorf("update: --note: %w", nerr))
+		}
+		linkTitle = n.Title
+	}
+	if strings.TrimSpace(bodyVal) != "" {
+		if linkTitle != "" {
+			return usageErr(fmt.Errorf("update: --note and --body are mutually exclusive (one link per update)"))
+		}
+		if len(handles) != 1 {
+			return usageErr(fmt.Errorf("update: --body attaches detail to exactly one task, got %d ids", len(handles)))
+		}
+		d0, derr := e.Read()
+		if derr != nil {
+			return fail(derr)
+		}
+		t0, rerr := resolveHandle(d0, handles[0])
+		if rerr != nil {
+			return fail(fmt.Errorf("update: %w", rerr))
+		}
+		n, nerr := note.Create(e.S, t0.Display(), bodyVal, nil, "cli", note.TaskNoteFolder)
+		if nerr != nil {
+			return fail(fmt.Errorf("update: saving the body note: %w", nerr))
+		}
+		linkTitle = n.Title
+	}
 	count := 0
 	var single, recurMsg string
 	var updated []*task.Task
@@ -847,14 +983,40 @@ func cmdUpdate(args []string) int {
 				t.SetKey("rec", *recur)
 			}
 			if *parent != "" {
-				if pt, amb := d.Resolve(*parent); pt != nil && !amb {
+				if *parent == "none" || *parent == "-" {
+					t.SetKey("parent", "")
+				} else {
+					pt, amb := d.Resolve(*parent)
+					if pt == nil || amb {
+						return fmt.Errorf("update: --parent: no unique task %q (use the id from `nt list`)", *parent)
+					}
 					t.SetKey("parent", pt.ID())
 				}
 			}
 			if *blocks != "" {
-				if bt, amb := d.Resolve(*blocks); bt != nil && !amb {
+				if *blocks == "none" || *blocks == "-" {
+					t.SetKey("blocks", "") // clears the dependency edge
+				} else {
+					bt, amb := d.Resolve(*blocks)
+					if bt == nil || amb {
+						return fmt.Errorf("update: --blocks: no unique task %q (use the id from `nt list`)", *blocks)
+					}
 					t.SetKey("blocks", bt.ID())
 				}
+			}
+			if *blockedBy != "" {
+				bt, amb := d.Resolve(*blockedBy)
+				if bt == nil || amb {
+					return fmt.Errorf("update: --blocked-by: no unique task %q (use the id from `nt list`)", *blockedBy)
+				}
+				if cur := bt.Blocks(); cur != "" && cur != t.ID() {
+					return fmt.Errorf("update: --blocked-by: task %s already blocks %s — a task can hold one blocks: edge; chain them instead", shortID(bt.ID()), shortID(cur))
+				}
+				rec.Before(bt)
+				bt.SetKey("blocks", t.ID())
+			}
+			if linkTitle != "" && !strings.Contains(t.Text, "[["+linkTitle+"]]") {
+				t.SetText(strings.TrimSpace(t.Text) + " [[" + linkTitle + "]]")
 			}
 			if *title != "" {
 				t.SetTitle(*title)
