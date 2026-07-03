@@ -29,9 +29,10 @@ const LessonTag = "lesson"
 
 // Result is one ranked note. Lesson notes sort first at equal relevance.
 type Result struct {
-	Note   *note.Note
-	Score  int
-	Lesson bool
+	Note         *note.Note
+	Score        int
+	Lesson       bool
+	ProjectMatch bool // note belongs to the caller's project (soft ranking boost applied)
 }
 
 // synGroups cluster words that mean the same thing to a coding agent. Matching any
@@ -155,10 +156,55 @@ func conceptID(w string) string {
 // so a relevant gotcha outranks a merely-adjacent reference note. Notes with no
 // overlap are dropped. limit<=0 means no cap.
 func Rank(notes []*note.Note, context string, limit int) []Result {
+	return RankProject(notes, context, limit, "")
+}
+
+// projectBoost tilts ties toward the caller's own project without burying
+// cross-project knowledge: multi-project field use showed recall interleaving
+// other projects' notes above the caller's equally-relevant ones. Kept well
+// below the lesson boost (1.6) so a genuinely more-relevant foreign note still
+// wins — this is a preference, not a filter.
+const projectBoost = 1.25
+
+// projectTokens reduces a project hint (an NT_WORKSTREAM like "feat-gamma-cache",
+// a branch, or a plain project name) to its lowercase alphanumeric tokens, the
+// form note tags fold to for matching.
+func projectTokens(project string) map[string]bool {
+	out := map[string]bool{}
+	for _, w := range strings.FieldsFunc(strings.ToLower(project), notWord) {
+		if len(w) >= 2 && !stop[w] {
+			out[w] = true
+		}
+	}
+	return out
+}
+
+// matchesProject reports whether a note self-identifies as belonging to the
+// project hint: any tag or folder path segment equals one of its tokens.
+func matchesProject(n *note.Note, proj map[string]bool) bool {
+	for _, t := range n.Tags {
+		if proj[strings.ToLower(t)] {
+			return true
+		}
+	}
+	for _, seg := range strings.Split(strings.ToLower(n.Rel), "/") {
+		if proj[seg] {
+			return true
+		}
+	}
+	return false
+}
+
+// RankProject is Rank with a soft same-project preference: notes tagged (or
+// foldered) as belonging to `project` — typically the caller's NT_WORKSTREAM —
+// rank above equally-relevant notes from other projects. Empty project means
+// no preference (identical to Rank).
+func RankProject(notes []*note.Note, context string, limit int, project string) []Result {
 	q := newBag(context)
 	if len(q.words) == 0 {
 		return nil
 	}
+	proj := projectTokens(project)
 	// Pass 1: build each note's bags and tally document frequency per concept, so a
 	// common word ("database", "test") counts less than a rare, discriminating one.
 	type cand struct {
@@ -242,7 +288,11 @@ func Rank(notes []*note.Note, context string, limit int) []Result {
 		if cd.lesson {
 			f *= 1.6 // surface recorded mistakes, without swamping relevance
 		}
-		out = append(out, scored{Result{Note: cd.n, Score: int(f*100 + 0.5), Lesson: cd.lesson}, f, exact, matched})
+		isMine := len(proj) > 0 && matchesProject(cd.n, proj)
+		if isMine {
+			f *= projectBoost
+		}
+		out = append(out, scored{Result{Note: cd.n, Score: int(f*100 + 0.5), Lesson: cd.lesson, ProjectMatch: isMine}, f, exact, matched})
 	}
 	// Precision floor (field-study fix): a specific query (≥4 concepts) matching a
 	// note on a SINGLE concept is topical noise, not a memory hit — the lesson

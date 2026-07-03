@@ -95,6 +95,8 @@ func Run(args []string) int {
 		return cmdPath(rest)
 	case "doctor":
 		return cmdDoctor(rest)
+	case "gc":
+		return cmdGc(rest)
 	case "git-init":
 		return cmdGitInit(rest)
 	case "hook":
@@ -140,7 +142,7 @@ var knownCommands = []string{
 	"view", "views", "ready", "agenda", "review", "index", "log",
 	"done", "do", "skip", "start", "stop", "update", "up", "search", "q",
 	"recall", "export", "tags", "tag", "links", "mv", "rename", "rm", "delete",
-	"archive", "undo", "redo", "edit", "path", "doctor", "git-init", "hook", "mcp",
+	"archive", "undo", "redo", "edit", "path", "doctor", "gc", "git-init", "hook", "mcp",
 	"opencode", "web", "version", "help", "supersede", "relink",
 }
 
@@ -426,6 +428,8 @@ USAGE
   nt git-init                 set up the store for git (union-merge + .gitignore)
   nt doctor [--check]         health check: reconcile tasks.txt (dedup ids) + lint notes
                               (dangling [[links]], missing descriptions, orphans)
+  nt gc [--older-than 30d]    reclaim dead weight: superseded stubs + stranded task-detail
+                              notes → .trash/ (dry-run by default; --yes applies)
   nt hook                     sync a Claude Code TodoWrite event (PostToolUse hook)
   nt mcp                      run the MCP server (stdio) — typed tools for agents
   nt mcp install [--client]   register nt's MCP server with an AI client

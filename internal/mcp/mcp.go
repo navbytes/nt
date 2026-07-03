@@ -1307,13 +1307,27 @@ func (s *server) recall(a map[string]any) (string, error) {
 		}
 		notes = kept
 	}
-	results := recall.Rank(notes, context, limit)
+	// Same-project preference: explicit `project` arg, else the workstream
+	// identity ("*" widen sentinel means none). A soft boost, never a filter.
+	proj := strings.TrimSpace(str(a, "project"))
+	if proj == "" {
+		if ws := s.workstream(a); ws != "*" {
+			proj = ws
+		}
+	} else if proj == "none" || proj == "-" || proj == "*" {
+		proj = ""
+	}
+	results := recall.RankProject(notes, context, limit, proj)
 	stubs := make([]map[string]any, 0, len(results))
 	for _, r := range results {
-		stubs = append(stubs, map[string]any{
+		row := map[string]any{
 			"id": r.Note.ID, "title": r.Note.Title, "description": r.Note.Description(160),
 			"tags": r.Note.Tags, "folder": pathDir(r.Note.Rel), "lesson": r.Lesson,
-		})
+		}
+		if r.ProjectMatch {
+			row["projectMatch"] = true
+		}
+		stubs = append(stubs, row)
 	}
 	return jsonText(map[string]any{"results": stubs}), nil
 }

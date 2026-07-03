@@ -367,13 +367,20 @@ func cmdDoctor(args []string) int {
 		fmt.Println("  ⚠ dangling link " + dl)
 	}
 
+	// Reclaimable dead weight (superseded stubs, stranded task details) — doctor
+	// is the curation entry point, so it points at the mechanized cleanup.
+	gcCount := len(gcCandidates(e, time.Now().AddDate(0, 0, -30).Format("2006-01-02")))
+
 	if !taskProblem && !noteProblem {
-		if nl.hasHygieneNotices() {
+		if nl.hasHygieneNotices() || gcCount > 0 {
 			fmt.Println("tasks and links are healthy — note-hygiene notices below")
 		} else {
 			fmt.Println("store is healthy — no issues found")
 		}
 		printNoteHygiene(nl)
+		if gcCount > 0 {
+			fmt.Printf("  %d reclaimable note(s) (superseded/stranded >30d) — `nt gc` to review, `nt gc --yes` to trash\n", gcCount)
+		}
 		return 0
 	}
 	if rep.Issues() > 0 {

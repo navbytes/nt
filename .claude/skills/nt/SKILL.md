@@ -53,6 +53,10 @@ differs (it's paraphrase-aware, unlike substring `nt search`):
 nt recall "adding concurrent token refresh"    # MCP: nt_recall(context: "...")
 ```
 
+When `NT_WORKSTREAM` is set, your own project's notes get a soft ranking
+preference (`projectMatch: true` in JSON) — cross-project results stay visible
+below. Override with `--project <name>` or disable with `--project none`.
+
 When you hit a mistake, footgun, or dead-end, capture it as a **lesson** so the
 next session recalls it — put the trigger in the description ("when X, do Y — not Z"):
 
@@ -151,6 +155,8 @@ Keep the KB tidy as it grows — no `$EDITOR` needed:
 nt mv <note> ref/auth              # refile/rename, rewriting every [[link]] to it
 nt tag <note> +reviewed -inbox     # add/remove tags
 nt rm <note>                       # delete → .trash/ (refuses if inbound [[links]] would dangle; --force overrides)
+nt gc                              # plan: superseded stubs + stranded task notes >30d old
+nt gc --yes                        # reclaim them → .trash/ (recoverable)
 ```
 
 MCP: `nt_mv` (handle, dest), `nt_tag` (handle, add, remove). All preserve other
