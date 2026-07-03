@@ -2,6 +2,11 @@
 #
 # Install the nt ↔ OpenCode memory system into your local OpenCode config.
 #
+# NOTE: `nt opencode install` (built into the binary since the integration
+# bundle was embedded) performs these same steps without a repo checkout, on
+# every platform — prefer it. This script remains for repo-checkout installs
+# (e.g. iterating on the plugin without rebuilding nt).
+#
 # It is idempotent and safe to re-run. It will:
 #   1. register nt's MCP server with OpenCode (absolute path)        → mcp.nt
 #   2. copy the nt-memory plugin into ~/.config/opencode/plugins/

@@ -200,9 +200,18 @@ Capability report complete; read+write verdict positive.
 
 ## What ships for OpenCode
 
-- `nt mcp install --client opencode` — registers nt's MCP server into
-  `~/.config/opencode/opencode.json` (`mcp` key, `local` type, argv `command`),
-  idempotent, `$schema`-stamped, `--print`-able. Delivers Phases 2–3's engine.
+- **`nt opencode install`** — the complete integration in one built-in command:
+  MCP registration, the `nt-memory` plugin, the `nt` skill, the `/learn` +
+  `/recall` commands, a starter `AGENTS.md` (never clobbers yours),
+  `permission.skill.nt = allow`, and seeded `rules/` + `memory/` folders with an
+  initial `nt-rules.md` export. The bundle is embedded in the binary, so it
+  works from any `go install`/brew/curl nt — no repo checkout, no bash/node.
+  Idempotent; re-run after upgrades to refresh the plugin/skill. `--print`
+  previews every step.
+- `nt mcp install --client opencode` — the minimal path: registers only nt's
+  MCP server into `~/.config/opencode/opencode.json` (`mcp` key, `local` type,
+  argv `command`), idempotent, `$schema`-stamped, `--print`-able. Delivers
+  Phases 2–3's engine without the always-on injection layer.
 - `nt export` — compiles tagged/foldered notes (and open tasks) into one md/json
   document for the always-in-context layer. Delivers Phase 1's compile step.
 - **[`integrations/opencode/`](../integrations/opencode/)** — a ready-to-use

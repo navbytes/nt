@@ -105,6 +105,8 @@ func Run(args []string) int {
 			return fail(err)
 		}
 		return 0
+	case "opencode":
+		return cmdOpencode(rest)
 	case "web":
 		return cmdWeb(rest)
 	case "version", "--version", "-v":
@@ -130,8 +132,8 @@ var knownCommands = []string{
 	"view", "views", "ready", "today", "agenda", "review", "index", "log",
 	"done", "do", "skip", "start", "stop", "update", "up", "search", "q",
 	"tags", "tag", "links", "mv", "rename", "rm", "delete", "archive", "undo",
-	"edit", "path", "doctor", "git-init", "hook", "mcp", "web", "version", "help",
-	"supersede", "relink",
+	"edit", "path", "doctor", "git-init", "hook", "mcp", "opencode", "web",
+	"version", "help", "supersede", "relink",
 }
 
 // suggestCommand returns the closest known command to cmd within a small edit
@@ -397,8 +399,12 @@ USAGE
                               (dangling [[links]], missing descriptions, orphans)
   nt hook                     sync a Claude Code TodoWrite event (PostToolUse hook)
   nt mcp                      run the MCP server (stdio) — typed tools for agents
-  nt mcp install [--client]   register nt with an AI client (claude-code|claude-desktop|opencode)
+  nt mcp install [--client]   register nt's MCP server with an AI client
+                              (claude-code|claude-desktop|opencode)
                               --print/--dry-run shows what would change without writing
+  nt opencode install         full OpenCode integration: MCP server + memory plugin +
+                              nt skill + /learn + /recall commands + AGENTS.md +
+                              seeded rules/ and memory/ folders (--print supported)
   nt web [--port N]           browse and edit notes in a browser (localhost only)
   nt web --detach             run the viewer in the background (--status / --stop to manage)
 

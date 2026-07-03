@@ -64,6 +64,8 @@ That's it — you're up. `nt help` lists every command; [more install options be
   ```bash
   nt mcp install                    # add nt to Claude Code / Claude Desktop (absolute path, idempotent)
   nt mcp install --client opencode  # …or OpenCode (~/.config/opencode/opencode.json)
+  nt opencode install               # …or the FULL OpenCode integration: MCP + memory plugin +
+                                    #    skill + /learn + /recall + AGENTS.md + seeded rules/memory
   ```
 - **The `/nt` skill + read-back loop** — teach the agent to capture as it works and load prior context (`nt index`, then fetch on demand) when it resumes.
 - **Learn from past mistakes** — record a footgun or dead-end as a **lesson** (`nt note … --lesson`), then `nt recall "<what you're about to do>"` surfaces the relevant lessons *first* — even when your wording differs from the note's — so the next session doesn't repeat them. See [durable memory](#-durable-memory-for-your-ai-agents) below.

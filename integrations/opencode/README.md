@@ -8,8 +8,10 @@ sessions, lives in plain files you can `grep`/`git diff`/open in Obsidian, and
 costs the right number of tokens for each kind of content.
 
 ```bash
-./install.sh        # global install into ~/.config/opencode
+nt opencode install   # complete setup from any installed nt binary (--print to preview)
 ```
+
+(From a repo checkout, `./install.sh` performs the same steps.)
 
 ---
 
@@ -168,9 +170,16 @@ the compiled output traces back to its source note by **stable nt id**.
 ## Install & verify
 
 ```bash
+nt opencode install               # from any installed binary (no checkout needed)
+nt opencode install --print       # preview every step without writing
+```
+Or, from a repo checkout (e.g. while iterating on the plugin):
+```bash
 cd integrations/opencode
 ./install.sh                      # or: NT_BIN=/abs/path/to/nt ./install.sh
 ```
+Both are idempotent; re-running `nt opencode install` after an nt upgrade
+refreshes the plugin/skill/commands to the versions that binary ships.
 Then restart OpenCode (or reload MCP). Verify:
 ```bash
 nt export --tag rule --title Rules     # exactly what gets injected as rules
