@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -367,7 +368,11 @@ func cmdDoctor(args []string) int {
 	}
 
 	if !taskProblem && !noteProblem {
-		fmt.Println("store is healthy — no issues found")
+		if nl.hasHygieneNotices() {
+			fmt.Println("tasks and links are healthy — note-hygiene notices below")
+		} else {
+			fmt.Println("store is healthy — no issues found")
+		}
 		printNoteHygiene(nl)
 		return 0
 	}
@@ -400,8 +405,9 @@ type noteLint struct {
 	NoteCount   int
 	MissingDesc []string // handles of active notes with no explicit `description:`
 	Orphans     []string // handles of active notes nothing links to (informational)
-	NearDups    []string // "a ≈ b" pairs of active notes with near-duplicate titles
-	PinnedCount int      // notes in the always-shown index tier (rules/memory/ref/pin)
+	NearDups     []string // "a ≈ b" pairs of active notes with near-duplicate titles
+	PinnedCount  int      // notes in the always-shown index tier (rules/memory/ref/pin)
+	OldestPinned []string // "handle (aged Nd)" — staleness candidates when the tier is oversized
 }
 
 // lintNotes scans notes and tasks for KB-graph health: unresolved [[links]]
@@ -437,6 +443,7 @@ func lintNotes(e *mutate.Engine) noteLint {
 		}
 	}
 	seen := make([]*note.Note, 0, len(active))
+	var pinnedNotes []*note.Note
 	for _, n := range active {
 		if n.Reserved() {
 			continue // machine task-detail notes aren't held to KB hygiene
@@ -444,6 +451,7 @@ func lintNotes(e *mutate.Engine) noteLint {
 		rep.NoteCount++
 		if n.Pinned() {
 			rep.PinnedCount++
+			pinnedNotes = append(pinnedNotes, n)
 		}
 		handle := shortID(n.ID) + " " + n.Rel
 		if !hasExplicitDescription(n) {
@@ -462,6 +470,22 @@ func lintNotes(e *mutate.Engine) noteLint {
 			rep.NearDups = append(rep.NearDups, fmt.Sprintf("%s ≈ %s", handle, shortID(sim[0].ID)+" "+sim[0].Rel))
 		}
 		seen = append(seen, n)
+	}
+	// When the pinned tier is oversized, name the oldest members with their age
+	// — "demote stale notes" is only actionable if nt says WHICH are stale.
+	if rep.PinnedCount > note.TierPinnedWarn {
+		sort.SliceStable(pinnedNotes, func(i, j int) bool { return pinnedNotes[i].ChangedDate() < pinnedNotes[j].ChangedDate() })
+		today := time.Now()
+		for i, n := range pinnedNotes {
+			if i >= 5 {
+				break
+			}
+			age := ""
+			if d, err := time.Parse("2006-01-02", n.ChangedDate()); err == nil {
+				age = fmt.Sprintf(" (aged %dd)", int(today.Sub(d).Hours()/24))
+			}
+			rep.OldestPinned = append(rep.OldestPinned, shortID(n.ID)+" "+n.Rel+age)
+		}
 	}
 	return rep
 }
@@ -534,11 +558,21 @@ func printNoteHygiene(nl noteLint) {
 		fmt.Printf("  near-duplicates (consolidate with `nt supersede <old> --by <new>`): %s\n", sampleList(nl.NearDups, 6))
 	}
 	// "Always shown" invites dumping — make the pinned tier's cost legible once
-	// it outgrows what a session-start load should pay for.
+	// it outgrows what a session-start load should pay for. ~25 tokens per stub
+	// row (measured on rendered output, not guessed).
 	if nl.PinnedCount > note.TierPinnedWarn {
 		fmt.Printf("  pinned tier is %d notes (≈%d tokens shown at EVERY session start) — demote stale rules/memory/ref notes (nt archive) or consolidate\n",
-			nl.PinnedCount, nl.PinnedCount*60)
+			nl.PinnedCount, nl.PinnedCount*25)
+		if len(nl.OldestPinned) > 0 {
+			fmt.Printf("  oldest pinned (staleness candidates): %s\n", sampleList(nl.OldestPinned, 5))
+		}
 	}
+}
+
+// hasHygieneNotices reports whether the informational note-quality summary has
+// anything to say — used to keep the headline honest.
+func (nl noteLint) hasHygieneNotices() bool {
+	return len(nl.MissingDesc) > 0 || len(nl.Orphans) > 0 || len(nl.NearDups) > 0 || nl.PinnedCount > note.TierPinnedWarn
 }
 
 // sampleList joins up to n items, appending "(+K more)" when it truncates.

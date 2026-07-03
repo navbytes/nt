@@ -74,6 +74,11 @@ func cmdShow(args []string) int {
 	if len(n.Tags) > 0 {
 		meta = append(meta, "@"+strings.Join(n.Tags, " @"))
 	}
+	// Dates make staleness visible — a pinned rule or repo map is served at every
+	// session start, and its age is the reader's only freshness signal.
+	if d := n.ChangedDate(); d != "" {
+		meta = append(meta, "updated "+d)
+	}
 	fmt.Printf("%s\n\n", strings.Join(meta, "  ·  "))
 	// The one-line description is real content (often the WHOLE content of a
 	// stub-style note) — print it, untruncated, ahead of the body.

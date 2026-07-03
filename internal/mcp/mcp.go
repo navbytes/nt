@@ -920,12 +920,18 @@ func (s *server) index(a map[string]any) (string, error) {
 		}
 	}
 	notes := note.Active(s.listNotes())
+	rootOnly := folder == "." // "." expands the "(root)" rollup
 	var filtered []*note.Note
+	folderSeen := map[string]bool{}
 	for _, n := range notes {
 		if n.Reserved() {
 			continue // task-detail notes aren't part of the KB catalog
 		}
-		if folder != "" && !strings.HasPrefix(n.Rel, folder+"/") {
+		folderSeen[pathDir(n.Rel)] = true
+		if rootOnly && strings.ContainsRune(n.Rel, '/') {
+			continue
+		}
+		if !rootOnly && folder != "" && !strings.HasPrefix(n.Rel, folder+"/") {
 			continue
 		}
 		if tag != "" && !contains(n.Tags, tag) {
@@ -935,6 +941,18 @@ func (s *server) index(a map[string]any) (string, error) {
 			continue // "what changed since T"
 		}
 		filtered = append(filtered, n)
+	}
+	// A folder that matches nothing is almost always a typo — a silent "0 notes"
+	// success reads as "those notes don't exist" to an agent.
+	if folder != "" && !rootOnly && len(filtered) == 0 && tag == "" && since == "" {
+		known := make([]string, 0, len(folderSeen))
+		for f := range folderSeen {
+			if f != "" && f != "." {
+				known = append(known, f)
+			}
+		}
+		sort.Strings(known)
+		return "", fmt.Errorf("no notes under folder %q — folders here: %s (folder \".\" = root notes)", folder, strings.Join(known, ", "))
 	}
 
 	// Tier the DEFAULT view of a large store (see note.TierIndex): pinned +
@@ -970,8 +988,25 @@ func (s *server) index(a map[string]any) (string, error) {
 		})
 	}
 	noteTotal := len(filtered)
-	if lim := intArg(a, "limit"); lim > 0 && len(stubs) > lim {
-		stubs = stubs[:lim]
+	if lim := intArg(a, "limit"); lim > 0 {
+		if tiered.Tiered {
+			// Shrink the recent tier; overflow joins the rollup so the arithmetic
+			// (pinned+recent+older == total) stays exact. Rebuild the stub list.
+			tiered.LimitRecent(lim)
+			stubs = stubs[:0]
+			for _, n := range tiered.Pinned {
+				st := noteToStub(n, "")
+				st.Tier = "pinned"
+				stubs = append(stubs, st)
+			}
+			for _, n := range tiered.Recent {
+				st := noteToStub(n, "")
+				st.Tier = "recent"
+				stubs = append(stubs, st)
+			}
+		} else if len(stubs) > lim {
+			stubs = stubs[:lim]
+		}
 	}
 
 	ws := s.workstream(a)
@@ -1006,15 +1041,14 @@ func (s *server) index(a map[string]any) (string, error) {
 	out := map[string]any{
 		"notes": stubs, "tasks": tasksOut(active), "recentlyDone": tasksOut(recent),
 	}
+	out["noteTotal"] = noteTotal // always present: lets an agent confirm completeness
 	if tiered.Tiered {
 		out["tiered"] = true
 		out["olderByFolder"] = tiered.OlderByFolder
 		out["olderTotal"] = tiered.OlderTotal
-		out["noteTotal"] = noteTotal
-		out["hint"] = "tiered catalog: pinned (standing rules/memory/ref) + notes changed in the last 14d; olderByFolder counts the rest — expand with folder/tag filters or all:true"
+		out["hint"] = "tiered catalog: pinned (standing rules/memory/ref) + notes changed in the last 14d; olderByFolder counts the rest — expand with folder (\".\" = root)/tag filters or all:true"
 	} else if noteTotal > len(stubs) {
 		out["truncated"] = true
-		out["noteTotal"] = noteTotal
 	}
 	return jsonText(out), nil
 }
@@ -1042,6 +1076,9 @@ func compactIndex(stubs []noteStub, active, recent []*task.Task, noteTotal int, 
 		if len(n.Tags) > 0 {
 			fmt.Fprintf(&b, "  @%s", strings.Join(n.Tags, " @"))
 		}
+		if n.Tier == "pinned" && n.Updated != "" {
+			fmt.Fprintf(&b, "  ·upd %s", n.Updated) // standing notes never expire out of view; age is the only staleness signal
+		}
 		b.WriteByte('\n')
 	}
 	if tiered.Tiered && tiered.OlderTotal > 0 {
@@ -1052,10 +1089,11 @@ func compactIndex(stubs []noteStub, active, recent []*task.Task, noteTotal int, 
 		sort.Strings(folders)
 		fmt.Fprintf(&b, "-- OLDER (%d — expand with folder/tag filters, or all:true) --\n", tiered.OlderTotal)
 		for _, f := range folders {
-			if f == "" {
-				f = "(root)"
+			label := f
+			if f == "" || f == "." {
+				label = "(root — folder \".\")"
 			}
-			fmt.Fprintf(&b, "%s: %d\n", f, tiered.OlderByFolder[f])
+			fmt.Fprintf(&b, "%s: %d\n", label, tiered.OlderByFolder[f])
 		}
 	} else if noteTotal > len(stubs) {
 		fmt.Fprintf(&b, "… %d more (pass a higher limit or a tag/folder filter)\n", noteTotal-len(stubs))
@@ -1083,6 +1121,9 @@ func compactIndex(stubs []noteStub, active, recent []*task.Task, noteTotal int, 
 // note.
 func (s *server) get(a map[string]any) (string, error) {
 	handle := strings.TrimSpace(str(a, "handle"))
+	if handle == "" {
+		handle = strings.TrimSpace(str(a, "id")) // stubs expose `id`; accept it here so the obvious follow-up call works
+	}
 	if handle == "" {
 		return "", fmt.Errorf("handle is required (a note id, slug, or title)")
 	}
@@ -1498,8 +1539,12 @@ func noteToStub(n *note.Note, snippet string) noteStub {
 	if upd == "" {
 		upd = n.Created
 	}
+	desc := n.Description(160)
+	if desc == n.Title {
+		desc = "" // a description that echoes the title is pure token waste
+	}
 	return noteStub{
-		ID: n.ID, Rel: n.Rel, Title: n.Title, Description: n.Description(160),
+		ID: n.ID, Rel: n.Rel, Title: n.Title, Description: desc,
 		Snippet: snippet, Tags: n.Tags, Folder: pathDir(n.Rel), Source: n.Source, Updated: shortDate(upd),
 	}
 }

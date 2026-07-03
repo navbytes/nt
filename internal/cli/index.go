@@ -3,8 +3,11 @@ package cli
 import (
 	"flag"
 	"fmt"
+	"os"
 	"path"
+	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -24,6 +27,22 @@ func shortDate(s string) string {
 // noteFolder is the directory a note lives in, relative to notes/ ("" = root).
 func noteFolder(n *note.Note) string {
 	return path.Dir(n.Rel)
+}
+
+// pastRelRe matches the past-relative day forms of --updated-since: "14d" or
+// "-14d" = 14 days ago. The shared date parser's +Nd is future-anchored (built
+// for due dates), which made "the last 14 days" unexpressible — and `+14d`
+// silently matched nothing.
+var pastRelRe = regexp.MustCompile(`^-?(\d+)d$`)
+
+// parsePastDate parses a --updated-since value: Nd/-Nd as N days AGO, else the
+// shared date grammar (today|fri|YYYY-MM-DD|+Nd…).
+func parsePastDate(s string) (string, bool) {
+	if m := pastRelRe.FindStringSubmatch(s); m != nil {
+		n, _ := strconv.Atoi(m[1])
+		return time.Now().AddDate(0, 0, -n).Format("2006-01-02"), true
+	}
+	return parseDate(s)
 }
 
 type indexNote struct {
@@ -81,9 +100,14 @@ func cmdIndex(args []string) int {
 	}
 	since := ""
 	if s := strings.TrimSpace(*updatedSince); s != "" {
-		d, ok := parseDate(s)
+		d, ok := parsePastDate(s)
 		if !ok {
-			return usageErr(fmt.Errorf("index: --updated-since: unrecognized date %q (try today|fri|+3d|YYYY-MM-DD)", s))
+			return usageErr(fmt.Errorf("index: --updated-since: unrecognized date %q (try 14d = 14 days ago, today, or YYYY-MM-DD)", s))
+		}
+		if d > time.Now().Format("2006-01-02") {
+			// A future cutoff silently matches nothing — the classic "+14d means
+			// last 14 days, right?" trap. Say so instead of returning [].
+			fmt.Fprintf(os.Stderr, "index: --updated-since %s resolves to a FUTURE date (%s) — every note predates it; for \"the last 14 days\" use --updated-since 14d\n", s, d)
 		}
 		since = d
 	}
@@ -94,12 +118,18 @@ func cmdIndex(args []string) int {
 
 	notes := note.Active(mustNotes(e))
 	prefix := strings.Trim(*folder, "/")
+	rootOnly := prefix == "." // `--folder .` expands the "(root)" rollup line
 	var filtered []*note.Note
+	folderSeen := map[string]bool{}
 	for _, n := range notes {
 		if n.Reserved() {
 			continue // task-detail notes aren't part of the KB catalog
 		}
-		if prefix != "" && !strings.HasPrefix(n.Rel, prefix+"/") {
+		folderSeen[noteFolder(n)] = true
+		if rootOnly && strings.ContainsRune(n.Rel, '/') {
+			continue
+		}
+		if !rootOnly && prefix != "" && !strings.HasPrefix(n.Rel, prefix+"/") {
 			continue
 		}
 		match := true
@@ -116,6 +146,19 @@ func cmdIndex(args []string) int {
 			continue // "what's changed since T" — skip anything older
 		}
 		filtered = append(filtered, n)
+	}
+
+	// A scoping folder that matches nothing is almost always a typo — a silent
+	// "0 notes" success reads as "those notes don't exist" to an agent.
+	if prefix != "" && !rootOnly && len(filtered) == 0 {
+		known := make([]string, 0, len(folderSeen))
+		for f := range folderSeen {
+			if f != "" && f != "." {
+				known = append(known, f)
+			}
+		}
+		sort.Strings(known)
+		return fail(fmt.Errorf("index: no notes under folder %q — folders here: %s (use `--folder .` for root notes)", prefix, strings.Join(known, ", ")))
 	}
 
 	// Tier the DEFAULT view of a large store: pinned (standing knowledge) +
@@ -135,8 +178,12 @@ func cmdIndex(args []string) int {
 			if updated == "" {
 				updated = n.Created
 			}
+			desc := n.Description(160)
+			if desc == n.Title {
+				desc = "" // a description that echoes the title is pure token waste
+			}
 			out = append(out, indexNote{
-				ID: n.ID, Title: n.Title, Description: n.Description(160), Source: n.Source,
+				ID: n.ID, Title: n.Title, Description: desc, Source: n.Source,
 				Tags: n.Tags, Folder: noteFolder(n), Updated: shortDate(updated), Tier: tier,
 			})
 		}
@@ -151,6 +198,9 @@ func cmdIndex(args []string) int {
 		})
 	}
 
+	// Under tiering a --limit shrinks the recent tier and the overflow joins the
+	// rollup counts, so the arithmetic (pinned+recent+older == total) stays exact.
+	tiers.LimitRecent(*limit)
 	var pinned, stubs []indexNote
 	if tiers.Tiered {
 		pinned = toStubs(tiers.Pinned, "pinned")
@@ -161,7 +211,7 @@ func cmdIndex(args []string) int {
 		byFolderTitle(stubs)
 	}
 	noteTotal := len(filtered)
-	if *limit > 0 && len(stubs) > *limit {
+	if !tiers.Tiered && *limit > 0 && len(stubs) > *limit {
 		stubs = stubs[:*limit]
 	}
 
@@ -180,8 +230,8 @@ func cmdIndex(args []string) int {
 				}
 				keep := true
 				for _, want := range tags {
-					if !contains(t.Tags(), want) {
-						keep = false
+					if !contains(t.Tags(), want) && !contains(t.Projects(), want) {
+						keep = false // a tag scope matches @tag or +project — projects ARE the task-side project identity
 						break
 					}
 				}
@@ -216,7 +266,7 @@ func cmdIndex(args []string) int {
 				"notes": shown, "tiered": true,
 				"olderByFolder": tiers.OlderByFolder, "olderTotal": tiers.OlderTotal,
 				"noteTotal": noteTotal,
-				"hint":      "tiered catalog: pinned (standing rules/memory/ref) + notes changed in the last 14d; olderByFolder counts the rest — expand with --folder <f>, --tag <t>, or --all",
+				"hint":      "tiered catalog: pinned (standing rules/memory/ref) + notes changed in the last 14d; olderByFolder counts the rest — expand with --folder <f> (`.` = root notes), --tag <t>, or --all",
 			}
 			if !*noTasks {
 				payload["tasks"] = tasksToJSON(active, map[*task.Task]int{})
@@ -244,6 +294,19 @@ func cmdIndex(args []string) int {
 		return printJSON(payload)
 	}
 
+	printStubDated := func(s indexNote) {
+		line := fmt.Sprintf("- `%s` %s", shortID(s.ID), s.Title)
+		if s.Description != "" {
+			line += " — " + s.Description
+		}
+		if len(s.Tags) > 0 {
+			line += "  @" + strings.Join(s.Tags, " @")
+		}
+		if s.Updated != "" {
+			line += "  ·upd " + s.Updated
+		}
+		fmt.Println(line)
+	}
 	printStub := func(s indexNote, withFolder bool) {
 		line := fmt.Sprintf("- `%s` %s", shortID(s.ID), s.Title)
 		if s.Description != "" {
@@ -273,7 +336,9 @@ func cmdIndex(args []string) int {
 					fmt.Printf("\n## %s\n", folderLabel(s.Folder))
 					lastFolder = s.Folder
 				}
-				printStub(s, false)
+				// Pinned rows carry their date: standing notes never expire out of
+				// view, so their age is the only staleness signal a reader gets.
+				printStubDated(s)
 			}
 		}
 		if len(stubs) > 0 {
@@ -295,6 +360,8 @@ func cmdIndex(args []string) int {
 		}
 	case noteTotal > len(stubs):
 		fmt.Printf("<!-- nt index — %d of %d notes (--limit), %d active tasks — narrow with --tag/--folder -->\n", len(stubs), noteTotal, len(active))
+	case scoped:
+		fmt.Printf("<!-- nt index — %d notes (full listing, untiered), %d active tasks — fetch a note with `nt show <id>` -->\n", len(stubs), len(active))
 	default:
 		fmt.Printf("<!-- nt index — %d notes, %d active tasks — fetch a note with `nt show <id>` -->\n", len(stubs), len(active))
 	}

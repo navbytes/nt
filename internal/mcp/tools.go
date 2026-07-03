@@ -112,7 +112,7 @@ var toolDefs = []toolDef{
 		Description: "Resuming work: the KB catalog. One stub per note (id, title, one-line description, tags, folder) — NO bodies — plus active (open+doing) tasks and a few recent completions (recentlyDone). Load this first, then nt_get the few notes you need or nt_search by topic. Cheap and bounded: large stores return a TIERED catalog (tiered=true) — pinned standing notes + stubs changed in the last 14d, with the older remainder as olderByFolder counts; expand a folder with the folder filter, or pass all:true for every stub. Scope with tag/folder.",
 		InputSchema: obj(map[string]any{
 			"tag":           sp("only notes/tasks with this tag"),
-			"folder":        sp("only notes under this folder, e.g. ref"),
+			"folder":        sp(`only notes under this folder, e.g. ref ("." = root notes)`),
 			"all":           map[string]any{"type": "boolean", "description": "full catalog: every note stub, no tiering (large stores tier by default)"},
 			"limit":         map[string]any{"type": "integer", "description": "cap the note catalog to N (truncated=true when more exist); scope with tag/folder for big stores"},
 			"updated_since": sp("only notes changed on/after this date (today|tomorrow|fri|+3d|YYYY-MM-DD) — 'what changed since last session'"),
@@ -128,8 +128,9 @@ var toolDefs = []toolDef{
 		Description: "Fetch one note's full body by handle (id, slug, or title) — the on-demand half of the index. With section, returns only the markdown block under that heading.",
 		InputSchema: obj(map[string]any{
 			"handle":  sp("note id, slug, or title (from nt_index / nt_search)"),
+			"id":      sp("alias for handle — pass a stub's id directly"),
 			"section": sp("optional: a heading within the note to return just that block"),
-		}, "handle"),
+		}),
 	},
 	{
 		Name:        "nt_search",

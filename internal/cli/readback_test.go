@@ -224,3 +224,28 @@ func TestIndexTiersLargeStores(t *testing.T) {
 		t.Fatalf("tiered JSON should mark tiers, got %+v", j)
 	}
 }
+
+func TestIndexRootExpansionAndUnknownFolder(t *testing.T) {
+	t.Setenv("NT_DIR", t.TempDir())
+	captureRun(t, "note", "root scratch note", "--description", "lives at the root")
+	captureRun(t, "note", "filed note", "--folder", "decisions", "--description", "x")
+
+	out := captureRun(t, "index", "--folder", ".")
+	if !strings.Contains(out, "root scratch note") || strings.Contains(out, "filed note") {
+		t.Fatalf("--folder . should list exactly the root notes:\n%s", out)
+	}
+	// A folder that matches nothing errors loudly and names the real folders.
+	msg, code := runWithStdout("index", "--folder", "nosuch")
+	if code == 0 {
+		t.Fatalf("unknown folder should be an error:\n%s", msg)
+	}
+}
+
+func TestIndexPastRelativeSince(t *testing.T) {
+	t.Setenv("NT_DIR", t.TempDir())
+	captureRun(t, "note", "fresh note", "--description", "x")
+	out := captureRun(t, "index", "--updated-since", "14d")
+	if !strings.Contains(out, "fresh note") {
+		t.Fatalf("Nd should mean N days AGO and match fresh notes:\n%s", out)
+	}
+}

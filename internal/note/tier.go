@@ -90,18 +90,21 @@ func TierIndex(notes []*Note, now time.Time) Tiers {
 		switch {
 		case n.Pinned():
 			t.Pinned = append(t.Pinned, n)
+		case strings.HasPrefix(n.Rel, "journal/"):
+			// Daily notes are chronological noise in a "what changed" tier — a
+			// week of journals would crowd out project-relevant recents. They
+			// stay in the rollup (and behind `nt journal` / --folder journal).
+			t.rollupNote(n)
 		case n.ChangedDate() >= cutoff:
 			recent = append(recent, n)
 		default:
-			t.OlderByFolder[folderOf(n)]++
-			t.OlderTotal++
+			t.rollupNote(n)
 		}
 	}
 	sort.SliceStable(recent, func(i, j int) bool { return recent[i].ChangedDate() > recent[j].ChangedDate() })
 	if len(recent) > TierRecentCap {
 		for _, n := range recent[TierRecentCap:] {
-			t.OlderByFolder[folderOf(n)]++
-			t.OlderTotal++
+			t.rollupNote(n)
 		}
 		recent = recent[:TierRecentCap]
 	}
@@ -109,11 +112,32 @@ func TierIndex(notes []*Note, now time.Time) Tiers {
 	return t
 }
 
-// folderOf is the rollup key: the note's top-level folder under notes/.
+// rollupNote counts a note into the older-remainder tier.
+func (t *Tiers) rollupNote(n *Note) {
+	t.OlderByFolder[folderOf(n)]++
+	t.OlderTotal++
+}
+
+// LimitRecent truncates the recent tier to n stubs, moving the overflow into
+// the rollup counts so pinned + recent + older still equals the total — a
+// --limit must shrink the listing, never make notes vanish from the math.
+func (t *Tiers) LimitRecent(n int) {
+	if !t.Tiered || n <= 0 || len(t.Recent) <= n {
+		return
+	}
+	for _, note := range t.Recent[n:] {
+		t.rollupNote(note)
+	}
+	t.Recent = t.Recent[:n]
+}
+
+// folderOf is the rollup key: the note's top-level folder under notes/, with
+// "." for the root — a real, expandable key (`nt index --folder .`), never the
+// cryptic empty string.
 func folderOf(n *Note) string {
 	d := path.Dir(n.Rel)
 	if d == "." {
-		return ""
+		return "."
 	}
 	if i := strings.IndexByte(d, '/'); i >= 0 {
 		return d[:i]

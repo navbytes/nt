@@ -60,3 +60,41 @@ func TestTierIndex(t *testing.T) {
 		t.Fatal("capped overflow should land in the rollup")
 	}
 }
+
+func TestTierLimitAndJournal(t *testing.T) {
+	now := time.Date(2026, 7, 3, 12, 0, 0, 0, time.UTC)
+	var notes []*Note
+	notes = append(notes, mk("rules/r.md", "rule", []string{"rule"}, "2024-01-01"))
+	notes = append(notes, mk("journal/2026-07-02.md", "journal 2026-07-02", nil, "2026-07-02")) // recent but journal
+	for i := 0; i < 20; i++ {
+		notes = append(notes, mk(fmt.Sprintf("decisions/d%d.md", i), fmt.Sprintf("decision %d", i), nil, "2026-07-01"))
+	}
+	for i := 0; i < 20; i++ {
+		notes = append(notes, mk(fmt.Sprintf("lessons/l%d.md", i), fmt.Sprintf("lesson %d", i), nil, "2025-01-01"))
+	}
+	tr := TierIndex(notes, now)
+	// Journal dailies never occupy recent-tier slots — they roll up.
+	for _, n := range tr.Recent {
+		if n.Title == "journal 2026-07-02" {
+			t.Fatal("journal note must not occupy a recent slot")
+		}
+	}
+	if tr.OlderByFolder["journal"] != 1 {
+		t.Fatalf("journal note should roll up, got %v", tr.OlderByFolder)
+	}
+	// LimitRecent keeps the arithmetic exact.
+	total := len(tr.Pinned) + len(tr.Recent) + tr.OlderTotal
+	tr.LimitRecent(5)
+	if len(tr.Recent) != 5 {
+		t.Fatalf("LimitRecent: want 5, got %d", len(tr.Recent))
+	}
+	if got := len(tr.Pinned) + len(tr.Recent) + tr.OlderTotal; got != total {
+		t.Fatalf("LimitRecent broke accounting: %d != %d", got, total)
+	}
+	// Root notes key as "." (a real, expandable folder), never "".
+	rooty := append(notes, mk("scratch.md", "root scratch", nil, "2024-06-01"))
+	tr = TierIndex(rooty, now)
+	if tr.OlderByFolder["."] != 1 || tr.OlderByFolder[""] != 0 {
+		t.Fatalf("root rollup key should be '.', got %v", tr.OlderByFolder)
+	}
+}
