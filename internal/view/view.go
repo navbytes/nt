@@ -24,13 +24,24 @@ const FileName = "views.json"
 // tasks. Output-only choices (e.g. --json) are deliberately excluded — they are
 // a recall-time concern, not part of the saved query.
 type Spec struct {
-	Status      string `json:"status,omitempty"`
-	Tag         string `json:"tag,omitempty"`
-	Project     string `json:"project,omitempty"`
-	Sort        string `json:"sort,omitempty"`
-	All         bool   `json:"all,omitempty"`
-	ShowBlocked bool   `json:"showBlocked,omitempty"`
-	Tree        bool   `json:"tree,omitempty"`
+	Status string `json:"status,omitempty"`
+	// Tag is the legacy single-tag field (older saved views); Tags is the
+	// repeatable --tag form, ANDed. Both are honored — AllTags() folds them.
+	Tag         string   `json:"tag,omitempty"`
+	Tags        []string `json:"tags,omitempty"`
+	Project     string   `json:"project,omitempty"`
+	Sort        string   `json:"sort,omitempty"`
+	All         bool     `json:"all,omitempty"`
+	ShowBlocked bool     `json:"showBlocked,omitempty"`
+	Tree        bool     `json:"tree,omitempty"`
+}
+
+// AllTags folds the legacy single Tag and the repeatable Tags into one AND set.
+func (s Spec) AllTags() []string {
+	if s.Tag == "" {
+		return s.Tags
+	}
+	return append([]string{s.Tag}, s.Tags...)
 }
 
 // file is the on-disk envelope. The wrapper object (rather than a bare map)
@@ -110,8 +121,8 @@ func (s Spec) Args() []string {
 	if s.Status != "" {
 		a = append(a, "--status", s.Status)
 	}
-	if s.Tag != "" {
-		a = append(a, "--tag", s.Tag)
+	for _, tg := range s.AllTags() {
+		a = append(a, "--tag", tg)
 	}
 	if s.Project != "" {
 		a = append(a, "--project", s.Project)

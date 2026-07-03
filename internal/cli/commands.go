@@ -277,7 +277,7 @@ func recurNote(spawned *task.Task) string {
 // cmdSkip advances one or more recurring tasks to their next occurrence without
 // completing them — "not this time, but keep the cadence."
 func cmdSkip(args []string) int {
-	handles, herr := handleArgs("skip", args)
+	handles, asJSON, herr := handleArgsJSON("skip", args)
 	if herr != nil {
 		return usageErr(herr)
 	}
@@ -289,8 +289,9 @@ func cmdSkip(args []string) int {
 		return 1
 	}
 	var lines []string
+	var updated []*task.Task
 	err := e.Apply("skip", func(d *task.Doc, rec *mutate.Recorder) error {
-		lines = nil
+		lines, updated = nil, nil
 		for _, h := range handles {
 			t, err := resolveHandle(d, h)
 			if err != nil {
@@ -306,11 +307,15 @@ func cmdSkip(args []string) int {
 			rec.Before(t)
 			t.SetKey("due", next)
 			lines = append(lines, fmt.Sprintf("skipped %s  %s  due:%s", shortID(t.ID()), t.Text, next))
+			updated = append(updated, t)
 		}
 		return nil
 	})
 	if err != nil {
 		return fail(err)
+	}
+	if asJSON {
+		return printJSON(tasksToJSON(updated, nil))
 	}
 	if len(lines) == 1 {
 		fmt.Println(lines[0])
@@ -326,7 +331,7 @@ func cmdSkip(args []string) int {
 // cmdStart begins time-tracking a task: stamps started: (now, unix seconds) and
 // sets s:doing. Pair with `nt stop` to log the elapsed time into spent: (T6).
 func cmdStart(args []string) int {
-	handles, herr := handleArgs("start", args)
+	handles, asJSON, herr := handleArgsJSON("start", args)
 	if herr != nil {
 		return usageErr(herr)
 	}
@@ -339,9 +344,10 @@ func cmdStart(args []string) int {
 	}
 	now := strconv.FormatInt(time.Now().Unix(), 10)
 	var single string
+	var updated []*task.Task
 	n := 0
 	err := e.Apply("start", func(d *task.Doc, rec *mutate.Recorder) error {
-		n, single = 0, ""
+		n, single, updated = 0, "", nil
 		for _, h := range handles {
 			t, err := resolveHandle(d, h)
 			if err != nil {
@@ -355,12 +361,16 @@ func cmdStart(args []string) int {
 			t.SetKey("started", now)
 			t.SetState("doing")
 			single = fmt.Sprintf("started %s  %s — `nt stop` to log the time", shortID(t.ID()), t.Text)
+			updated = append(updated, t)
 			n++
 		}
 		return nil
 	})
 	if err != nil {
 		return fail(err)
+	}
+	if asJSON {
+		return printJSON(tasksToJSON(updated, nil))
 	}
 	if n == 1 {
 		fmt.Println(single)
@@ -373,7 +383,7 @@ func cmdStart(args []string) int {
 // cmdStop ends time-tracking: adds the elapsed time since started: into spent:,
 // clears started:, and returns the task to s:open (T6).
 func cmdStop(args []string) int {
-	handles, herr := handleArgs("stop", args)
+	handles, asJSON, herr := handleArgsJSON("stop", args)
 	if herr != nil {
 		return usageErr(herr)
 	}
@@ -386,8 +396,9 @@ func cmdStop(args []string) int {
 	}
 	now := time.Now().Unix()
 	var lines []string
+	var updated []*task.Task
 	err := e.Apply("stop", func(d *task.Doc, rec *mutate.Recorder) error {
-		lines = nil
+		lines, updated = nil, nil
 		for _, h := range handles {
 			t, err := resolveHandle(d, h)
 			if err != nil {
@@ -417,11 +428,15 @@ func cmdStop(args []string) int {
 			t.SetState(restore)
 			lines = append(lines, fmt.Sprintf("stopped %s — logged %s (total spent %s)",
 				shortID(t.ID()), dateparse.FmtDuration(elapsed), dateparse.FmtDuration(total)))
+			updated = append(updated, t)
 		}
 		return nil
 	})
 	if err != nil {
 		return fail(err)
+	}
+	if asJSON {
+		return printJSON(tasksToJSON(updated, nil))
 	}
 	for _, l := range lines {
 		fmt.Println(l)
@@ -672,7 +687,7 @@ func cmdJournal(args []string) int {
 }
 
 func cmdDone(args []string) int {
-	handles, herr := handleArgs("done", args)
+	handles, asJSON, herr := handleArgsJSON("done", args)
 	if herr != nil {
 		return usageErr(herr)
 	}
@@ -684,9 +699,10 @@ func cmdDone(args []string) int {
 		return 1
 	}
 	var single string
+	var updated []*task.Task
 	count := 0
 	err := e.Apply("done", func(d *task.Doc, rec *mutate.Recorder) error {
-		count, single = 0, ""
+		count, single, updated = 0, "", nil
 		for _, h := range handles {
 			t, err := resolveHandle(d, h)
 			if err != nil {
@@ -694,12 +710,16 @@ func cmdDone(args []string) int {
 			}
 			spawned := completeAndSpawn(d, rec, t) // spawns next if recurring
 			single = fmt.Sprintf("done %s  %s%s", shortID(t.ID()), t.Text, recurNote(spawned))
+			updated = append(updated, t)
 			count++
 		}
 		return nil
 	})
 	if err != nil {
 		return fail(err)
+	}
+	if asJSON {
+		return printJSON(tasksToJSON(updated, nil))
 	}
 	if count == 1 {
 		fmt.Println(single)

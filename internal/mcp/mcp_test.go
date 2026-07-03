@@ -20,6 +20,12 @@ func newServer(t *testing.T) *server {
 	return &server{eng: e, version: "test", cache: note.NewCache()}
 }
 
+// statusOut mirrors the nt_status result fields the tests assert on.
+type statusOut struct {
+	OpenByUrgency []taskOut `json:"openByUrgency"`
+	RecentlyDone  []taskOut `json:"recentlyDone"`
+}
+
 func TestMCPToolFlow(t *testing.T) {
 	s := newServer(t)
 
@@ -36,33 +42,32 @@ func TestMCPToolFlow(t *testing.T) {
 		t.Fatalf("nt_add result wrong: %+v", added)
 	}
 
-	// nt_ready surfaces it.
-	out, _ = s.dispatch("nt_ready", map[string]any{})
-	var ready []taskOut
-	json.Unmarshal([]byte(out), &ready)
-	if len(ready) != 1 || ready[0].ID != added.ID {
-		t.Fatalf("nt_ready should return the new task, got %+v", ready)
+	// nt_status surfaces it among the open-by-urgency tasks.
+	out, _ = s.dispatch("nt_status", map[string]any{})
+	var st statusOut
+	json.Unmarshal([]byte(out), &st)
+	if len(st.OpenByUrgency) != 1 || st.OpenByUrgency[0].ID != added.ID {
+		t.Fatalf("nt_status should return the new task, got %+v", st.OpenByUrgency)
 	}
 
-	// nt_done by stable id removes it from ready; nt_log shows it.
-	if _, err := s.dispatch("nt_done", map[string]any{"id": added.ID}); err != nil {
+	// nt_update status:done by stable id completes it; the task leaves the open
+	// list and shows under recentlyDone.
+	if _, err := s.dispatch("nt_update", map[string]any{"id": added.ID, "status": "done"}); err != nil {
 		t.Fatal(err)
 	}
-	out, _ = s.dispatch("nt_ready", map[string]any{})
-	json.Unmarshal([]byte(out), &ready)
-	if len(ready) != 0 {
-		t.Errorf("nt_ready should be empty after done, got %d", len(ready))
+	out, _ = s.dispatch("nt_status", map[string]any{})
+	st = statusOut{}
+	json.Unmarshal([]byte(out), &st)
+	if len(st.OpenByUrgency) != 0 {
+		t.Errorf("open list should be empty after done, got %d", len(st.OpenByUrgency))
 	}
-	out, _ = s.dispatch("nt_log", map[string]any{})
-	var logged []taskOut
-	json.Unmarshal([]byte(out), &logged)
-	if len(logged) != 1 {
-		t.Errorf("nt_log should list the completed task, got %d", len(logged))
+	if len(st.RecentlyDone) != 1 {
+		t.Errorf("recentlyDone should list the completed task, got %d", len(st.RecentlyDone))
 	}
 
 	// Positional handles are refused (agents must use stable ids).
-	if _, err := s.dispatch("nt_done", map[string]any{"id": "task:1"}); err == nil {
-		t.Error("nt_done must reject a positional handle")
+	if _, err := s.dispatch("nt_update", map[string]any{"id": "task:1", "status": "done"}); err == nil {
+		t.Error("nt_update must reject a positional handle")
 	}
 
 	// nt_note captures a note; it shows up in nt_index as a stub (no body), and
@@ -148,13 +153,13 @@ func TestMCPStatus(t *testing.T) {
 	s.dispatch("nt_add", map[string]any{"text": "review auth", "project": "auth"})
 	s.dispatch("nt_add", map[string]any{"text": "buy milk"}) // out of scope
 
-	out, _ := s.dispatch("nt_ready", map[string]any{"project": "auth"})
-	var ready []taskOut
-	json.Unmarshal([]byte(out), &ready)
-	if len(ready) == 0 {
-		t.Fatal("seeded +auth tasks should be ready")
+	out, _ := s.dispatch("nt_status", map[string]any{"project": "auth"})
+	var pre statusOut
+	json.Unmarshal([]byte(out), &pre)
+	if len(pre.OpenByUrgency) == 0 {
+		t.Fatal("seeded +auth tasks should be open")
 	}
-	s.dispatch("nt_update", map[string]any{"id": ready[0].ID, "status": "doing"})
+	s.dispatch("nt_update", map[string]any{"id": pre.OpenByUrgency[0].ID, "status": "doing"})
 
 	out, err := s.dispatch("nt_status", map[string]any{"project": "auth"})
 	if err != nil {
@@ -511,7 +516,7 @@ func TestMCPIndexAndSearch(t *testing.T) {
 	// Done tasks are excluded from the active list.
 	var added taskOut
 	json.Unmarshal([]byte(must("nt_add", map[string]any{"text": "ship it"})), &added)
-	must("nt_done", map[string]any{"id": added.ID})
+	must("nt_update", map[string]any{"id": added.ID, "status": "done"})
 	var afterDone indexOut
 	json.Unmarshal([]byte(must("nt_index", map[string]any{})), &afterDone)
 	for _, tk := range afterDone.Tasks {
@@ -662,40 +667,35 @@ func TestMCPWorkstreamScopesAllReads(t *testing.T) {
 	if addedA.Workstream != "feat-a" {
 		t.Fatalf("nt_add should expose workstream in taskOut, got %+v", addedA)
 	}
-	// A completed task in A, for nt_log scoping.
+	// A completed task in A, for recentlyDone scoping.
 	doneOut, _ := s.dispatch("nt_add", map[string]any{"text": "done in A"})
 	var doneA taskOut
 	json.Unmarshal([]byte(doneOut), &doneA)
-	s.dispatch("nt_done", map[string]any{"id": doneA.ID})
+	s.dispatch("nt_update", map[string]any{"id": doneA.ID, "status": "done"})
 
 	t.Setenv("NT_WORKSTREAM", "feat-b")
 	s.dispatch("nt_add", map[string]any{"text": "ready in B"})
 
-	// nt_ready as feat-b: only B's task.
+	// nt_status as feat-b: only B's open task; A's completed task is invisible.
 	t.Setenv("NT_WORKSTREAM", "feat-b")
-	out, _ := s.dispatch("nt_ready", map[string]any{})
-	var ready []taskOut
-	json.Unmarshal([]byte(out), &ready)
-	if len(ready) != 1 || ready[0].Text != "ready in B" {
-		t.Errorf("nt_ready should scope to feat-b, got %+v", ready)
+	out, _ := s.dispatch("nt_status", map[string]any{})
+	var stB statusOut
+	json.Unmarshal([]byte(out), &stB)
+	if len(stB.OpenByUrgency) != 1 || stB.OpenByUrgency[0].Text != "ready in B" {
+		t.Errorf("nt_status should scope to feat-b, got %+v", stB.OpenByUrgency)
+	}
+	if strings.Contains(out, "done in A") {
+		t.Errorf("nt_status must not show feat-a's completed task to feat-b, got %s", out)
 	}
 
-	// nt_status as feat-a: A's open task present, B's absent.
+	// nt_status as feat-a: A's open + completed tasks present, B's absent.
 	t.Setenv("NT_WORKSTREAM", "feat-a")
 	out, _ = s.dispatch("nt_status", map[string]any{})
 	if !strings.Contains(out, "ready in A") || strings.Contains(out, "ready in B") {
 		t.Errorf("nt_status should scope to feat-a, got %s", out)
 	}
-
-	// nt_log as feat-a: A's completed task present; as feat-b: absent.
-	out, _ = s.dispatch("nt_log", map[string]any{})
 	if !strings.Contains(out, "done in A") {
-		t.Errorf("nt_log should show feat-a's completed task, got %s", out)
-	}
-	t.Setenv("NT_WORKSTREAM", "feat-b")
-	out, _ = s.dispatch("nt_log", map[string]any{})
-	if strings.Contains(out, "done in A") {
-		t.Errorf("nt_log must not show feat-a's completed task to feat-b, got %s", out)
+		t.Errorf("nt_status recentlyDone should show feat-a's completed task, got %s", out)
 	}
 }
 
@@ -750,7 +750,7 @@ func TestMCPUpdateClaimsWorkstream(t *testing.T) {
 
 // TestMCPDedupSupersedeAndDanglingLinks: nt_note flags a near-duplicate SOFTLY
 // (creates the note, returns `similar`) so parallel agents never lose a capture;
-// nt_supersede retires a note from the index; a note with an unresolved [[link]]
+// nt_archive(superseded_by) retires a note from the index; a note with an unresolved [[link]]
 // reports danglingLinks.
 func TestMCPDedupSupersedeAndDanglingLinks(t *testing.T) {
 	s := newServer(t)
@@ -776,8 +776,8 @@ func TestMCPDedupSupersedeAndDanglingLinks(t *testing.T) {
 		t.Errorf("near-duplicate should be a distinct new note, got %q", forked.ID)
 	}
 
-	// nt_supersede retires the fork; nt_index no longer lists it.
-	must("nt_supersede", map[string]any{"handle": forked.ID, "by": first.ID})
+	// nt_archive with superseded_by retires the fork; nt_index no longer lists it.
+	must("nt_archive", map[string]any{"handle": forked.ID, "superseded_by": first.ID})
 	if strings.Contains(must("nt_index", map[string]any{}), forked.ID) {
 		t.Error("superseded note should be gone from nt_index")
 	}
@@ -868,7 +868,7 @@ func TestMCPScopeArgArrayCoercion(t *testing.T) {
 }
 
 // TestMCPSearchTaskWorkstreamIsolation: nt_search task results are scoped to the
-// caller's workstream (like nt_index/nt_ready) so parallel agents don't leak
+// caller's workstream (like nt_index/nt_status) so parallel agents don't leak
 // in-flight tasks to each other; notes remain shared.
 func TestMCPSearchTaskWorkstreamIsolation(t *testing.T) {
 	s := newServer(t)

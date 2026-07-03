@@ -78,13 +78,13 @@ func TestRmValidatesAllHandlesUpFront(t *testing.T) {
 	}
 }
 
-// TestStrayFlagRejected: `nt done --json id` treats the flag-looking token as an
-// unknown flag rather than a bad handle.
+// TestStrayFlagRejected: `nt done --bogus id` treats the flag-looking token as
+// an unknown flag rather than a bad handle (--json is the one flag done takes).
 func TestStrayFlagRejected(t *testing.T) {
 	t.Setenv("NT_DIR", t.TempDir())
 	captureRun(t, "add", "a task")
 	id := taskIDByText(t, "a task")
-	if _, code := runWithStdout("done", "--json", id); code == 0 {
-		t.Fatal("done with a stray --json flag should be rejected")
+	if _, code := runWithStdout("done", "--bogus", id); code == 0 {
+		t.Fatal("done with a stray --bogus flag should be rejected")
 	}
 }

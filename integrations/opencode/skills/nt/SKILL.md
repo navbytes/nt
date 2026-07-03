@@ -25,7 +25,7 @@ reasoning — long, irrelevant context measurably hurts.)
 - `nt_index` — the KB catalog: one stub per note (id · title · one-line
   description · tags · folder) with NO bodies, plus the active task list. Read
   this first to see what's available.
-- `nt_ready` — open, unblocked tasks by urgency, if you only need the task feed.
+- `nt_status` — in-progress + blocked + open-by-urgency tasks, recent completions, linked notes.
 
 **Before starting a task — surface past lessons:**
 
@@ -53,7 +53,7 @@ reasoning — long, irrelevant context measurably hurts.)
 - `nt_note` — a finding, decision, constraint, or dead-end. **Always set
   `description`** (a one-line summary) — it's what `nt_index` shows, so the note
   is findable without opening it. The body is what a future `nt_get` reads back.
-- `nt_done` / `nt_update` — complete or change a task by its **stable id**
+- `nt_update` — change a task by its **stable id** (status:"done" completes it)
   (never a row number).
 
 ## Where things go (folders + tags)
@@ -83,7 +83,7 @@ distinguishable from the user's hand-entered items (the MCP tools default it).
 - `nt_mv` — refile/rename a note (rewrites every `[[link]]`).
 - `nt_tag` — add/remove tags (e.g. promote a `ref` note into `rule` once it's stable).
 - `nt_archive` — retire a stale note from the index/search (reversible).
-- `nt_supersede` (handle, by) — mark a note replaced by another; the old one leaves
+- `nt_archive` (handle, superseded_by) — mark a note replaced by another; the old one leaves
   the index so a resume sees only the current decision.
 - `nt_relink` (from, to) — repoint every `[[link]]` from one handle to another
   (e.g. after superseding, redirect references to the canonical note).

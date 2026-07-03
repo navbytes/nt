@@ -65,12 +65,16 @@ func cmdIndex(args []string) int {
 	noTasks := fs.Bool("no-tasks", false, "omit the active-task section")
 	limit := fs.Int("limit", 0, "cap the note catalog to N (0 = all); scope with --tag/--folder for large stores")
 	updatedSince := fs.String("updated-since", "", "only notes changed on/after this date (today|fri|+3d|YYYY-MM-DD) — 'what's new since last session'")
+	sinceAlias := fs.String("since", "", "alias for --updated-since (matches `nt log --since`)")
 	ws := fs.String("workstream", "", `scope tasks to a workstream (default: NT_WORKSTREAM; "*" = all)`)
 	var tags stringSlice
 	fs.Var(&tags, "tag", "only notes with this tag (repeatable, AND)")
 	flags, _ := splitArgs(args, map[string]bool{"json": true, "no-tasks": true})
 	if err := fs.Parse(flags); err != nil {
 		return 2
+	}
+	if *updatedSince == "" {
+		*updatedSince = *sinceAlias
 	}
 	since := ""
 	if s := strings.TrimSpace(*updatedSince); s != "" {

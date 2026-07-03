@@ -3,6 +3,7 @@ package view
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -39,7 +40,7 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 		t.Fatalf("want %d views, got %d", len(in), len(out))
 	}
 	for name, want := range in {
-		if out[name] != want {
+		if !reflect.DeepEqual(out[name], want) {
 			t.Errorf("view %q round-trip: got %#v, want %#v", name, out[name], want)
 		}
 	}

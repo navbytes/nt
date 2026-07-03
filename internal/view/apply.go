@@ -35,8 +35,10 @@ func Keep(t *task.Task, spec Spec, blocked map[string]bool) bool {
 	} else if !task.VisibleInList(t, blockedByDep, spec.All, spec.All || spec.ShowBlocked) {
 		return false
 	}
-	if spec.Tag != "" && !containsStr(t.Tags(), spec.Tag) {
-		return false
+	for _, tg := range spec.AllTags() {
+		if !containsStr(t.Tags(), tg) {
+			return false
+		}
 	}
 	if spec.Project != "" && !containsStr(t.Projects(), spec.Project) {
 		return false
