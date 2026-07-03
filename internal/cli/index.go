@@ -39,18 +39,6 @@ type indexNote struct {
 	Tier        string   `json:"tier,omitempty"` // "pinned"|"recent" on a tiered catalog
 }
 
-// noteChangedDate is the note's effective change date (YYYY-MM-DD): the later of
-// its file mtime (catches external edits) and its frontmatter updated/created.
-func noteChangedDate(n *note.Note, frontmatter string) string {
-	d := shortDate(frontmatter)
-	if !n.ModTime.IsZero() {
-		if m := n.ModTime.Format("2006-01-02"); m > d {
-			d = m
-		}
-	}
-	return d
-}
-
 // cmdIndex prints a compact catalog of the knowledge base — one line per note
 // (id · title · one-line description · tags · folder) plus the active task list,
 // and NO note bodies. This is the always-in-context "index" of the progressive-

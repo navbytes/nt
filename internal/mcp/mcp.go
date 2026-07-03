@@ -1369,8 +1369,9 @@ func (s *server) search(a map[string]any) (string, error) {
 		hits = hits[:limit]
 	}
 	// Empty result sets must encode as [] — a JSON null reads as "the tool broke"
-	// (or "tasks don't exist") to an agent, not as "no matches".
-	var noteRes any = []noteStub{}
+	// (or "tasks don't exist") to an agent, not as "no matches". Both branches
+	// below always assign a non-nil (possibly empty) slice.
+	var noteRes any
 	if full {
 		arr := make([]noteOut, 0, len(hits))
 		for _, h := range hits {
@@ -1464,11 +1465,12 @@ func (s *server) recall(a map[string]any) (string, error) {
 		// Same-project preference: explicit `project` arg, else the workstream
 		// identity ("*" widen sentinel means none). A soft boost, never a filter.
 		proj := strings.TrimSpace(str(a, "project"))
-		if proj == "" {
+		switch proj {
+		case "":
 			if ws := s.workstream(a); ws != "*" {
 				proj = ws
 			}
-		} else if proj == "none" || proj == "-" || proj == "*" {
+		case "none", "-", "*":
 			proj = ""
 		}
 		results = recall.RankProject(notes, context, limit, proj)

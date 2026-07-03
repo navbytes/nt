@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -83,8 +84,8 @@ func cmdGc(args []string) int {
 	if m == nil {
 		return usageErr(fmt.Errorf("gc: --older-than wants a day count like 30d, got %q", *olderThan))
 	}
-	days := 0
-	fmt.Sscanf(m[1], "%d", &days)
+	// pastRelRe's capture group is \d+, so this can't fail.
+	days, _ := strconv.Atoi(m[1])
 	cutoff := time.Now().AddDate(0, 0, -days).Format("2006-01-02")
 
 	e, ok := engine()

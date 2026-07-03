@@ -314,20 +314,12 @@ func splitArgs(args []string, boolFlags map[string]bool) (flags, positional []st
 	return flags, positional
 }
 
-// handleArgs returns the positional task handles in args, rejecting any stray
-// flag-looking token (e.g. `nt done --json id`) with a clear error rather than
-// silently treating it as a handle. cmd is the subcommand name for the message.
-func handleArgs(cmd string, args []string) ([]string, error) {
-	flags, positional := splitArgs(args, nil)
-	if len(flags) > 0 {
-		return nil, fmt.Errorf("%s: unknown flag %q", cmd, flags[0])
-	}
-	return positional, nil
-}
-
-// handleArgsJSON is handleArgs plus a --json flag — the shared arg shape of the
-// simple task-state mutators (done/skip/start/stop), so they can emit the
-// updated task(s) as JSON exactly like `nt update --json` does.
+// handleArgsJSON returns the positional task handles in args plus a --json
+// flag, rejecting any stray flag-looking token (e.g. `nt done --bogus id`)
+// with a clear error rather than silently treating it as a handle. It's the
+// shared arg shape of the simple task-state mutators (done/skip/start/stop),
+// so they can emit the updated task(s) as JSON exactly like `nt update --json`
+// does. cmd is the subcommand name for the error message.
 func handleArgsJSON(cmd string, args []string) (handles []string, asJSON bool, err error) {
 	flags, positional := splitArgs(args, map[string]bool{"json": true})
 	for _, f := range flags {

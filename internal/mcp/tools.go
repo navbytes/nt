@@ -28,7 +28,6 @@ func enum(vals ...string) map[string]any {
 func at() map[string]any {
 	return map[string]any{"type": "array", "items": map[string]any{"type": "string"}}
 }
-func it() map[string]any { return map[string]any{"type": "integer"} }
 
 // wsArg is the shared `workstream` property. It isolates parallel agents sharing
 // one store: tasks scope to a workstream, notes stay shared. Usually omitted —

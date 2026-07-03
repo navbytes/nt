@@ -190,7 +190,7 @@ func noteEditedSinceLastTxn(e *mutate.Engine) error {
 	if newest == nil || !newest.ModTime.After(txnTS.Add(noteEditGrace)) {
 		return nil
 	}
-	return fmt.Errorf("undo: your most recent store change looks like a NOTE edit (%s, %s) — note operations are not undoable (edit the note again, or nt archive/supersede it); `nt undo` would instead revert the older task change %q. Rerun with --force to revert that task change.",
+	return fmt.Errorf("undo: your most recent store change looks like a NOTE edit (%s, %s) — note operations are not undoable (edit the note again, or nt archive/supersede it); `nt undo` would instead revert the older task change %q — rerun with --force to revert that task change",
 		newest.Rel, newest.ModTime.Format("15:04:05"), label)
 }
 
