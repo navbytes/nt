@@ -6,7 +6,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 )
 
 // Fixes from the round-4 multi-agent field study: the undo-after-note-edit
@@ -23,22 +22,12 @@ func TestUndoRefusedAfterNoteEdit(t *testing.T) {
 	t.Setenv("NT_WORKSTREAM", "")
 	captureRun(t, "add", "task to revert")
 	captureRun(t, "note", "scratch pad", "--body", "v1")
+	// Deliberately back-to-back, no artificial delay: this is agent-speed
+	// usage (a scripted caller issuing add/note/edit inside the same wall-clock
+	// second), and the guard must catch it WITHOUT needing seconds of gap —
+	// txn timestamps carry nanosecond precision precisely so this ordering is
+	// resolvable even when everything lands in the same second.
 	captureRun(t, "edit", "scratch pad", "--append", "v2")
-
-	// Tests run inside one second; age the note edit past the grace window the
-	// way real usage looks (the note edited well after the task change).
-	var notes []struct {
-		Path string `json:"path"`
-	}
-	if err := json.Unmarshal([]byte(captureRun(t, "notes", "--json")), &notes); err != nil {
-		t.Fatal(err)
-	}
-	later := time.Now().Add(10 * time.Second)
-	for _, n := range notes {
-		if err := os.Chtimes(n.Path, later, later); err != nil {
-			t.Fatal(err)
-		}
-	}
 
 	_, stderr, code := runWithStderr("undo")
 	if code == 0 {

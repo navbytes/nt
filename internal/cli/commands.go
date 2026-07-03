@@ -574,7 +574,7 @@ func cmdNote(args []string) int {
 	bodyFile := fs.String("body-file", "", "read the body from a file ('-' = stdin); immune to shell quoting")
 	source := fs.String("source", defSource, "origin")
 	folder := fs.String("folder", "", "subfolder under notes/ (e.g. work or work/auth)")
-	project := fs.String("project", "", "project this note belongs to (stored as project: frontmatter; `nt recall --project` matches it)")
+	project := fs.String("project", "", "project this note belongs to (stored as project: frontmatter; 'nt recall --project' matches it)")
 	desc := fs.String("description", "", "one-line summary shown in 'nt index'")
 	supersede := fs.String("supersede", "", "mark this note as replacing an existing one (its handle) — the old note retires from active views")
 	force := fs.Bool("force", false, "create even if a near-duplicate note already exists")

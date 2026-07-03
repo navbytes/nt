@@ -150,10 +150,15 @@ func runReversal(args []string, isRedo bool) int {
 }
 
 // noteEditGrace is how much newer than the pending transaction a note's mtime
-// must be before undo suspects "the user means the note, not the task". Task
-// bodies create/append their detail note in the same breath as the task write,
-// so a small epsilon keeps those legitimate same-moment pairs out of the guard.
-const noteEditGrace = 2 * time.Second
+// must be before undo suspects "the user means the note, not the task". A task
+// body creates/appends its detail note BEFORE calling Apply (see cmdAdd/cmdUpdate
+// and mutate.Engine.Apply's time.Now() read), so that note's mtime always sorts
+// strictly before its own txn's timestamp — true causal ordering needs no
+// grace at all. This epsilon exists only for filesystem mtime truncation (some
+// filesystems round mtime to a coarser tick than Go's clock read); it must stay
+// tiny; multi-second slop is what let a genuine same-second agent-speed note
+// edit go undetected before.
+const noteEditGrace = time.Millisecond
 
 // noteEditedSinceLastTxn refuses an undo whose pending TASK transaction is older
 // than the newest note edit: notes aren't journaled, so the user who just edited
@@ -168,7 +173,10 @@ func noteEditedSinceLastTxn(e *mutate.Engine) error {
 	if _, isRedoPending, _ := e.PeekUndo(); isRedoPending {
 		return nil
 	}
-	txnTS, perr := time.Parse(time.RFC3339, txn.TS)
+	// RFC3339Nano parses older whole-second RFC3339 journal entries too (the
+	// fractional part is optional on read), so upgrading the write format never
+	// breaks a journal written by an older nt binary.
+	txnTS, perr := time.Parse(time.RFC3339Nano, txn.TS)
 	if perr != nil {
 		return nil
 	}

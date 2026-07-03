@@ -108,7 +108,7 @@ func (e *Engine) applyReversal(ws string, force, wantRedo bool) (undo.Txn, bool,
 	// Journal second: drop the undone txn and push its swapped redo, atomically.
 	// The swapped entry keeps the original writer's workstream so ownership
 	// survives an undo/redo round-trip.
-	redo := undo.Txn{Op: "redo:" + txn.Op, TS: time.Now().Format(time.RFC3339), WS: txn.WS}
+	redo := undo.Txn{Op: "redo:" + txn.Op, TS: time.Now().Format(time.RFC3339Nano), WS: txn.WS}
 	for _, c := range txn.Changes {
 		redo.Changes = append(redo.Changes, undo.Change{ID: c.ID, Before: c.After, After: c.Before})
 	}

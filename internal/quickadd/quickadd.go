@@ -33,10 +33,25 @@ func New(text string) *task.Task {
 	return t
 }
 
+// structuralKeys are todo.txt fields that must never come from freeform text:
+// task.ParseLine is also the trusted parser for real tasks.txt lines (where
+// every key is authoritative), but here it's parsing UNTRUSTED user/agent
+// input — a title that happens to contain "id: <ulid>" as plain English would
+// otherwise overwrite EnsureID's freshly generated id with that literal
+// string, colliding with whatever task already owns it (silent data
+// corruption: two lines sharing one id). ws/parent/blocks/discovered have the
+// same risk one step down (identity/relationship confusion instead of
+// collision) and, like id, are always set afterward through validated call
+// sites (--flags, MCP params), never meant to be sniffed out of prose.
+var structuralKeys = []string{"id", "ws", "parent", "blocks", "discovered"}
+
 // Apply normalizes an already-parsed task in place (inline date keys resolved,
-// priority marker lifted). New calls it; surfaces that build a task another way
-// can call it directly.
+// priority marker lifted, structural keys stripped of anything text-supplied).
+// New calls it; surfaces that build a task another way can call it directly.
 func Apply(t *task.Task) {
+	for _, k := range structuralKeys {
+		t.SetKey(k, "")
+	}
 	normalizeDateKey(t, "due")
 	normalizeDateKey(t, "t")
 	liftPriority(t)
