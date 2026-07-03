@@ -7,7 +7,7 @@ current Anomaly/SST version with a JS server + Go TUI, repo
 
 It is grounded in an audit of this repository's source and runtime, not the
 binary's name. **Headline finding:** `nt` is already a non-interactive,
-JSON-emitting CLI *and* ships a stdio **MCP server** (`nt mcp`) with 14 typed
+JSON-emitting CLI *and* ships a stdio **MCP server** (`nt mcp`) with 15 typed
 read **and write** tools — and OpenCode natively consumes MCP servers. That
 collapses most of what the brief assumed "must be built." The agent-driven
 read/write loop (knowledge-base retrieval **and** write-back memory) needs **no
@@ -50,10 +50,10 @@ memory must be built"** (a custom `nt_save` tool and/or a plugin). Two facts
 change the design:
 
 1. **`nt` already exposes write tools over MCP** — `nt_add`, `nt_note`,
-   `nt_update`, `nt_tag`, `nt_mv`, `nt_archive`, `nt_relink` — alongside the read
-   tools `nt_index`, `nt_search`, `nt_recall`, `nt_get`, `nt_status`, `nt_view`,
-   `nt_links`. Verified end-to-end over stdio JSON-RPC (`tools/list` →
-   14 tools; `tools/call nt_index`/`nt_search`/`nt_get` → results).
+   `nt_update`, `nt_rm`, `nt_tag`, `nt_mv`, `nt_archive`, `nt_relink` — alongside
+   the read tools `nt_index`, `nt_search`, `nt_recall`, `nt_get`, `nt_status`,
+   `nt_view`, `nt_links`. Verified end-to-end over stdio JSON-RPC (`tools/list` →
+   15 tools; `tools/call nt_index`/`nt_search`/`nt_get` → results).
 2. **OpenCode is a first-class MCP client.** Its config has a top-level `mcp` key
    for `"type": "local"` (stdio) servers, and the agent calls those tools the
    same way it calls built-ins.
@@ -139,7 +139,7 @@ Capability report complete; read+write verdict positive.
   immediately (index-first progressive disclosure). No custom tool needed.
 
 ### Phase 3 — Write-back memory ✅ engine + automation (shipped)
-- The write tools (`nt_add`, `nt_note`, `nt_update`, `nt_tag`,
+- The write tools (`nt_add`, `nt_note`, `nt_update`, `nt_rm`, `nt_tag`,
   `nt_mv`, `nt_archive`, `nt_relink`) are live the moment the MCP server is registered — the
   agent captures memory by calling them. **No `nt_save` to build.**
 - **Automation (shipped in the `nt-memory` plugin, each on by default):**

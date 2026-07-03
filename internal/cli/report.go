@@ -222,6 +222,24 @@ func cmdReady(args []string) int {
 	}
 	view.SortTasks(rows, "urgency")
 
+	// A dependency cycle silently disables blocking (every member shows as
+	// ready) — say so instead of letting the feed lie.
+	if cycles := task.DepCycles(all); len(cycles) > 0 {
+		fmt.Fprintf(os.Stderr, "⚠ %d dependency cycle(s) — blocking is disabled for those tasks; `nt doctor` lists them\n", len(cycles))
+	}
+	// Parents with open subtasks: the intended order is subtask-first, but only
+	// explicit blocks: edges gate visibility — annotate so a resuming agent
+	// doesn't start the parent before its open design subtask.
+	openKids := map[string]int{}
+	for _, t := range all {
+		if t.Done {
+			continue
+		}
+		if p := t.Key("parent"); p != "" {
+			openKids[p]++
+		}
+	}
+
 	if *asJSON {
 		return printJSON(tasksToJSON(rows, idx))
 	}
@@ -230,7 +248,11 @@ func cmdReady(args []string) int {
 		return 0
 	}
 	for _, t := range rows {
-		fmt.Println(formatRow(t, idx[t], false)) // ready ⇒ not blocked
+		row := formatRow(t, idx[t], false) // ready ⇒ not blocked
+		if n := openKids[t.ID()]; n > 0 {
+			row += fmt.Sprintf("  ← %d open subtask(s) first", n)
+		}
+		fmt.Println(row)
 	}
 	return 0
 }
@@ -845,6 +867,7 @@ func cmdLog(args []string) int {
 	since := fs.String("since", "", "only completions on/after YYYY-MM-DD")
 	days := fs.Int("days", 0, "only completions in the last N days")
 	source := fs.String("source", "", "filter by source (e.g. claude)")
+	ws := fs.String("workstream", "", `scope to a workstream (default: NT_WORKSTREAM; "*" = all)`)
 	asJSON := fs.Bool("json", false, "machine-readable output")
 
 	flags, _ := splitArgs(args, map[string]bool{"json": true})
@@ -867,6 +890,17 @@ func cmdLog(args []string) int {
 		}
 	}
 	done := task.CompletedSince(d.Tasks(), bound)
+	// Scope like list/ready do: an agent's logbook is its own workstream's (plus
+	// the shared backlog); pass --workstream "*" for the store-wide history.
+	if cur := workstream.Scope(*ws); cur != "" {
+		kept := done[:0]
+		for _, t := range done {
+			if workstream.Visible(t.Key("ws"), cur) {
+				kept = append(kept, t)
+			}
+		}
+		done = kept
+	}
 	if *source != "" {
 		kept := done[:0]
 		for _, t := range done {
@@ -909,6 +943,7 @@ func cmdLog(args []string) int {
 func cmdReview(args []string) int {
 	fs := flag.NewFlagSet("review", flag.ContinueOnError)
 	staleDays := fs.Int("stale", 14, "flag open tasks older than N days as stale")
+	ws := fs.String("workstream", "", `scope to a workstream (default: NT_WORKSTREAM; "*" = all)`)
 	asJSON := fs.Bool("json", false, "machine-readable output")
 	flags, _ := splitArgs(args, map[string]bool{"json": true})
 	if err := fs.Parse(flags); err != nil {
@@ -924,11 +959,23 @@ func cmdReview(args []string) int {
 	}
 	all := d.Tasks()
 	idx := indexMap(all)
-	blocked := task.BlockedIDs(all)
+	blocked := task.BlockedIDs(all) // blocked-ness is store-wide (edges cross workstreams)
 	today := mutate.Today()
 
+	// Scope the triage like list/ready: reviewing another agent's overdue work
+	// is noise (and misleading) inside a workstream-scoped session.
+	scoped := all
+	if cur := workstream.Scope(*ws); cur != "" {
+		scoped = nil
+		for _, t := range all {
+			if workstream.Visible(t.Key("ws"), cur) {
+				scoped = append(scoped, t)
+			}
+		}
+	}
+
 	// Shared triage (also powers the web /review) so the buckets never drift.
-	rev := task.BuildReview(all, blocked, *staleDays, today)
+	rev := task.BuildReview(scoped, blocked, *staleDays, today)
 	overdue, stale, undated, stuck := rev.Overdue, rev.Stale, rev.Undated, rev.StuckProjects
 
 	if *asJSON {

@@ -1303,32 +1303,46 @@ func contains(ss []string, want string) bool {
 // --- JSON output ---------------------------------------------------------
 
 type taskJSON struct {
-	Index     int      `json:"index"`
-	ID        string   `json:"id"`
-	Text      string   `json:"text"`
-	Status    string   `json:"status"`
-	Priority  string   `json:"priority,omitempty"`
-	Due       string   `json:"due,omitempty"`
-	Completed string   `json:"completed,omitempty"`
-	Project   string   `json:"project,omitempty"`
-	Tags      []string `json:"tags,omitempty"`
-	Source    string   `json:"source,omitempty"`
-	Links     []string `json:"links,omitempty"`
+	Index      int      `json:"index,omitempty"` // 1-based row in the listing that produced it; absent on create/update echoes
+	ID         string   `json:"id"`
+	Text       string   `json:"text"`
+	Status     string   `json:"status"`
+	Priority   string   `json:"priority,omitempty"`
+	Due        string   `json:"due,omitempty"`
+	Completed  string   `json:"completed,omitempty"`
+	Project    string   `json:"project,omitempty"`
+	Tags       []string `json:"tags,omitempty"`
+	Source     string   `json:"source,omitempty"`
+	Links      []string `json:"links,omitempty"`
+	Workstream string   `json:"workstream,omitempty"`
+	Est        string   `json:"est,omitempty"`
+	Spent      string   `json:"spent,omitempty"`
+	Blocks     string   `json:"blocks,omitempty"`
+	Parent     string   `json:"parent,omitempty"`
+	Recur      string   `json:"recur,omitempty"`
 }
 
+// tasksToJSON is deliberately LOSSLESS: every stored key:value rides along, so
+// an agent can verify a write from the response instead of grepping tasks.txt.
 func tasksToJSON(tasks []*task.Task, idx map[*task.Task]int) []taskJSON {
 	out := make([]taskJSON, 0, len(tasks))
 	for _, t := range tasks {
 		j := taskJSON{
-			Index:     idx[t],
-			ID:        t.ID(),
-			Text:      t.Text,
-			Status:    t.Status(),
-			Due:       t.Due(),
-			Completed: t.Completed,
-			Tags:      t.Tags(),
-			Source:    t.Source(),
-			Links:     t.Links(),
+			Index:      idx[t],
+			ID:         t.ID(),
+			Text:       t.Text,
+			Status:     t.Status(),
+			Due:        t.Due(),
+			Completed:  t.Completed,
+			Tags:       t.Tags(),
+			Source:     t.Source(),
+			Links:      t.Links(),
+			Workstream: t.Key("ws"),
+			Est:        t.Key("est"),
+			Spent:      t.Key("spent"),
+			Blocks:     t.Blocks(),
+			Parent:     t.Key("parent"),
+			Recur:      t.Key("rec"),
 		}
 		if t.Priority != 0 {
 			j.Priority = string(t.Priority)
@@ -1342,23 +1356,29 @@ func tasksToJSON(tasks []*task.Task, idx map[*task.Task]int) []taskJSON {
 }
 
 type noteJSON struct {
-	ID      string   `json:"id"`
-	Title   string   `json:"title"`
-	Tags    []string `json:"tags,omitempty"`
-	Source  string   `json:"source,omitempty"`
-	Created string   `json:"created,omitempty"`
-	Body    string   `json:"body,omitempty"`
-	Path    string   `json:"path"`
+	ID          string   `json:"id"`
+	Title       string   `json:"title"`
+	Description string   `json:"description,omitempty"`
+	Tags        []string `json:"tags,omitempty"`
+	Source      string   `json:"source,omitempty"`
+	Created     string   `json:"created,omitempty"`
+	Updated     string   `json:"updated,omitempty"`
+	Body        string   `json:"body,omitempty"`
+	Path        string   `json:"path"`
 }
 
 func notesToJSON(notes []*note.Note) []noteJSON {
 	out := make([]noteJSON, 0, len(notes))
 	for _, n := range notes {
-		// Include the body: an agent recalling a note needs the finding itself,
-		// not just its title (Product #4 — "the most valuable memory is the body").
+		// Include the body AND the untruncated description: an agent recalling a
+		// note needs the finding itself, and for stub-style notes the description
+		// IS the finding (field study: three lessons lived entirely in frontmatter
+		// and were unreadable through --json before this field existed).
 		out = append(out, noteJSON{
-			ID: n.ID, Title: n.Title, Tags: n.Tags, Source: n.Source,
-			Created: n.Created, Body: strings.TrimSpace(n.Body), Path: n.Path,
+			ID: n.ID, Title: n.Title, Description: n.Description(1 << 20),
+			Tags: n.Tags, Source: n.Source,
+			Created: n.Created, Updated: n.Updated,
+			Body: strings.TrimSpace(n.Body), Path: n.Path,
 		})
 	}
 	return out

@@ -867,6 +867,259 @@ func TestMCPScopeArgArrayCoercion(t *testing.T) {
 	}
 }
 
+// TestMCPUnknownToolSuggestions: an unknown tool name gets recovery guidance —
+// hand-written pointers for the documented-but-never-shipped names, and a
+// nearest-match "did you mean" for typos of real tools.
+func TestMCPUnknownToolSuggestions(t *testing.T) {
+	s := newServer(t)
+	cases := []struct {
+		name string
+		want string
+	}{
+		{"nt_ready", "use nt_status (in-progress + ready tasks) or nt_index"},
+		{"nt_log", "use nt_status (includes recent completions) or nt_index (recentlyDone)"},
+		{"nt_done", `use nt_update with status:"done"`},
+		{"nt_delete", "use nt_rm"},
+		{"nt_serch", "did you mean nt_search?"},
+		{"nt_stauts", "did you mean nt_status?"},
+	}
+	for _, c := range cases {
+		_, err := s.dispatch(c.name, map[string]any{})
+		if err == nil {
+			t.Fatalf("%s should be unknown", c.name)
+		}
+		if !strings.Contains(err.Error(), "unknown tool") || !strings.Contains(err.Error(), c.want) {
+			t.Errorf("%s error should suggest %q, got: %v", c.name, c.want, err)
+		}
+	}
+	// A name that isn't nt_-prefixed gets the plain error, no wild guess.
+	if _, err := s.dispatch("bogus", map[string]any{}); err == nil || strings.Contains(err.Error(), "did you mean") {
+		t.Errorf("non-nt names should not get a suggestion, got: %v", err)
+	}
+	// An nt_ name nowhere near any real tool gets no misleading suggestion.
+	if _, err := s.dispatch("nt_zzzzzzzzzzzzzzzz", map[string]any{}); err == nil || strings.Contains(err.Error(), "did you mean") {
+		t.Errorf("a far-off name should not get a suggestion, got: %v", err)
+	}
+}
+
+// TestMCPUpdateEchoesChanges: nt_update confirms what it applied via `changed`,
+// and warns when the target is already done (where the flat task shape alone
+// would silently omit e.g. priority).
+func TestMCPUpdateEchoesChanges(t *testing.T) {
+	s := newServer(t)
+	out, err := s.dispatch("nt_add", map[string]any{"text": "tune retries"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var added taskOut
+	json.Unmarshal([]byte(out), &added)
+
+	type updateOut struct {
+		taskOut
+		Changed map[string]string `json:"changed"`
+		Note    string            `json:"note"`
+	}
+
+	// An open-task update echoes the applied fields, no done-note.
+	out, err = s.dispatch("nt_update", map[string]any{"id": added.ID, "priority": "high", "due": "2030-01-02"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var up updateOut
+	json.Unmarshal([]byte(out), &up)
+	if up.Changed["priority"] != "A" || up.Changed["due"] != "2030-01-02" {
+		t.Errorf("changed should echo the applied fields, got %v", up.Changed)
+	}
+	if up.Note != "" {
+		t.Errorf("an open-task update should carry no done-note, got %q", up.Note)
+	}
+
+	// Updating a DONE task still applies + echoes, but warns it's already done.
+	if _, err := s.dispatch("nt_update", map[string]any{"id": added.ID, "status": "done"}); err != nil {
+		t.Fatal(err)
+	}
+	out, err = s.dispatch("nt_update", map[string]any{"id": added.ID, "priority": "low"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	up = updateOut{}
+	json.Unmarshal([]byte(out), &up)
+	if up.Changed["priority"] != "C" {
+		t.Errorf("done-task update should still echo changed, got %v", up.Changed)
+	}
+	if !strings.Contains(up.Note, "already done") || !strings.Contains(up.Note, `status:"open"`) {
+		t.Errorf("done-task update should note the reopen path, got %q", up.Note)
+	}
+
+	// Reopening suppresses the note (the update DOES reopen it).
+	out, _ = s.dispatch("nt_update", map[string]any{"id": added.ID, "status": "open"})
+	up = updateOut{}
+	json.Unmarshal([]byte(out), &up)
+	if up.Note != "" {
+		t.Errorf("a reopening update should carry no note, got %q", up.Note)
+	}
+	if up.Changed["status"] != "open" {
+		t.Errorf("reopen should echo status change, got %v", up.Changed)
+	}
+}
+
+// TestMCPProtocolVersionEcho: initialize echoes the client's requested MCP
+// revision when it's one we know (tools-only surface is compatible across
+// them), and falls back to the baseline otherwise.
+func TestMCPProtocolVersionEcho(t *testing.T) {
+	s := newServer(t)
+	initVersion := func(params string) string {
+		t.Helper()
+		req := request{ID: json.RawMessage("1"), Method: "initialize"}
+		if params != "" {
+			req.Params = json.RawMessage(params)
+		}
+		resp, reply := s.handle(req)
+		if !reply || resp.Error != nil {
+			t.Fatalf("initialize failed: %+v", resp)
+		}
+		return resp.Result.(map[string]any)["protocolVersion"].(string)
+	}
+	for _, v := range []string{"2024-11-05", "2025-03-26", "2025-06-18"} {
+		if got := initVersion(`{"protocolVersion":"` + v + `"}`); got != v {
+			t.Errorf("known revision %s should be echoed, got %s", v, got)
+		}
+	}
+	if got := initVersion(`{"protocolVersion":"1999-01-01"}`); got != "2024-11-05" {
+		t.Errorf("unknown revision should fall back to 2024-11-05, got %s", got)
+	}
+	if got := initVersion(""); got != "2024-11-05" {
+		t.Errorf("missing params should fall back to 2024-11-05, got %s", got)
+	}
+}
+
+// TestMCPRm: nt_rm removes a mistaken task via the journaled engine (so `nt
+// undo` can restore it), refuses positional handles, and errors on unknown ids.
+func TestMCPRm(t *testing.T) {
+	s := newServer(t)
+	out, err := s.dispatch("nt_add", map[string]any{"text": "oops, wrong task"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var added taskOut
+	json.Unmarshal([]byte(out), &added)
+
+	rout, err := s.dispatch("nt_rm", map[string]any{"id": added.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var rm struct {
+		Removed bool   `json:"removed"`
+		ID      string `json:"id"`
+		Text    string `json:"text"`
+		Note    string `json:"note"`
+	}
+	json.Unmarshal([]byte(rout), &rm)
+	if !rm.Removed || rm.ID != added.ID || !strings.Contains(rm.Text, "oops") {
+		t.Errorf("nt_rm should echo the removed task, got %s", rout)
+	}
+	if !strings.Contains(rm.Note, "nt undo") {
+		t.Errorf("nt_rm should point at `nt undo`, got %q", rm.Note)
+	}
+
+	// Gone from nt_index.
+	if got := indexTaskTexts(t, s, map[string]any{}); hasText(got, "oops") {
+		t.Errorf("removed task must be gone from nt_index, got %v", got)
+	}
+
+	// Positional handles are refused, with a pointer to where ids come from.
+	if _, err := s.dispatch("nt_rm", map[string]any{"id": "task:1"}); err == nil || !strings.Contains(err.Error(), "nt_status, nt_index, or nt_search") {
+		t.Errorf("nt_rm must refuse positional handles and say where ids come from, got: %v", err)
+	}
+	// Unknown ids error.
+	if _, err := s.dispatch("nt_rm", map[string]any{"id": "01ZZZZZZZZZZZZZZZZZZZZZZZZ"}); err == nil {
+		t.Error("nt_rm should error on an unknown id")
+	}
+	// id is required.
+	if _, err := s.dispatch("nt_rm", map[string]any{}); err == nil {
+		t.Error("nt_rm should require an id")
+	}
+}
+
+// TestMCPToolsListSchemas: the advertised catalog includes nt_rm, and nt_index's
+// format is a closed enum ["json","compact"] in the tools/list JSON.
+func TestMCPToolsListSchemas(t *testing.T) {
+	s := newServer(t)
+	resp, _ := s.handle(request{ID: json.RawMessage("1"), Method: "tools/list"})
+	raw, err := json.Marshal(resp.Result)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var listed struct {
+		Tools []struct {
+			Name        string `json:"name"`
+			InputSchema struct {
+				Properties map[string]struct {
+					Type string   `json:"type"`
+					Enum []string `json:"enum"`
+				} `json:"properties"`
+			} `json:"inputSchema"`
+		} `json:"tools"`
+	}
+	if err := json.Unmarshal(raw, &listed); err != nil {
+		t.Fatal(err)
+	}
+	names := map[string]bool{}
+	for _, td := range listed.Tools {
+		names[td.Name] = true
+		if td.Name == "nt_index" {
+			f, ok := td.InputSchema.Properties["format"]
+			if !ok {
+				t.Fatal("nt_index should advertise a format property")
+			}
+			if len(f.Enum) != 2 || f.Enum[0] != "json" || f.Enum[1] != "compact" {
+				t.Errorf(`nt_index format should be enum ["json","compact"], got %v`, f.Enum)
+			}
+		}
+	}
+	if !names["nt_rm"] {
+		t.Error("tools/list should advertise nt_rm")
+	}
+}
+
+// TestMCPStarReadCarriesWorkstream: a "*" (all-workstreams) read tags each task
+// with its workstream, so the agent can tell whose is whose.
+func TestMCPStarReadCarriesWorkstream(t *testing.T) {
+	s := newServer(t)
+	t.Setenv("NT_WORKSTREAM", "feat-a")
+	s.dispatch("nt_add", map[string]any{"text": "task in A"})
+	t.Setenv("NT_WORKSTREAM", "feat-b")
+	s.dispatch("nt_add", map[string]any{"text": "task in B"})
+
+	out, err := s.dispatch("nt_index", map[string]any{"workstream": "*"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var idx struct {
+		Tasks []taskOut `json:"tasks"`
+	}
+	json.Unmarshal([]byte(out), &idx)
+	byText := map[string]string{}
+	for _, tk := range idx.Tasks {
+		byText[tk.Text] = tk.Workstream
+	}
+	if byText["task in A"] != "feat-a" || byText["task in B"] != "feat-b" {
+		t.Errorf(`"*" read should carry each task's workstream, got %v`, byText)
+	}
+
+	// nt_status "*" carries it too.
+	sout, _ := s.dispatch("nt_status", map[string]any{"workstream": "*"})
+	var st statusOut
+	json.Unmarshal([]byte(sout), &st)
+	seen := map[string]string{}
+	for _, tk := range st.OpenByUrgency {
+		seen[tk.Text] = tk.Workstream
+	}
+	if seen["task in A"] != "feat-a" || seen["task in B"] != "feat-b" {
+		t.Errorf(`nt_status "*" should carry each task's workstream, got %v`, seen)
+	}
+}
+
 // TestMCPSearchTaskWorkstreamIsolation: nt_search task results are scoped to the
 // caller's workstream (like nt_index/nt_status) so parallel agents don't leak
 // in-flight tasks to each other; notes remain shared.

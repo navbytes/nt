@@ -30,6 +30,25 @@ import (
 
 const protocolVersion = "2024-11-05"
 
+// knownProtocolVersions are the MCP revisions this server can answer with. The
+// surface here is tools-only, which is compatible across all three, so we echo
+// whichever of these the client asked for (per the MCP version-negotiation
+// rules) and fall back to our baseline otherwise.
+var knownProtocolVersions = map[string]bool{
+	"2024-11-05": true,
+	"2025-03-26": true,
+	"2025-06-18": true,
+}
+
+// negotiateProtocol picks the version to answer an initialize with: the
+// client's requested revision when we know it, else our baseline.
+func negotiateProtocol(requested string) string {
+	if knownProtocolVersions[requested] {
+		return requested
+	}
+	return protocolVersion
+}
+
 // Serve runs the MCP stdio loop against the global store until stdin closes.
 func Serve(version string) error {
 	e, err := mutate.Open()
@@ -111,8 +130,12 @@ func (s *server) handle(req request) (resp response, reply bool) {
 	resp = response{JSONRPC: "2.0", ID: req.ID}
 	switch req.Method {
 	case "initialize":
+		var p struct {
+			ProtocolVersion string `json:"protocolVersion"`
+		}
+		_ = json.Unmarshal(req.Params, &p) // absent/malformed params → baseline version
 		resp.Result = map[string]any{
-			"protocolVersion": protocolVersion,
+			"protocolVersion": negotiateProtocol(p.ProtocolVersion),
 			"capabilities":    map[string]any{"tools": map[string]any{}},
 			"serverInfo":      map[string]any{"name": "nt", "version": s.version},
 		}
@@ -184,9 +207,79 @@ func (s *server) dispatch(name string, a map[string]any) (string, error) {
 		return s.tag(a)
 	case "nt_archive":
 		return s.archive(a)
+	case "nt_rm":
+		return s.rm(a)
 	default:
+		if hint := unknownToolHint(name); hint != "" {
+			return "", fmt.Errorf("unknown tool %q — %s", name, hint)
+		}
 		return "", fmt.Errorf("unknown tool %q", name)
 	}
+}
+
+// retiredToolHints maps tool names that were documented (or plausibly guessed)
+// but never shipped to the real tool that covers the need — so an agent that
+// read stale docs recovers in one turn instead of flailing.
+var retiredToolHints = map[string]string{
+	"nt_ready":  "use nt_status (in-progress + ready tasks) or nt_index",
+	"nt_log":    "use nt_status (includes recent completions) or nt_index (recentlyDone)",
+	"nt_done":   `use nt_update with status:"done"`,
+	"nt_delete": "use nt_rm (removes a task; `nt undo` restores it) or nt_archive (retires a note)",
+}
+
+// unknownToolHint returns recovery guidance for an unknown tool name: a
+// hand-written pointer for documented-but-never-shipped names, else the
+// nearest real tool by edit distance for anything nt_-prefixed.
+func unknownToolHint(name string) string {
+	if hint, ok := retiredToolHints[name]; ok {
+		return hint
+	}
+	if !strings.HasPrefix(name, "nt_") {
+		return ""
+	}
+	best, bestDist := "", -1
+	for _, td := range toolDefs {
+		if d := editDistance(name, td.Name); bestDist < 0 || d < bestDist {
+			best, bestDist = td.Name, d
+		}
+	}
+	// Only suggest a plausible near-miss: a distance beyond half the name is a
+	// different word, and "did you mean" would just mislead.
+	if best == "" || bestDist > len(name)/2 {
+		return ""
+	}
+	return fmt.Sprintf("did you mean %s?", best)
+}
+
+// editDistance is the Levenshtein distance between two ASCII tool names.
+func editDistance(a, b string) int {
+	prev := make([]int, len(b)+1)
+	cur := make([]int, len(b)+1)
+	for j := range prev {
+		prev[j] = j
+	}
+	for i := 1; i <= len(a); i++ {
+		cur[0] = i
+		for j := 1; j <= len(b); j++ {
+			cost := 1
+			if a[i-1] == b[j-1] {
+				cost = 0
+			}
+			cur[j] = min3(prev[j]+1, cur[j-1]+1, prev[j-1]+cost)
+		}
+		prev, cur = cur, prev
+	}
+	return prev[len(b)]
+}
+
+func min3(a, b, c int) int {
+	if b < a {
+		a = b
+	}
+	if c < a {
+		a = c
+	}
+	return a
 }
 
 // --- tools ---------------------------------------------------------------
@@ -499,29 +592,37 @@ func (s *server) update(a map[string]any) (string, error) {
 	}
 
 	var out *task.Task
+	changed := map[string]string{} // fields this call actually applied — echoed back
+	wasDone := false
 	err = s.eng.Apply("update", func(d *task.Doc, rec *mutate.Recorder) error {
 		t, e := resolve(d, id)
 		if e != nil {
 			return e
 		}
 		rec.Before(t)
+		wasDone = t.Done
 		switch status {
 		case "":
 		case "done":
 			mutate.Complete(d, rec, t, mutate.Today())
+			changed["status"] = "done"
 		case "open":
 			t.SetDone(false, "")
 			t.SetState("")
+			changed["status"] = "open"
 		case "doing", "blocked":
 			t.SetState(status)
+			changed["status"] = status
 		default:
 			return fmt.Errorf("invalid status %q (open|doing|blocked|done)", status)
 		}
 		if priStr != "" {
 			t.SetPriority(pri)
+			changed["priority"] = string(pri)
 		}
 		if due != "" {
 			t.SetKey("due", due)
+			changed["due"] = due
 		}
 		// Claim/reassign: only an EXPLICIT arg moves a task between workstreams —
 		// never the ambient identity, so updating a shared task's status doesn't
@@ -531,6 +632,7 @@ func (s *server) update(a map[string]any) (string, error) {
 				w = ""
 			}
 			t.SetKey("ws", w)
+			changed["workstream"] = w
 		}
 		out = t
 		return nil
@@ -538,7 +640,42 @@ func (s *server) update(a map[string]any) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return jsonText(taskToOut(out)), nil
+	// Echo what this call changed so the agent gets positive confirmation (the
+	// task shape alone can omit a field — e.g. priority on a done task).
+	res := toMap(taskToOut(out))
+	res["changed"] = changed
+	if wasDone && status != "open" {
+		res["note"] = `task is already done — status:"open" reopens it`
+	}
+	return jsonText(res), nil
+}
+
+// rm removes a task permanently (a mistaken or duplicate capture) through the
+// same journaled engine op as the CLI's `nt rm` — so `nt undo` restores it.
+// Notes are out of scope: retiring a note is nt_archive's job.
+func (s *server) rm(a map[string]any) (string, error) {
+	id, err := requireID(a)
+	if err != nil {
+		return "", err
+	}
+	var removed *task.Task
+	err = s.eng.Apply("rm", func(d *task.Doc, rec *mutate.Recorder) error {
+		t, e := resolve(d, id)
+		if e != nil {
+			return e
+		}
+		removed = t
+		before, _ := d.Remove(t.ID())
+		rec.Removed(t.ID(), before)
+		return nil
+	})
+	if err != nil {
+		return "", err
+	}
+	return jsonText(map[string]any{
+		"removed": true, "id": removed.ID(), "text": removed.Text,
+		"note": "task removed — `nt undo` restores it",
+	}), nil
 }
 
 func (s *server) note(a map[string]any) (string, error) {
@@ -1400,7 +1537,7 @@ func requireID(a map[string]any) (string, error) {
 		return "", fmt.Errorf("id is required")
 	}
 	if task.IsPositional(id) {
-		return "", fmt.Errorf("use the stable task id, not a positional handle (%q)", id)
+		return "", fmt.Errorf("use the stable task id, not a positional handle (%q) — ids come from nt_status, nt_index, or nt_search", id)
 	}
 	return id, nil
 }

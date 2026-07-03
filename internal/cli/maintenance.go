@@ -392,6 +392,7 @@ type noteLint struct {
 	NoteCount   int
 	MissingDesc []string // handles of active notes with no explicit `description:`
 	Orphans     []string // handles of active notes nothing links to (informational)
+	NearDups    []string // "a ≈ b" pairs of active notes with near-duplicate titles
 }
 
 // lintNotes scans notes and tasks for KB-graph health: unresolved [[links]]
@@ -426,6 +427,7 @@ func lintNotes(e *mutate.Engine) noteLint {
 			}
 		}
 	}
+	seen := make([]*note.Note, 0, len(active))
 	for _, n := range active {
 		if n.Reserved() {
 			continue // machine task-detail notes aren't held to KB hygiene
@@ -435,11 +437,39 @@ func lintNotes(e *mutate.Engine) noteLint {
 		if !hasExplicitDescription(n) {
 			rep.MissingDesc = append(rep.MissingDesc, handle)
 		}
-		if !linked[n.Path] {
+		// Standalone kinds — lessons, decisions, reference notes — are consulted
+		// through recall/index, not through inbound links; calling them orphans
+		// buried the real strays in noise (field-study: every orphan report was
+		// a false alarm).
+		if !linked[n.Path] && !standaloneKind(n) {
 			rep.Orphans = append(rep.Orphans, handle)
 		}
+		// Near-duplicate titles are the store rot that degrades recall most —
+		// surface them here since doctor is the curation entry point.
+		if sim := note.FindSimilar(seen, n.Title, n.Tags); len(sim) > 0 {
+			rep.NearDups = append(rep.NearDups, fmt.Sprintf("%s ≈ %s", handle, shortID(sim[0].ID)+" "+sim[0].Rel))
+		}
+		seen = append(seen, n)
 	}
 	return rep
+}
+
+// standaloneKind reports whether a note's class makes it legitimately
+// inbound-linkless: lessons and rules (consumed via recall/export), decision
+// and reference notes (consumed via index/search), and daily journal entries.
+func standaloneKind(n *note.Note) bool {
+	for _, t := range n.Tags {
+		switch t {
+		case "lesson", "rule", "memory-core", "decision", "ref", "reference":
+			return true
+		}
+	}
+	for _, f := range []string{"lessons/", "decisions/", "ref/", "rules/", "journal/", "memory/"} {
+		if strings.HasPrefix(n.Rel, f) {
+			return true
+		}
+	}
+	return false
 }
 
 // hasExplicitDescription reports whether a note carries a `description:` line in
@@ -456,15 +486,18 @@ func hasExplicitDescription(n *note.Note) bool {
 // printNoteHygiene emits the informational (non-failing) note-quality summary,
 // naming a few offenders so they're actionable (not just a count).
 func printNoteHygiene(nl noteLint) {
-	if len(nl.MissingDesc) == 0 && len(nl.Orphans) == 0 {
+	if len(nl.MissingDesc) == 0 && len(nl.Orphans) == 0 && len(nl.NearDups) == 0 {
 		return
 	}
 	fmt.Printf("note hygiene: %d note(s)", nl.NoteCount)
 	if len(nl.MissingDesc) > 0 {
-		fmt.Printf(", %d without a description:", len(nl.MissingDesc))
+		fmt.Printf(", %d without a description", len(nl.MissingDesc))
 	}
 	if len(nl.Orphans) > 0 {
 		fmt.Printf(", %d orphan(s)", len(nl.Orphans))
+	}
+	if len(nl.NearDups) > 0 {
+		fmt.Printf(", %d near-duplicate title pair(s)", len(nl.NearDups))
 	}
 	fmt.Println()
 	if len(nl.MissingDesc) > 0 {
@@ -472,6 +505,9 @@ func printNoteHygiene(nl noteLint) {
 	}
 	if len(nl.Orphans) > 0 {
 		fmt.Printf("  orphans (nothing links to them): %s\n", sampleList(nl.Orphans, 8))
+	}
+	if len(nl.NearDups) > 0 {
+		fmt.Printf("  near-duplicates (consolidate with `nt supersede <old> --by <new>`): %s\n", sampleList(nl.NearDups, 6))
 	}
 }
 

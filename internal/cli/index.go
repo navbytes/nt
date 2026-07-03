@@ -135,7 +135,7 @@ func cmdIndex(args []string) int {
 	// Active tasks (open + doing, unblocked, by urgency) plus a few recent
 	// completions so a resuming reader sees what's already handled, not only what's
 	// open. No bodies.
-	var active, recent []*task.Task
+	var active, blockedTasks, recent []*task.Task
 	if !*noTasks {
 		if d, err := e.Read(); err == nil {
 			blocked := task.BlockedIDs(d.Tasks())
@@ -156,8 +156,12 @@ func cmdIndex(args []string) int {
 					continue
 				}
 				scoped = append(scoped, t)
-				if !t.Done && !blocked[t.ID()] {
-					active = append(active, t)
+				if !t.Done {
+					if blocked[t.ID()] {
+						blockedTasks = append(blockedTasks, t)
+					} else {
+						active = append(active, t)
+					}
 				}
 			}
 			task.SortByUrgency(active)
@@ -169,6 +173,9 @@ func cmdIndex(args []string) int {
 	}
 
 	if *asJSON {
+		if stubs == nil {
+			stubs = []indexNote{} // an empty catalog is [], never null
+		}
 		payload := map[string]any{"notes": stubs}
 		if noteTotal > len(stubs) {
 			payload["truncated"] = true
@@ -177,6 +184,11 @@ func cmdIndex(args []string) int {
 		if !*noTasks {
 			payload["tasks"] = tasksToJSON(active, map[*task.Task]int{})
 			payload["recentlyDone"] = tasksToJSON(recent, map[*task.Task]int{})
+			if len(blockedTasks) > 0 {
+				// A resumer reading only the index must still learn blocked work
+				// exists — otherwise the plan looks smaller than it is.
+				payload["blocked"] = tasksToJSON(blockedTasks, map[*task.Task]int{})
+			}
 		}
 		return printJSON(payload)
 	}
@@ -215,6 +227,12 @@ func cmdIndex(args []string) int {
 				mark = "~"
 			}
 			fmt.Printf("- [%s] %s `%s`\n", mark, strings.TrimSpace(t.Text), shortID(t.ID()))
+		}
+	}
+	if !*noTasks && len(blockedTasks) > 0 {
+		fmt.Printf("\n# Blocked (%d — hidden from ready until their blocker completes)\n", len(blockedTasks))
+		for _, t := range blockedTasks {
+			fmt.Printf("- [⊘] %s `%s`\n", strings.TrimSpace(t.Text), shortID(t.ID()))
 		}
 	}
 	if !*noTasks && len(recent) > 0 {

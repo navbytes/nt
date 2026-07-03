@@ -3,6 +3,7 @@ package cli
 import (
 	"flag"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/navbytes/nt/internal/note"
@@ -27,8 +28,8 @@ func cmdRecall(args []string) int {
 		return 2
 	}
 	context := strings.TrimSpace(strings.Join(positional, " "))
-	if context == "" {
-		return usageErr(fmt.Errorf("recall: describe what you're about to work on, e.g. `nt recall adding a cache layer`"))
+	if context == "" && !*lessonsOnly {
+		return usageErr(fmt.Errorf("recall: describe what you're about to work on, e.g. `nt recall adding a cache layer` (or `nt recall --lessons-only` to list every recorded lesson)"))
 	}
 	e, ok := engine()
 	if !ok {
@@ -44,7 +45,29 @@ func cmdRecall(args []string) int {
 		}
 		notes = kept
 	}
-	results := recall.Rank(notes, context, *limit)
+	var results []recall.Result
+	if context == "" {
+		// Bare `nt recall --lessons-only`: enumerate the whole lesson book, newest
+		// first — the discoverable "what mistakes are on record?" read.
+		for _, n := range notes {
+			results = append(results, recall.Result{Note: n, Lesson: true})
+		}
+		sort.SliceStable(results, func(i, j int) bool {
+			ui, uj := results[i].Note.Updated, results[j].Note.Updated
+			if ui == "" {
+				ui = results[i].Note.Created
+			}
+			if uj == "" {
+				uj = results[j].Note.Created
+			}
+			return ui > uj
+		})
+		if *limit > 0 && len(results) > *limit {
+			results = results[:*limit]
+		}
+	} else {
+		results = recall.Rank(notes, context, *limit)
+	}
 
 	if *asJSON {
 		out := make([]map[string]any, 0, len(results))

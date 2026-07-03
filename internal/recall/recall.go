@@ -210,13 +210,14 @@ func Rank(notes []*note.Note, context string, limit int) []Result {
 	// outrank a genuinely more-relevant note.
 	type scored struct {
 		Result
-		f     float64
-		exact int
+		f       float64
+		exact   int
+		matched int
 	}
 	var out []scored
 	for _, cd := range cands {
 		var f float64
-		exact := 0
+		exact, matched := 0, 0
 		for w := range q.words {
 			c := conceptID(w)
 			var base float64
@@ -230,6 +231,9 @@ func Rank(notes []*note.Note, context string, limit int) []Result {
 			case cd.weak.concepts[c]:
 				base = 1
 			}
+			if base > 0 {
+				matched++
+			}
 			f += base * idf(c)
 		}
 		if f == 0 {
@@ -238,7 +242,20 @@ func Rank(notes []*note.Note, context string, limit int) []Result {
 		if cd.lesson {
 			f *= 1.6 // surface recorded mistakes, without swamping relevance
 		}
-		out = append(out, scored{Result{Note: cd.n, Score: int(f*100 + 0.5), Lesson: cd.lesson}, f, exact})
+		out = append(out, scored{Result{Note: cd.n, Score: int(f*100 + 0.5), Lesson: cd.lesson}, f, exact, matched})
+	}
+	// Precision floor (field-study fix): a specific query (≥4 concepts) matching a
+	// note on a SINGLE concept is topical noise, not a memory hit — the lesson
+	// boost was promoting exactly those to the top of adjacent-topic queries. For
+	// short queries a single shared concept is legitimately all the signal there is.
+	if len(q.words) >= 4 {
+		kept := out[:0]
+		for _, s := range out {
+			if s.matched >= 2 {
+				kept = append(kept, s)
+			}
+		}
+		out = kept
 	}
 	sort.SliceStable(out, func(i, j int) bool {
 		if out[i].f != out[j].f {
@@ -252,6 +269,19 @@ func Rank(notes []*note.Note, context string, limit int) []Result {
 		}
 		return out[i].Note.Updated > out[j].Note.Updated
 	})
+	// Trim the long tail: results far below the best hit read as "also relevant"
+	// to an agent, which pads every recall to `limit` rows and buries the honest
+	// "nothing more here". Anything under a quarter of the top score goes.
+	if len(out) > 1 {
+		floor := out[0].f * 0.25
+		kept := out[:1]
+		for _, s := range out[1:] {
+			if s.f >= floor {
+				kept = append(kept, s)
+			}
+		}
+		out = kept
+	}
 	if limit > 0 && len(out) > limit {
 		out = out[:limit]
 	}

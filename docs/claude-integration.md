@@ -118,13 +118,15 @@ nt mcp install --print                  # show what it would do, change nothing
 For any other client (Cursor, a project `.mcp.json`, …), `nt mcp install --print`
 emits the snippet to paste.
 
-Tools exposed (**18**) — **capture:** `nt_add`, `nt_note` (with `folder` and
-`description`; add tag `lesson` to record a mistake), `nt_update` (status:"done" completes), `nt_tag`, `nt_mv`, `nt_archive` (retire
+Tools exposed (**15**) — **capture:** `nt_add`, `nt_note` (with `folder` and
+`description`; add tag `lesson` to record a mistake), `nt_update` (status:"done" completes; the response echoes what `changed`), `nt_rm` (remove a
+mistaken task — journaled, `nt undo` restores), `nt_tag`, `nt_mv`, `nt_archive` (retire
 stale notes — set `superseded_by` to reconcile duplicates), `nt_relink` (fix a wrong outbound link); **retrieve:** `nt_index` (start here — a compact
-catalog of note stubs plus the active tasks, no bodies), `nt_get` (fetch one
-note's full body by id/slug/title, optional `section`), `nt_ready`,
-`nt_status` (one-call project/area state), `nt_view` (recall the user's saved
-smart views — list them by calling it bare), `nt_log`, `nt_search` (ranked
+catalog of note stubs plus the active tasks and recent completions, no bodies), `nt_get` (fetch one
+note's full body by id/slug/title, optional `section`),
+`nt_status` (one-call project/area state: in-progress + blocked + open-by-urgency
++ recently done), `nt_view` (recall the user's saved
+smart views — list them by calling it bare), `nt_search` (ranked
 stubs, text and/or tag; `full:true` inlines bodies), `nt_recall` (lessons-first,
 paraphrase-aware retrieval for a free-text task context — surfaces past mistakes
 before you repeat them), `nt_links` (forward links + backlinks). They go through the same locked, journaled engine as the CLI,
@@ -152,11 +154,12 @@ in-flight **tasks** isolated while **notes** (the knowledge base) stay shared:
   for worktree-per-process setups like grove, where each `nt mcp` runs in its own
   worktree. Avoid `auto` when one server is shared across trees, or the branch may
   be renamed mid-session; prefer a literal there.
-- `nt_add` stamps the resolved id (`ws:` on the task); `nt_index` / `nt_ready` /
-  `nt_status` / `nt_log` scope to it. Tasks with no workstream (the human's
-  CLI/TUI/web backlog) stay visible to every agent — only *another* agent's
-  stamped tasks are hidden. `nt_search` / `nt_view` are never scoped.
-- A read can pass `workstream: "*"` to see every workstream, or an explicit id to
+- `nt_add` stamps the resolved id (`ws:` on the task); `nt_index` / `nt_status` /
+  `nt_search` scope their *task* results to it. Tasks with no workstream (the
+  human's CLI/TUI/web backlog) stay visible to every agent — only *another*
+  agent's stamped tasks are hidden. Notes and `nt_view` are never scoped.
+- A read can pass `workstream: "*"` to see every workstream (each task then
+  carries its `workstream` so you can tell whose is whose), or an explicit id to
   target another. **Unset → no isolation**, identical to single-agent behavior.
 
 `nt_add` titles are meant to be **short and scannable** — one actionable line,

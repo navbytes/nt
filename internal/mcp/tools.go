@@ -69,7 +69,7 @@ var toolDefs = []toolDef{
 			"tags":            at(),
 			"discovered_from": sp("id of the originating task"),
 			"source":          st(),
-			"workstream":      wsArg,
+			"workstream":      sp(`workstream to stamp on the task; omit to use NT_WORKSTREAM; "*" or "" stores it unscoped (shared backlog)`),
 		}, "text"),
 	},
 	{
@@ -114,7 +114,10 @@ var toolDefs = []toolDef{
 			"folder":        sp("only notes under this folder, e.g. ref"),
 			"limit":         map[string]any{"type": "integer", "description": "cap the note catalog to N (truncated=true when more exist); scope with tag/folder for big stores"},
 			"updated_since": sp("only notes changed on/after this date (today|tomorrow|fri|+3d|YYYY-MM-DD) — 'what changed since last session'"),
-			"format":        sp("'compact' for terse one-line-per-item text (cheaper — prefer for the session-start load); default is JSON"),
+			"format": map[string]any{
+				"type": "string", "enum": []string{"json", "compact"},
+				"description": "'compact' for terse one-line-per-item text (cheaper — prefer for the session-start load); default is JSON",
+			},
 			"workstream":    wsArg,
 		}),
 	},
@@ -167,6 +170,13 @@ var toolDefs = []toolDef{
 			"add":    at(),
 			"remove": at(),
 		}, "handle"),
+	},
+	{
+		Name:        "nt_rm",
+		Description: "Remove a mistaken/duplicate TASK permanently by stable id — journaled, so `nt undo` restores it. Finished work is nt_update status:\"done\", not rm; a stale NOTE is nt_archive, not rm.",
+		InputSchema: obj(map[string]any{
+			"id": sp("stable task id (from nt_status, nt_index, or nt_search) — positional task:N is refused"),
+		}, "id"),
 	},
 	{
 		Name:        "nt_archive",
