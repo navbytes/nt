@@ -1156,10 +1156,19 @@ func (s *server) get(a map[string]any) (string, error) {
 			return "", fmt.Errorf("no section %q in note %q", section, handle)
 		}
 	}
-	return jsonText(map[string]any{
+	out := map[string]any{
 		"id": n.ID, "title": n.Title, "tags": n.Tags, "folder": pathDir(n.Rel),
 		"source": n.Source, "body": body,
-	}), nil
+	}
+	// The change date is the reader's staleness signal — a pinned rule or repo
+	// map is served at every session start, and age is how you'd doubt it.
+	if d := n.ChangedDate(); d != "" {
+		out["updated"] = d
+	}
+	if desc := n.Description(1 << 20); desc != "" && desc != n.Title {
+		out["description"] = desc // for stub-style notes this IS the content
+	}
+	return jsonText(out), nil
 }
 
 // search is the KB's on-demand retrieval verb. It returns ranked STUBS (id,
