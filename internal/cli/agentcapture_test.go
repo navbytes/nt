@@ -158,3 +158,28 @@ func TestTagsAliasCommaSeparated(t *testing.T) {
 		t.Fatalf("expected 2 tags from --tags a,b, got %v", listed[0].Tags)
 	}
 }
+
+func TestNoteKindSteersTaxonomy(t *testing.T) {
+	t.Setenv("NT_DIR", t.TempDir())
+	captureRun(t, "note", "chose sentinel error over bool", "--kind", "decision", "--description", "x")
+	var j struct {
+		Path string `json:"path"`
+		Tags []string `json:"tags"`
+	}
+	json.Unmarshal([]byte(captureRun(t, "show", "chose sentinel error over bool", "--json")), &j)
+	if !strings.Contains(j.Path, "decisions/") {
+		t.Fatalf("--kind decision should file under decisions/, got %s", j.Path)
+	}
+	found := false
+	for _, tg := range j.Tags {
+		if tg == "decision" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("--kind decision should tag 'decision', got %v", j.Tags)
+	}
+	if _, code := runWithStdout("note", "bad kind", "--kind", "todo"); code == 0 {
+		t.Fatal("invalid --kind should be refused")
+	}
+}

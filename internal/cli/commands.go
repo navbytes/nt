@@ -17,7 +17,6 @@ import (
 	"github.com/navbytes/nt/internal/mutate"
 	"github.com/navbytes/nt/internal/note"
 	"github.com/navbytes/nt/internal/quickadd"
-	"github.com/navbytes/nt/internal/recall"
 	"github.com/navbytes/nt/internal/task"
 	"github.com/navbytes/nt/internal/tui"
 	"github.com/navbytes/nt/internal/web"
@@ -542,6 +541,7 @@ func cmdNote(args []string) int {
 	supersede := fs.String("supersede", "", "mark this note as replacing an existing one (its handle) — the old note retires from active views")
 	force := fs.Bool("force", false, "create even if a near-duplicate note already exists")
 	lesson := fs.Bool("lesson", false, "record a durable lesson/gotcha: tags it `lesson` and files it under lessons/ so `nt recall` surfaces it before the mistake recurs")
+	kind := fs.String("kind", "", "note class: lesson|decision|ref|rule — tags it and files it in the canonical folder (multi-agent stores converge instead of inventing taxonomies)")
 	var fields stringSlice
 	asJSON := fs.Bool("json", false, "print the created note as JSON (id, title, path, …)")
 	fs.Var(&tags, "tag", "tag (repeatable)")
@@ -561,11 +561,27 @@ func cmdNote(args []string) int {
 	// lessons/ (unless an explicit --folder overrides). Keeps captured mistakes a
 	// distinct, recall-able class rather than indistinguishable KB notes.
 	if *lesson {
-		if !contains(tags, recall.LessonTag) {
-			tags = append(tags, recall.LessonTag)
+		if *kind == "" {
+			*kind = "lesson"
+		} else if *kind != "lesson" {
+			return usageErr(fmt.Errorf("note: --lesson conflicts with --kind %q", *kind))
+		}
+	}
+	// --kind generalizes the same convention to the other note classes agents
+	// produce constantly. In the field study three agents invented three task-note
+	// folders and two lesson locations in one day — steering at write time is what
+	// makes a shared store converge.
+	if *kind != "" {
+		kindFolder := map[string]string{"lesson": "lessons", "decision": "decisions", "ref": "ref", "rule": "rules"}
+		fold, okKind := kindFolder[*kind]
+		if !okKind {
+			return usageErr(fmt.Errorf("note: --kind must be lesson|decision|ref|rule, got %q", *kind))
+		}
+		if !contains(tags, *kind) {
+			tags = append(tags, *kind)
 		}
 		if *folder == "" {
-			*folder = "lessons"
+			*folder = fold
 		}
 	}
 	title := strings.Join(positional, " ")

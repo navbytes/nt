@@ -689,6 +689,24 @@ func (s *server) note(a map[string]any) (string, error) {
 	}
 	tags := strSlice(a, "tags")
 	supersede := strings.TrimSpace(str(a, "supersede"))
+	folder := str(a, "folder")
+
+	// kind steers taxonomy at write time (multi-agent stores converge on one
+	// layout instead of inventing folders): canonical tag + folder per class,
+	// with an explicit folder still winning.
+	if kind := strings.TrimSpace(str(a, "kind")); kind != "" {
+		kindFolder := map[string]string{"lesson": "lessons", "decision": "decisions", "ref": "ref", "rule": "rules"}
+		fold, ok := kindFolder[kind]
+		if !ok {
+			return "", fmt.Errorf("invalid kind %q (use lesson|decision|ref|rule)", kind)
+		}
+		if !contains(tags, kind) {
+			tags = append(tags, kind)
+		}
+		if folder == "" {
+			folder = fold
+		}
+	}
 
 	// Dedup-on-write is a SOFT signal for agents, not a hard refuse: parallel
 	// agents legitimately record similar-but-distinct findings at the same time,
@@ -700,7 +718,7 @@ func (s *server) note(a map[string]any) (string, error) {
 		similar = note.FindSimilar(note.Active(s.listNotes()), title, tags)
 	}
 
-	n, err := note.Create(s.eng.S, title, str(a, "body"), tags, source, str(a, "folder"))
+	n, err := note.Create(s.eng.S, title, str(a, "body"), tags, source, folder)
 	if err != nil {
 		return "", err
 	}
