@@ -87,6 +87,8 @@ func Run(args []string) int {
 		return cmdArchive(rest)
 	case "undo":
 		return cmdUndo(rest)
+	case "redo":
+		return cmdRedo(rest)
 	case "edit":
 		return cmdEdit(rest)
 	case "path":
@@ -109,6 +111,12 @@ func Run(args []string) int {
 		return cmdOpencode(rest)
 	case "web":
 		return cmdWeb(rest)
+	case "status":
+		// MCP exposes nt_status, so agents type `nt status` at the CLI too; the
+		// edit-distance suggester used to answer "did you mean start?" — actively
+		// misleading for someone trying to orient. Point at the real entry points.
+		fmt.Fprintln(os.Stderr, "nt: no `status` command on the CLI — orient with `nt ready` (what to do next), `nt index` (KB catalog + tasks), or `nt review` (triage)")
+		return 2
 	case "version", "--version", "-v":
 		fmt.Println("nt " + Version)
 		return 0
@@ -132,7 +140,7 @@ var knownCommands = []string{
 	"view", "views", "ready", "agenda", "review", "index", "log",
 	"done", "do", "skip", "start", "stop", "update", "up", "search", "q",
 	"recall", "export", "tags", "tag", "links", "mv", "rename", "rm", "delete",
-	"archive", "undo", "edit", "path", "doctor", "git-init", "hook", "mcp",
+	"archive", "undo", "redo", "edit", "path", "doctor", "git-init", "hook", "mcp",
 	"opencode", "web", "version", "help", "supersede", "relink",
 }
 
@@ -393,8 +401,9 @@ USAGE
   nt update <id…> [flags]     change one or more tasks (bulk)  (alias: up)
   nt list --tree              show sub-tasks indented under their parent
   nt search "query" [--tag T]  full-text + tag search (AND terms; "phrase"; --json) (alias: q)
-  nt recall "what I'm doing"  relevant notes for a task, lessons first — paraphrase-aware
-                              (--lessons-only to see recorded mistakes only)
+  nt recall "what I'm doing"  relevant notes for a task, lessons flagged ⚑ — paraphrase-aware
+                              (--lessons-only filters to recorded mistakes; bare
+                               'nt recall --lessons-only' lists every lesson)
   nt export [--tag|--folder]  compile notes into one md/json doc (rules/instructions, SKILL.md)
   nt tags                     list the tag vocabulary with counts
   nt tag <id|note…> +x -y     retag tasks or notes (no $EDITOR; preserves frontmatter)
@@ -408,7 +417,8 @@ USAGE
                               -y/--yes skips the confirm prompt
   nt archive                  move done tasks to done.txt
   nt archive <note> [--undo]  retire a note from the active views (reversible; still on disk)
-  nt undo                     revert the last change
+  nt undo / redo              revert / re-apply the last change (workstream-safe:
+                              refuses another agent's change unless --force)
   nt path                     print the store directory
   nt version                  print the nt version (alias: -v, --version)
   nt git-init                 set up the store for git (union-merge + .gitignore)
@@ -430,22 +440,33 @@ USAGE
 
 ADD/UPDATE FLAGS
   --pri high|med|low   --due today|tomorrow|fri|+3d|YYYY-MM-DD
-  --tag NAME (repeat)  --project NAME   --source NAME
-  --parent <id>        --blocks <id>
+  --tag NAME (repeat; --tags a,b also works)  --project NAME   --source NAME
+  --body TEXT / --body-file PATH|-  task detail, saved as a linked note ('-' = stdin)
+  --parent <id>        --blocks <id>  (this task gates <id>)
+  --blocked-by <id>    the reverse: <id> must finish before this task ('ready' hides it)
+  --note <slug>        link a note to the task (add or update)
   --discovered-from <id>   record that this task was surfaced while doing another
   --json                   print the created/updated task(s) as JSON (id, text, status…)
-  add-only:    --note <slug> (link to a note)   --est 90m|2h   --recur weekly|3d
+  add-only:    --est 90m|2h   --recur weekly|3d
   update-only: --title "new text" (keeps tags/links)  --untag NAME (repeat)
-               --project none (clears)  --source none (clears)
+               --project/--source/--est/--parent/--blocks none (clears)
 
 NOTE FLAGS (nt note)
-  --body TEXT   --tag NAME (repeat)   --source NAME   --json (print as JSON)
+  --body TEXT / --body-file PATH|-   note body ('-' = stdin; survives shell quoting)
+  --tag NAME (repeat; --tags a,b)    --source NAME   --json (print as JSON)
   --description TEXT  one-line summary shown in 'nt index' (progressive disclosure)
+  --lesson            record a durable lesson/gotcha: tags it 'lesson', files it in
+                      lessons/, and 'nt recall' surfaces it before the mistake recurs
   --folder DIR        file under notes/DIR/ (created as needed; or path-style:
                       nt note "decisions/Chose flock over SQLite")
   --field key=value   set extra frontmatter at capture (repeatable, preserved)
   --supersede <id>    replace an existing note (retires it from views)
   --force             create even if a near-duplicate note already exists
+
+EDIT (non-interactive — agents)
+  nt edit <note> --append TEXT       append to a note body without $EDITOR
+  nt edit <note> --append-file P|-   append from a file or stdin
+  nt edit <note> --body-file P|-     replace the body from a file or stdin
 
 LIST FLAGS
   --status open|doing|blocked|done   --tag NAME   --project NAME
@@ -453,7 +474,9 @@ LIST FLAGS
   --show-blocked                     --source NAME / --since YYYY-MM-DD
 
 Recurring: add --recur weekly|3d|… ; completing spawns the next occurrence.
-Dependencies: add --blocks <id> ; blocked tasks hide unless --show-blocked.
+Dependencies: --blocked-by <id> on the waiting task (or --blocks <id> on the gating
+one); blocked tasks hide from ready/list unless --show-blocked; clear with
+--blocks none. A cycle disables blocking for its members ('nt doctor' finds them).
 
 The store lives at $NT_DIR (default ~/.local/share/nt): tasks.txt + notes/*.md.
 The TUI follows your terminal's light/dark background; force it with NT_THEME=light|dark.

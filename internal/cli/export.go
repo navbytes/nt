@@ -180,6 +180,11 @@ func renderExportMarkdown(title string, notes []*note.Note, tasks []*task.Task, 
 		if h1 := "# " + n.Title; strings.HasPrefix(body, h1) {
 			body = strings.TrimSpace(strings.TrimPrefix(body, h1))
 		}
+		// Stub-style notes keep their whole content in the frontmatter
+		// description — fold it in so the compiled doc never has empty sections.
+		if body == "" {
+			body = n.Description(1 << 20)
+		}
 		if body != "" {
 			b.WriteString(body)
 			b.WriteString("\n")

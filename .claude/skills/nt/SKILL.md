@@ -52,17 +52,22 @@ next session recalls it — put the trigger in the description ("when X, do Y �
 
 ```bash
 nt note "single-flight the refresh; parallel calls double-spend" --lesson --source claude
+nt recall --lessons-only                     # bare: list every recorded lesson
 ```
 
 ## Capture tasks
 
 ```bash
 nt add "refactor auth middleware" --source claude --pri high --due today --tag backend --project api
+nt add "fix refresh race" --source claude --body "repro: two parallel calls…"   # detail → auto-linked note
 ```
 
-Flags: `--pri high|med|low`, `--due today|tomorrow|fri|+3d|YYYY-MM-DD`,
-`--tag NAME` (repeatable), `--project NAME`, `--blocks <id>`,
-`--discovered-from <id>`, `--recur weekly|3d|…`, `--note <slug>` (link to a note).
+Keep the title short and verb-first; put detail/reasoning/steps in `--body` —
+it's saved as the task's linked note. Flags: `--pri high|med|low`,
+`--due today|tomorrow|fri|+3d|YYYY-MM-DD`, `--tag NAME` (repeatable; `--tags a,b`),
+`--project NAME`, `--blocked-by <id>` (this task waits for `<id>`), `--blocks <id>`
+(the reverse), `--discovered-from <id>`, `--recur weekly|3d|…`, `--note <slug>`
+(link an existing note; also on `nt update` to attach one later).
 
 ## Capture notes — and file them into folders
 
@@ -72,18 +77,25 @@ For findings, context, decisions — anything longer than a task line:
 nt note "JWT tokens expire after 24h" --body "Refresh window is 7d. See auth.go." --source claude --tag auth
 ```
 
-**Notes live in folders, and you set the folder at capture** (it's created as
-needed). Two equivalent forms — use them; don't dump everything in the root:
+**Bodies with backticks, `$()`, or multiple lines: never inline them in the shell
+string** — the shell eats them silently. Write the body to a temp file (or pipe
+it) and use `--body-file`:
 
 ```bash
-nt note "Auth design" --folder ref --source claude            # → notes/ref/auth-design.md
-nt note "decisions/Chose flock over SQLite" --source claude   # path-style: text before the last "/" is the folder
+nt note "Decision: flock over SQLite" --kind decision --body-file /tmp/body.md --source claude
+printf '%s\n' "the body…" | nt note "…" --body-file - --source claude
 ```
 
-The `nt_note` MCP tool takes the same **`folder`** argument. Common folders:
-`ref/` (reference), `decisions/`, `inbox/` (triage later). Bare `[[name]]` links
-resolve across folders by shortest path-suffix, so foldering never breaks
-linking — and you can refile later with `nt mv`.
+**File notes by class with `--kind lesson|decision|ref|rule`** — it applies the
+canonical tag + folder (`lessons/`, `decisions/`, `ref/`, `rules/`) so every
+session converges on one layout. An explicit `--folder` (or path-style
+`nt note "decisions/Chose flock"`) still wins for bespoke foldering. Bare
+`[[name]]` links resolve across folders by shortest path-suffix, so foldering
+never breaks linking — and you can refile later with `nt mv`. The `nt_note` MCP
+tool takes the same **`kind`**/**`folder`** arguments.
+
+To fix or extend a note later **without an editor**: `nt edit <note> --append
+"Resolved in commit abc123"` (or `--body-file new.md` to replace the body).
 
 Set **structured frontmatter at capture** with `--field key=value` (repeatable):
 
@@ -174,6 +186,9 @@ records it, and `nt_index`/`nt_status` scope to it.
 - Pass `workstream: "*"` on a read to see every workstream's tasks; pass an
   explicit `workstream` to target another one. With `NT_WORKSTREAM` unset there
   is no scoping and behavior is unchanged.
+- `nt undo` is workstream-safe: it refuses to revert a change made by another
+  workstream (rerun with `--force` only if you truly mean it), prints exactly
+  what it touched, and `nt redo` re-applies the last undo.
 
 ## Automatic sync (optional)
 

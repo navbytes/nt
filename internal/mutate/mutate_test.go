@@ -77,8 +77,8 @@ func TestDoneUndoRedo(t *testing.T) {
 	if tasks(t, e)[0].Done {
 		t.Fatal("undo should have reopened the task")
 	}
-	// Undo again redoes (re-completes).
-	if _, did, _ := e.Undo(); !did {
+	// Redo re-completes (plain undo now refuses a pending redo entry).
+	if _, did, _ := e.Redo("", true); !did {
 		t.Fatal("expected a redo transaction to exist")
 	}
 	if !tasks(t, e)[0].Done {
@@ -258,7 +258,7 @@ func TestPeekUndoTracksDirection(t *testing.T) {
 		t.Fatalf("after undo: label=%q isRedo=%v ok=%v, want add/true/true", label, isRedo, ok)
 	}
 
-	if _, did, err := e.Undo(); err != nil || !did { // toggles: redoes the add
+	if _, did, err := e.Redo("", true); err != nil || !did { // redoes the add
 		t.Fatalf("redo: did=%v err=%v", did, err)
 	}
 	// After redo: forward again (direction tracking, not stuck on the prefix).

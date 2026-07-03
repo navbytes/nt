@@ -53,9 +53,18 @@ func cmdShow(args []string) int {
 		return 1
 	}
 	notes, _ := note.List(e.S)
-	n, err := resolveNote(notes, strings.Join(positional, " "))
+	handle := strings.Join(positional, " ")
+	n, err := resolveNote(notes, handle)
 	if err != nil {
-		return fail(fmt.Errorf("show: %w", err))
+		// Not a note — fall back to a task handle, so `nt show <task-id>` works.
+		// Ids look like one namespace to an agent; making show refuse tasks was a
+		// field-study paper cut (the task inspector was hidden behind `nt links`).
+		if d, derr := e.Read(); derr == nil {
+			if t, terr := resolveHandle(d, handle); terr == nil {
+				return showTask(d, notes, t, asJSON)
+			}
+		}
+		return fail(fmt.Errorf("show: no note or task %q", handle))
 	}
 	if asJSON {
 		return printJSON(notesToJSON([]*note.Note{n})[0])
@@ -66,12 +75,73 @@ func cmdShow(args []string) int {
 		meta = append(meta, "@"+strings.Join(n.Tags, " @"))
 	}
 	fmt.Printf("%s\n\n", strings.Join(meta, "  ·  "))
+	// The one-line description is real content (often the WHOLE content of a
+	// stub-style note) — print it, untruncated, ahead of the body.
+	if d := n.Description(1 << 20); d != "" {
+		fmt.Printf("%s\n\n", d)
+	}
 	body := strings.TrimSpace(n.Body)
 	// Drop a leading "# Title" H1 — it just echoes the header we already printed.
 	if strings.HasPrefix(body, "# "+n.Title) {
 		body = strings.TrimSpace(strings.TrimPrefix(body, "# "+n.Title))
 	}
-	fmt.Println(body)
+	if body != "" {
+		fmt.Println(body)
+	}
+	return 0
+}
+
+// showTask renders one task in full: the row plus its key:value metadata and the
+// bodies of its linked notes — the "open the task" view agents expect from
+// `nt show <id>` (the detail used to be reachable only via `nt links` + a second
+// show).
+func showTask(d *task.Doc, notes []*note.Note, t *task.Task, asJSON bool) int {
+	if asJSON {
+		return printJSON(tasksToJSON([]*task.Task{t}, nil)[0])
+	}
+	blocked := task.BlockedIDs(d.Tasks())
+	fmt.Printf("%s %s  %s\n", iconStatus(task.EffectiveStatus(t, blocked[t.ID()])), shortID(t.ID()), t.Text)
+	var meta []string
+	if t.Priority != 0 {
+		meta = append(meta, "pri:"+string(t.Priority))
+	}
+	if due := t.Due(); due != "" {
+		meta = append(meta, "due:"+due)
+	}
+	for _, k := range []string{"ws", "est", "spent", "rec"} {
+		if v := t.Key(k); v != "" {
+			meta = append(meta, k+":"+v)
+		}
+	}
+	if b := t.Blocks(); b != "" {
+		meta = append(meta, "blocks:"+shortID(b))
+	}
+	if p := t.Key("parent"); p != "" {
+		meta = append(meta, "parent:"+shortID(p))
+	}
+	if len(meta) > 0 {
+		fmt.Println(strings.Join(meta, "  ·  "))
+	}
+	// Inline each linked note's content — a task's detail lives in its notes.
+	for _, raw := range t.Links() {
+		it, ok := links.Resolve(raw, d, notes)
+		if !ok || it.Kind != "note" {
+			continue
+		}
+		for _, n := range notes {
+			if n.Path != it.Path {
+				continue
+			}
+			fmt.Printf("\n── [[%s]] (%s) ──\n", n.Title, shortID(n.ID))
+			body := strings.TrimSpace(n.Body)
+			if desc := n.Description(1 << 20); desc != "" && body == "" {
+				fmt.Println(desc)
+			} else if body != "" {
+				fmt.Println(body)
+			}
+			break
+		}
+	}
 	return 0
 }
 

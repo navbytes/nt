@@ -69,7 +69,7 @@ var toolDefs = []toolDef{
 			"tags":            at(),
 			"discovered_from": sp("id of the originating task"),
 			"source":          st(),
-			"workstream":      wsArg,
+			"workstream":      sp(`workstream to stamp on the task; omit to use NT_WORKSTREAM; "*" or "" stores it unscoped (shared backlog)`),
 		}, "text"),
 	},
 	{
@@ -85,13 +85,14 @@ var toolDefs = []toolDef{
 	},
 	{
 		Name:        "nt_note",
-		Description: "Save a note (finding/decision/dead-end) — capture the WHY. Set description to a one-line summary; it's what nt_index shows. Guarded against near-duplicates: if a similar note exists it errors — update that one, supersede it, or set force=true. Use supersede=<id> to replace an existing note (the old one retires from views).",
+		Description: "Save a note (finding/decision/dead-end) — capture the WHY. Set description to a one-line summary; it's what nt_index shows. The note is always created; if near-duplicates exist the response includes a `similar` list — check it, and consolidate with nt_archive superseded_by=<id> if you truly doubled one. Use supersede=<id> to replace an existing note (the old one retires from views).",
 		InputSchema: obj(map[string]any{
 			"title":       st(),
 			"body":        sp("markdown"),
 			"description": sp("one-line summary shown in nt_index (progressive disclosure)"),
 			"tags":        at(),
-			"folder":      sp("subfolder, e.g. ref or decisions/auth"),
+			"kind":        map[string]any{"type": "string", "enum": []string{"lesson", "decision", "ref", "rule"}, "description": "note class — tags it and files it in the canonical folder (lessons/, decisions/, ref/, rules/); prefer this over inventing a folder"},
+			"folder":      sp("subfolder, e.g. ref or decisions/auth (kind picks a canonical one; explicit folder wins)"),
 			"source":      st(),
 			"supersede":   sp("id of an existing note this replaces; the old note retires from active views"),
 			"force":       map[string]any{"type": "boolean", "description": "create even if a near-duplicate exists"},
@@ -114,7 +115,10 @@ var toolDefs = []toolDef{
 			"folder":        sp("only notes under this folder, e.g. ref"),
 			"limit":         map[string]any{"type": "integer", "description": "cap the note catalog to N (truncated=true when more exist); scope with tag/folder for big stores"},
 			"updated_since": sp("only notes changed on/after this date (today|tomorrow|fri|+3d|YYYY-MM-DD) — 'what changed since last session'"),
-			"format":        sp("'compact' for terse one-line-per-item text (cheaper — prefer for the session-start load); default is JSON"),
+			"format": map[string]any{
+				"type": "string", "enum": []string{"json", "compact"},
+				"description": "'compact' for terse one-line-per-item text (cheaper — prefer for the session-start load); default is JSON",
+			},
 			"workstream":    wsArg,
 		}),
 	},
@@ -167,6 +171,13 @@ var toolDefs = []toolDef{
 			"add":    at(),
 			"remove": at(),
 		}, "handle"),
+	},
+	{
+		Name:        "nt_rm",
+		Description: "Remove a mistaken/duplicate TASK permanently by stable id — journaled, so `nt undo` restores it. Finished work is nt_update status:\"done\", not rm; a stale NOTE is nt_archive, not rm.",
+		InputSchema: obj(map[string]any{
+			"id": sp("stable task id (from nt_status, nt_index, or nt_search) — positional task:N is refused"),
+		}, "id"),
 	},
 	{
 		Name:        "nt_archive",
