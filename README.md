@@ -31,7 +31,7 @@ curl -fsSL https://raw.githubusercontent.com/navbytes/nt/main/install.sh | bash
 
 ```bash
 nt add "fix token refresh race" --pri high --due today --tag auth   # capture a task
-nt note "Chose flock over SQLite" --folder decisions                # capture a note
+nt note "Chose flock over SQLite" --kind decision                   # capture a note
 nt                                                                  # open the TUI (just run it)
 nt ready                                                            # what should I do next?
 nt index                                                            # the KB catalog an AI reads back
