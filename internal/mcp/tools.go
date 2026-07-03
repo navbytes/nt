@@ -63,7 +63,7 @@ var toolDefs = []toolDef{
 		InputSchema: obj(map[string]any{
 			"text":            sp("short actionable title, verb-first, ~60 chars"),
 			"body":            sp("detail/reasoning/steps — saved as a linked note (markdown)"),
-			"priority":        enum("high", "med", "low"),
+			"priority":        enum("high", "med", "medium", "low"),
 			"due":             sp("today|tomorrow|fri|+3d|YYYY-MM-DD"),
 			"project":         st(),
 			"tags":            at(),
@@ -80,7 +80,7 @@ var toolDefs = []toolDef{
 		InputSchema: obj(map[string]any{
 			"id":         st(),
 			"status":     enum("open", "doing", "blocked", "done"),
-			"priority":   enum("high", "med", "low"),
+			"priority":   enum("high", "med", "medium", "low"),
 			"due":        sp("today|tomorrow|fri|+3d|YYYY-MM-DD"),
 			"blocked_by": sp("id of a task that must complete first (the reverse of blocks)"),
 			"blocks":     sp(`id of a task this task blocks; "none" clears the edge`),
@@ -97,6 +97,7 @@ var toolDefs = []toolDef{
 			"tags":        at(),
 			"kind":        map[string]any{"type": "string", "enum": []string{"lesson", "decision", "ref", "rule", "memory"}, "description": "note class lesson|decision|ref|rule|memory — tags it and files it in the canonical folder (lessons/, decisions/, ref/, rules/, memory/); memory files under memory/ with tag memory-core — the always-loaded core-memory layer; prefer this over inventing a folder"},
 			"folder":      sp("subfolder, e.g. ref or decisions/auth (kind picks a canonical one; explicit folder wins)"),
+			"project":     sp("project this note belongs to — stored as project: frontmatter so nt_recall's project boost finds it"),
 			"source":      st(),
 			"supersede":   sp("id of an existing note this replaces; the old note retires from active views"),
 			"force":       map[string]any{"type": "boolean", "description": "create even if a near-duplicate exists"},
@@ -138,7 +139,7 @@ var toolDefs = []toolDef{
 	},
 	{
 		Name:        "nt_search",
-		Description: "Find notes and tasks by EXACT text and/or tag — reach for it when you know the words that appear in the note (use nt_recall for paraphrased/conceptual matching, nt_index for the whole catalog). Returns ranked STUBS (id, title, description, snippet) not bodies; nt_get the id you want. Title matches rank first; truncated=true when more exist. At least one of query/tag is required; full=true to inline bodies.",
+		Description: "Find notes and tasks by EXACT text and/or tag — reach for it when you know the words that appear in the note (use nt_recall for paraphrased/conceptual matching, nt_index for the whole catalog). Store-wide: results are never workstream-scoped, so it finds every agent's tasks. Returns ranked STUBS (id, title, description, snippet) not bodies; nt_get the id you want. Title matches rank first; truncated=true when more exist. At least one of query/tag is required; full=true to inline bodies.",
 		InputSchema: obj(map[string]any{
 			"query": sp("text to match in titles + bodies (optional if tag is set)"),
 			"tag":   sp("only items with this tag"),
@@ -152,7 +153,7 @@ var toolDefs = []toolDef{
 		Description: "Learn from past sessions: given a free-text description of what you're ABOUT to do, return the most relevant notes — lessons/gotchas first — so you don't repeat a recorded mistake. Unlike nt_search (exact substring), recall stems and expands synonyms, so a paraphrase still finds the note. Call this at the start of a task (e.g. context:'adding a cache layer to the API'); omit context with lessons_only:true to list every recorded lesson (newest first). Cheap: returns compact stubs, no bodies. Results with lesson:true are recorded mistakes — read them (nt_get) before proceeding.",
 		InputSchema: obj(map[string]any{
 			"context":      sp("what you're about to work on, in plain words — the more specific, the better the recall (optional with lessons_only)"),
-			"project":      sp(`prefer this project's notes in ranking (soft boost, never a filter); omit to use the workstream identity, "none" disables`),
+			"project":      sp(`prefer this project's notes in ranking (soft boost, never a filter) — matches note tags, folder segments, and project: frontmatter; omit to use the workstream identity, "none" disables`),
 			"limit":        map[string]any{"type": "integer", "description": "max results (default 8)"},
 			"lessons_only": map[string]any{"type": "boolean", "description": "restrict to notes tagged `lesson` (recorded mistakes only); with no context, lists every lesson newest-first"},
 		}),

@@ -3,6 +3,7 @@ package mutate
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/navbytes/nt/internal/store"
 	"github.com/navbytes/nt/internal/task"
@@ -264,5 +265,16 @@ func TestPeekUndoTracksDirection(t *testing.T) {
 	// After redo: forward again (direction tracking, not stuck on the prefix).
 	if label, isRedo, ok := e.PeekUndo(); !ok || isRedo || label != "add" {
 		t.Fatalf("after redo: label=%q isRedo=%v ok=%v, want add/false/true", label, isRedo, ok)
+	}
+
+	// PeekUndoTxn exposes the raw pending transaction (op with its internal
+	// redo: prefixes, plus TS) alongside the stripped label — the CLI's
+	// note-edited-since guard compares its timestamp with note mtimes.
+	txn, label, ok := e.PeekUndoTxn()
+	if !ok || label != "add" || txn.Op != "redo:redo:add" {
+		t.Fatalf("PeekUndoTxn: label=%q op=%q ok=%v, want add/redo:redo:add/true", label, txn.Op, ok)
+	}
+	if _, err := time.Parse(time.RFC3339, txn.TS); err != nil {
+		t.Fatalf("PeekUndoTxn TS should be RFC3339, got %q: %v", txn.TS, err)
 	}
 }

@@ -510,7 +510,7 @@ func (s *server) add(a map[string]any) (string, error) {
 	}
 	pri, ok := dateparse.Priority(str(a, "priority"))
 	if !ok {
-		return "", fmt.Errorf("invalid priority %q (use high|med|low)", str(a, "priority"))
+		return "", fmt.Errorf("invalid priority %q (use high|med|medium|low)", str(a, "priority"))
 	}
 	due, ok := dateparse.Date(str(a, "due"))
 	if !ok {
@@ -690,7 +690,7 @@ func (s *server) update(a map[string]any) (string, error) {
 	dueStr := str(a, "due")
 	pri, ok := dateparse.Priority(priStr)
 	if !ok {
-		return "", fmt.Errorf("invalid priority %q (use high|med|low)", priStr)
+		return "", fmt.Errorf("invalid priority %q (use high|med|medium|low)", priStr)
 	}
 	due, ok := dateparse.Date(dueStr)
 	if !ok {
@@ -766,11 +766,13 @@ func (s *server) update(a map[string]any) (string, error) {
 		}
 		// Claim/reassign: only an EXPLICIT arg moves a task between workstreams —
 		// never the ambient identity, so updating a shared task's status doesn't
-		// silently capture it. "*" releases it back to the shared backlog.
+		// silently capture it. "*" releases it back to the shared backlog. The id is
+		// Normalized (whitespace → "-") so it survives the space-delimited stamp.
 		if w, ok := a["workstream"].(string); ok {
 			if w = strings.TrimSpace(w); w == "*" {
 				w = ""
 			}
+			w = workstream.Normalize(w)
 			t.SetKey("ws", w)
 			changed["workstream"] = w
 		}
@@ -868,8 +870,18 @@ func (s *server) note(a map[string]any) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	extraChanged := false
 	if desc := strings.TrimSpace(str(a, "description")); desc != "" {
 		n.Extra = append(n.Extra, "description: "+desc)
+		extraChanged = true
+	}
+	// project: frontmatter — the note self-identifies as belonging to a project,
+	// so nt_recall's same-project boost finds it even without a tag/folder match.
+	if proj := strings.TrimSpace(str(a, "project")); proj != "" {
+		n.Extra = append(n.Extra, "project: "+proj)
+		extraChanged = true
+	}
+	if extraChanged {
 		if err := n.Save(); err != nil {
 			return "", err
 		}
@@ -1356,7 +1368,9 @@ func (s *server) search(a map[string]any) (string, error) {
 	if len(hits) > limit {
 		hits = hits[:limit]
 	}
-	var noteRes any
+	// Empty result sets must encode as [] — a JSON null reads as "the tool broke"
+	// (or "tasks don't exist") to an agent, not as "no matches".
+	var noteRes any = []noteStub{}
 	if full {
 		arr := make([]noteOut, 0, len(hits))
 		for _, h := range hits {
@@ -1371,17 +1385,15 @@ func (s *server) search(a map[string]any) (string, error) {
 		noteRes = arr
 	}
 
-	var tout []taskOut
+	tout := []taskOut{}
 	taskTotal := 0
 	if typ == "all" || typ == "task" {
-		ws := s.workstream(a)
 		for _, t := range d.Tasks() {
-			// Scope tasks to the caller's workstream, exactly as nt_index/nt_status
-			// do — otherwise a parallel agent's search leaks every other agent's
-			// in-flight tasks. Notes stay store-wide (knowledge is shared).
-			if !workstream.Visible(t.Key("ws"), ws) {
-				continue
-			}
+			// Search is deliberately NEVER workstream-scoped (unlike nt_index /
+			// nt_status): it's the "does this exist anywhere in the store?" verb, and
+			// the docs promise store-wide results. Scoping here made a match in
+			// another agent's workstream come back as an empty result — which agents
+			// read as "no such task" and then duplicated the work.
 			if tag != "" && !contains(t.Tags(), tag) {
 				continue
 			}

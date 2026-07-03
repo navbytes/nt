@@ -461,6 +461,19 @@ func clampLine(s string, max int) string {
 	return s
 }
 
+// Project returns the note's `project:` frontmatter value ("" when unset). The
+// key isn't modeled (it rides in Extra, preserved verbatim); this accessor is
+// how recall's same-project boost reads a note's declared project membership —
+// alongside its tags and folder path.
+func (n *Note) Project() string {
+	for _, line := range n.Extra {
+		if k, v, ok := strings.Cut(line, ":"); ok && strings.EqualFold(strings.TrimSpace(k), "project") {
+			return strings.TrimSpace(unquote(strings.TrimSpace(v)))
+		}
+	}
+	return ""
+}
+
 // Reserved reports whether a note lives in a machine-managed folder that isn't
 // part of the human/agent knowledge base — currently notes/__tasks__/, where
 // nt files the detail bodies of split tasks. These are reachable by id/link but

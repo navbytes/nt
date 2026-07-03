@@ -97,7 +97,7 @@ func runReversal(args []string, isRedo bool) int {
 		verb, past = "redo", "redid"
 	}
 	fs := flag.NewFlagSet(verb, flag.ContinueOnError)
-	force := fs.Bool("force", false, "revert even if the last change belongs to another workstream")
+	force := fs.Bool("force", false, "revert even if the last change belongs to another workstream, or a note was edited more recently")
 	ws := fs.String("workstream", "", "act as this workstream (default: NT_WORKSTREAM)")
 	if err := fs.Parse(args); err != nil {
 		return 2
@@ -107,6 +107,14 @@ func runReversal(args []string, isRedo bool) int {
 		return 1
 	}
 	cur := workstream.Scope(*ws)
+	// Note-edit guard (undo only): note operations aren't journaled, so right
+	// after a note edit "the last change" an undo would revert is an OLDER,
+	// unrelated TASK change. Refuse (teaching the note-side fix) unless --force.
+	if !isRedo && !*force {
+		if err := noteEditedSinceLastTxn(e); err != nil {
+			return fail(err)
+		}
+	}
 	var txn undo.Txn
 	var did bool
 	var err error
@@ -139,6 +147,43 @@ func runReversal(args []string, isRedo bool) int {
 		}
 	}
 	return 0
+}
+
+// noteEditGrace is how much newer than the pending transaction a note's mtime
+// must be before undo suspects "the user means the note, not the task". Task
+// bodies create/append their detail note in the same breath as the task write,
+// so a small epsilon keeps those legitimate same-moment pairs out of the guard.
+const noteEditGrace = 2 * time.Second
+
+// noteEditedSinceLastTxn refuses an undo whose pending TASK transaction is older
+// than the newest note edit: notes aren't journaled, so the user who just edited
+// a note and typed `nt undo` would silently revert an unrelated task change.
+// Returns nil when there's nothing pending, the pending entry is a redo (plain
+// undo errors on those anyway), or no note was touched after the transaction.
+func noteEditedSinceLastTxn(e *mutate.Engine) error {
+	txn, label, ok := e.PeekUndoTxn()
+	if !ok {
+		return nil
+	}
+	if _, isRedoPending, _ := e.PeekUndo(); isRedoPending {
+		return nil
+	}
+	txnTS, perr := time.Parse(time.RFC3339, txn.TS)
+	if perr != nil {
+		return nil
+	}
+	notes, _ := note.List(e.S)
+	var newest *note.Note
+	for _, n := range notes {
+		if newest == nil || n.ModTime.After(newest.ModTime) {
+			newest = n
+		}
+	}
+	if newest == nil || !newest.ModTime.After(txnTS.Add(noteEditGrace)) {
+		return nil
+	}
+	return fmt.Errorf("undo: your most recent store change looks like a NOTE edit (%s, %s) — note operations are not undoable (edit the note again, or nt archive/supersede it); `nt undo` would instead revert the older task change %q. Rerun with --force to revert that task change.",
+		newest.Rel, newest.ModTime.Format("15:04:05"), label)
 }
 
 func cmdEdit(args []string) int {
@@ -210,10 +255,20 @@ func cmdEdit(args []string) int {
 		fmt.Printf("%s %s  %s\n", verb, shortID(n.ID), n.Rel)
 		return 0
 	}
+	// Everything below hands the terminal to $EDITOR. In a non-interactive
+	// context (a pipe, CI, an agent shelling out) that spews raw escape
+	// sequences and hangs — fail with the agent-safe alternatives instead.
+	// (Resolution still runs first, so a bad handle errors as a bad handle.)
+	editNote := func(n *note.Note) int {
+		if code := requireEditorTerminal(); code != 0 {
+			return code
+		}
+		return runEditor(n.Path)
+	}
 	if strings.HasPrefix(handle, "note:") {
 		want := strings.TrimPrefix(handle, "note:")
 		if n, nerr := resolveNote(notes, want); nerr == nil {
-			return runEditor(n.Path)
+			return editNote(n)
 		}
 		return fail(fmt.Errorf("edit: no note %q", want))
 	}
@@ -229,9 +284,12 @@ func cmdEdit(args []string) int {
 		// Not a task — fall back to a note handle so `nt edit <slug>` works without
 		// the note: prefix (the bare-handle convention the skill documents).
 		if n, nerr := resolveNote(notes, handle); nerr == nil {
-			return runEditor(n.Path)
+			return editNote(n)
 		}
 		return fail(fmt.Errorf("edit: no task or note %q", handle))
+	}
+	if code := requireEditorTerminal(); code != 0 {
+		return code
 	}
 	id := t.ID()
 	tmp, err := os.CreateTemp("", "nt-edit-*.txt")
@@ -347,6 +405,9 @@ func cmdDoctor(args []string) int {
 	// counts for missing descriptions and orphans). Read-only — no lock needed,
 	// and never auto-fixed (a dangling link is a user decision, like a dep cycle).
 	nl := lintNotes(e)
+	// Task-side duplicate lint (informational): identical bare captures slip past
+	// the write-time warning when the writers never see each other's stderr.
+	dupTasks := lintTaskDups(e)
 	taskProblem := rep.HasProblems()
 	noteProblem := len(nl.Dangling) > 0
 
@@ -372,12 +433,13 @@ func cmdDoctor(args []string) int {
 	gcCount := len(gcCandidates(e, time.Now().AddDate(0, 0, -30).Format("2006-01-02")))
 
 	if !taskProblem && !noteProblem {
-		if nl.hasHygieneNotices() || gcCount > 0 {
-			fmt.Println("tasks and links are healthy — note-hygiene notices below")
+		if nl.hasHygieneNotices() || gcCount > 0 || len(dupTasks) > 0 {
+			fmt.Println("tasks and links are healthy — hygiene notices below")
 		} else {
 			fmt.Println("store is healthy — no issues found")
 		}
 		printNoteHygiene(nl)
+		printTaskDups(dupTasks)
 		if gcCount > 0 {
 			fmt.Printf("  %d reclaimable note(s) (superseded/stranded >30d) — `nt gc` to review, `nt gc --yes` to trash\n", gcCount)
 		}
@@ -399,10 +461,48 @@ func cmdDoctor(args []string) int {
 		fmt.Printf("%d dangling note link(s) — fix the [[target]] or the note it points to\n", len(nl.Dangling))
 	}
 	printNoteHygiene(nl)
+	printTaskDups(dupTasks)
 	if *check {
 		return 1
 	}
 	return 0
+}
+
+// lintTaskDups finds pairs of OPEN tasks whose titles overlap heavily (the same
+// dupTitleOverlap threshold the write-time warning uses) — likely duplicate
+// captures from writers who never saw each other's stderr hint. Informational,
+// never a doctor failure; capped at 5 pairs so a messy store stays readable.
+func lintTaskDups(e *mutate.Engine) []string {
+	d, err := e.Read()
+	if err != nil || d == nil {
+		return nil
+	}
+	var open []*task.Task
+	for _, t := range d.Tasks() {
+		if !t.Done {
+			open = append(open, t)
+		}
+	}
+	var out []string
+	for i := 0; i < len(open); i++ {
+		for j := i + 1; j < len(open); j++ {
+			if note.TitleOverlap(open[i].Display(), open[j].Display()) >= dupTitleOverlap {
+				out = append(out, fmt.Sprintf("%s ≈ %s (%s)", shortID(open[i].ID()), shortID(open[j].ID()), open[i].Display()))
+				if len(out) >= 5 {
+					return out
+				}
+			}
+		}
+	}
+	return out
+}
+
+// printTaskDups emits the informational duplicate-open-task notice (one line).
+func printTaskDups(pairs []string) {
+	if len(pairs) == 0 {
+		return
+	}
+	fmt.Printf("  possible duplicate open tasks: %s — review with `nt show <id>`, then link or `nt rm` one\n", strings.Join(pairs, ", "))
 }
 
 // noteLint is the KB-side health report `nt doctor` produces alongside the task
@@ -472,9 +572,20 @@ func lintNotes(e *mutate.Engine) noteLint {
 			rep.Orphans = append(rep.Orphans, handle)
 		}
 		// Near-duplicate titles are the store rot that degrades recall most —
-		// surface them here since doctor is the curation entry point.
-		if sim := note.FindSimilar(seen, n.Title, n.Tags); len(sim) > 0 {
-			rep.NearDups = append(rep.NearDups, fmt.Sprintf("%s ≈ %s", handle, shortID(sim[0].ID)+" "+sim[0].Rel))
+		// surface them here since doctor is the curation entry point. A pair where
+		// EITHER note carries the `distinct` tag is a sanctioned fork (a deliberate
+		// --force the author already acknowledged) — nagging forever just teaches
+		// people to ignore doctor.
+		if !contains(n.Tags, "distinct") {
+			if sim := note.FindSimilar(seen, n.Title, n.Tags); len(sim) > 0 {
+				for _, s := range sim {
+					if contains(s.Tags, "distinct") {
+						continue
+					}
+					rep.NearDups = append(rep.NearDups, fmt.Sprintf("%s ≈ %s", handle, shortID(s.ID)+" "+s.Rel))
+					break
+				}
+			}
 		}
 		seen = append(seen, n)
 	}
@@ -548,9 +659,6 @@ func printNoteHygiene(nl noteLint) {
 	if len(nl.MissingDesc) > 0 {
 		fmt.Printf(", %d without a description", len(nl.MissingDesc))
 	}
-	if len(nl.Orphans) > 0 {
-		fmt.Printf(", %d orphan(s)", len(nl.Orphans))
-	}
 	if len(nl.NearDups) > 0 {
 		fmt.Printf(", %d near-duplicate title pair(s)", len(nl.NearDups))
 	}
@@ -558,11 +666,14 @@ func printNoteHygiene(nl noteLint) {
 	if len(nl.MissingDesc) > 0 {
 		fmt.Printf("  no description (add one so `nt index` is scannable): %s\n", sampleList(nl.MissingDesc, 8))
 	}
+	// Orphans are one line, no sample list: field data showed most active notes
+	// are legitimately unlinked (fresh captures, standalone references), and an
+	// 8-item name dump trained readers to ignore doctor entirely.
 	if len(nl.Orphans) > 0 {
-		fmt.Printf("  orphans (nothing links to them): %s\n", sampleList(nl.Orphans, 8))
+		fmt.Printf("  %d unlinked note(s) (normal for fresh captures) — nt links --orphans lists them\n", len(nl.Orphans))
 	}
 	if len(nl.NearDups) > 0 {
-		fmt.Printf("  near-duplicates (consolidate with `nt supersede <old> --by <new>`): %s\n", sampleList(nl.NearDups, 6))
+		fmt.Printf("  near-duplicates (consolidate with `nt supersede <old> --by <new>`): %s (tag one 'distinct' to acknowledge a deliberate fork)\n", sampleList(nl.NearDups, 6))
 	}
 	// "Always shown" invites dumping — make the pinned tier's cost legible once
 	// it outgrows what a session-start load should pay for. ~25 tokens per stub

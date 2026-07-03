@@ -412,7 +412,8 @@ USAGE
   nt recall "what I'm doing"  relevant notes for a task, lessons flagged ⚑ — paraphrase-aware
                               (--lessons-only filters to recorded mistakes; bare
                                'nt recall --lessons-only' lists every lesson)
-                              --project NAME prefers that project's notes
+                              --project NAME prefers that project's notes — matched
+                              by tag, folder, or project: frontmatter
                               (default: NT_WORKSTREAM; 'none' disables)
   nt export [--tag|--folder]  compile notes into one md/json doc (rules/instructions, SKILL.md)
   nt tags                     list the tag vocabulary with counts
@@ -427,8 +428,10 @@ USAGE
                               -y/--yes confirms (required for tasks when non-interactive)
   nt archive                  move done tasks to done.txt
   nt archive <note> [--undo]  retire a note from the active views (reversible; still on disk)
-  nt undo / redo              revert / re-apply the last change (workstream-safe:
-                              refuses another agent's change unless --force)
+  nt undo / redo              revert / re-apply the last TASK change (notes aren't
+                              journaled — re-edit or supersede a note instead;
+                              workstream-safe: refuses another agent's change
+                              unless --force)
   nt path                     print the store directory
   nt version                  print the nt version (alias: -v, --version)
   nt git-init                 set up the store for git (union-merge + .gitignore)
@@ -468,6 +471,7 @@ NOTE FLAGS (nt note)
   --body TEXT / --body-file PATH|-   note body ('-' = stdin; survives shell quoting)
   --tag NAME (repeat; --tags a,b)    --source NAME   --json (print as JSON)
   --description TEXT  one-line summary shown in 'nt index' (progressive disclosure)
+  --project NAME      stored as project: frontmatter ('nt recall --project' matches it)
   --lesson            record a durable lesson/gotcha: tags it 'lesson', files it in
                       lessons/, and 'nt recall' surfaces it before the mistake recurs
   --kind lesson|decision|ref|rule|memory   note class: canonical tag + folder — use it

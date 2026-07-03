@@ -180,7 +180,8 @@ func projectTokens(project string) map[string]bool {
 }
 
 // matchesProject reports whether a note self-identifies as belonging to the
-// project hint: any tag or folder path segment equals one of its tokens.
+// project hint: any tag, folder path segment, or `project:` frontmatter token
+// equals one of its tokens.
 func matchesProject(n *note.Note, proj map[string]bool) bool {
 	for _, t := range n.Tags {
 		if proj[strings.ToLower(t)] {
@@ -190,6 +191,13 @@ func matchesProject(n *note.Note, proj map[string]bool) bool {
 	for _, seg := range strings.Split(strings.ToLower(n.Rel), "/") {
 		if proj[seg] {
 			return true
+		}
+	}
+	if p := n.Project(); p != "" {
+		for tok := range projectTokens(p) {
+			if proj[tok] {
+				return true
+			}
 		}
 	}
 	return false

@@ -23,7 +23,7 @@ func cmdRecall(args []string) int {
 	fs := flag.NewFlagSet("recall", flag.ContinueOnError)
 	limit := fs.Int("limit", 8, "max results (0 = all)")
 	lessonsOnly := fs.Bool("lessons-only", false, "only notes tagged 'lesson'")
-	project := fs.String("project", "", "prefer this project's notes in ranking (default: NT_WORKSTREAM; 'none' disables)")
+	project := fs.String("project", "", "prefer this project's notes in ranking — matches tags, folders, and project: frontmatter (default: NT_WORKSTREAM; 'none' disables)")
 	asJSON := fs.Bool("json", false, "print results as JSON stubs")
 	flags, positional := splitArgs(args, map[string]bool{"json": true, "lessons-only": true})
 	if err := fs.Parse(flags); err != nil {

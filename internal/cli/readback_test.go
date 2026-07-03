@@ -129,8 +129,13 @@ func TestDoctorOrphanExemptions(t *testing.T) {
 	if strings.Contains(out, "single-flight") || strings.Contains(out, "flock") {
 		t.Fatalf("lessons/decisions must not be counted as orphans:\n%s", out)
 	}
-	if !strings.Contains(out, "1 orphan(s)") {
-		t.Fatalf("the genuinely stray note should still be flagged:\n%s", out)
+	// Orphans are a single demoted line — a count + the lister command, never a
+	// sample dump of note names (field data: the list was pure noise).
+	if !strings.Contains(out, "1 unlinked note(s) (normal for fresh captures) — nt links --orphans lists them") {
+		t.Fatalf("the genuinely stray note should be counted on the one-line notice:\n%s", out)
+	}
+	if strings.Contains(out, "an-actually-stray-note") {
+		t.Fatalf("doctor must not dump orphan names:\n%s", out)
 	}
 }
 

@@ -43,3 +43,19 @@ func TestRankProjectBoost(t *testing.T) {
 		}
 	}
 }
+
+// project: frontmatter (kept in Extra — nt doesn't model the key) also counts
+// as project membership, alongside tags and folder segments.
+func TestMatchesProjectFrontmatter(t *testing.T) {
+	fm := &note.Note{Title: "cache invalidation strategy", Rel: "misc/cache.md",
+		Body: "the cache design", Extra: []string{"project: gamma"}}
+	res := RankProject([]*note.Note{fm}, "improving the cache invalidation layer", 8, "gamma")
+	if len(res) == 0 || !res[0].ProjectMatch {
+		t.Fatalf("project: frontmatter should mark ProjectMatch, got %+v", res)
+	}
+	// A different project hint doesn't match.
+	res = RankProject([]*note.Note{fm}, "improving the cache invalidation layer", 8, "delta")
+	if len(res) == 0 || res[0].ProjectMatch {
+		t.Fatalf("foreign hint must not mark ProjectMatch, got %+v", res)
+	}
+}

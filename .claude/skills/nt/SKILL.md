@@ -116,7 +116,9 @@ never breaks linking — and you can refile later with `nt mv`. The `nt_note` MC
 tool takes the same **`kind`**/**`folder`** arguments.
 
 To fix or extend a note later **without an editor**: `nt edit <note> --append
-"Resolved in commit abc123"` (or `--body-file new.md` to replace the body).
+"Resolved in commit abc123"`, `--append-file notes.md` (or `-` for stdin — use
+this for multi-line/backtick appends), `--body-file new.md` (replace the body),
+or `--desc "…"` (set the one-line summary).
 
 Set **structured frontmatter at capture** with `--field key=value` (repeatable):
 
@@ -166,6 +168,7 @@ Keep the KB tidy as it grows — no `$EDITOR` needed:
 nt mv <note> ref/auth              # refile/rename, rewriting every [[link]] to it
 nt tag <note> +reviewed -inbox     # add/remove tags
 nt rm <note>                       # delete → .trash/ (refuses if inbound [[links]] would dangle; --force overrides)
+nt rm <task-id> --yes              # delete a task (agents must pass --yes; journaled, nt undo restores)
 nt doctor                          # store health: dangling [[links]], near-duplicates, oversized pinned tier
 nt archive <note>                  # retire a stale note from index/search/recall (reversible)
 nt supersede <old> --by <new>      # (or nt note … --supersede <old>) — replace a note; the old one retires with a pointer
@@ -192,6 +195,8 @@ the returned id directly with `nt links` / `nt tag` / `nt mv` / `nt rm`.
 ## Conventions
 
 - **Always** `--source claude` on items you create.
+- Finished work gets `nt done`, never `nt rm` — done tasks feed the Logbook
+  (`nt log`) that the next session reads; rm erases the history.
 - Retrieve (`index`/`search`) before creating, to avoid duplicates.
 - Tasks are one line; put anything longer in a note and link to it.
 - Always give notes a `--description` — it's the one-line summary `nt index`
@@ -206,7 +211,8 @@ When several agents share one store (e.g. parallel git worktrees), tasks are
 **isolated per workstream** so your in-flight work doesn't mix with another
 session's, while **notes stay shared** so knowledge cross-pollinates. This is
 automatic via the MCP tools and CLI `nt add` when `NT_WORKSTREAM` is set (grove/CI/harness export
-it; `auto` derives it from the git branch). You don't stamp anything — `nt_add`
+it; `auto` derives it from the git branch, falling back to the working
+directory's basename outside a git repo — prefer a literal id there). You don't stamp anything — `nt_add`
 records it, and `nt_index`/`nt_status` scope to it.
 
 - Tasks with no workstream (the human's CLI/TUI/web backlog) stay visible to
