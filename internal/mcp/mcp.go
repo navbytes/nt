@@ -1322,7 +1322,7 @@ func (s *server) recall(a map[string]any) (string, error) {
 	for _, r := range results {
 		row := map[string]any{
 			"id": r.Note.ID, "title": r.Note.Title, "description": r.Note.Description(160),
-			"tags": r.Note.Tags, "folder": pathDir(r.Note.Rel), "lesson": r.Lesson,
+			"tags": r.Note.Tags, "folder": pathDir(r.Note.Rel), "lesson": r.Lesson, "score": r.Score,
 		}
 		if r.ProjectMatch {
 			row["projectMatch"] = true

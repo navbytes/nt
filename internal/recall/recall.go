@@ -260,11 +260,20 @@ func RankProject(notes []*note.Note, context string, limit int, project string) 
 		exact   int
 		matched int
 	}
+	// Iterate query words in a FIXED order: float accumulation is not
+	// associative, so map-order iteration makes tied notes differ in their last
+	// bits run-to-run — which reshuffled results (and the --limit cutoff!) on
+	// every invocation for homogeneous stores.
+	qwords := make([]string, 0, len(q.words))
+	for w := range q.words {
+		qwords = append(qwords, w)
+	}
+	sort.Strings(qwords)
 	var out []scored
 	for _, cd := range cands {
 		var f float64
 		exact, matched := 0, 0
-		for w := range q.words {
+		for _, w := range qwords {
 			c := conceptID(w)
 			var base float64
 			switch {
@@ -317,7 +326,10 @@ func RankProject(notes []*note.Note, context string, limit int, project string) 
 		if out[i].Lesson != out[j].Lesson {
 			return out[i].Lesson
 		}
-		return out[i].Note.Updated > out[j].Note.Updated
+		if out[i].Note.Updated != out[j].Note.Updated {
+			return out[i].Note.Updated > out[j].Note.Updated
+		}
+		return out[i].Note.Rel < out[j].Note.Rel // total order: identical runs return identical results
 	})
 	// Trim the long tail: results far below the best hit read as "also relevant"
 	// to an agent, which pads every recall to `limit` rows and buries the honest
