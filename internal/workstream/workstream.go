@@ -9,17 +9,37 @@ package workstream
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
+	"unicode"
 )
+
+// Normalize maps a raw workstream id to its canonical stored form: every
+// whitespace run becomes a single "-", and leading/trailing "-" are stripped.
+// Workstream ids are stamped into the space-delimited todo.txt line as `ws:<id>`,
+// so an id containing whitespace would parse back truncated ("ws:my stream" reads
+// as ws:"my" with "stream" leaking into the task text) — writes and reads must
+// agree on this normalized form. Non-whitespace runes (unicode included) pass
+// through untouched.
+func Normalize(id string) string {
+	return strings.Trim(strings.Join(strings.Fields(id), "-"), "-")
+}
+
+// warnNormalizedOnce guards the one-per-process stderr notice printed when a
+// whitespace-carrying NT_WORKSTREAM is normalized — informative, never spammy.
+var warnNormalizedOnce sync.Once
 
 // Env resolves the workstream from the NT_WORKSTREAM environment variable: a
 // literal id, or "auto" → derived from the working repo, or "" when unset (no
 // scoping — behaves exactly as nt did before workstreams). Isolation is opt-in:
-// it activates only once this resolves to a non-empty value.
+// it activates only once this resolves to a non-empty value. The value is
+// Normalized (whitespace → "-") so it survives the space-delimited todo.txt
+// stamp; when that changes it, a single notice is printed to stderr.
 func Env() string {
 	env := strings.TrimSpace(os.Getenv("NT_WORKSTREAM"))
 	if env == "" {
@@ -28,19 +48,26 @@ func Env() string {
 	if env == "auto" {
 		return Derive()
 	}
-	return env
+	norm := Normalize(env)
+	if norm != env && strings.ContainsFunc(env, unicode.IsSpace) {
+		warnNormalizedOnce.Do(func() {
+			fmt.Fprintf(os.Stderr, "nt: note — workstream %q contains whitespace; using %q\n", env, norm)
+		})
+	}
+	return norm
 }
 
 // Derive infers an identity from the working repo: the checked-out git branch
 // (the natural unit of a parallel line of work, and what grove worktrees map to),
 // falling back to the working-directory basename for non-git or detached-HEAD
-// trees. Returns "" only if even the cwd is unavailable.
+// trees. Returns "" only if even the cwd is unavailable. The result is
+// Normalized so a directory name with spaces stays a valid todo.txt ws: value.
 func Derive() string {
 	if b := gitBranch(); b != "" {
-		return b
+		return Normalize(b)
 	}
 	if wd, err := os.Getwd(); err == nil {
-		return filepath.Base(wd)
+		return Normalize(filepath.Base(wd))
 	}
 	return ""
 }
@@ -60,12 +87,14 @@ func Visible(taskWS, current string) bool {
 
 // Scope resolves the effective current workstream for a read: an explicit value
 // (a literal id, or "*" to widen) wins; otherwise the NT_WORKSTREAM environment.
+// Explicit ids are Normalized (whitespace → "-") so reads agree with what writes
+// stamped; "*" passes through Normalize unchanged.
 func Scope(explicit string) string {
 	if e := strings.TrimSpace(explicit); e != "" {
 		if e == "auto" {
 			return Derive()
 		}
-		return e
+		return Normalize(e)
 	}
 	return Env()
 }

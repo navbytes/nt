@@ -20,7 +20,9 @@ it on demand.
 ## Start of session
 - Call **`nt_index`** for the KB catalog (note stubs + active tasks — no bodies)
   and **`nt_status`** for the task feed before starting substantive work. Prefer
-  `nt_index` with `format:"compact"` — same catalog, far fewer tokens. Don't
+  `nt_index` with `format:"compact"` — same catalog, far fewer tokens (large
+  stores return a tiered catalog: pinned + recent, older as per-folder counts —
+  expand with `folder` or `all:true`). Don't
   re-derive what a past session recorded, and don't bulk-load note bodies.
 
 ## Before each task — learn from past sessions
@@ -34,8 +36,9 @@ it on demand.
 - Capture the *why*: record decisions, constraints, and dead-ends with **`nt_note`**
   (always set a one-line `description`); capture follow-ups with **`nt_add`**
   (link discovered work via `discovered_from`).
+- Set `source:"opencode"` on what you create.
 - Hit a mistake, footgun, or dead-end? Record it as a **lesson**: `nt_note` with
-  tag `lesson` (CLI `nt note … --lesson`). Put the *trigger* in the description
+  `kind:"lesson"` (CLI `nt note … --lesson`). Put the *trigger* in the description
   ("when X, do Y — not Z") so `nt_recall` surfaces it next time someone hits X.
 - To look something up: **`nt_search`** for ranked stubs, then **`nt_get`** the one
   note you need (by id, or a single `section`). Fetch on demand — don't preload.

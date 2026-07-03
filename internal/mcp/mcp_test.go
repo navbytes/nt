@@ -1120,16 +1120,20 @@ func TestMCPStarReadCarriesWorkstream(t *testing.T) {
 	}
 }
 
-// TestMCPSearchTaskWorkstreamIsolation: nt_search task results are scoped to the
-// caller's workstream (like nt_index/nt_status) so parallel agents don't leak
-// in-flight tasks to each other; notes remain shared.
-func TestMCPSearchTaskWorkstreamIsolation(t *testing.T) {
+// TestMCPSearchIsStoreWide: nt_search is the "does this exist anywhere?" verb —
+// its task results are NEVER workstream-scoped (unlike nt_index/nt_status), per
+// the documented contract. Scoping made a match in another agent's workstream
+// come back empty, which readers took as "no such task" and duplicated the work.
+func TestMCPSearchIsStoreWide(t *testing.T) {
 	s := newServer(t)
-	t.Setenv("NT_WORKSTREAM", "feat-a")
-	s.dispatch("nt_add", map[string]any{"text": "wire widget alpha"})
-	t.Setenv("NT_WORKSTREAM", "feat-b")
+	t.Setenv("NT_WORKSTREAM", "webhookd")
+	if _, err := s.dispatch("nt_add", map[string]any{"text": "verify HMAC signatures on inbound webhooks"}); err != nil {
+		t.Fatal(err)
+	}
 
-	out, err := s.dispatch("nt_search", map[string]any{"query": "widget", "type": "all"})
+	// A different workstream still finds the task by text.
+	t.Setenv("NT_WORKSTREAM", "mcpbuild")
+	out, err := s.dispatch("nt_search", map[string]any{"query": "HMAC", "type": "task"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1137,14 +1141,207 @@ func TestMCPSearchTaskWorkstreamIsolation(t *testing.T) {
 		Tasks []taskOut `json:"tasks"`
 	}
 	json.Unmarshal([]byte(out), &res)
-	if len(res.Tasks) != 0 {
-		t.Errorf("feat-b must not see feat-a's task via search, got %v", res.Tasks)
+	if len(res.Tasks) != 1 || res.Tasks[0].Workstream != "webhookd" {
+		t.Fatalf("search must find another workstream's task (store-wide), got %s", out)
 	}
-	// The owner still finds it.
-	t.Setenv("NT_WORKSTREAM", "feat-a")
-	out, _ = s.dispatch("nt_search", map[string]any{"query": "widget", "type": "all"})
+}
+
+// TestMCPSearchEmptyResultsEncodeAsArrays: no matches must come back as
+// "tasks":[] / "notes":[], never null — a null reads as breakage to an agent.
+func TestMCPSearchEmptyResultsEncodeAsArrays(t *testing.T) {
+	s := newServer(t)
+	out, err := s.dispatch("nt_search", map[string]any{"query": "nothing matches this"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, `"tasks":[]`) || !strings.Contains(out, `"notes":[]`) {
+		t.Fatalf("empty search results must encode as [] not null: %s", out)
+	}
+	// type:"task" leaves the notes side untouched — it still must be [], not null.
+	out, err = s.dispatch("nt_search", map[string]any{"query": "nothing matches this", "type": "task"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(out, "null") {
+		t.Fatalf("type-scoped empty search must not emit null arrays: %s", out)
+	}
+}
+
+// TestMCPPriorityMediumAcceptedAndEchoed: the advertised enum includes "medium"
+// (dateparse always accepted it — the schema just lied), and both nt_add and
+// nt_update echo the canonical stored priority ("B") so the agent gets positive
+// confirmation of what the store now holds.
+func TestMCPPriorityMediumAcceptedAndEchoed(t *testing.T) {
+	s := newServer(t)
+	out, err := s.dispatch("nt_add", map[string]any{"text": "medium priority task", "priority": "medium"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var added taskOut
+	if err := json.Unmarshal([]byte(out), &added); err != nil {
+		t.Fatal(err)
+	}
+	if added.Priority != "B" {
+		t.Fatalf(`nt_add priority:"medium" should echo canonical "B", got %+v`, added)
+	}
+
+	uout, err := s.dispatch("nt_update", map[string]any{"id": added.ID, "priority": "medium"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var upd struct {
+		Priority string            `json:"priority"`
+		Changed  map[string]string `json:"changed"`
+	}
+	json.Unmarshal([]byte(uout), &upd)
+	if upd.Priority != "B" || upd.Changed["priority"] != "B" {
+		t.Fatalf(`nt_update priority:"medium" should echo canonical "B", got %s`, uout)
+	}
+
+	// The advertised schemas match reality: "medium" is in both enums.
+	for _, name := range []string{"nt_add", "nt_update"} {
+		found := false
+		for _, td := range toolDefs {
+			if td.Name != name {
+				continue
+			}
+			props := td.InputSchema["properties"].(map[string]any)
+			pri := props["priority"].(map[string]any)
+			for _, v := range pri["enum"].([]string) {
+				if v == "medium" {
+					found = true
+				}
+			}
+		}
+		if !found {
+			t.Errorf("%s priority enum should advertise \"medium\"", name)
+		}
+	}
+}
+
+// TestMCPNoteProjectFrontmatter: nt_note's project param stores project:
+// frontmatter, and nt_recall's project boost matches it (projectMatch true)
+// even when the note carries no project tag or folder.
+func TestMCPNoteProjectFrontmatter(t *testing.T) {
+	s := newServer(t)
+	t.Setenv("NT_WORKSTREAM", "")
+	if _, err := s.dispatch("nt_note", map[string]any{
+		"title": "cache invalidation strategy", "body": "the cache design",
+		"project": "gamma", "description": "how invalidation works",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	out, err := s.dispatch("nt_recall", map[string]any{"context": "improving the cache invalidation layer", "project": "gamma"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var res struct {
+		Results []struct {
+			Title        string `json:"title"`
+			ProjectMatch bool   `json:"projectMatch"`
+		} `json:"results"`
+	}
 	json.Unmarshal([]byte(out), &res)
-	if len(res.Tasks) != 1 {
-		t.Errorf("owner should find its own task, got %v", res.Tasks)
+	if len(res.Results) == 0 || !res.Results[0].ProjectMatch {
+		t.Fatalf("project: frontmatter should trigger the recall project boost: %s", out)
+	}
+}
+
+// nt_note_edit is the MCP counterpart of `nt edit`: it fixes an EXISTING note
+// in place instead of nt_note's create-or-supersede (new id) path — the gap
+// MCP-only agents hit hardest when a note needed a small correction.
+func TestMCPNoteEditModes(t *testing.T) {
+	s := newServer(t)
+	created, err := s.dispatch("nt_note", map[string]any{"title": "edit target", "body": "original body"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var n noteOut
+	json.Unmarshal([]byte(created), &n)
+
+	// append
+	out, err := s.dispatch("nt_note_edit", map[string]any{"handle": n.ID, "append": "more detail"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "more detail") || !strings.Contains(out, "original body") {
+		t.Fatalf("append should keep the original body and add to it: %s", out)
+	}
+
+	// full body replace
+	out, err = s.dispatch("nt_note_edit", map[string]any{"handle": n.ID, "body": "replaced entirely"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "replaced entirely") || strings.Contains(out, "original body") {
+		t.Fatalf("body should fully replace, got %s", out)
+	}
+
+	// targeted old_string/new_string patch
+	if _, err := s.dispatch("nt_note_edit", map[string]any{"handle": n.ID, "body": "the cach layer needs work"}); err != nil {
+		t.Fatal(err)
+	}
+	out, err = s.dispatch("nt_note_edit", map[string]any{"handle": n.ID, "old_string": "cach layer", "new_string": "cache layer"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "cache layer") || strings.Contains(out, "cach layer") {
+		t.Fatalf("targeted patch didn't apply cleanly: %s", out)
+	}
+
+	// description alongside a body edit
+	out, err = s.dispatch("nt_note_edit", map[string]any{"handle": n.ID, "append": "note", "description": "a fresh summary"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var edited struct {
+		Description string `json:"description"`
+	}
+	json.Unmarshal([]byte(out), &edited)
+	if edited.Description != "a fresh summary" {
+		t.Fatalf("description should update alongside a body edit, got %q", edited.Description)
+	}
+}
+
+func TestMCPNoteEditOldStringAmbiguousRefuses(t *testing.T) {
+	s := newServer(t)
+	created, _ := s.dispatch("nt_note", map[string]any{"title": "dup text note", "body": "foo bar\nfoo bar"})
+	var n noteOut
+	json.Unmarshal([]byte(created), &n)
+	_, err := s.dispatch("nt_note_edit", map[string]any{"handle": n.ID, "old_string": "foo bar", "new_string": "baz"})
+	if err == nil {
+		t.Fatal("an old_string matching twice must be refused, not guessed at")
+	}
+	if !strings.Contains(err.Error(), "2 times") {
+		t.Fatalf("refusal should say how many times it matched: %v", err)
+	}
+}
+
+func TestMCPNoteEditRequiresPairAndOneMode(t *testing.T) {
+	s := newServer(t)
+	created, _ := s.dispatch("nt_note", map[string]any{"title": "pairing note", "body": "some text"})
+	var n noteOut
+	json.Unmarshal([]byte(created), &n)
+
+	if _, err := s.dispatch("nt_note_edit", map[string]any{"handle": n.ID, "old_string": "some text"}); err == nil {
+		t.Fatal("old_string without new_string must be rejected")
+	}
+	if _, err := s.dispatch("nt_note_edit", map[string]any{"handle": n.ID, "append": "x", "body": "y"}); err == nil {
+		t.Fatal("mixing append and body must be rejected")
+	}
+	if _, err := s.dispatch("nt_note_edit", map[string]any{"handle": n.ID}); err == nil {
+		t.Fatal("a call with nothing to edit must be rejected")
+	}
+}
+
+// nt_note_edit accepts an "id" alias for "handle", matching nt_get's pattern —
+// agents naturally reuse the id field name a stub just handed them.
+func TestMCPNoteEditAcceptsIDAlias(t *testing.T) {
+	s := newServer(t)
+	created, _ := s.dispatch("nt_note", map[string]any{"title": "id alias note", "body": "text"})
+	var n noteOut
+	json.Unmarshal([]byte(created), &n)
+	if _, err := s.dispatch("nt_note_edit", map[string]any{"id": n.ID, "append": "more"}); err != nil {
+		t.Fatalf("id should work as a handle alias: %v", err)
 	}
 }

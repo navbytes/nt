@@ -120,13 +120,22 @@ func TestNotesAndShow(t *testing.T) {
 }
 
 // TestEditNoteBareHandle: `nt edit <slug>` resolves a note without the note:
-// prefix (it should not error with "no task").
+// prefix (it must not error with "no task or note"). Tests run non-interactive
+// (stdout piped), so the resolved note now hits the no-terminal editor guard —
+// which proves resolution worked AND that $EDITOR is never launched into a pipe.
 func TestEditNoteBareHandle(t *testing.T) {
 	t.Setenv("NT_DIR", t.TempDir())
 	captureRun(t, "note", "Some ref", "--folder", "ref")
-	t.Setenv("EDITOR", "true") // a no-op editor so runEditor succeeds
-	if out, code := runWithStdout("edit", "some-ref"); code != 0 {
-		t.Fatalf("edit of a bare note handle failed (%d): %s", code, out)
+	t.Setenv("EDITOR", "true")
+	_, stderr, code := runWithStderr("edit", "some-ref")
+	if code == 0 {
+		t.Fatal("edit without a terminal should refuse to launch $EDITOR")
+	}
+	if strings.Contains(stderr, "no task or note") {
+		t.Fatalf("bare note handle should resolve, got: %s", stderr)
+	}
+	if !strings.Contains(stderr, "no terminal") || !strings.Contains(stderr, "--append") {
+		t.Fatalf("expected the no-terminal guard naming the agent-safe flags, got: %s", stderr)
 	}
 }
 

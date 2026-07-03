@@ -108,7 +108,7 @@ func (e *Engine) applyReversal(ws string, force, wantRedo bool) (undo.Txn, bool,
 	// Journal second: drop the undone txn and push its swapped redo, atomically.
 	// The swapped entry keeps the original writer's workstream so ownership
 	// survives an undo/redo round-trip.
-	redo := undo.Txn{Op: "redo:" + txn.Op, TS: time.Now().Format(time.RFC3339), WS: txn.WS}
+	redo := undo.Txn{Op: "redo:" + txn.Op, TS: time.Now().Format(time.RFC3339Nano), WS: txn.WS}
 	for _, c := range txn.Changes {
 		redo.Changes = append(redo.Changes, undo.Change{ID: c.ID, Before: c.After, After: c.Before})
 	}
@@ -144,16 +144,24 @@ func displayOp(op string) string {
 // a fresh forward op. ok is false when the journal is empty. It is a display-only
 // read of the atomically-written journal, so it runs lock-free.
 func (e *Engine) PeekUndo() (label string, isRedo bool, ok bool) {
-	txn, found, err := undo.Peek(e.S)
-	if err != nil || !found {
+	txn, label, ok := e.PeekUndoTxn()
+	if !ok {
 		return "", false, false
 	}
-	op, n := txn.Op, 0
-	for strings.HasPrefix(op, "redo:") {
-		op = op[len("redo:"):]
-		n++
+	return label, isRedoEntry(txn.Op), true
+}
+
+// PeekUndoTxn returns the pending journal transaction itself (op label raw,
+// including any internal "redo:" prefixes), the stripped display label, and
+// whether one exists — so callers can inspect its timestamp/workstream before
+// deciding to revert (e.g. the CLI's note-edited-since guard). Lock-free,
+// display-only, like PeekUndo.
+func (e *Engine) PeekUndoTxn() (txn undo.Txn, label string, ok bool) {
+	txn, found, err := undo.Peek(e.S)
+	if err != nil || !found {
+		return undo.Txn{}, "", false
 	}
-	return op, n%2 == 1, true
+	return txn, displayOp(txn.Op), true
 }
 
 // validatePostImage checks that the live document still matches what the

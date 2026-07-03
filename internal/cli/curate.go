@@ -46,7 +46,7 @@ func cmdShow(args []string) int {
 		}
 	}
 	if len(positional) == 0 {
-		return usageErr(fmt.Errorf("show: need a note handle (slug/title/id)"))
+		return usageErr(fmt.Errorf("show: need a note or task handle (slug/title/id)"))
 	}
 	e, ok := engine()
 	if !ok {
@@ -73,6 +73,11 @@ func cmdShow(args []string) int {
 	meta := []string{shortID(n.ID), n.Rel}
 	if len(n.Tags) > 0 {
 		meta = append(meta, "@"+strings.Join(n.Tags, " @"))
+	}
+	// Dates make staleness visible — a pinned rule or repo map is served at every
+	// session start, and its age is the reader's only freshness signal.
+	if d := n.ChangedDate(); d != "" {
+		meta = append(meta, "updated "+d)
 	}
 	fmt.Printf("%s\n\n", strings.Join(meta, "  ·  "))
 	// The one-line description is real content (often the WHOLE content of a

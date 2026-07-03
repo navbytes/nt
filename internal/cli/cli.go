@@ -95,6 +95,8 @@ func Run(args []string) int {
 		return cmdPath(rest)
 	case "doctor":
 		return cmdDoctor(rest)
+	case "gc":
+		return cmdGc(rest)
 	case "git-init":
 		return cmdGitInit(rest)
 	case "hook":
@@ -140,7 +142,7 @@ var knownCommands = []string{
 	"view", "views", "ready", "agenda", "review", "index", "log",
 	"done", "do", "skip", "start", "stop", "update", "up", "search", "q",
 	"recall", "export", "tags", "tag", "links", "mv", "rename", "rm", "delete",
-	"archive", "undo", "redo", "edit", "path", "doctor", "git-init", "hook", "mcp",
+	"archive", "undo", "redo", "edit", "path", "doctor", "gc", "git-init", "hook", "mcp",
 	"opencode", "web", "version", "help", "supersede", "relink",
 }
 
@@ -312,20 +314,12 @@ func splitArgs(args []string, boolFlags map[string]bool) (flags, positional []st
 	return flags, positional
 }
 
-// handleArgs returns the positional task handles in args, rejecting any stray
-// flag-looking token (e.g. `nt done --json id`) with a clear error rather than
-// silently treating it as a handle. cmd is the subcommand name for the message.
-func handleArgs(cmd string, args []string) ([]string, error) {
-	flags, positional := splitArgs(args, nil)
-	if len(flags) > 0 {
-		return nil, fmt.Errorf("%s: unknown flag %q", cmd, flags[0])
-	}
-	return positional, nil
-}
-
-// handleArgsJSON is handleArgs plus a --json flag — the shared arg shape of the
-// simple task-state mutators (done/skip/start/stop), so they can emit the
-// updated task(s) as JSON exactly like `nt update --json` does.
+// handleArgsJSON returns the positional task handles in args plus a --json
+// flag, rejecting any stray flag-looking token (e.g. `nt done --bogus id`)
+// with a clear error rather than silently treating it as a handle. It's the
+// shared arg shape of the simple task-state mutators (done/skip/start/stop),
+// so they can emit the updated task(s) as JSON exactly like `nt update --json`
+// does. cmd is the subcommand name for the error message.
 func handleArgsJSON(cmd string, args []string) (handles []string, asJSON bool, err error) {
 	flags, positional := splitArgs(args, map[string]bool{"json": true})
 	for _, f := range flags {
@@ -380,20 +374,26 @@ func printHelp() {
 
 const helpText = `nt — tasks & notes as plain text · durable memory for AI agents
 
+  AGENT LOOP   orient:  nt index && nt ready        recall:  nt recall "what I'm about to do"
+               capture: nt add --body / nt note --kind …    curate:  nt doctor → nt gc
+
 USAGE
   nt                          open the interactive TUI
   nt add "title" [flags]      add a task
   nt note "title" [flags]     capture a note (--folder work files it in notes/work/)
   nt notes [--folder|--tag]   list notes (one row each)  (--json)
-  nt show <note>              print a note in the terminal (alias: cat)
+  nt show <id|note>           print a note, or a task with its linked detail (alias: cat)
   nt journal [--date D]       open a daily note in $EDITOR (D: today|fri|+1d|YYYY-MM-DD)  (alias: j)
   nt list [flags]             list tasks            (alias: ls)
   nt view <name>              run a saved view; save/list/rm to manage them
-  nt ready [flags]            open, unblocked tasks by urgency — start here
+  nt ready [flags]            open, unblocked tasks by urgency — the what-next feed
   nt agenda [--days N]        the next N days, grouped Overdue/Today/Upcoming
                               (--days 0 = just today's plan)
   nt review [--stale N]       weekly digest: overdue, stale, undated, stuck projects
   nt index [--tag|--folder]   compact KB catalog (ids+titles+descriptions) + active tasks — start here
+                              (large stores tier: pinned rules/memory/ref + last-14d notes
+                               + per-folder counts of the rest; --all = every stub;
+                               --folder . = root notes)
   nt log [--since|--days N]    completed tasks, newest first (the Logbook)
   nt done <id|task:N>         mark a task done       (alias: do)
   nt skip <id|task:N>         move a recurring task to its next occurrence
@@ -404,6 +404,9 @@ USAGE
   nt recall "what I'm doing"  relevant notes for a task, lessons flagged ⚑ — paraphrase-aware
                               (--lessons-only filters to recorded mistakes; bare
                                'nt recall --lessons-only' lists every lesson)
+                              --project NAME prefers that project's notes — matched
+                              by tag, folder, or project: frontmatter
+                              (default: NT_WORKSTREAM; 'none' disables)
   nt export [--tag|--folder]  compile notes into one md/json doc (rules/instructions, SKILL.md)
   nt tags                     list the tag vocabulary with counts
   nt tag <id|note…> +x -y     retag tasks or notes (no $EDITOR; preserves frontmatter)
@@ -414,16 +417,20 @@ USAGE
   nt relink <note> <old> <new>   fix a wrong outbound [[link]] in a note's body
   nt rm <id|note> [flags]     delete tasks (undoable) or notes (to .trash/)
                               notes: --unlink strips inbound links, --force keeps them;
-                              -y/--yes skips the confirm prompt
+                              -y/--yes confirms (required for tasks when non-interactive)
   nt archive                  move done tasks to done.txt
   nt archive <note> [--undo]  retire a note from the active views (reversible; still on disk)
-  nt undo / redo              revert / re-apply the last change (workstream-safe:
-                              refuses another agent's change unless --force)
+  nt undo / redo              revert / re-apply the last TASK change (notes aren't
+                              journaled — re-edit or supersede a note instead;
+                              workstream-safe: refuses another agent's change
+                              unless --force)
   nt path                     print the store directory
   nt version                  print the nt version (alias: -v, --version)
   nt git-init                 set up the store for git (union-merge + .gitignore)
   nt doctor [--check]         health check: reconcile tasks.txt (dedup ids) + lint notes
                               (dangling [[links]], missing descriptions, orphans)
+  nt gc [--older-than 30d]    reclaim dead weight: superseded stubs + stranded task-detail
+                              notes → .trash/ (dry-run by default; --yes applies)
   nt hook                     sync a Claude Code TodoWrite event (PostToolUse hook)
   nt mcp                      run the MCP server (stdio) — typed tools for agents
   nt mcp install [--client]   register nt's MCP server with an AI client
@@ -442,6 +449,7 @@ ADD/UPDATE FLAGS
   --pri high|med|low   --due today|tomorrow|fri|+3d|YYYY-MM-DD
   --tag NAME (repeat; --tags a,b also works)  --project NAME   --source NAME
   --body TEXT / --body-file PATH|-  task detail, saved as a linked note ('-' = stdin)
+                                    (update --body appends to an existing detail note)
   --parent <id>        --blocks <id>  (this task gates <id>)
   --blocked-by <id>    the reverse: <id> must finish before this task ('ready' hides it)
   --note <slug>        link a note to the task (add or update)
@@ -455,8 +463,11 @@ NOTE FLAGS (nt note)
   --body TEXT / --body-file PATH|-   note body ('-' = stdin; survives shell quoting)
   --tag NAME (repeat; --tags a,b)    --source NAME   --json (print as JSON)
   --description TEXT  one-line summary shown in 'nt index' (progressive disclosure)
+  --project NAME      stored as project: frontmatter ('nt recall --project' matches it)
   --lesson            record a durable lesson/gotcha: tags it 'lesson', files it in
                       lessons/, and 'nt recall' surfaces it before the mistake recurs
+  --kind lesson|decision|ref|rule|memory   note class: canonical tag + folder — use it
+                      instead of inventing a folder (--lesson = --kind lesson)
   --folder DIR        file under notes/DIR/ (created as needed; or path-style:
                       nt note "decisions/Chose flock over SQLite")
   --field key=value   set extra frontmatter at capture (repeatable, preserved)
@@ -467,6 +478,7 @@ EDIT (non-interactive — agents)
   nt edit <note> --append TEXT       append to a note body without $EDITOR
   nt edit <note> --append-file P|-   append from a file or stdin
   nt edit <note> --body-file P|-     replace the body from a file or stdin
+  nt edit <note> --desc TEXT         set the note's one-line description (no $EDITOR)
 
 LIST FLAGS
   --status open|doing|blocked|done   --tag NAME   --project NAME
@@ -477,6 +489,10 @@ Recurring: add --recur weekly|3d|… ; completing spawns the next occurrence.
 Dependencies: --blocked-by <id> on the waiting task (or --blocks <id> on the gating
 one); blocked tasks hide from ready/list unless --show-blocked; clear with
 --blocks none. A cycle disables blocking for its members ('nt doctor' finds them).
+
+Multi-agent: set NT_WORKSTREAM to scope tasks per agent (notes stay shared); undo/redo
+refuse another workstream's change unless --force; "*" reads all workstreams.
+Agents: pass --source claude on what you create.
 
 The store lives at $NT_DIR (default ~/.local/share/nt): tasks.txt + notes/*.md.
 The TUI follows your terminal's light/dark background; force it with NT_THEME=light|dark.

@@ -28,7 +28,6 @@ func enum(vals ...string) map[string]any {
 func at() map[string]any {
 	return map[string]any{"type": "array", "items": map[string]any{"type": "string"}}
 }
-func it() map[string]any { return map[string]any{"type": "integer"} }
 
 // wsArg is the shared `workstream` property. It isolates parallel agents sharing
 // one store: tasks scope to a workstream, notes stay shared. Usually omitted —
@@ -63,11 +62,13 @@ var toolDefs = []toolDef{
 		InputSchema: obj(map[string]any{
 			"text":            sp("short actionable title, verb-first, ~60 chars"),
 			"body":            sp("detail/reasoning/steps — saved as a linked note (markdown)"),
-			"priority":        enum("high", "med", "low"),
+			"priority":        enum("high", "med", "medium", "low"),
 			"due":             sp("today|tomorrow|fri|+3d|YYYY-MM-DD"),
 			"project":         st(),
 			"tags":            at(),
 			"discovered_from": sp("id of the originating task"),
+			"blocked_by":      sp("id of a task that must complete first (the reverse of blocks)"),
+			"blocks":          sp("id of a task THIS new task blocks"),
 			"source":          st(),
 			"workstream":      sp(`workstream to stamp on the task; omit to use NT_WORKSTREAM; "*" or "" stores it unscoped (shared backlog)`),
 		}, "text"),
@@ -78,25 +79,41 @@ var toolDefs = []toolDef{
 		InputSchema: obj(map[string]any{
 			"id":         st(),
 			"status":     enum("open", "doing", "blocked", "done"),
-			"priority":   enum("high", "med", "low"),
+			"priority":   enum("high", "med", "medium", "low"),
 			"due":        sp("today|tomorrow|fri|+3d|YYYY-MM-DD"),
+			"blocked_by": sp("id of a task that must complete first (the reverse of blocks)"),
+			"blocks":     sp(`id of a task this task blocks; "none" clears the edge`),
 			"workstream": sp(`reassign to a workstream; "*" releases to the shared backlog`),
 		}, "id"),
 	},
 	{
 		Name:        "nt_note",
-		Description: "Save a note (finding/decision/dead-end) — capture the WHY. Set description to a one-line summary; it's what nt_index shows. The note is always created; if near-duplicates exist the response includes a `similar` list — check it, and consolidate with nt_archive superseded_by=<id> if you truly doubled one. Use supersede=<id> to replace an existing note (the old one retires from views).",
+		Description: "Save a note (finding/decision/dead-end) — capture the WHY. Set description to a one-line summary; it's what nt_index shows. The note is always created; if near-duplicates exist the response includes a `similar` list — check it, and consolidate with nt_archive superseded_by=<id> if you truly doubled one. Use supersede=<id> to replace an existing note (the old one retires from views). Unlike the CLI (which refuses near-duplicates), this tool never refuses — consolidate afterwards via the similar list.",
 		InputSchema: obj(map[string]any{
 			"title":       st(),
 			"body":        sp("markdown"),
 			"description": sp("one-line summary shown in nt_index (progressive disclosure)"),
 			"tags":        at(),
-			"kind":        map[string]any{"type": "string", "enum": []string{"lesson", "decision", "ref", "rule"}, "description": "note class — tags it and files it in the canonical folder (lessons/, decisions/, ref/, rules/); prefer this over inventing a folder"},
+			"kind":        map[string]any{"type": "string", "enum": []string{"lesson", "decision", "ref", "rule", "memory"}, "description": "note class lesson|decision|ref|rule|memory — tags it and files it in the canonical folder (lessons/, decisions/, ref/, rules/, memory/); memory files under memory/ with tag memory-core — the always-loaded core-memory layer; prefer this over inventing a folder"},
 			"folder":      sp("subfolder, e.g. ref or decisions/auth (kind picks a canonical one; explicit folder wins)"),
+			"project":     sp("project this note belongs to — stored as project: frontmatter so nt_recall's project boost finds it"),
 			"source":      st(),
 			"supersede":   sp("id of an existing note this replaces; the old note retires from active views"),
 			"force":       map[string]any{"type": "boolean", "description": "create even if a near-duplicate exists"},
 		}, "title"),
+	},
+	{
+		Name:        "nt_note_edit",
+		Description: "Fix an EXISTING note in place — no new id, no retired-note churn (unlike nt_note supersede:, which replaces it with a brand new note). Exactly one of append / body / old_string+new_string per call: append adds to the end; body replaces the whole thing (build the full text yourself and send it — there's no partial form of body); old_string+new_string patches ONE exact match (must appear exactly once in the current body, or the call is refused — include more surrounding text to disambiguate). description replaces the one-line summary and can be combined with any of the three.",
+		InputSchema: obj(map[string]any{
+			"handle":      sp("note id, slug, or title"),
+			"id":          sp("alias for handle — pass a stub's id directly"),
+			"append":      sp("markdown to add to the end of the body"),
+			"body":        sp("replace the whole body with this literal text"),
+			"old_string":  sp("exact existing text in the body to replace — must match exactly once"),
+			"new_string":  sp("replacement for old_string (empty deletes the matched text); required together with old_string"),
+			"description": sp("replace the note's one-line description (frontmatter)"),
+		}),
 	},
 	{
 		Name:        "nt_relink",
@@ -109,17 +126,18 @@ var toolDefs = []toolDef{
 	},
 	{
 		Name:        "nt_index",
-		Description: "Resuming work: the KB catalog. One stub per note (id, title, one-line description, tags, folder) — NO bodies — plus active (open+doing) tasks and a few recent completions (recentlyDone). Load this first, then nt_get the few notes you need or nt_search by topic. Cheap and bounded; replaces dumping every note. Scope with tag/folder.",
+		Description: "Resuming work: the KB catalog. One stub per note (id, title, one-line description, tags, folder) — NO bodies — plus active (open+doing) tasks and a few recent completions (recentlyDone); blocked tasks are listed separately. Load this first, then nt_get the few notes you need or nt_search by topic. Cheap and bounded: large stores return a TIERED catalog (tiered=true) — pinned standing notes + stubs changed in the last 14d, with the older remainder as olderByFolder counts; expand a folder with the folder filter, or pass all:true for every stub. Scope with tag/folder.",
 		InputSchema: obj(map[string]any{
 			"tag":           sp("only notes/tasks with this tag"),
-			"folder":        sp("only notes under this folder, e.g. ref"),
+			"folder":        sp(`only notes under this folder, e.g. ref ("." = root notes)`),
+			"all":           map[string]any{"type": "boolean", "description": "full catalog: every note stub, no tiering (large stores tier by default)"},
 			"limit":         map[string]any{"type": "integer", "description": "cap the note catalog to N (truncated=true when more exist); scope with tag/folder for big stores"},
-			"updated_since": sp("only notes changed on/after this date (today|tomorrow|fri|+3d|YYYY-MM-DD) — 'what changed since last session'"),
+			"updated_since": sp("only notes changed on/after this date (14d = last 14 days | today | YYYY-MM-DD) — 'what changed since last session'"),
 			"format": map[string]any{
 				"type": "string", "enum": []string{"json", "compact"},
 				"description": "'compact' for terse one-line-per-item text (cheaper — prefer for the session-start load); default is JSON",
 			},
-			"workstream":    wsArg,
+			"workstream": wsArg,
 		}),
 	},
 	{
@@ -127,12 +145,13 @@ var toolDefs = []toolDef{
 		Description: "Fetch one note's full body by handle (id, slug, or title) — the on-demand half of the index. With section, returns only the markdown block under that heading.",
 		InputSchema: obj(map[string]any{
 			"handle":  sp("note id, slug, or title (from nt_index / nt_search)"),
+			"id":      sp("alias for handle — pass a stub's id directly"),
 			"section": sp("optional: a heading within the note to return just that block"),
-		}, "handle"),
+		}),
 	},
 	{
 		Name:        "nt_search",
-		Description: "Find notes and tasks by EXACT text and/or tag — reach for it when you know the words that appear in the note (use nt_recall for paraphrased/conceptual matching, nt_index for the whole catalog). Returns ranked STUBS (id, title, description, snippet) not bodies; nt_get the id you want. Title matches rank first; truncated=true when more exist. At least one of query/tag is required; full=true to inline bodies.",
+		Description: "Find notes and tasks by EXACT text and/or tag — reach for it when you know the words that appear in the note (use nt_recall for paraphrased/conceptual matching, nt_index for the whole catalog). Store-wide: results are never workstream-scoped, so it finds every agent's tasks. Returns ranked STUBS (id, title, description, snippet) not bodies; nt_get the id you want. Title matches rank first; truncated=true when more exist. At least one of query/tag is required; full=true to inline bodies.",
 		InputSchema: obj(map[string]any{
 			"query": sp("text to match in titles + bodies (optional if tag is set)"),
 			"tag":   sp("only items with this tag"),
@@ -143,12 +162,13 @@ var toolDefs = []toolDef{
 	},
 	{
 		Name:        "nt_recall",
-		Description: "Learn from past sessions: given a free-text description of what you're ABOUT to do, return the most relevant notes — lessons/gotchas first — so you don't repeat a recorded mistake. Unlike nt_search (exact substring), recall stems and expands synonyms, so a paraphrase still finds the note. Call this at the start of a task (e.g. context:'adding a cache layer to the API'). Cheap: returns compact stubs, no bodies. Results with lesson:true are recorded mistakes — read them (nt_get) before proceeding.",
+		Description: "Learn from past sessions: given a free-text description of what you're ABOUT to do, return the most relevant notes — lessons/gotchas first — so you don't repeat a recorded mistake. Unlike nt_search (exact substring), recall stems and expands synonyms, so a paraphrase still finds the note. Call this at the start of a task (e.g. context:'adding a cache layer to the API'); omit context with lessons_only:true to list every recorded lesson (newest first). Cheap: returns compact stubs, no bodies. Results with lesson:true are recorded mistakes — read them (nt_get) before proceeding.",
 		InputSchema: obj(map[string]any{
-			"context":      sp("what you're about to work on, in plain words — the more specific, the better the recall"),
+			"context":      sp("what you're about to work on, in plain words — the more specific, the better the recall (optional with lessons_only)"),
+			"project":      sp(`prefer this project's notes in ranking (soft boost, never a filter) — matches note tags, folder segments, and project: frontmatter; omit to use the workstream identity, "none" disables`),
 			"limit":        map[string]any{"type": "integer", "description": "max results (default 8)"},
-			"lessons_only": map[string]any{"type": "boolean", "description": "restrict to notes tagged `lesson` (recorded mistakes only)"},
-		}, "context"),
+			"lessons_only": map[string]any{"type": "boolean", "description": "restrict to notes tagged `lesson` (recorded mistakes only); with no context, lists every lesson newest-first"},
+		}),
 	},
 	{
 		Name:        "nt_links",

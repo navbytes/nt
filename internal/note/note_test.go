@@ -52,6 +52,30 @@ func TestRoundTripNative(t *testing.T) {
 	}
 }
 
+// TestProjectAccessor: the project: frontmatter (an unmodeled key kept in
+// Extra) round-trips through Save/Load and is readable via Project().
+func TestProjectAccessor(t *testing.T) {
+	s := testStore(t)
+	n, err := Create(s, "Gamma cache design", "body", nil, "cli", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n.Project() != "" {
+		t.Fatalf("unset project should read empty, got %q", n.Project())
+	}
+	n.Extra = append(n.Extra, "project: gamma")
+	if err := n.Save(); err != nil {
+		t.Fatal(err)
+	}
+	got, err := Load(n.Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Project() != "gamma" {
+		t.Fatalf("Project() = %q, want gamma", got.Project())
+	}
+}
+
 // TestCreateInFolder: Create writes into a subfolder, the file lands there, and
 // List discovers it with the expected slash-separated Rel.
 func TestCreateInFolder(t *testing.T) {

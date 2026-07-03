@@ -64,18 +64,25 @@ teaches Claude to use `nt` directly. With it installed, you can say things like:
 - "what should I work on?" → Claude runs `nt ready` (open, unblocked, by urgency)
 - "save that as a task in nt"
 - "note this finding for later"
-- "what did we capture last session?" → Claude runs `nt index --source claude`
+- "what did we capture last session?" → Claude runs `nt index --json`
 - or just type `/nt`
 
 Claude will run the right `nt` commands (`ready`, `add`, `note`, `index`,
-`show`, `done`, `links`, `search`), always passing `--source claude`.
+`recall`, `show`, `done`, `links`, `search`), always passing `--source claude`.
 
 **Start a session with `nt ready`.** It returns only actionable work — open
 tasks that aren't done and aren't waiting on a dependency — newest-urgency
 first. That's the agent's "pick up here" feed; `nt index` is the broader
-"everything we captured" read — a compact catalog of note stubs (title,
-description, tags) plus the active tasks, from which Claude fetches a specific
-body with `nt show <handle>` on demand.
+"everything we captured" read — the tiered stub catalog: pinned standing notes
+(`rules/`, `memory/`, `ref/`, and anything tagged `pin`) always listed, the
+last 14 days of recent stubs, and per-folder counts for the rest (`--all` for
+the flat catalog; scoped `--tag`/`--folder` views are complete) — plus the
+active tasks, from which Claude fetches a specific body with
+`nt show <handle>` on demand.
+
+**Before each task, run `nt recall "<plain words>"`** — paraphrase-aware
+retrieval with lessons flagged ⚑ first; it returns nothing when nothing is
+relevant, so it's cheap to run every time.
 
 Install it by keeping `.claude/skills/nt/` in your project, or copy it to
 `~/.claude/skills/nt/` to make it available everywhere.
@@ -118,11 +125,16 @@ nt mcp install --print                  # show what it would do, change nothing
 For any other client (Cursor, a project `.mcp.json`, …), `nt mcp install --print`
 emits the snippet to paste.
 
-Tools exposed (**15**) — **capture:** `nt_add`, `nt_note` (with `folder` and
-`description`; add tag `lesson` to record a mistake), `nt_update` (status:"done" completes; the response echoes what `changed`), `nt_rm` (remove a
+Tools exposed (**16**) — **capture:** `nt_add`, `nt_note` (with `folder`,
+`description`, and `kind: lesson|decision|ref|rule|memory` — canonical tag +
+folder; always give a `description`, it's what `nt_index` shows), `nt_note_edit`
+(fix an EXISTING note in place — `append`/`body`/`old_string`+`new_string`/
+`description`; no new id, unlike `nt_note supersede:`), `nt_update` (status:"done" completes; the response echoes what `changed`), `nt_rm` (remove a
 mistaken task — journaled, `nt undo` restores), `nt_tag`, `nt_mv`, `nt_archive` (retire
 stale notes — set `superseded_by` to reconcile duplicates), `nt_relink` (fix a wrong outbound link); **retrieve:** `nt_index` (start here — a compact
-catalog of note stubs plus the active tasks and recent completions, no bodies), `nt_get` (fetch one
+catalog of note stubs plus the active tasks and recent completions — tiered on
+large stores: pinned standing notes + recent stubs + folder counts; blocked
+tasks listed separately; no bodies), `nt_get` (fetch one
 note's full body by id/slug/title, optional `section`),
 `nt_status` (one-call project/area state: in-progress + blocked + open-by-urgency
 + recently done), `nt_view` (recall the user's saved
@@ -133,7 +145,10 @@ before you repeat them), `nt_links` (forward links + backlinks). They go through
 default `source` to `claude`, and require **stable task ids** (positional
 `task:N` is refused — the index isn't safe for an agent). Retrieval is
 index-first progressive disclosure: load the small stub catalog, then fetch
-bodies on demand.
+bodies on demand. `nt_add`/`nt_note` are dedup-advisory: they always create and
+return a `similar` list when near-duplicates exist so the agent can consolidate
+instead of forking memory (the CLI `nt note` is stricter — it refuses near-dups
+outright with repair commands).
 
 ### Parallel agents — workstreams
 
@@ -161,14 +176,20 @@ in-flight **tasks** isolated while **notes** (the knowledge base) stay shared:
 - A read can pass `workstream: "*"` to see every workstream (each task then
   carries its `workstream` so you can tell whose is whose), or an explicit id to
   target another. **Unset → no isolation**, identical to single-agent behavior.
+  The CLI scopes the same way when `NT_WORKSTREAM` is set
+  (`list`/`ready`/`log`/`review`/`index`), and `nt undo`/`redo` refuse another
+  workstream's change unless `--force`.
 
 `nt_add` titles are meant to be **short and scannable** — one actionable line,
 verb-first, ~10 words / 60 chars. Put detail in the task's **body**: `nt_add`
-takes a `body` arg, saved as the task's linked note so the title stays clean and
-the detail is one click away (the web shows a 📄 details chip; following the task
-opens it). Only genuine paragraph-length `text` with no `body` (≥240 chars) is
-auto-split the same way; ordinary verbose one-liners are left intact and just
-clamp to a few lines in the UI (full text on hover / on edit).
+takes a `body` arg, saved as the task's linked **detail note** — filed under
+`notes/__tasks__/`, and **appended to on re-use** (a second `body` for the same
+task extends the same note rather than creating another) — so the title stays
+clean and the detail is one click away (the web shows a 📄 details chip;
+following the task opens it, and `nt show <task-id>` renders the task and its
+detail note together). Only genuine paragraph-length `text` with no `body`
+(≥240 chars) is auto-split the same way; ordinary verbose one-liners are left
+intact and just clamp to a few lines in the UI (full text on hover / on edit).
 
 These machine-created task notes are filed under **`notes/__tasks__/`** (the
 reserved-looking name avoids colliding with a plain `tasks` folder you might keep
@@ -178,6 +199,14 @@ grouped and don't clutter a human's hand-curated folders.
 Hook, skill, and MCP compose: the hook mirrors the todo list automatically, the
 skill/MCP capture notes and read back context. Use the MCP server if your client
 supports it; the CLI + skill work everywhere.
+
+## Standing rules in CLAUDE.md
+
+Notes in `rules/` (tag `rule`) and `memory/` (tag `memory-core`, written with
+`--kind memory`) are the **always-loaded layers**: they're pinned atop every
+`nt index` so an agent sees them before anything else, and they compile into
+your `CLAUDE.md` / `AGENTS.md` with `nt export --tag rule`. Keep them small —
+they're the part of the store that's paid for on every request.
 
 ## Hook vs. skill — when each fires
 
@@ -200,8 +229,10 @@ read-back, and ad-hoc edits.
 
 # session 2 — pick up where it left off
 nt ready --json                    # what's actionable right now (open, unblocked)
-nt index --source claude --json    # the fuller context: stub catalog of everything captured
-nt show token-refresh-race         # fetch a specific note's body on demand
+nt index --json                    # the tiered catalog: pinned standing notes + recent stubs + folder counts
+nt recall "token refresh race"     # lessons flagged ⚑ first, paraphrase-aware — before touching the code
+nt show <task-id>                  # the task + its detail note, rendered together
+nt note "Chose flock over SQLite" --kind decision --description "one writer at a time, no CGo"   # capture as you go
 # → Claude reads its prior work back and continues
 ```
 

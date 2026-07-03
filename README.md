@@ -60,7 +60,7 @@ That's it — you're up. `nt help` lists every command; [more install options be
 `nt` is the place that memory lives. Because the store is plain text, an agent doesn't need a special database or a running service to remember — it just reads and writes files. Three ways to wire it up:
 
 - **PostToolUse hook** — `nt hook` mirrors Claude Code's `TodoWrite` list into your store automatically (idempotent, tagged `src:claude`). Wire it once in `~/.claude/settings.json`.
-- **MCP server** — `nt mcp` exposes typed tools (`nt_index`, `nt_add`, `nt_search`, `nt_recall`, `nt_get`, `nt_note`, `nt_status`, …) over stdio. Register it with one command:
+- **MCP server** — `nt mcp` exposes **16 typed tools** (`nt_index`, `nt_recall`, `nt_add`, `nt_note`, `nt_note_edit`, `nt_get`, `nt_status`, `nt_search`, `nt_update`, …) with strict unknown-parameter rejection, over stdio. Register it with one command:
   ```bash
   nt mcp install                    # add nt to Claude Code / Claude Desktop (absolute path, idempotent)
   nt mcp install --client opencode  # …or OpenCode (~/.config/opencode/opencode.json)
@@ -68,16 +68,18 @@ That's it — you're up. `nt help` lists every command; [more install options be
                                     #    skill + /learn + /recall + AGENTS.md + seeded rules/memory
   ```
 - **The `/nt` skill + read-back loop** — teach the agent to capture as it works and load prior context (`nt index`, then fetch on demand) when it resumes.
-- **Learn from past mistakes** — record a footgun or dead-end as a **lesson** (`nt note … --lesson`), then `nt recall "<what you're about to do>"` surfaces the relevant lessons *first* — even when your wording differs from the note's — so the next session doesn't repeat them. See [durable memory](#-durable-memory-for-your-ai-agents) below.
+- **Learn from past mistakes** — record a footgun or dead-end as a **lesson** (`nt note … --lesson`), then `nt recall "<what you're about to do>"` surfaces relevant notes with lessons flagged ⚑ first — paraphrase-aware, returns nothing when nothing is relevant (a precision floor, so it's safe to run before every task), and softly boosts same-project notes (`NT_WORKSTREAM`/`--project`; `none` disables). See [docs/claude-integration.md](docs/claude-integration.md).
+- **Parallel agents, one store** — set `NT_WORKSTREAM` per agent to isolate in-flight tasks (`list`/`ready`/`log`/`review`/`index` scope to it; `"*"` widens) while notes stay shared; `undo`/`redo` refuse another workstream's change unless `--force`.
+- **Curate, don't hoard** — `nt doctor` flags near-duplicates, orphans, and an oversized pinned tier; `nt supersede`/`nt archive` retire stale notes; `nt gc` sweeps superseded stubs and stranded task-detail notes to `.trash/` (dry-run by default).
 
 Beyond Claude Code, any MCP-speaking agent can drive the same store — including **OpenCode**, whose rules / knowledge-base / memory layers map cleanly onto nt. Full mapping & phased plan → **[docs/opencode-integration.md](docs/opencode-integration.md)**.
 
 ```bash
 # During a session (the hook does this for you, or call it directly):
 nt add "fix token refresh race" --source claude --tag auth
-nt note "single-flight the refresh; two parallel calls double-spend" --lesson  # record a gotcha
+nt note "Single-flight the token refresh" --lesson --description "two parallel refresh calls double-spend the refresh token" --source claude  # record a gotcha
 # A week and three sessions later — read it straight back:
-nt index --json          # the catalog; then nt show <id> / nt search for the details
+nt index --json          # tiered catalog: pinned rules/memory/ref + recent stubs + folder counts (--all = every stub); then nt show <id>
 nt recall "adding concurrent token refresh"   # surfaces the lesson before you hit it again
 ```
 
@@ -142,20 +144,26 @@ nt log --since 2026-01-01 --json                         # the Logbook, machine-
 
 ```bash
 nt add "title" --pri high --due "fri 5pm" --est 2h --tag t --project p   # capture a task (a = alias)
+nt add "title" --blocked-by <id>   # dependency edge (--blocks none clears)
 nt note "title" --folder work --field status=stable         # capture a note (folders + frontmatter)
-nt note "gotcha to remember" --lesson       # record a mistake/dead-end (tag lesson, folder lessons/)
+nt note "title" --kind lesson|decision|ref|rule|memory --description "…"   # taxonomy + the one-line summary index shows
 nt journal                  # open today's daily note (j = alias)
 nt                          # TUI            nt list [--status|--tag|--sort urgency|--tree|--all|--json]
 nt view <name>              # saved views    nt view save <name> [list flags]   nt view list / rm <name>
 nt ready / today / agenda   # what's next    nt done <id|task:N>     nt update <id> --status doing
 nt review [--stale N]       # weekly triage  nt start <id> … nt stop <id>   (time tracking → spent:)
-nt search <q> [--tag…]      # find           nt recall "<context>"   # lessons-first, paraphrase-aware
+nt search <q> [--tag…]      # find
+nt recall "<context>" [--lessons-only]   # lessons flagged ⚑ first, paraphrase-aware (bare --lessons-only = the whole lesson book)
 nt tags                     # tag vocab      nt tag <note…> +ref -inbox
-nt links <id> [--orphans]   # graph          nt index [--tag|--folder|--json]   nt log [--since|--days N]
+nt links <id> [--orphans]   # graph          nt log [--since|--days N]
+nt index [--all|--tag|--folder|--json]   # tiered on large stores; --all = flat, scoped views are complete
 nt skip <id>                # recurring: next occurrence      nt mv <note> <dest>   (rewrites [[links]])
 nt edit <id|task:N>         # safe $EDITOR round-trip        nt rm <note> [--force]   (→ .trash/)
 nt web [--port N]           # browser app, editing enabled (--detach to run in the background; --status / --stop)
-nt undo / "redo"   nt mcp [install]   nt hook
+nt supersede <old> --by <new>   nt gc [--yes]   # curation: retire, then reclaim (dry-run default)
+nt export --tag rule            # compile the standing rules layer into CLAUDE.md/AGENTS.md
+nt undo / redo              # workstream-safe: refuses another agent's change unless --force
+nt mcp [install]   nt hook
 nt git-init && nt doctor    # version-control the store + reconcile merges (+ dependency checks)
 nt path                     # print $NT_DIR  nt archive   nt --version   nt help
 # Optional defaults live in $NT_DIR/config.toml ([defaults]/[web]/[tui]).
@@ -230,7 +238,7 @@ go install github.com/navbytes/nt@latest
 git clone https://github.com/navbytes/nt && cd nt && make install
 ```
 
-Single static binary for Linux & macOS (amd64/arm64). Releases are automated by GoReleaser on a `vX.Y.Z` tag ([RELEASING.md](RELEASING.md)). Homebrew is planned (`brew install navbytes/tap/nt`).
+Single static binary for Linux, macOS & Windows (amd64/arm64). Releases are automated by GoReleaser on a `vX.Y.Z` tag ([RELEASING.md](RELEASING.md)). Homebrew is planned (`brew install navbytes/tap/nt`).
 
 **Desktop app** — each release also attaches native **`nt-desktop`** bundles (macOS / Linux / Windows): the same web UI in a native window over your local store, editing included, with **no port opened at all** (the webview talks to the Go server in-process). See [desktop/README.md](desktop/README.md).
 

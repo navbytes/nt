@@ -29,9 +29,10 @@ const LessonTag = "lesson"
 
 // Result is one ranked note. Lesson notes sort first at equal relevance.
 type Result struct {
-	Note   *note.Note
-	Score  int
-	Lesson bool
+	Note         *note.Note
+	Score        int
+	Lesson       bool
+	ProjectMatch bool // note belongs to the caller's project (soft ranking boost applied)
 }
 
 // synGroups cluster words that mean the same thing to a coding agent. Matching any
@@ -155,10 +156,63 @@ func conceptID(w string) string {
 // so a relevant gotcha outranks a merely-adjacent reference note. Notes with no
 // overlap are dropped. limit<=0 means no cap.
 func Rank(notes []*note.Note, context string, limit int) []Result {
+	return RankProject(notes, context, limit, "")
+}
+
+// projectBoost tilts ties toward the caller's own project without burying
+// cross-project knowledge: multi-project field use showed recall interleaving
+// other projects' notes above the caller's equally-relevant ones. Kept well
+// below the lesson boost (1.6) so a genuinely more-relevant foreign note still
+// wins — this is a preference, not a filter.
+const projectBoost = 1.25
+
+// projectTokens reduces a project hint (an NT_WORKSTREAM like "feat-gamma-cache",
+// a branch, or a plain project name) to its lowercase alphanumeric tokens, the
+// form note tags fold to for matching.
+func projectTokens(project string) map[string]bool {
+	out := map[string]bool{}
+	for _, w := range strings.FieldsFunc(strings.ToLower(project), notWord) {
+		if len(w) >= 2 && !stop[w] {
+			out[w] = true
+		}
+	}
+	return out
+}
+
+// matchesProject reports whether a note self-identifies as belonging to the
+// project hint: any tag, folder path segment, or `project:` frontmatter token
+// equals one of its tokens.
+func matchesProject(n *note.Note, proj map[string]bool) bool {
+	for _, t := range n.Tags {
+		if proj[strings.ToLower(t)] {
+			return true
+		}
+	}
+	for _, seg := range strings.Split(strings.ToLower(n.Rel), "/") {
+		if proj[seg] {
+			return true
+		}
+	}
+	if p := n.Project(); p != "" {
+		for tok := range projectTokens(p) {
+			if proj[tok] {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// RankProject is Rank with a soft same-project preference: notes tagged (or
+// foldered) as belonging to `project` — typically the caller's NT_WORKSTREAM —
+// rank above equally-relevant notes from other projects. Empty project means
+// no preference (identical to Rank).
+func RankProject(notes []*note.Note, context string, limit int, project string) []Result {
 	q := newBag(context)
 	if len(q.words) == 0 {
 		return nil
 	}
+	proj := projectTokens(project)
 	// Pass 1: build each note's bags and tally document frequency per concept, so a
 	// common word ("database", "test") counts less than a rare, discriminating one.
 	type cand struct {
@@ -214,11 +268,20 @@ func Rank(notes []*note.Note, context string, limit int) []Result {
 		exact   int
 		matched int
 	}
+	// Iterate query words in a FIXED order: float accumulation is not
+	// associative, so map-order iteration makes tied notes differ in their last
+	// bits run-to-run — which reshuffled results (and the --limit cutoff!) on
+	// every invocation for homogeneous stores.
+	qwords := make([]string, 0, len(q.words))
+	for w := range q.words {
+		qwords = append(qwords, w)
+	}
+	sort.Strings(qwords)
 	var out []scored
 	for _, cd := range cands {
 		var f float64
 		exact, matched := 0, 0
-		for w := range q.words {
+		for _, w := range qwords {
 			c := conceptID(w)
 			var base float64
 			switch {
@@ -242,7 +305,11 @@ func Rank(notes []*note.Note, context string, limit int) []Result {
 		if cd.lesson {
 			f *= 1.6 // surface recorded mistakes, without swamping relevance
 		}
-		out = append(out, scored{Result{Note: cd.n, Score: int(f*100 + 0.5), Lesson: cd.lesson}, f, exact, matched})
+		isMine := len(proj) > 0 && matchesProject(cd.n, proj)
+		if isMine {
+			f *= projectBoost
+		}
+		out = append(out, scored{Result{Note: cd.n, Score: int(f*100 + 0.5), Lesson: cd.lesson, ProjectMatch: isMine}, f, exact, matched})
 	}
 	// Precision floor (field-study fix): a specific query (≥4 concepts) matching a
 	// note on a SINGLE concept is topical noise, not a memory hit — the lesson
@@ -267,7 +334,10 @@ func Rank(notes []*note.Note, context string, limit int) []Result {
 		if out[i].Lesson != out[j].Lesson {
 			return out[i].Lesson
 		}
-		return out[i].Note.Updated > out[j].Note.Updated
+		if out[i].Note.Updated != out[j].Note.Updated {
+			return out[i].Note.Updated > out[j].Note.Updated
+		}
+		return out[i].Note.Rel < out[j].Note.Rel // total order: identical runs return identical results
 	})
 	// Trim the long tail: results far below the best hit read as "also relevant"
 	// to an agent, which pads every recall to `limit` rows and buries the honest

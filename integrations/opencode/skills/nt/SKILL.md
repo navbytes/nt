@@ -24,7 +24,11 @@ reasoning — long, irrelevant context measurably hurts.)
 
 - `nt_index` — the KB catalog: one stub per note (id · title · one-line
   description · tags · folder) with NO bodies, plus the active task list. Read
-  this first to see what's available.
+  this first to see what's available. Prefer `format:"compact"` (same catalog,
+  far fewer tokens). Large stores return a tiered catalog: pinned standing notes
+  (`rules/`, `memory/`, `ref/`, tag `pin`) + the last 14 days, older notes as
+  per-folder counts — expand with the `folder` filter (`"."` = root) or
+  `all:true`. Blocked tasks are listed separately.
 - `nt_status` — in-progress + blocked + open-by-urgency tasks, recent completions, linked notes.
 
 **Before starting a task — surface past lessons:**
@@ -35,6 +39,9 @@ reasoning — long, irrelevant context measurably hurts.)
   exact substring match). A result with `lesson:true` is a mistake a past session
   hit — `nt_get` it and heed it before writing code. This is the proactive half of
   the learn-from-sessions loop; call it at task start, not just when stuck.
+  Your workstream's project gets a soft ranking boost (`projectMatch:true`;
+  `project:"none"` disables); an empty result means nothing recorded is
+  on-topic — proceed.
 
 **When you need specifics (on demand):**
 
@@ -66,33 +73,45 @@ plugin injects into every session — keep them small and high-signal:
 | **Rule** (stable directive: "always run gofmt", style/process) | `rules/` | `rule` | Must apply every session. Costs tokens every turn — keep terse. |
 | **Core memory** (small evolving fact: a user preference, a key project convention) | `memory/` | `memory-core` | The agent should *always* know it. A handful, not hundreds. |
 | **Knowledge base** (findings, decisions, reference) | `ref/`, `decisions/` | topical, e.g. `auth` | Looked up on demand via `nt_index` → `nt_search`/`nt_get` — **not** injected, so size is free. |
-| **Lesson** (a mistake, footgun, or dead-end not to repeat) | `lessons/` | `lesson` | Surfaced by `nt_recall` at task start — **not** injected, so it costs nothing until relevant. Capture with `nt note … --lesson`. |
+| **Lesson** (a mistake, footgun, or dead-end not to repeat) | `lessons/` | `lesson` | Surfaced by `nt_recall` at task start — **not** injected, so it costs nothing until relevant. Capture with `nt_note kind:"lesson"` (CLI: `nt note … --lesson`). |
 
-So: a durable directive → `nt_note "…" --folder rules --tag rule`; a learned
-preference → `nt_note "…" --folder memory --tag memory-core`; a recorded mistake →
-`nt_note "…" --lesson` (trigger in the description: "when X, do Y — not Z");
-everything else →
+So: a durable directive → `nt_note` with `kind:"rule"`; a recorded mistake →
+`kind:"lesson"` (trigger in the description: "when X, do Y — not Z");
+decisions/reference → `kind:"decision"` / `kind:"ref"`; a learned preference →
+`kind:"memory"` (files under `memory/` with tag `memory-core`); everything else →
 a normally-foldered note found later by `nt_search`.
 
 Use stable nt ids and `[[slug]]` / `[[id]]` links to cross-reference; backlinks
-resolve automatically. Set `source: opencode` on what you create so it's
-distinguishable from the user's hand-entered items (the MCP tools default it).
+resolve automatically. Always pass `source:"opencode"` explicitly on
+`nt_add`/`nt_note` — the MCP tools default `source` to `"claude"` — so what you
+create is distinguishable from the user's hand-entered items.
 
 ## Curate
 
 - `nt_mv` — refile/rename a note (rewrites every `[[link]]`).
 - `nt_tag` — add/remove tags (e.g. promote a `ref` note into `rule` once it's stable).
-- `nt_archive` — retire a stale note from the index/search (reversible).
-- `nt_archive` (handle, superseded_by) — mark a note replaced by another; the old one leaves
-  the index so a resume sees only the current decision.
+- `nt_note_edit` — fix an EXISTING note in place: `append` (add to the end),
+  `body` (replace it wholesale), or `old_string`+`new_string` (patch ONE exact
+  match — refuses if it's not unique, so include more context to disambiguate).
+  No new id, unlike `nt_note supersede:`, which retires the old note. Combine
+  with `description` to also update the one-line summary.
+- `nt_archive` — retire a stale note from index/search/recall (reversible;
+  `undo:true` restores). Pass `superseded_by:<id>` when another note replaces
+  it — the old one leaves the index with a pointer.
 - `nt_relink` (from, to) — repoint every `[[link]]` from one handle to another
   (e.g. after superseding, redirect references to the canonical note).
+- `nt_rm` — permanently remove a mistaken/duplicate task by stable id (journaled;
+  `nt undo` restores). CLI `nt gc` reclaims superseded stubs and stranded task
+  notes >30d → `.trash/` (dry-run by default; `--yes` applies); CLI equivalent
+  of `nt_note_edit` is `nt edit <id> --append/--desc/--body/--body-file/
+  --old-string+--new-string`.
 
-**Dedup guard:** `nt_note` refuses a near-duplicate of an existing note (parallel
-agents often record the same decision). When it errors, prefer to **update** the
-existing note or **supersede** it; pass `force: true` only for a deliberately
-separate note. Watch the `danglingLinks` field in the result — a `[[link]]` that
-didn't resolve is a typo to fix.
+**Dedup signal:** `nt_note` always creates the note; when near-duplicates exist
+the response carries a `similar` list — check it, and if you truly doubled an
+existing note, consolidate (`nt_archive` with `superseded_by=<kept id>`) or
+extend the original instead of leaving both. (The nt CLI, by contrast, refuses
+near-duplicates unless `--force`/`--supersede`.) Watch the `danglingLinks` field
+in the result — a `[[link]]` that didn't resolve is a typo to fix.
 
 ## Conventions
 

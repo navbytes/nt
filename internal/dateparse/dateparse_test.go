@@ -110,3 +110,23 @@ func TestDuration(t *testing.T) {
 		t.Errorf("FmtDuration wrong: %q %q %q", FmtDuration(90), FmtDuration(120), FmtDuration(45))
 	}
 }
+
+func TestPastDate(t *testing.T) {
+	today := time.Now().Format("2006-01-02")
+	if got, ok := PastDate("14d"); !ok || got != time.Now().AddDate(0, 0, -14).Format("2006-01-02") {
+		t.Errorf("PastDate(14d) = (%q,%v), want 14 days ago", got, ok)
+	}
+	if got, ok := PastDate("-3d"); !ok || got != time.Now().AddDate(0, 0, -3).Format("2006-01-02") {
+		t.Errorf("PastDate(-3d) = (%q,%v), want 3 days ago", got, ok)
+	}
+	// Falls back to the shared Date grammar.
+	if got, ok := PastDate("today"); !ok || got != today {
+		t.Errorf("PastDate(today) = (%q,%v)", got, ok)
+	}
+	if got, ok := PastDate("+2d"); !ok || got != time.Now().AddDate(0, 0, 2).Format("2006-01-02") {
+		t.Errorf("PastDate(+2d) = (%q,%v), want future-anchored fallback", got, ok)
+	}
+	if _, ok := PastDate("garbage"); ok {
+		t.Error("PastDate(garbage) should not parse")
+	}
+}

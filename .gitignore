@@ -1,6 +1,7 @@
 # compiled binary
 /nt
 /nt-e2e
+/nt-validate
 
 # goreleaser snapshot/release output (the embedded SPA dist/ lives under internal/)
 /dist/

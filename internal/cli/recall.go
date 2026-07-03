@@ -8,6 +8,7 @@ import (
 
 	"github.com/navbytes/nt/internal/note"
 	"github.com/navbytes/nt/internal/recall"
+	"github.com/navbytes/nt/internal/workstream"
 )
 
 // cmdRecall surfaces the notes — lessons/gotchas first — most relevant to a
@@ -21,7 +22,8 @@ import (
 func cmdRecall(args []string) int {
 	fs := flag.NewFlagSet("recall", flag.ContinueOnError)
 	limit := fs.Int("limit", 8, "max results (0 = all)")
-	lessonsOnly := fs.Bool("lessons-only", false, "only notes tagged `lesson`")
+	lessonsOnly := fs.Bool("lessons-only", false, "only notes tagged 'lesson'")
+	project := fs.String("project", "", "prefer this project's notes in ranking — matches tags, folders, and project: frontmatter (default: NT_WORKSTREAM; 'none' disables)")
 	asJSON := fs.Bool("json", false, "print results as JSON stubs")
 	flags, positional := splitArgs(args, map[string]bool{"json": true, "lessons-only": true})
 	if err := fs.Parse(flags); err != nil {
@@ -66,16 +68,30 @@ func cmdRecall(args []string) int {
 			results = results[:*limit]
 		}
 	} else {
-		results = recall.Rank(notes, context, *limit)
+		// Same-project notes get a soft ranking preference — sourced from an
+		// explicit --project, else the workstream identity. Cross-project results
+		// stay visible below (knowledge cross-pollinates); 'none' disables.
+		proj := strings.TrimSpace(*project)
+		switch proj {
+		case "":
+			proj = workstream.Env()
+		case "none", "-":
+			proj = ""
+		}
+		results = recall.RankProject(notes, context, *limit, proj)
 	}
 
 	if *asJSON {
 		out := make([]map[string]any, 0, len(results))
 		for _, r := range results {
-			out = append(out, map[string]any{
+			row := map[string]any{
 				"id": r.Note.ID, "title": r.Note.Title, "description": r.Note.Description(160),
 				"tags": r.Note.Tags, "folder": noteFolder(r.Note), "lesson": r.Lesson, "score": r.Score,
-			})
+			}
+			if r.ProjectMatch {
+				row["projectMatch"] = true
+			}
+			out = append(out, row)
 		}
 		return printJSON(out)
 	}

@@ -137,7 +137,7 @@ func cmdAdd(args []string) int {
 	fs := flag.NewFlagSet("add", flag.ContinueOnError)
 	var tags stringSlice
 	pri := fs.String("pri", defPri, "priority high|med|low")
-	due := fs.String("due", "", "due date")
+	due := fs.String("due", "", "due date (today|tomorrow|fri|+3d|YYYY-MM-DD)")
 	project := fs.String("project", "", "project")
 	source := fs.String("source", defSource, "origin")
 	parent := fs.String("parent", "", "parent task id")
@@ -166,11 +166,16 @@ func cmdAdd(args []string) int {
 	if bodyErr != nil {
 		return usageErr(fmt.Errorf("add: %w", bodyErr))
 	}
+	// "--blocked-by none" is a natural guess for clearing a dependency, but the
+	// edge lives on the BLOCKER (blocks:). Teach the real clearing move.
+	if *blockedBy == "none" || *blockedBy == "-" {
+		return usageErr(fmt.Errorf("add: --blocked-by takes a task id; to clear a dependency run nt update <blocker-id> --blocks none (nt links <id> shows the blocker)"))
+	}
 	var p byte
 	if *pri != "" {
 		b, ok := parsePriority(*pri)
 		if !ok {
-			return usageErr(fmt.Errorf("add: invalid priority %q", *pri))
+			return usageErr(fmt.Errorf("add: invalid priority %q (use high|med|low)", *pri))
 		}
 		p = b
 	}
@@ -178,7 +183,7 @@ func cmdAdd(args []string) int {
 	if *due != "" {
 		v, ok := parseDate(*due)
 		if !ok {
-			return usageErr(fmt.Errorf("add: invalid due date %q", *due))
+			return usageErr(fmt.Errorf("add: invalid due date %q (use today|tomorrow|fri|+3d|YYYY-MM-DD)", *due))
 		}
 		dueVal = v
 	}
@@ -306,10 +311,17 @@ func taskProjTagOverlap(a, b *task.Task) bool {
 	return false
 }
 
+// dupTitleOverlap is the title-similarity threshold above which two tasks look
+// like duplicates even WITHOUT a shared project/tag: identical bare captures
+// ("fix the flaky login test" twice) carry no overlap signal, so title alone has
+// to be enough. With a shared project/tag the looser 0.5 threshold applies.
+const dupTitleOverlap = 0.75
+
 // warnDuplicateTask prints (to stderr, non-blocking) any existing open task that
 // looks like a duplicate of the one just created — shared project/tag + similar
-// title — and any active decision note on the same topic, so the author can link
-// or dedupe instead of quietly doubling the work.
+// title, or a near-identical title alone — and any active decision note on the
+// same topic, so the author can link or dedupe instead of quietly doubling the
+// work.
 func warnDuplicateTask(e *mutate.Engine, created *task.Task) {
 	if created == nil {
 		return
@@ -323,8 +335,9 @@ func warnDuplicateTask(e *mutate.Engine, created *task.Task) {
 		if t.ID() == created.ID() || t.Done {
 			continue
 		}
-		if taskProjTagOverlap(created, t) && note.TitleOverlap(title, t.Display()) >= 0.5 {
-			fmt.Fprintf(os.Stderr, "note: similar task already exists — %s  %s (link or dedupe instead of doubling work)\n", shortID(t.ID()), t.Display())
+		overlap := note.TitleOverlap(title, t.Display())
+		if (taskProjTagOverlap(created, t) && overlap >= 0.5) || overlap >= dupTitleOverlap {
+			fmt.Fprintf(os.Stderr, "note: similar task already exists — %s  %s (link or dedupe instead of doubling work) (verify with `nt show %s` — the store may have changed since)\n", shortID(t.ID()), t.Display(), shortID(t.ID()))
 		}
 	}
 	tags := created.Tags()
@@ -343,7 +356,7 @@ func warnDuplicateTask(e *mutate.Engine, created *task.Task) {
 			}
 		}
 		if shared && note.TitleOverlap(title, n.Title) >= 0.5 {
-			fmt.Fprintf(os.Stderr, "note: a decision note already covers this — %s  %s (consider [[linking]] the task to it)\n", shortID(n.ID), n.Title)
+			fmt.Fprintf(os.Stderr, "note: a decision note already covers this — %s  %s (consider [[linking]] the task to it) (verify with `nt show %s` — the store may have changed since)\n", shortID(n.ID), n.Title, shortID(n.ID))
 		}
 	}
 }
@@ -549,17 +562,24 @@ func cmdStop(args []string) int {
 }
 
 func cmdNote(args []string) int {
+	// Config [defaults] source sets the flag default (same as cmdAdd); an
+	// explicit --source wins.
+	defSource := "cli"
+	if cfg := loadConfig(); cfg.DefaultSource != "" {
+		defSource = cfg.DefaultSource
+	}
 	fs := flag.NewFlagSet("note", flag.ContinueOnError)
 	var tags stringSlice
-	body := fs.String("body", "", "note body")
+	body := fs.String("body", "", "note body (markdown); use --body-file - for long bodies (immune to shell quoting)")
 	bodyFile := fs.String("body-file", "", "read the body from a file ('-' = stdin); immune to shell quoting")
-	source := fs.String("source", "cli", "origin")
+	source := fs.String("source", defSource, "origin")
 	folder := fs.String("folder", "", "subfolder under notes/ (e.g. work or work/auth)")
-	desc := fs.String("description", "", "one-line summary shown in `nt index`")
+	project := fs.String("project", "", "project this note belongs to (stored as project: frontmatter; 'nt recall --project' matches it)")
+	desc := fs.String("description", "", "one-line summary shown in 'nt index'")
 	supersede := fs.String("supersede", "", "mark this note as replacing an existing one (its handle) — the old note retires from active views")
 	force := fs.Bool("force", false, "create even if a near-duplicate note already exists")
-	lesson := fs.Bool("lesson", false, "record a durable lesson/gotcha: tags it `lesson` and files it under lessons/ so `nt recall` surfaces it before the mistake recurs")
-	kind := fs.String("kind", "", "note class: lesson|decision|ref|rule — tags it and files it in the canonical folder (multi-agent stores converge instead of inventing taxonomies)")
+	lesson := fs.Bool("lesson", false, "record a durable lesson/gotcha: tags it 'lesson' and files it under lessons/ so 'nt recall' surfaces it before the mistake recurs")
+	kind := fs.String("kind", "", "note class: lesson|decision|ref|rule|memory — tags it and files it in the canonical folder (memory files under memory/ with tag memory-core — the always-loaded core-memory layer)")
 	var fields stringSlice
 	asJSON := fs.Bool("json", false, "print the created note as JSON (id, title, path, …)")
 	fs.Var(&tags, "tag", "tag (repeatable)")
@@ -588,29 +608,37 @@ func cmdNote(args []string) int {
 	// --kind generalizes the same convention to the other note classes agents
 	// produce constantly. In the field study three agents invented three task-note
 	// folders and two lesson locations in one day — steering at write time is what
-	// makes a shared store converge.
+	// makes a shared store converge. The canonical tag is always applied; the
+	// canonical FOLDER is only a default (see below), so an explicit --folder or a
+	// path-style title keeps winning.
+	var kindFolder string
 	if *kind != "" {
-		kindFolder := map[string]string{"lesson": "lessons", "decision": "decisions", "ref": "ref", "rule": "rules"}
-		fold, okKind := kindFolder[*kind]
+		meta, okKind := note.Kinds[*kind]
 		if !okKind {
-			return usageErr(fmt.Errorf("note: --kind must be lesson|decision|ref|rule, got %q", *kind))
+			return usageErr(fmt.Errorf("note: --kind must be lesson|decision|ref|rule|memory, got %q", *kind))
 		}
-		if !contains(tags, *kind) {
-			tags = append(tags, *kind)
+		if !contains(tags, meta.Tag) {
+			tags = append(tags, meta.Tag)
 		}
-		if *folder == "" {
-			*folder = fold
-		}
+		kindFolder = meta.Folder
 	}
 	title := strings.Join(positional, " ")
 	fold := *folder
 	// Path-style shorthand: `nt note "work/Auth design"` files it under work/
-	// when no explicit --folder was given.
+	// when no explicit --folder was given. This runs BEFORE the kind's default
+	// folder applies — a path in the title is an explicit filing choice, so
+	// `nt note "custom/x" --kind lesson` lands in custom/ (tagged lesson), not
+	// in lessons/ with "custom" mangled into the filename.
 	if fold == "" {
 		if i := strings.LastIndex(title, "/"); i >= 0 {
 			fold = strings.TrimSpace(title[:i])
 			title = strings.TrimSpace(title[i+1:])
 		}
+	}
+	// The kind's canonical folder is the default only when neither --folder nor a
+	// path-style title chose one.
+	if fold == "" {
+		fold = kindFolder
 	}
 	if strings.TrimSpace(title) == "" {
 		return usageErr(fmt.Errorf("note: a title is required"))
@@ -643,6 +671,9 @@ func cmdNote(args []string) int {
 	}
 	if d := strings.TrimSpace(*desc); d != "" { // --description → a modeled frontmatter key
 		fields = append(fields, "description="+d)
+	}
+	if p := strings.TrimSpace(*project); p != "" { // --project → project: frontmatter (recall's project boost matches it)
+		fields = append(fields, "project="+p)
 	}
 	if len(fields) > 0 { // --field key=value → extra frontmatter, preserved verbatim
 		for _, f := range fields {
@@ -796,6 +827,11 @@ func cmdJournal(args []string) int {
 		}
 		date = dateparse.DatePart(d) // ignore any time-of-day
 	}
+	// journal is $EDITOR-only; without a terminal it would spew escape sequences
+	// (and create today's note as a side effect). Fail before touching the store.
+	if !interactive() {
+		return fail(fmt.Errorf("journal: no terminal ($EDITOR needs one) — capture a dated entry non-interactively with `nt note --folder journal`"))
+	}
 	e, ok := engine()
 	if !ok {
 		return 1
@@ -878,15 +914,15 @@ func completeAndSpawn(d *task.Doc, rec *mutate.Recorder, t *task.Task) *task.Tas
 func cmdUpdate(args []string) int {
 	fs := flag.NewFlagSet("update", flag.ContinueOnError)
 	status := fs.String("status", "", "open|doing|blocked|done")
-	pri := fs.String("pri", "", "priority")
-	due := fs.String("due", "", "due date")
+	pri := fs.String("pri", "", "priority high|med|low")
+	due := fs.String("due", "", "due date (today|tomorrow|fri|+3d|YYYY-MM-DD)")
 	recur := fs.String("recur", "", "recurrence (stored; Phase 3)")
 	parent := fs.String("parent", "", "parent id ('none' clears)")
 	blocks := fs.String("blocks", "", "id of a task THIS task blocks ('none' clears the edge)")
-	blockedBy := fs.String("blocked-by", "", "id of a task that must complete first (the reverse of --blocks)")
+	blockedBy := fs.String("blocked-by", "", "id of a task that must complete first (reverse of --blocks; clear with --blocks none on the blocking task)")
 	noteSlug := fs.String("note", "", "link an existing note to the task(s) (slug/title/id)")
 	body := fs.String("body", "", "attach detail (markdown) — saved as the task's linked note")
-	bodyFile := fs.String("body-file", "", "read --body from a file ('-' = stdin)")
+	bodyFile := fs.String("body-file", "", "read the body from a file ('-' = stdin); immune to shell quoting")
 	est := fs.String("est", "", "time estimate (90m, 2h; 'none' clears)")
 	title := fs.String("title", "", "replace the task's description (keeps tags/project/links)")
 	project := fs.String("project", "", "set the +project ('none' clears)")
@@ -906,11 +942,16 @@ func cmdUpdate(args []string) int {
 	handles := positional // bulk: apply the same changes to every id given
 
 	// Validate parseable flags before locking.
+	if *blockedBy == "none" || *blockedBy == "-" {
+		// The dependency edge lives on the BLOCKER (blocks:) — teach the real
+		// clearing move instead of failing with "no task \"none\"".
+		return usageErr(fmt.Errorf("update: --blocked-by takes a task id; to clear a dependency run nt update <blocker-id> --blocks none (nt links <id> shows the blocker)"))
+	}
 	var priByte byte
 	if *pri != "" {
 		b, ok := parsePriority(*pri)
 		if !ok {
-			return usageErr(fmt.Errorf("update: invalid priority %q", *pri))
+			return usageErr(fmt.Errorf("update: invalid priority %q (use high|med|low)", *pri))
 		}
 		priByte = b
 	}
@@ -918,7 +959,7 @@ func cmdUpdate(args []string) int {
 	if *due != "" {
 		v, ok := parseDate(*due)
 		if !ok {
-			return usageErr(fmt.Errorf("update: invalid due %q", *due))
+			return usageErr(fmt.Errorf("update: invalid due %q (use today|tomorrow|fri|+3d|YYYY-MM-DD)", *due))
 		}
 		dueVal = v
 	}
@@ -1228,7 +1269,7 @@ func cmdRm(args []string) int {
 		fmt.Printf("removed %d (nt undo to restore)\n", count)
 	}
 	for _, dn := range strandedDetail {
-		fmt.Fprintf(os.Stderr, "note: %s was this task's detail note and is now stranded — `nt rm %s -y` to trash it (keep it if you might undo)\n", dn.Rel, shortID(dn.ID))
+		fmt.Fprintf(os.Stderr, "note: %s was this task's detail note and is now stranded — `nt rm %s -y` to trash it (keep it if you might undo) — or let `nt gc` collect it after 30d\n", dn.Rel, shortID(dn.ID))
 	}
 	return 0
 }
@@ -1328,6 +1369,17 @@ func extractLinks(body string) []string {
 		rest = rest[i+2+j+2:]
 	}
 	return out
+}
+
+// requireEditorTerminal refuses to launch $EDITOR without a terminal: in a
+// pipe/CI/agent context an editor spews raw escape sequences (or hangs), and
+// the non-interactive edit flags cover every agent need. Returns 0 when a
+// terminal is present, else the (nonzero) exit code after printing the error.
+func requireEditorTerminal() int {
+	if interactive() {
+		return 0
+	}
+	return fail(fmt.Errorf("edit: no terminal — use --append/--append-file/--body-file/--desc for non-interactive edits"))
 }
 
 func runEditor(path string) int {

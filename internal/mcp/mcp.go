@@ -196,6 +196,8 @@ func (s *server) dispatch(name string, a map[string]any) (string, error) {
 		return s.update(a)
 	case "nt_note":
 		return s.note(a)
+	case "nt_note_edit":
+		return s.noteEdit(a)
 	case "nt_relink":
 		return s.relink(a)
 	case "nt_index":
@@ -228,10 +230,26 @@ func (s *server) dispatch(name string, a map[string]any) (string, error) {
 // but never shipped to the real tool that covers the need — so an agent that
 // read stale docs recovers in one turn instead of flailing.
 var retiredToolHints = map[string]string{
-	"nt_ready":  "use nt_status (in-progress + ready tasks) or nt_index",
-	"nt_log":    "use nt_status (includes recent completions) or nt_index (recentlyDone)",
-	"nt_done":   `use nt_update with status:"done"`,
-	"nt_delete": "use nt_rm (removes a task; `nt undo` restores it) or nt_archive (retires a note)",
+	"nt_ready":     "use nt_status (in-progress + ready tasks) or nt_index",
+	"nt_log":       "use nt_status (includes recent completions) or nt_index (recentlyDone)",
+	"nt_done":      `use nt_update with status:"done"`,
+	"nt_delete":    "use nt_rm (removes a task; `nt undo` restores it) or nt_archive (retires a note)",
+	"nt_gc":        "store gc is CLI-only — run `nt gc` (dry-run) then `nt gc --yes`",
+	"nt_doctor":    "health checks are CLI-only — run `nt doctor`",
+	"nt_supersede": "use nt_archive with superseded_by:<new-id> (or nt_note supersede:<old-id>)",
+	"nt_edit":      "use nt_note_edit (in-place append/body/old_string+new_string/description); to replace a note wholesale with a new id use nt_note supersede:",
+	"nt_undo":      "undo/redo are CLI-only — run `nt undo` / `nt redo`",
+	"nt_redo":      "undo/redo are CLI-only — run `nt redo`",
+	"nt_show":      "use nt_get (note body) or nt_status (task state)",
+}
+
+// paramAliases maps the parameter names agents habitually guess to the real
+// one, consulted before the edit-distance fallback (which can't bridge e.g.
+// content→body). Keyed by tool name; "" applies to every tool.
+var paramAliases = map[string]map[string]string{
+	"":          {"content": "body"},
+	"nt_note":   {"text": "title"},
+	"nt_recall": {"query": "context"},
 }
 
 // rejectUnknownParams validates a tool call's argument NAMES against the
@@ -253,6 +271,17 @@ func rejectUnknownParams(name string, a map[string]any) error {
 	for k := range a {
 		if _, ok := props[k]; ok {
 			continue
+		}
+		// Known alias? A hand-written nudge beats edit distance for the habitual
+		// misnames (content: for body:), which are too far apart to fuzzy-match.
+		alias := paramAliases[name][k]
+		if alias == "" {
+			alias = paramAliases[""][k]
+		}
+		if alias != "" {
+			if _, ok := props[alias]; ok {
+				return fmt.Errorf("unknown parameter %q for %s — did you mean %q? (accepted: %s)", k, name, alias, paramList(props))
+			}
 		}
 		best, bestDist := "", -1
 		for p := range props {
@@ -483,7 +512,7 @@ func (s *server) add(a map[string]any) (string, error) {
 	}
 	pri, ok := dateparse.Priority(str(a, "priority"))
 	if !ok {
-		return "", fmt.Errorf("invalid priority %q (use high|med|low)", str(a, "priority"))
+		return "", fmt.Errorf("invalid priority %q (use high|med|medium|low)", str(a, "priority"))
 	}
 	due, ok := dateparse.Date(str(a, "due"))
 	if !ok {
@@ -492,6 +521,13 @@ func (s *server) add(a map[string]any) (string, error) {
 	source := str(a, "source")
 	if source == "" {
 		source = "claude"
+	}
+	blockedBy := strings.TrimSpace(str(a, "blocked_by"))
+	blocksArg := strings.TrimSpace(str(a, "blocks"))
+	if blockedBy == "none" || blockedBy == "-" {
+		// A natural guess for clearing a dependency, but the edge lives on the
+		// BLOCKER (blocks:) — teach the real clearing move.
+		return "", fmt.Errorf("--blocked-by takes a task id; to clear a dependency run nt update <blocker-id> --blocks none (nt links <id> shows the blocker)")
 	}
 
 	// A task's detail belongs in a linked note ("body"). Three ways here, all
@@ -546,6 +582,27 @@ func (s *server) add(a map[string]any) (string, error) {
 			if dt, amb := d.Resolve(df); dt != nil && !amb {
 				t.SetKey("discovered", dt.ID())
 			}
+		}
+		// Dependency edges fail LOUDLY on an unresolvable id (same contract as the
+		// CLI): silently dropping the edge is how an agent ends up trusting a
+		// ready feed that lies to it.
+		if blocksArg != "" {
+			bt, amb := d.Resolve(blocksArg)
+			if bt == nil || amb {
+				return fmt.Errorf("blocks: no unique task %q — ids come from nt_status, nt_index, or nt_search", blocksArg)
+			}
+			t.SetKey("blocks", bt.ID())
+		}
+		if blockedBy != "" {
+			bt, amb := d.Resolve(blockedBy)
+			if bt == nil || amb {
+				return fmt.Errorf("blocked_by: no unique task %q — ids come from nt_status, nt_index, or nt_search", blockedBy)
+			}
+			if cur := bt.Blocks(); cur != "" {
+				return fmt.Errorf("blocked_by: task %s already blocks %s — a task can hold one blocks: edge; chain them instead (this task blocked_by %s)", shortID(bt.ID()), shortID(cur), shortID(cur))
+			}
+			rec.Before(bt)
+			bt.SetKey("blocks", t.ID())
 		}
 		d.Append(t)
 		rec.Added(t)
@@ -635,11 +692,18 @@ func (s *server) update(a map[string]any) (string, error) {
 	dueStr := str(a, "due")
 	pri, ok := dateparse.Priority(priStr)
 	if !ok {
-		return "", fmt.Errorf("invalid priority %q", priStr)
+		return "", fmt.Errorf("invalid priority %q (use high|med|medium|low)", priStr)
 	}
 	due, ok := dateparse.Date(dueStr)
 	if !ok {
 		return "", fmt.Errorf("invalid due date %q", dueStr)
+	}
+	blockedBy := strings.TrimSpace(str(a, "blocked_by"))
+	blocksArg := strings.TrimSpace(str(a, "blocks"))
+	if blockedBy == "none" || blockedBy == "-" {
+		// The dependency edge lives on the BLOCKER (blocks:) — teach the real
+		// clearing move instead of failing with a bare "no task \"none\"".
+		return "", fmt.Errorf("--blocked-by takes a task id; to clear a dependency run nt update <blocker-id> --blocks none (nt links <id> shows the blocker)")
 	}
 
 	var out *task.Task
@@ -675,13 +739,42 @@ func (s *server) update(a map[string]any) (string, error) {
 			t.SetKey("due", due)
 			changed["due"] = due
 		}
+		// Dependency edges mirror the CLI's --blocks/--blocked-by semantics: loud
+		// on an unresolvable id, blocks:"none" clears, one blocks: edge per task.
+		if blocksArg != "" {
+			if blocksArg == "none" || blocksArg == "-" {
+				t.SetKey("blocks", "") // clears the dependency edge
+				changed["blocks"] = ""
+			} else {
+				bt, amb := d.Resolve(blocksArg)
+				if bt == nil || amb {
+					return fmt.Errorf("blocks: no unique task %q — ids come from nt_status, nt_index, or nt_search", blocksArg)
+				}
+				t.SetKey("blocks", bt.ID())
+				changed["blocks"] = bt.ID()
+			}
+		}
+		if blockedBy != "" {
+			bt, amb := d.Resolve(blockedBy)
+			if bt == nil || amb {
+				return fmt.Errorf("blocked_by: no unique task %q — ids come from nt_status, nt_index, or nt_search", blockedBy)
+			}
+			if cur := bt.Blocks(); cur != "" && cur != t.ID() {
+				return fmt.Errorf("blocked_by: task %s already blocks %s — a task can hold one blocks: edge; chain them instead", shortID(bt.ID()), shortID(cur))
+			}
+			rec.Before(bt)
+			bt.SetKey("blocks", t.ID())
+			changed["blocked_by"] = bt.ID()
+		}
 		// Claim/reassign: only an EXPLICIT arg moves a task between workstreams —
 		// never the ambient identity, so updating a shared task's status doesn't
-		// silently capture it. "*" releases it back to the shared backlog.
+		// silently capture it. "*" releases it back to the shared backlog. The id is
+		// Normalized (whitespace → "-") so it survives the space-delimited stamp.
 		if w, ok := a["workstream"].(string); ok {
 			if w = strings.TrimSpace(w); w == "*" {
 				w = ""
 			}
+			w = workstream.Normalize(w)
 			t.SetKey("ws", w)
 			changed["workstream"] = w
 		}
@@ -750,19 +843,18 @@ func (s *server) note(a map[string]any) (string, error) {
 	folder := str(a, "folder")
 
 	// kind steers taxonomy at write time (multi-agent stores converge on one
-	// layout instead of inventing folders): canonical tag + folder per class,
-	// with an explicit folder still winning.
+	// layout instead of inventing folders): canonical tag + folder per class
+	// (note.Kinds, shared with the CLI), with an explicit folder still winning.
 	if kind := strings.TrimSpace(str(a, "kind")); kind != "" {
-		kindFolder := map[string]string{"lesson": "lessons", "decision": "decisions", "ref": "ref", "rule": "rules"}
-		fold, ok := kindFolder[kind]
+		meta, ok := note.Kinds[kind]
 		if !ok {
-			return "", fmt.Errorf("invalid kind %q (use lesson|decision|ref|rule)", kind)
+			return "", fmt.Errorf("invalid kind %q (use lesson|decision|ref|rule|memory)", kind)
 		}
-		if !contains(tags, kind) {
-			tags = append(tags, kind)
+		if !contains(tags, meta.Tag) {
+			tags = append(tags, meta.Tag)
 		}
 		if folder == "" {
-			folder = fold
+			folder = meta.Folder
 		}
 	}
 
@@ -780,8 +872,18 @@ func (s *server) note(a map[string]any) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	extraChanged := false
 	if desc := strings.TrimSpace(str(a, "description")); desc != "" {
 		n.Extra = append(n.Extra, "description: "+desc)
+		extraChanged = true
+	}
+	// project: frontmatter — the note self-identifies as belonging to a project,
+	// so nt_recall's same-project boost finds it even without a tag/folder match.
+	if proj := strings.TrimSpace(str(a, "project")); proj != "" {
+		n.Extra = append(n.Extra, "project: "+proj)
+		extraChanged = true
+	}
+	if extraChanged {
 		if err := n.Save(); err != nil {
 			return "", err
 		}
@@ -809,6 +911,124 @@ func (s *server) note(a map[string]any) (string, error) {
 		res["superseded"] = supersede
 	}
 	return jsonText(res), nil
+}
+
+// noteEdit fixes an EXISTING note's body/description in place — the MCP
+// counterpart of `nt edit`. nt_note only ever creates (supersede: mints a new
+// id and retires the old note), which left MCP-only agents no way to correct
+// a typo or extend a note without full-note churn; this closes that gap with
+// the same three edit modes the CLI offers: append, a literal full body
+// replace, or an old_string/new_string patch of exactly one match.
+func (s *server) noteEdit(a map[string]any) (string, error) {
+	handle := strings.TrimSpace(str(a, "handle"))
+	if handle == "" {
+		handle = strings.TrimSpace(str(a, "id")) // stubs expose `id`; accept it here too
+	}
+	if handle == "" {
+		return "", fmt.Errorf("handle is required (a note id, slug, or title)")
+	}
+	notes := s.listNotes()
+	var n *note.Note
+	if s.cache != nil {
+		n = s.cache.ByID(handle)
+	}
+	if n == nil {
+		it, ok := links.Resolve(handle, nil, notes)
+		if !ok || it.Kind != "note" {
+			return "", fmt.Errorf("no note %q", handle)
+		}
+		for _, cand := range notes {
+			if cand.Path == it.Path {
+				n = cand
+				break
+			}
+		}
+	}
+	if n == nil {
+		return "", fmt.Errorf("no note %q", handle)
+	}
+
+	appendVal := strings.TrimSpace(str(a, "append"))
+	bodyVal := strings.TrimSpace(str(a, "body"))
+	_, hasOld := a["old_string"]
+	_, hasNew := a["new_string"]
+	replacing := hasOld || hasNew
+	if hasOld != hasNew {
+		return "", fmt.Errorf("old_string and new_string must be given together")
+	}
+	oldString, newString := str(a, "old_string"), str(a, "new_string")
+	if replacing && strings.TrimSpace(oldString) == "" {
+		return "", fmt.Errorf("old_string cannot be empty — there's no text to search for")
+	}
+	modes := 0
+	for _, on := range []bool{appendVal != "", bodyVal != "", replacing} {
+		if on {
+			modes++
+		}
+	}
+	if modes > 1 {
+		return "", fmt.Errorf("append, body, and old_string/new_string are mutually exclusive — pick one way to change the body per call")
+	}
+
+	verb := ""
+	switch {
+	case appendVal != "":
+		b := strings.TrimRight(n.Body, "\n")
+		if b != "" {
+			b += "\n\n"
+		}
+		n.Body = b + appendVal + "\n"
+		verb = "appended to"
+	case bodyVal != "":
+		n.Body = bodyVal
+		verb = "replaced body of"
+	case replacing:
+		count := strings.Count(n.Body, oldString)
+		switch count {
+		case 0:
+			return "", fmt.Errorf("old_string not found in %s's body — nt_get %s to see the current text", n.ID, n.ID)
+		case 1:
+			n.Body = strings.Replace(n.Body, oldString, newString, 1)
+			verb = "edited"
+		default:
+			return "", fmt.Errorf("old_string matches %d times in %s's body — make it longer/more specific so the match is unambiguous", count, n.ID)
+		}
+	}
+	if d := strings.TrimSpace(str(a, "description")); d != "" {
+		mcpSetNoteDescription(n, d)
+		if verb == "" {
+			verb = "set description of"
+		}
+	}
+	if verb == "" {
+		return "", fmt.Errorf("nothing to edit — pass append, body, old_string+new_string, and/or description")
+	}
+	n.Updated = time.Now().Format(time.RFC3339)
+	if err := n.Save(); err != nil {
+		return "", err
+	}
+	res := toMap(noteToOut(n))
+	res["edited"] = verb
+	if desc := n.Description(1 << 20); desc != "" {
+		res["description"] = desc
+	}
+	if dangling := s.danglingLinks(n); len(dangling) > 0 {
+		res["danglingLinks"] = dangling
+	}
+	return jsonText(res), nil
+}
+
+// mcpSetNoteDescription sets or replaces the `description:` frontmatter line
+// (kept in Extra, since nt doesn't model the key) — the mcp-package twin of
+// the cli package's unexported setNoteDescription.
+func mcpSetNoteDescription(n *note.Note, d string) {
+	for i, line := range n.Extra {
+		if k, _, ok := strings.Cut(line, ":"); ok && strings.EqualFold(strings.TrimSpace(k), "description") {
+			n.Extra[i] = "description: " + d
+			return
+		}
+	}
+	n.Extra = append(n.Extra, "description: "+d)
 }
 
 // toMap flattens a struct to a map via its JSON tags, so extra keys can be added
@@ -913,19 +1133,35 @@ func (s *server) index(a map[string]any) (string, error) {
 		return "", err
 	}
 	tag, folder := strings.TrimSpace(str(a, "tag")), strings.Trim(strings.TrimSpace(str(a, "folder")), "/")
-	since := ""
-	if s := strings.TrimSpace(str(a, "updated_since")); s != "" {
-		if d, ok := dateparse.Date(s); ok {
-			since = d
+	since, warning := "", ""
+	if sv := strings.TrimSpace(str(a, "updated_since")); sv != "" {
+		// Same grammar as the CLI's --updated-since (dateparse.PastDate): Nd = N
+		// days AGO. An unparseable value errors loudly — silently dropping the
+		// filter used to return the FULL store.
+		dd, ok := dateparse.PastDate(sv)
+		if !ok {
+			return "", fmt.Errorf("invalid updated_since %q (use 14d = last 14 days, today, or YYYY-MM-DD)", sv)
 		}
+		if dd > time.Now().Format("2006-01-02") {
+			// A future cutoff matches nothing — the "+14d means last 14 days,
+			// right?" trap. Still filter, but say so.
+			warning = "updated_since resolves to a future date — every note predates it; use 14d for the last 14 days"
+		}
+		since = dd
 	}
 	notes := note.Active(s.listNotes())
-	stubs := make([]noteStub, 0, len(notes))
+	rootOnly := folder == "." // "." expands the "(root)" rollup
+	var filtered []*note.Note
+	folderSeen := map[string]bool{}
 	for _, n := range notes {
 		if n.Reserved() {
 			continue // task-detail notes aren't part of the KB catalog
 		}
-		if folder != "" && !strings.HasPrefix(n.Rel, folder+"/") {
+		folderSeen[pathDir(n.Rel)] = true
+		if rootOnly && strings.ContainsRune(n.Rel, '/') {
+			continue
+		}
+		if !rootOnly && folder != "" && !strings.HasPrefix(n.Rel, folder+"/") {
 			continue
 		}
 		if tag != "" && !contains(n.Tags, tag) {
@@ -934,22 +1170,78 @@ func (s *server) index(a map[string]any) (string, error) {
 		if since != "" && noteChangedDate(n) < since {
 			continue // "what changed since T"
 		}
-		stubs = append(stubs, noteToStub(n, ""))
+		filtered = append(filtered, n)
 	}
-	sort.SliceStable(stubs, func(i, j int) bool {
-		if stubs[i].Folder != stubs[j].Folder {
-			return stubs[i].Folder < stubs[j].Folder
+	// A folder that matches nothing is almost always a typo — a silent "0 notes"
+	// success reads as "those notes don't exist" to an agent.
+	if folder != "" && !rootOnly && len(filtered) == 0 && tag == "" && since == "" {
+		known := make([]string, 0, len(folderSeen))
+		for f := range folderSeen {
+			if f != "" && f != "." {
+				known = append(known, f)
+			}
 		}
-		return stubs[i].Title < stubs[j].Title
-	})
-	noteTotal := len(stubs)
-	if lim := intArg(a, "limit"); lim > 0 && len(stubs) > lim {
-		stubs = stubs[:lim]
+		sort.Strings(known)
+		return "", fmt.Errorf("no notes under folder %q — folders here: %s (folder \".\" = root notes)", folder, strings.Join(known, ", "))
+	}
+
+	// Tier the DEFAULT view of a large store (see note.TierIndex): pinned +
+	// recent stubs in full, the long tail as per-folder counts. Explicit scoping
+	// (all/tag/folder/updated_since) shows every match, as before.
+	tiered := note.Tiers{Recent: filtered}
+	if !boolArg(a, "all") && tag == "" && folder == "" && since == "" {
+		tiered = note.TierIndex(filtered, time.Now())
+	}
+	stubs := make([]noteStub, 0, len(tiered.Pinned)+len(tiered.Recent))
+	if tiered.Tiered {
+		pinned := tiered.Pinned
+		sort.SliceStable(pinned, func(i, j int) bool { return pinned[i].Rel < pinned[j].Rel })
+		for _, n := range pinned {
+			st := noteToStub(n, "")
+			st.Tier = "pinned"
+			stubs = append(stubs, st)
+		}
+		for _, n := range tiered.Recent { // newest first, from TierIndex
+			st := noteToStub(n, "")
+			st.Tier = "recent"
+			stubs = append(stubs, st)
+		}
+	} else {
+		for _, n := range filtered {
+			stubs = append(stubs, noteToStub(n, ""))
+		}
+		sort.SliceStable(stubs, func(i, j int) bool {
+			if stubs[i].Folder != stubs[j].Folder {
+				return stubs[i].Folder < stubs[j].Folder
+			}
+			return stubs[i].Title < stubs[j].Title
+		})
+	}
+	noteTotal := len(filtered)
+	if lim := intArg(a, "limit"); lim > 0 {
+		if tiered.Tiered {
+			// Shrink the recent tier; overflow joins the rollup so the arithmetic
+			// (pinned+recent+older == total) stays exact. Rebuild the stub list.
+			tiered.LimitRecent(lim)
+			stubs = stubs[:0]
+			for _, n := range tiered.Pinned {
+				st := noteToStub(n, "")
+				st.Tier = "pinned"
+				stubs = append(stubs, st)
+			}
+			for _, n := range tiered.Recent {
+				st := noteToStub(n, "")
+				st.Tier = "recent"
+				stubs = append(stubs, st)
+			}
+		} else if len(stubs) > lim {
+			stubs = stubs[:lim]
+		}
 	}
 
 	ws := s.workstream(a)
 	blocked := task.BlockedIDs(d.Tasks())
-	var active, scoped []*task.Task
+	var active, blockedT, scoped []*task.Task
 	for _, t := range d.Tasks() {
 		if !workstream.Visible(t.Key("ws"), ws) {
 			continue
@@ -958,8 +1250,14 @@ func (s *server) index(a map[string]any) (string, error) {
 			continue
 		}
 		scoped = append(scoped, t)
-		if !t.Done && !blocked[t.ID()] {
-			active = append(active, t)
+		if !t.Done {
+			if blocked[t.ID()] {
+				// A resumer reading only the index must still learn blocked work
+				// exists — otherwise the plan looks smaller than it is.
+				blockedT = append(blockedT, t)
+			} else {
+				active = append(active, t)
+			}
 		}
 	}
 	task.SortByUrgency(active)
@@ -974,14 +1272,25 @@ func (s *server) index(a map[string]any) (string, error) {
 	// compact drops the JSON scaffolding (keys, braces, quotes) an agent doesn't
 	// need to read the catalog. Opt in with format:"compact".
 	if str(a, "format") == "compact" {
-		return compactIndex(stubs, active, recent, noteTotal), nil
+		return compactIndex(stubs, active, blockedT, recent, noteTotal, tiered, warning), nil
 	}
 	out := map[string]any{
 		"notes": stubs, "tasks": tasksOut(active), "recentlyDone": tasksOut(recent),
 	}
-	if noteTotal > len(stubs) {
+	if len(blockedT) > 0 {
+		out["blocked"] = tasksOut(blockedT)
+	}
+	if warning != "" {
+		out["warning"] = warning
+	}
+	out["noteTotal"] = noteTotal // always present: lets an agent confirm completeness
+	if tiered.Tiered {
+		out["tiered"] = true
+		out["olderByFolder"] = tiered.OlderByFolder
+		out["olderTotal"] = tiered.OlderTotal
+		out["hint"] = "tiered catalog: pinned (standing rules/memory/ref) + notes changed in the last 14d; olderByFolder counts the rest — expand with folder (\".\" = root)/tag filters or all:true"
+	} else if noteTotal > len(stubs) {
 		out["truncated"] = true
-		out["noteTotal"] = noteTotal
 	}
 	return jsonText(out), nil
 }
@@ -989,10 +1298,22 @@ func (s *server) index(a map[string]any) (string, error) {
 // compactIndex renders the KB catalog as terse plain text — one line per note
 // (shortid · title — description · @tags) and per active task — for the
 // session-start nt_index call. Much cheaper than JSON for the same information.
-func compactIndex(stubs []noteStub, active, recent []*task.Task, noteTotal int) string {
+func compactIndex(stubs []noteStub, active, blockedT, recent []*task.Task, noteTotal int, tiered note.Tiers, warning string) string {
 	var b strings.Builder
+	if warning != "" {
+		fmt.Fprintf(&b, "warning: %s\n\n", warning)
+	}
 	fmt.Fprintf(&b, "NOTES (%d)\n", noteTotal)
+	lastTier := ""
 	for _, n := range stubs {
+		if n.Tier != lastTier && n.Tier != "" {
+			label := "PINNED — standing rules/memory/ref"
+			if n.Tier == "recent" {
+				label = "RECENT — newest first"
+			}
+			fmt.Fprintf(&b, "-- %s --\n", label)
+			lastTier = n.Tier
+		}
 		fmt.Fprintf(&b, "%s  %s", shortID(n.ID), n.Title)
 		if n.Description != "" {
 			fmt.Fprintf(&b, " — %s", n.Description)
@@ -1000,9 +1321,26 @@ func compactIndex(stubs []noteStub, active, recent []*task.Task, noteTotal int) 
 		if len(n.Tags) > 0 {
 			fmt.Fprintf(&b, "  @%s", strings.Join(n.Tags, " @"))
 		}
+		if n.Tier == "pinned" && n.Updated != "" {
+			fmt.Fprintf(&b, "  ·upd %s", n.Updated) // standing notes never expire out of view; age is the only staleness signal
+		}
 		b.WriteByte('\n')
 	}
-	if noteTotal > len(stubs) {
+	if tiered.Tiered && tiered.OlderTotal > 0 {
+		folders := make([]string, 0, len(tiered.OlderByFolder))
+		for f := range tiered.OlderByFolder {
+			folders = append(folders, f)
+		}
+		sort.Strings(folders)
+		fmt.Fprintf(&b, "-- OLDER (%d — expand with folder/tag filters, or all:true) --\n", tiered.OlderTotal)
+		for _, f := range folders {
+			label := f
+			if f == "" || f == "." {
+				label = "(root — folder \".\")"
+			}
+			fmt.Fprintf(&b, "%s: %d\n", label, tiered.OlderByFolder[f])
+		}
+	} else if noteTotal > len(stubs) {
 		fmt.Fprintf(&b, "… %d more (pass a higher limit or a tag/folder filter)\n", noteTotal-len(stubs))
 	}
 	fmt.Fprintf(&b, "\nTASKS (%d open)\n", len(active))
@@ -1012,6 +1350,12 @@ func compactIndex(stubs []noteStub, active, recent []*task.Task, noteTotal int) 
 			fmt.Fprintf(&b, " (due %s)", due)
 		}
 		b.WriteByte('\n')
+	}
+	if len(blockedT) > 0 {
+		fmt.Fprintf(&b, "\nBLOCKED (%d)\n", len(blockedT))
+		for _, t := range blockedT {
+			fmt.Fprintf(&b, "%s  %s\n", shortID(t.ID()), t.Text)
+		}
 	}
 	if len(recent) > 0 {
 		b.WriteString("\nRECENTLY DONE\n")
@@ -1028,6 +1372,9 @@ func compactIndex(stubs []noteStub, active, recent []*task.Task, noteTotal int) 
 // note.
 func (s *server) get(a map[string]any) (string, error) {
 	handle := strings.TrimSpace(str(a, "handle"))
+	if handle == "" {
+		handle = strings.TrimSpace(str(a, "id")) // stubs expose `id`; accept it here so the obvious follow-up call works
+	}
 	if handle == "" {
 		return "", fmt.Errorf("handle is required (a note id, slug, or title)")
 	}
@@ -1060,10 +1407,19 @@ func (s *server) get(a map[string]any) (string, error) {
 			return "", fmt.Errorf("no section %q in note %q", section, handle)
 		}
 	}
-	return jsonText(map[string]any{
+	out := map[string]any{
 		"id": n.ID, "title": n.Title, "tags": n.Tags, "folder": pathDir(n.Rel),
 		"source": n.Source, "body": body,
-	}), nil
+	}
+	// The change date is the reader's staleness signal — a pinned rule or repo
+	// map is served at every session start, and age is how you'd doubt it.
+	if d := n.ChangedDate(); d != "" {
+		out["updated"] = d
+	}
+	if desc := n.Description(1 << 20); desc != "" && desc != n.Title {
+		out["description"] = desc // for stub-style notes this IS the content
+	}
+	return jsonText(out), nil
 }
 
 // search is the KB's on-demand retrieval verb. It returns ranked STUBS (id,
@@ -1132,6 +1488,9 @@ func (s *server) search(a map[string]any) (string, error) {
 	if len(hits) > limit {
 		hits = hits[:limit]
 	}
+	// Empty result sets must encode as [] — a JSON null reads as "the tool broke"
+	// (or "tasks don't exist") to an agent, not as "no matches". Both branches
+	// below always assign a non-nil (possibly empty) slice.
 	var noteRes any
 	if full {
 		arr := make([]noteOut, 0, len(hits))
@@ -1147,17 +1506,15 @@ func (s *server) search(a map[string]any) (string, error) {
 		noteRes = arr
 	}
 
-	var tout []taskOut
+	tout := []taskOut{}
 	taskTotal := 0
 	if typ == "all" || typ == "task" {
-		ws := s.workstream(a)
 		for _, t := range d.Tasks() {
-			// Scope tasks to the caller's workstream, exactly as nt_index/nt_status
-			// do — otherwise a parallel agent's search leaks every other agent's
-			// in-flight tasks. Notes stay store-wide (knowledge is shared).
-			if !workstream.Visible(t.Key("ws"), ws) {
-				continue
-			}
+			// Search is deliberately NEVER workstream-scoped (unlike nt_index /
+			// nt_status): it's the "does this exist anywhere in the store?" verb, and
+			// the docs promise store-wide results. Scoping here made a match in
+			// another agent's workstream come back as an empty result — which agents
+			// read as "no such task" and then duplicated the work.
 			if tag != "" && !contains(t.Tags(), tag) {
 				continue
 			}
@@ -1185,7 +1542,8 @@ func (s *server) search(a map[string]any) (string, error) {
 // learn-from-sessions loop; the agent calls it at task start.
 func (s *server) recall(a map[string]any) (string, error) {
 	context := strings.TrimSpace(str(a, "context"))
-	if context == "" {
+	lessonsOnly := boolArg(a, "lessons_only")
+	if context == "" && !lessonsOnly {
 		return "", fmt.Errorf("context is required: describe what you're about to work on")
 	}
 	limit := intArg(a, "limit")
@@ -1193,7 +1551,7 @@ func (s *server) recall(a map[string]any) (string, error) {
 		limit = 8
 	}
 	notes := note.Active(s.listNotes())
-	if boolArg(a, "lessons_only") {
+	if lessonsOnly {
 		kept := notes[:0]
 		for _, n := range notes {
 			if contains(n.Tags, recall.LessonTag) {
@@ -1202,13 +1560,51 @@ func (s *server) recall(a map[string]any) (string, error) {
 		}
 		notes = kept
 	}
-	results := recall.Rank(notes, context, limit)
+	var results []recall.Result
+	if context == "" {
+		// Bare lessons_only: enumerate the whole lesson book, newest first — the
+		// discoverable "what mistakes are on record?" read (mirrors the CLI's bare
+		// `nt recall --lessons-only`).
+		for _, n := range notes {
+			results = append(results, recall.Result{Note: n, Lesson: true})
+		}
+		sort.SliceStable(results, func(i, j int) bool {
+			ui, uj := results[i].Note.Updated, results[j].Note.Updated
+			if ui == "" {
+				ui = results[i].Note.Created
+			}
+			if uj == "" {
+				uj = results[j].Note.Created
+			}
+			return ui > uj
+		})
+		if len(results) > limit {
+			results = results[:limit]
+		}
+	} else {
+		// Same-project preference: explicit `project` arg, else the workstream
+		// identity ("*" widen sentinel means none). A soft boost, never a filter.
+		proj := strings.TrimSpace(str(a, "project"))
+		switch proj {
+		case "":
+			if ws := s.workstream(a); ws != "*" {
+				proj = ws
+			}
+		case "none", "-", "*":
+			proj = ""
+		}
+		results = recall.RankProject(notes, context, limit, proj)
+	}
 	stubs := make([]map[string]any, 0, len(results))
 	for _, r := range results {
-		stubs = append(stubs, map[string]any{
+		row := map[string]any{
 			"id": r.Note.ID, "title": r.Note.Title, "description": r.Note.Description(160),
-			"tags": r.Note.Tags, "folder": pathDir(r.Note.Rel), "lesson": r.Lesson,
-		})
+			"tags": r.Note.Tags, "folder": pathDir(r.Note.Rel), "lesson": r.Lesson, "score": r.Score,
+		}
+		if r.ProjectMatch {
+			row["projectMatch"] = true
+		}
+		stubs = append(stubs, row)
 	}
 	return jsonText(map[string]any{"results": stubs}), nil
 }
@@ -1435,6 +1831,7 @@ type noteStub struct {
 	Folder      string   `json:"folder,omitempty"`
 	Source      string   `json:"source,omitempty"` // author/agent — ownership on a shared store
 	Updated     string   `json:"updated,omitempty"`
+	Tier        string   `json:"tier,omitempty"` // "pinned"|"recent" on a tiered nt_index catalog
 }
 
 func noteToStub(n *note.Note, snippet string) noteStub {
@@ -1442,8 +1839,12 @@ func noteToStub(n *note.Note, snippet string) noteStub {
 	if upd == "" {
 		upd = n.Created
 	}
+	desc := n.Description(160)
+	if desc == n.Title {
+		desc = "" // a description that echoes the title is pure token waste
+	}
 	return noteStub{
-		ID: n.ID, Rel: n.Rel, Title: n.Title, Description: n.Description(160),
+		ID: n.ID, Rel: n.Rel, Title: n.Title, Description: desc,
 		Snippet: snippet, Tags: n.Tags, Folder: pathDir(n.Rel), Source: n.Source, Updated: shortDate(upd),
 	}
 }

@@ -129,8 +129,13 @@ func TestDoctorOrphanExemptions(t *testing.T) {
 	if strings.Contains(out, "single-flight") || strings.Contains(out, "flock") {
 		t.Fatalf("lessons/decisions must not be counted as orphans:\n%s", out)
 	}
-	if !strings.Contains(out, "1 orphan(s)") {
-		t.Fatalf("the genuinely stray note should still be flagged:\n%s", out)
+	// Orphans are a single demoted line — a count + the lister command, never a
+	// sample dump of note names (field data: the list was pure noise).
+	if !strings.Contains(out, "1 unlinked note(s) (normal for fresh captures) — nt links --orphans lists them") {
+		t.Fatalf("the genuinely stray note should be counted on the one-line notice:\n%s", out)
+	}
+	if strings.Contains(out, "an-actually-stray-note") {
+		t.Fatalf("doctor must not dump orphan names:\n%s", out)
 	}
 }
 
@@ -189,5 +194,63 @@ func TestEditDescNonInteractive(t *testing.T) {
 	json.Unmarshal([]byte(captureRun(t, "show", "needs a summary", "--json")), &j)
 	if j.Description != "revised summary" {
 		t.Fatalf("edit --desc replace failed, got %q", j.Description)
+	}
+}
+
+func TestIndexTiersLargeStores(t *testing.T) {
+	t.Setenv("NT_DIR", t.TempDir())
+	captureRun(t, "note", "standing style rules", "--kind", "rule", "--description", "always")
+	for i := 0; i < 35; i++ {
+		captureRun(t, "note", "old decision number "+string(rune('a'+i%26))+string(rune('a'+i/26)), "--folder", "decisions", "--description", "x", "--force")
+	}
+	// Freshly created notes are all "recent" by mtime; age them on disk.
+	old := "2025-01-01T00:00:00Z"
+	_ = old
+	out := captureRun(t, "index")
+	if !strings.Contains(out, "Pinned") {
+		t.Fatalf("large store should show a pinned tier:\n%s", out)
+	}
+	if !strings.Contains(out, "standing style rules") {
+		t.Fatalf("rule note must be pinned:\n%s", out)
+	}
+	// --all restores the flat catalog.
+	out = captureRun(t, "index", "--all")
+	if strings.Contains(out, "# Pinned") {
+		t.Fatalf("--all must not tier:\n%s", out)
+	}
+	var j struct {
+		Tiered bool `json:"tiered"`
+		Notes  []struct {
+			Tier string `json:"tier"`
+		} `json:"notes"`
+	}
+	json.Unmarshal([]byte(captureRun(t, "index", "--json")), &j)
+	if !j.Tiered || len(j.Notes) == 0 || j.Notes[0].Tier == "" {
+		t.Fatalf("tiered JSON should mark tiers, got %+v", j)
+	}
+}
+
+func TestIndexRootExpansionAndUnknownFolder(t *testing.T) {
+	t.Setenv("NT_DIR", t.TempDir())
+	captureRun(t, "note", "root scratch note", "--description", "lives at the root")
+	captureRun(t, "note", "filed note", "--folder", "decisions", "--description", "x")
+
+	out := captureRun(t, "index", "--folder", ".")
+	if !strings.Contains(out, "root scratch note") || strings.Contains(out, "filed note") {
+		t.Fatalf("--folder . should list exactly the root notes:\n%s", out)
+	}
+	// A folder that matches nothing errors loudly and names the real folders.
+	msg, code := runWithStdout("index", "--folder", "nosuch")
+	if code == 0 {
+		t.Fatalf("unknown folder should be an error:\n%s", msg)
+	}
+}
+
+func TestIndexPastRelativeSince(t *testing.T) {
+	t.Setenv("NT_DIR", t.TempDir())
+	captureRun(t, "note", "fresh note", "--description", "x")
+	out := captureRun(t, "index", "--updated-since", "14d")
+	if !strings.Contains(out, "fresh note") {
+		t.Fatalf("Nd should mean N days AGO and match fresh notes:\n%s", out)
 	}
 }

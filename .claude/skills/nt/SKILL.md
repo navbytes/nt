@@ -17,8 +17,12 @@ distinguishable from what the user typed by hand.
 > If the `nt` MCP server is registered with your client, **prefer the typed
 > `nt_*` tools over shelling out** — they go through the same store, default
 > `source` to `claude`, and avoid CLI-string mistakes. Capture: `nt_add`,
-> `nt_note`, `nt_update` (status:"done" completes), `nt_tag`, `nt_mv`. Retrieve:
-> `nt_index`, `nt_search`, `nt_recall`, `nt_get`, `nt_status`, `nt_links`. Fall back
+> `nt_note` (`kind` files it), `nt_note_edit` (fix an EXISTING note in place —
+> `append`/`body`/`old_string`+`new_string`/`description` — no new id, unlike
+> `nt_note supersede:`), `nt_update` (status:"done" completes), `nt_tag`,
+> `nt_mv`, `nt_archive` (supersede), `nt_relink`, `nt_rm` (tasks). Retrieve:
+> `nt_index`, `nt_search`, `nt_recall`, `nt_get` (handle or id), `nt_status`,
+> `nt_links`, `nt_view`. Fall back
 > to the `nt` commands below when the tools aren't available — the workflow is identical.
 
 ## Start here: `nt index` + `nt ready`
@@ -32,10 +36,20 @@ nt index --json                     # KB catalog: note stubs (id·title·descrip
 nt ready --json                     # open, UNBLOCKED tasks by urgency
 ```
 
+On large stores the index is **tiered**: pinned standing notes (rules/, memory/,
+ref/, or tag `pin`) + everything changed in the last 14 days, with the older
+remainder as per-folder counts. Expand a folder with `--folder <f>`, or pass
+`--all` for every stub. Standing knowledge belongs in the pinned layers — file
+it with `--kind rule|ref` (or tag `pin`) so every future session sees it.
+
 `nt index` is your "what's here" catalog; `nt ready` is the task feed. **Before
 creating anything, retrieve first** (`nt index` / `nt search`) so you don't
-duplicate an item that already exists. To read a specific note, `nt show <id>`
-(MCP: `nt_get`); to find one, `nt search <q>` returns ranked stubs.
+duplicate an item that already exists. If `nt note` refuses with "a
+near-duplicate already exists", follow its hint: `nt edit <id> --append`, or
+`--supersede <id>`, or rerun with `--force` only if genuinely distinct. (The MCP
+`nt_note` instead always creates and returns a `similar` list — consolidate
+afterwards.) To read a specific note — or a task and its linked detail —
+`nt show <id>` (MCP: `nt_get`); to find one, `nt search <q>` returns ranked stubs.
 
 ## Before a task: `nt recall` — don't repeat past mistakes
 
@@ -46,6 +60,13 @@ differs (it's paraphrase-aware, unlike substring `nt search`):
 ```bash
 nt recall "adding concurrent token refresh"    # MCP: nt_recall(context: "...")
 ```
+
+An empty result means nothing relevant is recorded (recall has a precision
+floor) — proceed, don't retry with looser words.
+
+When `NT_WORKSTREAM` is set, your own project's notes get a soft ranking
+preference (`projectMatch: true` in JSON) — cross-project results stay visible
+below. Override with `--project <name>` or disable with `--project none`.
 
 When you hit a mistake, footgun, or dead-end, capture it as a **lesson** so the
 next session recalls it — put the trigger in the description ("when X, do Y — not Z"):
@@ -59,14 +80,15 @@ nt recall --lessons-only                     # bare: list every recorded lesson
 
 ```bash
 nt add "refactor auth middleware" --source claude --pri high --due today --tag backend --project api
-nt add "fix refresh race" --source claude --body "repro: two parallel calls…"   # detail → auto-linked note
+nt add "fix refresh race" --source claude --body "repro: two parallel calls…"   # detail → auto-linked note under notes/__tasks__/ (re-using --body on the same task appends)
 ```
 
 Keep the title short and verb-first; put detail/reasoning/steps in `--body` —
 it's saved as the task's linked note. Flags: `--pri high|med|low`,
 `--due today|tomorrow|fri|+3d|YYYY-MM-DD`, `--tag NAME` (repeatable; `--tags a,b`),
 `--project NAME`, `--blocked-by <id>` (this task waits for `<id>`), `--blocks <id>`
-(the reverse), `--discovered-from <id>`, `--recur weekly|3d|…`, `--note <slug>`
+(the reverse; pass `none` to `--blocks` on the blocking task to clear an edge),
+`--discovered-from <id>`, `--recur weekly|3d|…`, `--note <slug>`
 (link an existing note; also on `nt update` to attach one later).
 
 ## Capture notes — and file them into folders
@@ -74,7 +96,7 @@ it's saved as the task's linked note. Flags: `--pri high|med|low`,
 For findings, context, decisions — anything longer than a task line:
 
 ```bash
-nt note "JWT tokens expire after 24h" --body "Refresh window is 7d. See auth.go." --source claude --tag auth
+nt note "JWT tokens expire after 24h" --description "Access 24h, refresh 7d — see auth.go" --body "Refresh window is 7d. See auth.go." --source claude --tag auth
 ```
 
 **Bodies with backticks, `$()`, or multiple lines: never inline them in the shell
@@ -86,16 +108,35 @@ nt note "Decision: flock over SQLite" --kind decision --body-file /tmp/body.md -
 printf '%s\n' "the body…" | nt note "…" --body-file - --source claude
 ```
 
-**File notes by class with `--kind lesson|decision|ref|rule`** — it applies the
-canonical tag + folder (`lessons/`, `decisions/`, `ref/`, `rules/`) so every
-session converges on one layout. An explicit `--folder` (or path-style
+**File notes by class with `--kind lesson|decision|ref|rule|memory`** — it applies the
+canonical tag + folder (`lessons/`, `decisions/`, `ref/`, `rules/`, `memory/`) so every
+session converges on one layout (`--kind memory` files under `memory/` with tag
+`memory-core` — the always-loaded core-memory layer). An explicit `--folder` (or path-style
 `nt note "decisions/Chose flock"`) still wins for bespoke foldering. Bare
 `[[name]]` links resolve across folders by shortest path-suffix, so foldering
 never breaks linking — and you can refile later with `nt mv`. The `nt_note` MCP
 tool takes the same **`kind`**/**`folder`** arguments.
 
 To fix or extend a note later **without an editor**: `nt edit <note> --append
-"Resolved in commit abc123"` (or `--body-file new.md` to replace the body).
+"Resolved in commit abc123"`, `--append-file notes.md` (or `-` for stdin — use
+this for multi-line/backtick appends), `--body <text>` (replace the whole body
+inline, no temp file needed), `--body-file new.md` (replace the body from a
+file — for long/multi-line content), `--old-string "..." --new-string "..."`
+(patch ONE exact match in place — the targeted fix for a longer note; refuses
+if the match isn't unique, so make it longer to disambiguate), or `--desc "…"`
+(set the one-line summary). These are mutually exclusive per call — pick one
+way to change the body. MCP: `nt_note_edit` takes the same
+`append`/`body`/`old_string`+`new_string`/`description` fields; it's the
+in-place counterpart to `nt_note`, which only ever creates (`supersede:` mints
+a *new* id rather than editing in place).
+
+Tag a note with **`--project <name>`** when it's specific to one codebase in a
+shared multi-project store — `nt recall --project <name>` (default: your
+`NT_WORKSTREAM`) then ranks it above cross-project noise:
+
+```bash
+nt note "webhookd retry backoff" --kind decision --project webhookd --description "exponential, cap 5 tries"
+```
 
 Set **structured frontmatter at capture** with `--field key=value` (repeatable):
 
@@ -145,6 +186,12 @@ Keep the KB tidy as it grows — no `$EDITOR` needed:
 nt mv <note> ref/auth              # refile/rename, rewriting every [[link]] to it
 nt tag <note> +reviewed -inbox     # add/remove tags
 nt rm <note>                       # delete → .trash/ (refuses if inbound [[links]] would dangle; --force overrides)
+nt rm <task-id> --yes              # delete a task (agents must pass --yes; journaled, nt undo restores)
+nt doctor                          # store health: dangling [[links]], near-duplicates, oversized pinned tier
+nt archive <note>                  # retire a stale note from index/search/recall (reversible)
+nt supersede <old> --by <new>      # (or nt note … --supersede <old>) — replace a note; the old one retires with a pointer
+nt gc                              # plan: superseded stubs + stranded task notes >30d old
+nt gc --yes                        # reclaim them → .trash/ (recoverable)
 ```
 
 MCP: `nt_mv` (handle, dest), `nt_tag` (handle, add, remove). All preserve other
@@ -166,9 +213,14 @@ the returned id directly with `nt links` / `nt tag` / `nt mv` / `nt rm`.
 ## Conventions
 
 - **Always** `--source claude` on items you create.
+- Finished work gets `nt done`, never `nt rm` — done tasks feed the Logbook
+  (`nt log`) that the next session reads; rm erases the history.
 - Retrieve (`index`/`search`) before creating, to avoid duplicates.
 - Tasks are one line; put anything longer in a note and link to it.
-- Organize notes into folders (`ref/`, `decisions/`, `inbox/`) rather than a flat root.
+- Always give notes a `--description` — it's the one-line summary `nt index`
+  shows; `nt show` prints it and export folds it in.
+- File notes by class with `--kind` (`lessons/`, `decisions/`, `ref/`, `rules/`,
+  `memory/`); use bespoke folders (`--folder`) only when no kind fits.
 - The store is global at `$NT_DIR` (default `~/.local/share/nt`); `nt path` prints it.
 
 ## Workstreams (parallel sessions, shared store)
@@ -177,7 +229,8 @@ When several agents share one store (e.g. parallel git worktrees), tasks are
 **isolated per workstream** so your in-flight work doesn't mix with another
 session's, while **notes stay shared** so knowledge cross-pollinates. This is
 automatic via the MCP tools and CLI `nt add` when `NT_WORKSTREAM` is set (grove/CI/harness export
-it; `auto` derives it from the git branch). You don't stamp anything — `nt_add`
+it; `auto` derives it from the git branch, falling back to the working
+directory's basename outside a git repo — prefer a literal id there). You don't stamp anything — `nt_add`
 records it, and `nt_index`/`nt_status` scope to it.
 
 - Tasks with no workstream (the human's CLI/TUI/web backlog) stay visible to

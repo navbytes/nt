@@ -33,7 +33,10 @@ func (s *server) workstream(a map[string]any) string {
 		if w == "auto" {
 			return workstream.Derive()
 		}
-		return w // a literal id, or "*" which callers treat as "all"
+		// Normalize (whitespace → "-") so an explicit id with spaces stamps a value
+		// the space-delimited todo.txt line can hold; "*" passes through unchanged
+		// (callers treat it as "all").
+		return workstream.Normalize(w)
 	}
 	return workstream.Env()
 }

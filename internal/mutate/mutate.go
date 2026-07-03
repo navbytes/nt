@@ -118,7 +118,11 @@ func (e *Engine) Apply(op string, fn func(d *task.Doc, rec *Recorder) error) err
 	// leaves a benign orphan entry, never a mutation without its inverse. The
 	// transaction carries the writer's workstream so undo can tell "my change"
 	// from another agent's on a shared store.
-	if err := undo.Append(e.S, undo.Txn{Op: op, TS: time.Now().Format(time.RFC3339), WS: workstream.Env(), Changes: changes}); err != nil {
+	// Nanosecond precision (not RFC3339's whole-second form): the note-edit-since
+	// guard in internal/cli needs sub-second ordering to tell "this task op's own
+	// linked-note write, a moment earlier" from "a genuinely later note edit" —
+	// both can land in the same wall-clock second at agent speed.
+	if err := undo.Append(e.S, undo.Txn{Op: op, TS: time.Now().Format(time.RFC3339Nano), WS: workstream.Env(), Changes: changes}); err != nil {
 		return err
 	}
 	return store.WriteAtomic(e.S.TasksFile(), d.Render(), 0o644)

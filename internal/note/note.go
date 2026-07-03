@@ -75,6 +75,25 @@ func Slug(title string) string {
 // "journal" folder does for daily notes.
 const TaskNoteFolder = "__tasks__"
 
+// Kind is the canonical folder + tag pair for one note class (see Kinds).
+type Kind struct {
+	Folder string // canonical folder under notes/
+	Tag    string // canonical tag stamped on the note
+}
+
+// Kinds maps a note class (CLI --kind / MCP kind:) to its canonical folder +
+// tag, so multi-agent stores converge on one taxonomy instead of inventing
+// folders. Shared by the CLI and MCP surfaces — keep them identical. "memory"
+// is the always-loaded core-memory layer (the OpenCode plugin injects it):
+// files under memory/ carrying the memory-core tag, NOT a bare "memory" tag.
+var Kinds = map[string]Kind{
+	"lesson":   {Folder: "lessons", Tag: "lesson"},
+	"decision": {Folder: "decisions", Tag: "decision"},
+	"ref":      {Folder: "ref", Tag: "ref"},
+	"rule":     {Folder: "rules", Tag: "rule"},
+	"memory":   {Folder: "memory", Tag: "memory-core"},
+}
+
 // Create builds and writes a new note, returning it. The body is prefixed with
 // an H1 title when it doesn't already start with one.
 // Create writes a new note. folder, when non-empty, is a slash-separated
@@ -440,6 +459,19 @@ func clampLine(s string, max int) string {
 		return strings.TrimSpace(s[:max-1]) + "…"
 	}
 	return s
+}
+
+// Project returns the note's `project:` frontmatter value ("" when unset). The
+// key isn't modeled (it rides in Extra, preserved verbatim); this accessor is
+// how recall's same-project boost reads a note's declared project membership —
+// alongside its tags and folder path.
+func (n *Note) Project() string {
+	for _, line := range n.Extra {
+		if k, v, ok := strings.Cut(line, ":"); ok && strings.EqualFold(strings.TrimSpace(k), "project") {
+			return strings.TrimSpace(unquote(strings.TrimSpace(v)))
+		}
+	}
+	return ""
 }
 
 // Reserved reports whether a note lives in a machine-managed folder that isn't

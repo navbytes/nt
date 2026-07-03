@@ -24,7 +24,9 @@ user (or you, later) can `nt_get` on demand.
      opened; offer to open others on request.
    - **Related open tasks** — id + title.
    Then continue with whatever the user asks next, informed by the brief. If
-   recall and search both come back empty, say so in one line — don't pad.
+   recall and search both come back empty, say so in one line — don't pad
+   (recall returns empty when nothing recorded is on-topic — that's signal,
+   not an error).
 
 ## If no topic was given — resume brief ("where was I?")
 
@@ -32,8 +34,8 @@ If the conversation above already makes the current task obvious, treat that as
 the topic and run the task-priming brief instead. Otherwise:
 
 1. `nt_status` — in-progress/blocked/open tasks by urgency, plus recent completions.
-3. `nt_index` — note stubs only; surface the handful most recently updated.
-4. Present a short "where things stand" brief: open tasks, recent completions,
+2. `nt_index` — note stubs only; surface the handful most recently updated.
+3. Present a short "where things stand" brief: open tasks, recent completions,
    recently-touched notes (stubs). End by asking which thread to pick up — and
    once the user picks one, run the task-priming brief for it before starting.
 

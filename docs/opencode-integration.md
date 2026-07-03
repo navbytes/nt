@@ -23,11 +23,11 @@ Audited against `internal/` and a built binary (`v0.10.0`-era `main`).
 
 | # | Question | Finding |
 |---|----------|---------|
-| 1 | **Purpose & data model** | Task + note manager built explicitly as "durable memory for AI sessions." Tasks are todo.txt-style lines in `tasks.txt`; notes are markdown files with YAML frontmatter under `notes/` **with subfolders** (`ref/`, `decisions/`, `notes/__tasks__/` for task bodies, `notes/journal/` for dailies). Plain files — no DB. |
+| 1 | **Purpose & data model** | Task + note manager built explicitly as "durable memory for AI sessions." Tasks are todo.txt-style lines in `tasks.txt`; notes are markdown files with YAML frontmatter under `notes/` **with subfolders** — the `--kind` taxonomy's canonical folders (`lessons/`, `decisions/`, `ref/`, `rules/`, `memory/`) plus `notes/__tasks__/` for task bodies and `notes/journal/` for dailies. Plain files — no DB. |
 | 2 | **Interface** | A Go CLI (`nt <verb>`), **plus** a stdio **MCP server** (`nt mcp`), **plus** a localhost web HTTP API (`nt web`), **plus** a Bubble Tea TUI and a Wails desktop app. Four programmatic surfaces; three are non-interactive. |
 | 3 | **Output format** | Every read/write verb takes `--json` and prints structured JSON to stdout; non-`--json` output is human text. Fully pipeable and scriptable. |
-| 4 | **Read / query** | Index-first progressive disclosure: `nt index [--tag --folder --json]` (a catalog of note **stubs** — id, title, one-line description, tags — plus active tasks, **no bodies**); `nt search "<text>" [--tag] [--limit N] [--json]` (ranked stubs, `--full` for bodies); `nt show <handle>` / `nt_get` (one note's body, optional `section`); plus `nt ready`, `nt log`, `nt links <handle> [--orphans]`, `nt tags`, `nt view <name>`. |
-| 5 | **Write / append** | **Fully non-interactive.** `nt add`, `nt note` (with `--body`, `--folder`, `--field k=v`), `nt done`, `nt update`, `nt tag`, `nt mv`, `nt rm`, `nt archive` — all flag/arg-driven, all with `--json`. No `$EDITOR`/GUI required (`nt edit`/`nt journal` are the *opt-in* interactive verbs). |
+| 4 | **Read / query** | Index-first progressive disclosure: `nt index [--tag --folder --json]` (a catalog of note **stubs** — id, title, one-line description, tags — plus active tasks, **no bodies**; tiered on large stores: pinned standing notes + recent stubs + per-folder counts, `--all` for the flat catalog, scoped views complete); `nt search "<text>" [--tag] [--limit N] [--json]` (ranked stubs, `--full` for bodies); `nt show <handle>` / `nt_get` (one note's body, optional `section`); plus `nt ready`, `nt log`, `nt links <handle> [--orphans]`, `nt tags`, `nt view <name>`. |
+| 5 | **Write / append** | **Fully non-interactive.** `nt add`, `nt note` (with `--body`, `--folder`, `--field k=v`), `nt done`, `nt update`, `nt tag`, `nt mv`, `nt rm` — plus the curation verbs: `nt supersede`, `nt archive <note>`, `nt gc` (dry-run by default), and `nt doctor --check` for CI — all flag/arg-driven, all with `--json`. No `$EDITOR`/GUI required (`nt journal` is the opt-in interactive verb; `nt edit` has non-interactive forms too — `--append`, `--append-file -`, `--body-file -`, `--desc`). |
 | 6 | **Addressability** | Every entry has a stable **ULID** `id` (e.g. `01KW8N…`). Notes also addressable by slug/title. Any verb accepts the same **handle** (id, slug, or title) it printed. The MCP layer **refuses** positional `task:N` — agents must use stable ids. |
 | 7 | **Storage location & portability** | Global store at `$NT_DIR` (default `~/.local/share/nt`); `nt path` prints it. Fully relocatable via the env var — can point into a repo. `nt git-init` sets up union-merge + `.gitignore` for committing the store. |
 | 8 | **Concurrency & safety** | `tasks.txt.lock` flock + atomic temp-then-rename writes (`internal/store/atomic.go`, `internal/lock/`) + an undo journal. Safe to read while OpenCode (or a human TUI/web session) writes. **Workstreams** (`NT_WORKSTREAM`) isolate parallel agents' *tasks* while keeping *notes* shared. |
@@ -50,10 +50,15 @@ memory must be built"** (a custom `nt_save` tool and/or a plugin). Two facts
 change the design:
 
 1. **`nt` already exposes write tools over MCP** — `nt_add`, `nt_note`,
-   `nt_update`, `nt_rm`, `nt_tag`, `nt_mv`, `nt_archive`, `nt_relink` — alongside
-   the read tools `nt_index`, `nt_search`, `nt_recall`, `nt_get`, `nt_status`,
-   `nt_view`, `nt_links`. Verified end-to-end over stdio JSON-RPC (`tools/list` →
-   15 tools; `tools/call nt_index`/`nt_search`/`nt_get` → results).
+   `nt_note_edit`, `nt_update`, `nt_rm`, `nt_tag`, `nt_mv`, `nt_archive`,
+   `nt_relink` — alongside the read tools `nt_index`, `nt_search`, `nt_recall`,
+   `nt_get`, `nt_status`, `nt_view`, `nt_links`. Verified end-to-end over stdio
+   JSON-RPC (`tools/list` → 16 tools; `tools/call nt_index`/`nt_search`/`nt_get`
+   → results). Unknown tool parameters are rejected, not ignored — a
+   misspelled arg fails loudly instead of silently dropping intent.
+   `nt_note_edit` fixes an existing note in place (append/body/
+   old_string+new_string) so a small correction doesn't need `nt_note
+   supersede:`'s new-id churn.
 2. **OpenCode is a first-class MCP client.** Its config has a top-level `mcp` key
    for `"type": "local"` (stdio) servers, and the agent calls those tools the
    same way it calls built-ins.
@@ -96,7 +101,7 @@ cost.
 |---------|---------|-----------|-----------|
 | **Rules** (small, stable, always true) | `instructions` glob → an `nt`-generated markdown file (or `AGENTS.md`) | `nt export --tag rule > .opencode/nt-rules.md`; `"instructions": [".opencode/nt-rules.md"]` | Paid every request — keep it small |
 | **Knowledge base** (large, queried occasionally) | **MCP tools** `nt_index` → `nt_search` / `nt_get` / `nt_links` / `nt_status` | Already registered via `nt mcp install --client opencode` | **Zero until called** (lazy, index-first) |
-| **Memory write-back** (capture as the agent works) | **MCP tools** `nt_add` / `nt_note` / `nt_update` | Same registration; agent calls them explicitly | Only when writing |
+| **Memory write-back** (capture as the agent works) | **MCP tools** `nt_add` / `nt_note` / `nt_note_edit` / `nt_update` | Same registration; agent calls them explicitly | Only when writing |
 | **Curated KB highlights** (optional) | **Agent Skills** | Symlink/export curated notes to `.opencode/skills/<name>/SKILL.md` | Only the skill list is always-loaded; bodies load on demand |
 
 **Token-budget plan.** Always-in-context = the rules file only (and OpenCode's
@@ -139,9 +144,10 @@ Capability report complete; read+write verdict positive.
   immediately (index-first progressive disclosure). No custom tool needed.
 
 ### Phase 3 — Write-back memory ✅ engine + automation (shipped)
-- The write tools (`nt_add`, `nt_note`, `nt_update`, `nt_rm`, `nt_tag`,
-  `nt_mv`, `nt_archive`, `nt_relink`) are live the moment the MCP server is registered — the
-  agent captures memory by calling them. **No `nt_save` to build.**
+- The write tools (`nt_add`, `nt_note`, `nt_note_edit`, `nt_update`, `nt_rm`,
+  `nt_tag`, `nt_mv`, `nt_archive`, `nt_relink`) are live the moment the MCP
+  server is registered — the agent captures memory by calling them. **No
+  `nt_save` to build.**
 - **Automation (shipped in the `nt-memory` plugin, each on by default):**
   - *Compaction survival* — `experimental.session.compacting` pushes open nt
     tasks + a re-`nt_recall` directive into the compaction context, so
@@ -149,8 +155,9 @@ Capability report complete; read+write verdict positive.
     (`NT_COMPACT=0` disables).
   - *Error-triggered recall* — a failed bash call runs
     `nt recall --lessons-only` on the command + error and injects matching
-    lessons into the next request; recorded mistakes resurface exactly when
-    they're about to repeat (`NT_ERROR_RECALL=0` disables).
+    lessons (lessons flagged ⚑) into the next request; recorded mistakes
+    resurface exactly when they're about to repeat (`NT_ERROR_RECALL=0`
+    disables).
   - *Idle capture nudge* — a session that used tools but wrote nothing to nt
     gets a one-time TUI toast suggesting a note/lesson (`NT_IDLE_NUDGE=0`
     disables).
@@ -192,9 +199,9 @@ Capability report complete; read+write verdict positive.
 - **In-repo vs in-home store.** In-repo (`NT_DIR=./.nt` + `nt git-init`) →
   shared, committed, team-visible memory. In-home (default) → personal, private.
   A team choice, not a technical one; both work.
-- **`nt export` is the lone dependency.** Phases 2–3 work today; Phase 1's rules
-  path is blocked only on adding `nt export`. Until then, rules can be maintained
-  by hand in `AGENTS.md` and KB/memory go fully through MCP.
+- **`nt export` shipped** — Phase 1's compile step exists (`nt export --tag rule`
+  and friends), and the `nt-memory` plugin's live injection makes the static
+  rules file a fallback, not a requirement. Phases 1–3 all work today.
 
 ---
 

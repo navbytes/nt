@@ -147,8 +147,8 @@ func cmdOpencodeInstall(args []string) int {
 	}
 
 	fmt.Println("\n✓ Done. Restart OpenCode (or reload its MCP servers) to pick up nt.")
-	fmt.Println("  rules:  nt note \"<rule>\" --folder rules --tag rule        (injected every turn — keep small)")
-	fmt.Println("  memory: nt note \"<fact>\" --folder memory --tag memory-core")
+	fmt.Println("  rules:  nt note \"<rule>\" --kind rule --description \"…\"        (injected every turn — keep small)")
+	fmt.Println("  memory: nt note \"<fact>\" --kind memory --description \"…\"")
 	fmt.Println("  check what gets injected: nt export --tag rule --title Rules")
 	return 0
 }

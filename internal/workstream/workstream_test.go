@@ -41,6 +41,48 @@ func TestDeriveGitBranch(t *testing.T) {
 	}
 }
 
+// TestNormalize: whitespace runs fold to "-" and edge dashes are stripped, so an
+// id always survives the space-delimited todo.txt ws: stamp.
+func TestNormalize(t *testing.T) {
+	cases := map[string]string{
+		"my stream with spaces": "my-stream-with-spaces",
+		"  padded  ":            "padded",
+		"a\tb\nc":               "a-b-c",
+		"-lead-and-trail-":      "lead-and-trail",
+		"clean-id":              "clean-id",
+		"*":                     "*",
+		"":                      "",
+		"café branch":           "café-branch", // unicode letters pass through
+		"nb sp":                 "nb-sp",       // unicode whitespace folds too
+	}
+	for in, want := range cases {
+		if got := Normalize(in); got != want {
+			t.Errorf("Normalize(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+// TestEnvNormalizesWhitespace: a spacey NT_WORKSTREAM resolves to its dashed
+// form, so writes (stamp) and reads (scope) agree.
+func TestEnvNormalizesWhitespace(t *testing.T) {
+	t.Setenv("NT_WORKSTREAM", "my stream")
+	if got := Env(); got != "my-stream" {
+		t.Errorf("Env() = %q, want my-stream", got)
+	}
+}
+
+// TestScopeNormalizesExplicit: an explicit scope value normalizes the same way;
+// "*" (widen) passes through.
+func TestScopeNormalizesExplicit(t *testing.T) {
+	t.Setenv("NT_WORKSTREAM", "")
+	if got := Scope("a b"); got != "a-b" {
+		t.Errorf(`Scope("a b") = %q, want a-b`, got)
+	}
+	if got := Scope("*"); got != "*" {
+		t.Errorf(`Scope("*") = %q, want *`, got)
+	}
+}
+
 // TestEnv: NT_WORKSTREAM literal wins; "auto" derives; unset → "".
 func TestEnv(t *testing.T) {
 	dir := t.TempDir()

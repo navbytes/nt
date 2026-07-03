@@ -103,3 +103,28 @@ func TestNewAssignsID(t *testing.T) {
 		t.Fatal("quickadd.New should assign an id")
 	}
 }
+
+// A title containing "id:<value>" as plain prose must never hijack the task's
+// identity: task.ParseLine treats id: as a real todo.txt field (it must, to
+// round-trip a genuine stored line), but New parses UNTRUSTED freeform text,
+// where an "id:" token is either an accident or an attempted collision, never
+// a legitimate way to set the id — that always comes from EnsureID.
+func TestStructuralKeysNotInjectableFromText(t *testing.T) {
+	victim := New("existing task")
+	attacker := New("malicious collide id:" + victim.ID())
+	if attacker.ID() == victim.ID() {
+		t.Fatalf("freeform text set id: and collided with an existing task: %q", attacker.ID())
+	}
+	if attacker.ID() == "" {
+		t.Fatal("quickadd.New should still assign a fresh id despite the id: token in text")
+	}
+	// Same for the other structural keys: ws/parent/blocks/discovered are only
+	// ever meant to be set afterward via validated flags/params, not sniffed
+	// out of prose.
+	for _, key := range []string{"ws", "parent", "blocks", "discovered"} {
+		tk := New("a task " + key + ":something")
+		if tk.Key(key) != "" {
+			t.Errorf("%s: should not be settable from freeform text, got %q", key, tk.Key(key))
+		}
+	}
+}
