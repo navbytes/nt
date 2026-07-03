@@ -120,6 +120,14 @@ To fix or extend a note later **without an editor**: `nt edit <note> --append
 this for multi-line/backtick appends), `--body-file new.md` (replace the body),
 or `--desc "…"` (set the one-line summary).
 
+Tag a note with **`--project <name>`** when it's specific to one codebase in a
+shared multi-project store — `nt recall --project <name>` (default: your
+`NT_WORKSTREAM`) then ranks it above cross-project noise:
+
+```bash
+nt note "webhookd retry backoff" --kind decision --project webhookd --description "exponential, cap 5 tries"
+```
+
 Set **structured frontmatter at capture** with `--field key=value` (repeatable):
 
 ```bash
