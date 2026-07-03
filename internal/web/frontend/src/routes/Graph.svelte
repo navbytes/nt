@@ -1249,18 +1249,18 @@
     if (!view.frozen) graph.d3ReheatSimulation();
   }
 
-  // The 3D renderer needs a WebGL context. Some embedded webviews — notably
-  // WebKitGTK, which backs the Linux desktop app — don't expose one, and
-  // 3d-force-graph then renders a blank canvas with no error. Probe for it up
+  // The 3D renderer needs a WebGL2 context — three r163+ dropped WebGL1, so a
+  // WebGL1-only webview can't run it either. Some embedded webviews — notably
+  // WebKitGTK, which backs the Linux desktop app — expose no usable context at
+  // all, and 3d-force-graph then renders a blank canvas with no error. Probe up
   // front so we can fall back to the 2D canvas (which needs no WebGL) instead of
   // failing silently. The probe context is released immediately.
   function webglAvailable(): boolean {
     try {
       const c = document.createElement("canvas");
-      const gl =
-        c.getContext("webgl2") || c.getContext("webgl") || c.getContext("experimental-webgl");
+      const gl = c.getContext("webgl2");
       if (!gl) return false;
-      (gl as WebGLRenderingContext).getExtension("WEBGL_lose_context")?.loseContext();
+      gl.getExtension("WEBGL_lose_context")?.loseContext();
       return true;
     } catch {
       return false;
@@ -1418,6 +1418,21 @@
       // so they don't accumulate across 2D⟷3D rebuilds.
       container.addEventListener("pointerdown", () => (userMoved = true), { once: true });
       container.addEventListener("wheel", () => (userMoved = true), { once: true, passive: true });
+      // Some webviews (WKWebView in the macOS desktop shell) hand out a WebGL
+      // context whose GPU backing is already dead, or kill it moments later —
+      // three then renders a permanently blank pane with no exception. A dead
+      // context at build time throws into the 2D fallback below; a later loss
+      // flips the renderer back to 2D via the dim effect.
+      if (g.renderer?.()?.getContext?.()?.isContextLost?.()) {
+        throw new Error("WebGL context lost during init");
+      }
+      container.querySelector("canvas")?.addEventListener("webglcontextlost", (e: Event) => {
+        e.preventDefault();
+        if (destroyed || !built3d) return;
+        console.error("3D graph WebGL context lost");
+        showToast("The 3D graph lost its WebGL context — showing 2D instead.");
+        view.dim = "2d";
+      });
       built3d = true;
       graph = g;
       } catch (e) {

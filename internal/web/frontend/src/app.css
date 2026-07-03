@@ -915,6 +915,21 @@ body.resizing {
   background: color-mix(in srgb, var(--red) 14%, transparent);
   color: var(--red);
 }
+/* On small screens the action pills would overflow the column, so buttons that
+   wrap their text in .pillbar__btn-label collapse to the icon alone (the text
+   lives on as the button's title/aria-label). Icon-only buttons get the same
+   44px touch target the mobile block below gives .pillbar__btn--icon. */
+@media (max-width: 760px) {
+  .pillbar__btn-label {
+    display: none;
+  }
+  .pillbar__btn:has(> .pillbar__btn-label) {
+    padding: 5px;
+    min-width: 44px;
+    min-height: 44px;
+    justify-content: center;
+  }
+}
 /* hairline divider between sub-groups inside a pill */
 .pillbar__sep {
   align-self: stretch;
@@ -1295,6 +1310,10 @@ body.resizing {
   color: var(--accent-color);
   background: var(--accent-tint);
 }
+.empty__art--err {
+  color: var(--red);
+  background: color-mix(in srgb, var(--red) 13%, transparent);
+}
 .empty code {
   font-family: var(--font-mono);
   font-size: 0.85em;
@@ -1542,16 +1561,8 @@ body.resizing {
   font-size: var(--text-prose);
   line-height: var(--leading-prose);
   letter-spacing: 0;
-  /* A readable measure so note bodies don't run edge-to-edge on wide screens
-     (finding 13). pre/table opt back out below to use the full column width. */
-  max-width: 72ch;
   /* Long unbroken tokens (URLs, hashes) wrap instead of overflowing on mobile. */
   overflow-wrap: anywhere;
-}
-/* Wide content opts out of the 72ch cap and scrolls/wraps within the column. */
-.prose :global(pre),
-.prose :global(table) {
-  max-width: 100%;
 }
 /* Tables scroll horizontally rather than overflow the viewport on mobile. */
 .prose :global(table) {
