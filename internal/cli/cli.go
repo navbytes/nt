@@ -113,6 +113,8 @@ func Run(args []string) int {
 		return cmdOpencode(rest)
 	case "pi":
 		return cmdPi(rest)
+	case "store-hash":
+		return cmdStoreHash(rest)
 	case "web":
 		return cmdWeb(rest)
 	case "status":
@@ -145,7 +147,7 @@ var knownCommands = []string{
 	"done", "do", "skip", "start", "stop", "update", "up", "search", "q",
 	"recall", "export", "tags", "tag", "links", "mv", "rename", "rm", "delete",
 	"archive", "undo", "redo", "edit", "path", "doctor", "gc", "git-init", "hook", "mcp",
-	"opencode", "pi", "web", "version", "help", "supersede", "relink",
+	"opencode", "pi", "store-hash", "web", "version", "help", "supersede", "relink",
 }
 
 // suggestCommand returns the closest known command to cmd within a small edit
@@ -444,6 +446,10 @@ USAGE
   nt pi install               full Pi integration: nt-memory extension (bridges nt's
                               tools — Pi has no MCP) + nt skill + /learn + /recall
                               prompts + AGENTS.md + seeded folders (--print supported)
+  nt store-hash                print a fingerprint of the note store (changes iff a
+                              note was added/removed/modified) — used by the
+                              OpenCode/Pi plugins to skip recompiling unchanged
+                              injected content
   nt web [--port N]           browse and edit notes in a browser (localhost only)
   nt web --detach             run the viewer in the background (--status / --stop to manage)
 

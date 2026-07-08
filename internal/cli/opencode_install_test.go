@@ -35,6 +35,12 @@ func TestOpencodeInstallFull(t *testing.T) {
 		t.Errorf("permission.skill.nt = %v, want allow", skill["nt"])
 	}
 
+	// 7. instructions = ["nt-rules.md"] — the hybrid-mode file baseline.
+	instr, _ := root["instructions"].([]any)
+	if len(instr) != 1 || instr[0] != "nt-rules.md" {
+		t.Errorf("instructions = %v, want [\"nt-rules.md\"]", root["instructions"])
+	}
+
 	// 2–5. Plugin, skill, commands, AGENTS.md on disk.
 	for _, rel := range []string{
 		"plugins/nt-memory.ts",
@@ -142,6 +148,37 @@ func TestEnsureOpencodeSkillPermissionRespectsUserValue(t *testing.T) {
 	skill := perm["skill"].(map[string]any)
 	if skill["nt"] != "deny" || skill["other"] != "allow" {
 		t.Errorf("skill permissions altered: %v", skill)
+	}
+}
+
+// ensureOpencodeInstructions preserves a user's existing instructions list
+// (appending, not replacing) and is idempotent — it doesn't duplicate the
+// entry on a second call.
+func TestEnsureOpencodeInstructionsPreservesExistingEntries(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "opencode.json")
+	seed := `{"instructions": ["CLAUDE.md"]}`
+	if err := os.WriteFile(path, []byte(seed), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	changed, err := ensureOpencodeInstructions(path)
+	if err != nil || !changed {
+		t.Fatalf("expected a change: changed=%v err=%v", changed, err)
+	}
+	root := readJSON(t, path)
+	instr, _ := root["instructions"].([]any)
+	if len(instr) != 2 || instr[0] != "CLAUDE.md" || instr[1] != "nt-rules.md" {
+		t.Errorf("instructions = %v, want [\"CLAUDE.md\", \"nt-rules.md\"]", root["instructions"])
+	}
+
+	// Idempotent: a second call is a no-op, no duplicate entry.
+	changed, err = ensureOpencodeInstructions(path)
+	if err != nil || changed {
+		t.Fatalf("second call should be a no-op: changed=%v err=%v", changed, err)
+	}
+	root = readJSON(t, path)
+	instr, _ = root["instructions"].([]any)
+	if len(instr) != 2 {
+		t.Errorf("instructions grew on re-run: %v", instr)
 	}
 }
 

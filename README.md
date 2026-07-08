@@ -59,7 +59,7 @@ That's it — you're up. `nt help` lists every command; [more install options be
 
 `nt` is the place that memory lives. Because the store is plain text, an agent doesn't need a special database or a running service to remember — it just reads and writes files. Three ways to wire it up:
 
-- **PostToolUse hook** — `nt hook` mirrors Claude Code's `TodoWrite` list into your store automatically (idempotent, tagged `src:claude`). Wire it once in `~/.claude/settings.json`.
+- **PostToolUse hooks** — `nt hook` mirrors Claude Code's `TodoWrite` list into your store automatically (idempotent, tagged `src:claude`), and on a **failed Bash command** surfaces any matching recorded lesson back to Claude (block+reason). Wire both matchers once in `~/.claude/settings.json` — see [docs/claude-integration.md](docs/claude-integration.md).
 - **MCP server** — `nt mcp` exposes **16 typed tools** (`nt_index`, `nt_recall`, `nt_add`, `nt_note`, `nt_note_edit`, `nt_get`, `nt_status`, `nt_search`, `nt_update`, …) with strict unknown-parameter rejection, over stdio. Register it with one command:
   ```bash
   nt mcp install                    # add nt to Claude Code / Claude Desktop (absolute path, idempotent)
@@ -74,7 +74,7 @@ That's it — you're up. `nt help` lists every command; [more install options be
 - **Parallel agents, one store** — set `NT_WORKSTREAM` per agent to isolate in-flight tasks (`list`/`ready`/`log`/`review`/`index` scope to it; `"*"` widens) while notes stay shared; `undo`/`redo` refuse another workstream's change unless `--force`.
 - **Curate, don't hoard** — `nt doctor` flags near-duplicates, orphans, and an oversized pinned tier; `nt supersede`/`nt archive` retire stale notes; `nt gc` sweeps superseded stubs and stranded task-detail notes to `.trash/` (dry-run by default).
 
-Beyond Claude Code, any MCP-speaking agent can drive the same store — including **OpenCode**, whose rules / knowledge-base / memory layers map cleanly onto nt. Full mapping & phased plan → **[docs/opencode-integration.md](docs/opencode-integration.md)**. **[Pi](https://github.com/badlogic/pi-mono)** has no built-in MCP, so `nt pi install` ships an in-process extension that bridges nt's tools in and injects rules + memory live → **[integrations/pi/README.md](integrations/pi/README.md)**.
+Beyond Claude Code, any MCP-speaking agent can drive the same store — including **OpenCode**, whose rules / knowledge-base / memory layers map cleanly onto nt. Full mapping & phased plan → **[docs/opencode-integration.md](docs/opencode-integration.md)**. **[Pi](https://github.com/badlogic/pi-mono)** has no built-in MCP, so `nt pi install` ships an in-process extension that bridges nt's tools in and injects rules + memory live → **[integrations/pi/README.md](integrations/pi/README.md)**. The ranked backlog for where the integration layer goes next (researched by a multi-agent team against market alternatives) → **[docs/memory-integration-roadmap.md](docs/memory-integration-roadmap.md)**.
 
 ```bash
 # During a session (the hook does this for you, or call it directly):
