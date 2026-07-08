@@ -1,0 +1,19 @@
+{
+  "name": "nt",
+  "version": "0.1.0",
+  "description": "Durable task & note memory for AI coding sessions — plain-text todo.txt tasks + markdown notes, with paraphrase-aware recall so lessons survive across sessions.",
+  "author": {
+    "name": "navbytes"
+  },
+  "homepage": "https://github.com/navbytes/nt",
+  "repository": "https://github.com/navbytes/nt",
+  "license": "MIT",
+  "keywords": ["memory", "tasks", "notes", "knowledge-base", "recall", "todo"],
+  "skills": ["./.claude/skills"],
+  "mcpServers": {
+    "nt": {
+      "command": "nt",
+      "args": ["mcp"]
+    }
+  }
+}

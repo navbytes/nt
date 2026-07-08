@@ -60,15 +60,16 @@ That's it — you're up. `nt help` lists every command; [more install options be
 `nt` is the place that memory lives. Because the store is plain text, an agent doesn't need a special database or a running service to remember — it just reads and writes files. Three ways to wire it up:
 
 - **PostToolUse hooks** — `nt hook` mirrors Claude Code's `TodoWrite` list into your store automatically (idempotent, tagged `src:claude`), and on a **failed Bash command** surfaces any matching recorded lesson back to Claude (block+reason). Wire both matchers once in `~/.claude/settings.json` — see [docs/claude-integration.md](docs/claude-integration.md).
-- **MCP server** — `nt mcp` exposes **16 typed tools** (`nt_index`, `nt_recall`, `nt_add`, `nt_note`, `nt_note_edit`, `nt_get`, `nt_status`, `nt_search`, `nt_update`, …) with strict unknown-parameter rejection, over stdio. Register it with one command:
+- **MCP server** — `nt mcp` exposes **18 typed tools** (`nt_index`, `nt_recall`, `nt_add`, `nt_note`, `nt_note_edit`, `nt_get`, `nt_status`, `nt_search`, `nt_update`, `nt_doctor`, `nt_distill`, …) with strict unknown-parameter rejection, over stdio. Register it with one command:
   ```bash
   nt mcp install                    # add nt to Claude Code / Claude Desktop (absolute path, idempotent)
   nt mcp install --client opencode  # …or OpenCode (~/.config/opencode/opencode.json)
   nt opencode install               # …or the FULL OpenCode integration: MCP + memory plugin +
-                                    #    skill + /learn + /recall + AGENTS.md + seeded rules/memory
+                                    #    skill + /learn + /recall + /distill + AGENTS.md + seeded rules/memory
   nt pi install                     # …or the FULL Pi integration: an extension that bridges nt's
-                                    #    tools (Pi has no MCP) + skill + /learn + /recall + AGENTS.md
+                                    #    tools (Pi has no MCP) + skill + /learn + /recall + /distill + AGENTS.md
   ```
+- **Claude Code plugin marketplace** — this repo is a self-hosted marketplace (`.claude-plugin/`): `/plugin marketplace add navbytes/nt` then `/plugin install nt@navbytes-nt` installs the skill + registers the MCP server in one step, no separate `nt mcp install` needed.
 - **The `/nt` skill + read-back loop** — teach the agent to capture as it works and load prior context (`nt index`, then fetch on demand) when it resumes.
 - **Learn from past mistakes** — record a footgun or dead-end as a **lesson** (`nt note … --lesson`), then `nt recall "<what you're about to do>"` surfaces relevant notes with lessons flagged ⚑ first — paraphrase-aware, returns nothing when nothing is relevant (a precision floor, so it's safe to run before every task), and softly boosts same-project notes (`NT_WORKSTREAM`/`--project`; `none` disables). See [docs/claude-integration.md](docs/claude-integration.md).
 - **Parallel agents, one store** — set `NT_WORKSTREAM` per agent to isolate in-flight tasks (`list`/`ready`/`log`/`review`/`index` scope to it; `"*"` widens) while notes stay shared; `undo`/`redo` refuse another workstream's change unless `--force`.
