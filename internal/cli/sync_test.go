@@ -25,6 +25,16 @@ func gitCmdErr(dir string, args ...string) (string, error) {
 	return strings.TrimSpace(string(out)), err
 }
 
+// gitConfigIdentity sets a LOCAL (not global) git identity for dir's repo —
+// CI runners have no global user.name/user.email configured, and `nt sync`
+// itself commits, so every repo these tests create (including clones) needs
+// its own identity rather than relying on the environment's global config.
+func gitConfigIdentity(t *testing.T, dir string) {
+	t.Helper()
+	gitCmd(t, dir, "config", "user.email", "test@example.com")
+	gitCmd(t, dir, "config", "user.name", "Test")
+}
+
 func TestSyncRequiresGitInit(t *testing.T) {
 	t.Setenv("NT_DIR", t.TempDir())
 	captureRun(t, "note", "hello") // give the store something, though it shouldn't matter
@@ -46,6 +56,7 @@ func TestSyncRoundTripBetweenTwoClones(t *testing.T) {
 	t.Setenv("NT_DIR", alice)
 	captureRun(t, "note", "Alice's note", "--tag", "alice")
 	captureRun(t, "git-init")
+	gitConfigIdentity(t, alice)
 	gitCmd(t, alice, "add", "-A")
 	gitCmd(t, alice, "commit", "-m", "seed")
 	gitCmd(t, alice, "remote", "add", "origin", bare)
@@ -55,6 +66,7 @@ func TestSyncRoundTripBetweenTwoClones(t *testing.T) {
 	// up to date — reconcile, push).
 	bob := filepath.Join(t.TempDir(), "bob")
 	gitCmd(t, t.TempDir(), "clone", bare, bob)
+	gitConfigIdentity(t, bob)
 	t.Setenv("NT_DIR", bob)
 	captureRun(t, "note", "Bob's note", "--tag", "bob")
 	out := captureRun(t, "sync")
@@ -96,6 +108,7 @@ func TestSyncCommitsLocalEditsBeforePulling(t *testing.T) {
 	t.Setenv("NT_DIR", dir)
 	captureRun(t, "note", "Seed")
 	captureRun(t, "git-init")
+	gitConfigIdentity(t, dir)
 	gitCmd(t, dir, "add", "-A")
 	gitCmd(t, dir, "commit", "-m", "seed")
 	gitCmd(t, dir, "remote", "add", "origin", bare)
@@ -123,6 +136,7 @@ func TestSyncNoPushSkipsPush(t *testing.T) {
 	t.Setenv("NT_DIR", dir)
 	captureRun(t, "note", "Seed")
 	captureRun(t, "git-init")
+	gitConfigIdentity(t, dir)
 	gitCmd(t, dir, "add", "-A")
 	gitCmd(t, dir, "commit", "-m", "seed")
 	gitCmd(t, dir, "remote", "add", "origin", bare)
