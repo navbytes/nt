@@ -149,10 +149,10 @@ func TestLastLineHandlesMultiChunkFile(t *testing.T) {
 	for i := range big {
 		big[i] = 'a'
 	}
-	if _, err := f.WriteString(fmt.Sprintf("first-%s\n", string(big[:100]))); err != nil {
+	if _, err := fmt.Fprintf(f, "first-%s\n", string(big[:100])); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.WriteString(fmt.Sprintf("second-%s\n", string(big))); err != nil {
+	if _, err := fmt.Fprintf(f, "second-%s\n", string(big)); err != nil {
 		t.Fatal(err)
 	}
 	if err := f.Close(); err != nil {
