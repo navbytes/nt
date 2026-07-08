@@ -130,9 +130,13 @@ met, don't schedule otherwise):
     `brew install navbytes/tap/nt` ships from the next tag.
   - **mise**: documented `mise use -g github:navbytes/nt` — works today via
     mise's `github:` backend with zero repo changes, since nt's release
-    assets already follow a standard name/version/os/arch pattern. The
-    *official* registry (bare `mise use nt`) needs a `registry.toml` PR to
-    `jdx/mise`, an external repo — left for the maintainer.
+    assets already follow a standard name/version/os/arch pattern. Tried the
+    *official* registry (bare `mise use nt`) via
+    [jdx/mise#10867](https://github.com/jdx/mise/pull/10867) — withdrawn:
+    their registry gates new tools on real popularity (stars/forks/downloads,
+    a hard no-appeal bar per their contributing guide), and nt (6 stars,
+    ~1 month old) doesn't clear it yet. Resubmit once nt has real traction;
+    `github:navbytes/nt` is a full substitute until then.
   - **Claude Code plugin marketplace**: nt is now a self-hosted marketplace
     (`.claude-plugin/marketplace.json` + `plugin.json` at repo root) —
     `/plugin marketplace add navbytes/nt` + `/plugin install nt@navbytes-nt`
