@@ -1345,3 +1345,39 @@ func TestMCPNoteEditAcceptsIDAlias(t *testing.T) {
 		t.Fatalf("id should work as a handle alias: %v", err)
 	}
 }
+
+// cloneNote must produce a fully independent copy: noteEdit/relink/
+// markSuperseded mutate the clone (never the *Note the cache handed back —
+// notes/cache.go documents those as read-only) so a failed Save can never
+// leave the cache's shared pointer poisoned. A naive `cp := *n` shallow copy
+// is NOT enough on its own: Tags/Aliases/Extra are slices, so the copy would
+// still share their backing arrays — and mcpSetNoteDescription mutates Extra
+// BY INDEX (n.Extra[i] = ...), which would silently corrupt the cached note
+// even though the top-level struct was "copied".
+func TestCloneNoteIsIndependentOfOriginal(t *testing.T) {
+	orig := &note.Note{
+		ID:    "abc123",
+		Body:  "original body",
+		Tags:  []string{"a", "b"},
+		Extra: []string{"description: original desc"},
+	}
+	clone := cloneNote(orig)
+
+	clone.Body = "MUTATED"
+	clone.Tags[0] = "MUTATED"
+	clone.Tags = append(clone.Tags, "new-tag")
+	clone.Extra[0] = "description: MUTATED"
+
+	if orig.Body != "original body" {
+		t.Errorf("mutating the clone's Body leaked into the original: %q", orig.Body)
+	}
+	if orig.Tags[0] != "a" {
+		t.Errorf("mutating the clone's Tags[0] leaked into the original: %v", orig.Tags)
+	}
+	if len(orig.Tags) != 2 {
+		t.Errorf("append on the clone's Tags leaked into the original: %v", orig.Tags)
+	}
+	if orig.Extra[0] != "description: original desc" {
+		t.Errorf("index-mutating the clone's Extra (mcpSetNoteDescription's pattern) leaked into the original: %v", orig.Extra)
+	}
+}

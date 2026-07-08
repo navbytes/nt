@@ -16,6 +16,7 @@
 package recall
 
 import (
+	"fmt"
 	"math"
 	"sort"
 	"strings"
@@ -69,7 +70,10 @@ var synGroups = [][]string{
 var conceptOf = func() map[string]string {
 	m := map[string]string{}
 	for i, g := range synGroups {
-		id := "g" + string(rune('0'+i))
+		// fmt.Sprintf, not "g"+string(rune('0'+i)): the latter overflows past i=9
+		// into punctuation (':' at i=10, ';' at i=11, …) and eventually collides
+		// with real word characters once the group count passes 74.
+		id := fmt.Sprintf("g%d", i)
 		for _, w := range g {
 			m[stem(w)] = id
 		}

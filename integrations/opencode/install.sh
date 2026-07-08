@@ -55,11 +55,12 @@ else
   cp "$here/AGENTS.md" "$cfg/AGENTS.md"
 fi
 
-# 6. Merge permission.skill.nt = allow into opencode.json without touching the
-#    rest. Uses node if available; otherwise prints a manual hint.
+# 6-7. Merge permission.skill.nt = allow and "nt-rules.md" into instructions
+#      (the hybrid-mode file baseline) into opencode.json without touching the
+#      rest. Uses node if available; otherwise prints a manual hint.
 ocjson="$cfg/opencode.json"
 if command -v node >/dev/null 2>&1; then
-  echo "→ ensuring permission.skill.nt = allow in $ocjson"
+  echo "→ ensuring permission.skill.nt = allow and instructions += nt-rules.md in $ocjson"
   node - "$ocjson" <<'NODE'
 const fs = require("fs");
 const p = process.argv[2];
@@ -69,10 +70,12 @@ root["$schema"] ||= "https://opencode.ai/config.json";
 root.permission ||= {};
 root.permission.skill ||= {};
 root.permission.skill.nt ||= "allow";
+root.instructions ||= [];
+if (!root.instructions.includes("nt-rules.md")) root.instructions.push("nt-rules.md");
 fs.writeFileSync(p, JSON.stringify(root, null, 2) + "\n");
 NODE
 else
-  echo "  (node not found — add \"permission\": { \"skill\": { \"nt\": \"allow\" } } to $ocjson by hand)"
+  echo "  (node not found — add \"permission\": { \"skill\": { \"nt\": \"allow\" } } and \"instructions\": [\"nt-rules.md\"] to $ocjson by hand)"
 fi
 
 # 7. Seed the always-in-context folders + an initial rules export. These notes are
@@ -99,8 +102,9 @@ if is_empty_folder memory; then
     --folder memory --tag memory-core --source opencode >/dev/null || true
 fi
 
-# Initial export so file-mode users have nt-rules.md immediately (harmless in the
-# default system-injection mode).
+# Initial export so nt-rules.md exists immediately — the plugin overwrites it
+# with the full compiled (rules+memory) block at every session start anyway,
+# but this guarantees the file baseline isn't missing before the first session.
 "$nt" export --tag rule --title "Rules" --out "$cfg/nt-rules.md" >/dev/null || true
 
 cat <<EOF
@@ -114,8 +118,11 @@ Next:
   • Inspect what gets injected:  nt export --tag rule --title Rules
 
 Modes (env on the OpenCode process, e.g. via the plugin):
-  NT_INJECT=system  (default) inject live into the system prompt
-  NT_INJECT=file    refresh $cfg/nt-rules.md and load it via "instructions"
+  NT_INJECT=hybrid  (default) session-start file baseline (guaranteed — loaded
+                    via "instructions") + live updates via the system-prompt
+                    transform when it changes mid-session (best-effort)
+  NT_INJECT=system  transform-only, no file baseline (the old default)
+  NT_INJECT=file    file-only, no live transform push
   NT_INJECT=off     rely on AGENTS.md + on-demand MCP only
 
 Learning-loop automation (all ON by default; set =0 to disable):

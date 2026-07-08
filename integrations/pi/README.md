@@ -55,7 +55,13 @@ tokens only when recalled.
   - **Tool bridge** — spawns `nt mcp`, handshakes, `registerTool`s each nt tool
     (read: `nt_index`/`nt_search`/`nt_recall`/`nt_get`/`nt_status`/`nt_links`;
     write: `nt_add`/`nt_note`/`nt_note_edit`/`nt_update`/`nt_tag`/`nt_mv`/
-    `nt_archive`/`nt_relink`/`nt_rm`); torn down on `session_shutdown`.
+    `nt_archive`/`nt_relink`/`nt_rm`); torn down on `session_shutdown`. Since
+    `registerTool` only runs once at load but the subprocess can die mid
+    session (a crash, or `session_shutdown` firing on something short of a
+    real end — e.g. `/new` or `/fork`), the bridge **self-heals**: the next
+    bridged call lazily respawns it, with concurrent calls sharing one
+    in-flight respawn and a cooldown bounding retries against a persistently
+    broken `nt`.
   - **Rules + core-memory injection** every run (`before_agent_start`),
     recompiled live from `nt export`, capped at `NT_INJECT_MAX` and truncated on
     note boundaries (never mid-rule). Re-running each turn means rules also

@@ -13,12 +13,19 @@
  *    `nt_note_edit`, `nt_status`, `nt_update`, `nt_links`, and the curation tools.
  *    The tool names + schemas come straight from `nt mcp`, so they stay in sync
  *    with the binary and match the skill / prompts / AGENTS.md verbatim. This is
- *    the Pi analog of OpenCode's `nt mcp install --client opencode`.
+ *    the Pi analog of OpenCode's `nt mcp install --client opencode`. The bridge
+ *    self-heals: registerTool runs once at load, but the subprocess can die mid
+ *    session (a crash, or session_shutdown firing on something short of a real
+ *    end); NtBridge.ensureAlive() respawns it lazily on the next bridged call
+ *    rather than leaving every nt_* tool permanently broken.
  *
  * 2. **Always-in-context injection.** The user's nt **rules** + a small **core
  *    memory** are compiled live from nt on every agent run and appended to the
  *    system prompt via the `before_agent_start` hook — so editing a note in nt
- *    updates what the agent sees, with no stale exported file.
+ *    updates what the agent sees, with no stale exported file. The compiled
+ *    block is memoized (keyed by `nt store-hash`, a cheap fingerprint) so
+ *    unrelated turns don't re-exec nt or re-emit different bytes for
+ *    unchanged content — see the compile()/compileUncached() split below.
  *
  * 3. **Error-triggered recall.** When a bash tool call fails, we run
  *    `nt recall --lessons-only` on the command + error and append any recorded
@@ -104,19 +111,40 @@ async function runNtJSON(args: string[]): Promise<any> {
 // ---- minimal MCP stdio client for `nt mcp` (newline-delimited JSON-RPC) ----
 type Pending = { resolve: (v: any) => void; reject: (e: any) => void }
 
+// How long ensureAlive() waits after a FAILED respawn before trying again —
+// bounds respawn frequency when nt is persistently broken (uninstalled, PATH
+// issue) without ever permanently giving up (nt might come back on PATH
+// later, or a transient failure might clear).
+const RESTART_COOLDOWN_MS = 5000
+
 class NtBridge {
   private proc: ReturnType<typeof spawn> | null = null
   private buf = ""
   private nextId = 1
   private pending = new Map<number, Pending>()
   private dead = false
+  // Dedupe concurrent respawns into one in-flight promise, and bound retry
+  // frequency after a failed one. See ensureAlive().
+  private starting: Promise<void> | null = null
+  private nextRetryAt = 0
+  // Last few stderr lines from the subprocess, surfaced in the dead-bridge
+  // error so a broken nt is diagnosable instead of a bare "bridge is down".
+  private stderrTail: string[] = []
   tools: any[] = []
 
   async start(): Promise<void> {
-    this.proc = spawn(NT_BIN, ["mcp"], { stdio: ["pipe", "pipe", "ignore"] })
+    this.dead = false
+    this.buf = ""
+    this.pending.clear()
+    this.proc = spawn(NT_BIN, ["mcp"], { stdio: ["pipe", "pipe", "pipe"] })
     this.proc.on("exit", () => this.die(new Error("nt mcp exited")))
     this.proc.on("error", (e) => this.die(e))
     this.proc.stdout?.on("data", (d: Buffer) => this.onData(d))
+    this.proc.stderr?.on("data", (d: Buffer) => {
+      const lines = d.toString().split("\n").filter(Boolean)
+      this.stderrTail.push(...lines)
+      if (this.stderrTail.length > 20) this.stderrTail = this.stderrTail.slice(-20)
+    })
 
     await this.request("initialize", {
       protocolVersion: "2024-11-05",
@@ -127,6 +155,42 @@ class NtBridge {
     this.notify("notifications/initialized")
     const res = await this.request("tools/list", {})
     this.tools = Array.isArray(res?.tools) ? res.tools : []
+  }
+
+  // Respawns the subprocess if it died, for ANY reason — a crash, an explicit
+  // stop() (see session_shutdown below), or Pi firing session_shutdown on
+  // something short of a real process end (e.g. /new or /fork — unconfirmed
+  // either way, and this makes it not matter: the bridge recovers on the next
+  // call regardless of why it went down). Without this, EVERY bridged tool
+  // call fails for the rest of the process's life the moment the subprocess
+  // dies once, even though the tools stay registered (registerTool runs once
+  // at load, never re-run per session). Concurrent callers share ONE in-flight
+  // respawn so a burst of tool calls doesn't spawn `nt mcp` N times.
+  private async ensureAlive(): Promise<void> {
+    if (!this.dead) return
+    if (this.starting) return this.starting
+    if (Date.now() < this.nextRetryAt) {
+      const tail = this.stderrTail.slice(-3).join(" | ")
+      throw new Error("nt bridge is down (retrying after a cooldown)" + (tail ? `; last stderr: ${tail}` : ""))
+    }
+    this.starting = this.start()
+      .catch((e) => {
+        // start() sets dead=false at its top, so a THROW BEFORE this.proc is
+        // assigned (spawn() itself throwing, not just the child process later
+        // failing) would otherwise leave dead=false — the next ensureAlive()
+        // call's `if (!this.dead) return` would then silently skip retrying
+        // forever, falling through to write()'s generic "bridge is down"
+        // with no cooldown and no further respawn attempts. Force it back to
+        // dead so the cooldown/retry contract holds regardless of how start()
+        // failed.
+        this.dead = true
+        this.nextRetryAt = Date.now() + RESTART_COOLDOWN_MS
+        throw e
+      })
+      .finally(() => {
+        this.starting = null
+      })
+    return this.starting
   }
 
   private onData(chunk: Buffer) {
@@ -191,7 +255,8 @@ class NtBridge {
     })
   }
 
-  call(name: string, args: any): Promise<any> {
+  async call(name: string, args: any): Promise<any> {
+    await this.ensureAlive()
     return this.request("tools/call", { name, arguments: args ?? {} })
   }
 
@@ -209,7 +274,7 @@ class NtBridge {
 // separate `nt export` (tag filters are AND-combined, so two tags need two
 // calls). Provenance AND the top "Generated by" header are dropped to save
 // tokens on every turn — the agent can still nt_search/nt_get the source note.
-async function compile(): Promise<string> {
+async function compileUncached(): Promise<string> {
   const [rules, memory] = await Promise.all([
     runNt(["export", "--tag", CONFIG.rulesTag, "--title", "Rules", "--no-provenance", "--no-header"]),
     runNt(["export", "--tag", CONFIG.memoryTag, "--title", "Memory", "--no-provenance", "--no-header"]),
@@ -264,6 +329,43 @@ async function compile(): Promise<string> {
   }
   return result
 }
+
+// ---- compile() memoization ----
+// compileUncached() re-execs two `nt export` calls, and before_agent_start
+// fires on every agent run, so an unmemoized compile spawns nt processes
+// needlessly and re-emits fresh bytes each time. The cache is keyed by `nt
+// store-hash` (a cheap stat-walk over notes/, no bodies read) rather than the
+// compiled bytes themselves, so unchanged content returns byte-identical
+// cached output — the actual precision an LLM provider's prompt cache needs.
+// A short TTL bounds how often the hash itself gets checked; write signals (an
+// nt_* write tool, or a bash command that runs `nt note/add/…`) drop the cache
+// immediately so an edit made THIS turn shows up THIS turn, not after the TTL.
+let compileCache: { hash: string; text: string; ts: number } | null = null
+const COMPILE_TTL_MS = Number(process.env.NT_INJECT_TTL || 15000)
+
+function invalidateCompileCache() {
+  compileCache = null
+}
+
+async function compile(): Promise<string> {
+  const now = Date.now()
+  if (compileCache && now - compileCache.ts < COMPILE_TTL_MS) {
+    return compileCache.text
+  }
+  const hash = (await runNt(["store-hash"])).trim()
+  if (hash && compileCache && hash === compileCache.hash) {
+    compileCache.ts = now // still fresh — refresh the TTL clock, skip re-export
+    return compileCache.text
+  }
+  const text = await compileUncached()
+  compileCache = { hash, text, ts: now }
+  return text
+}
+
+// A bash command that drives nt's write surface directly (fallback path, or
+// an agent that prefers the CLI) — same invalidation trigger as a bridged
+// nt_* write tool.
+const NT_WRITE_COMMAND = /(^|[;&|]\s*)nt\s+(note|add|update|tag|mv|rm|archive|relink|edit)\b/
 
 // Recall recorded lessons for a failed command; empty string when none match.
 async function recallLessons(command: string, errorTail: string): Promise<string> {
@@ -370,11 +472,14 @@ export default async function (pi: ExtensionAPI) {
   pi.on("tool_result", async (event: any) => {
     try {
       const tool: string = event?.toolName || ""
+      const command: string = tool === "bash" ? String(event?.input?.command ?? "") : ""
       usedTools = true
       if (NT_WRITE_TOOL.test(tool)) wroteNt = true
+      if (NT_WRITE_TOOL.test(tool) || (tool === "bash" && NT_WRITE_COMMAND.test(command))) {
+        invalidateCompileCache()
+      }
 
       if (!CONFIG.errorRecall || tool !== "bash" || !event?.isError) return
-      const command = String(event?.input?.command ?? "")
       const throttleKey = command.slice(0, 80)
       if (!throttleKey || recalledFailures.has(throttleKey)) return
       if (recalledFailures.size > 128) recalledFailures.clear()

@@ -7,15 +7,28 @@ integration points: an automatic **hook** and an explicit **`/nt` skill**.
 
 ---
 
-## 1. Automatic capture — the PostToolUse hook
+## 1. Automatic capture & recall — two PostToolUse hooks
 
-Claude Code maintains a todo list via its `TodoWrite` tool. The `nt hook` command
-mirrors that list into your nt store, idempotently, tagged `src:claude`.
+`nt hook` is one command that dispatches on which tool fired it — wire it under
+**both** matchers below and it handles each independently.
+
+### 1a. Todo mirror (matcher `TodoWrite`)
+
+Claude Code maintains a todo list via its `TodoWrite` tool. `nt hook` mirrors
+that list into your nt store, idempotently, tagged `src:claude`.
+
+### 1b. Error-triggered lesson recall (matcher `Bash`)
+
+The same loop the OpenCode/Pi integrations run: when a bash command **fails**,
+`nt hook` searches your recorded **lessons** (`nt note … --lesson`) for the
+command + error tail. If it finds one, it feeds it back to Claude via the
+hook's block+reason contract — the mistake summons its own antidote on the
+next turn instead of relying on the agent remembering to run `nt recall`.
 
 ### Setup
 
-Add a PostToolUse hook to your Claude Code settings (`~/.claude/settings.json`
-for all projects, or a project's `.claude/settings.json`):
+Add both matchers to your Claude Code settings (`~/.claude/settings.json` for
+all projects, or a project's `.claude/settings.json`):
 
 ```json
 {
@@ -26,18 +39,25 @@ for all projects, or a project's `.claude/settings.json`):
         "hooks": [
           { "type": "command", "command": "nt hook" }
         ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          { "type": "command", "command": "nt hook" }
+        ]
       }
     ]
   }
 }
 ```
 
-That's it. From then on, whenever Claude updates its todo list:
+That's it. From then on:
 
 - new todos are added to nt as tasks (`src:claude`),
 - status changes are mirrored (`in_progress` → doing, `completed` → done),
 - nothing is duplicated — a per-session map (`$NT_DIR/.claude-sync.json`) tracks
-  which todo maps to which nt task.
+  which todo maps to which nt task,
+- a failed bash command that matches a recorded lesson surfaces it on the next turn.
 
 ### How it behaves
 
@@ -47,9 +67,13 @@ That's it. From then on, whenever Claude updates its todo list:
 | `in_progress`    | `s:doing` |
 | `completed`      | done (`x`) |
 
-`nt hook` reads the hook's JSON event from stdin, is silent, and **always exits
-0** — it can never break or slow your session. If `nt` isn't installed or the
-store can't be opened, it simply does nothing.
+`nt hook` reads the hook's JSON event from stdin and is silent by design in
+every case except the one it's SUPPOSED to speak up for: a failed Bash command
+matching a recorded lesson, where it exits **2** with the lesson(s) on stderr
+(Claude Code's block+reason contract for feeding text back to the model).
+Every other path — a successful command, a TodoWrite event, nothing relevant
+on record, `nt` not installed, the store not opening — exits **0** silently. It
+can never break or meaningfully slow your session either way.
 
 > Tip: while the hook runs, keep the `nt` TUI open in a side pane (`nt`). Tasks
 > appear within ~80ms (fsnotify) as Claude works — no window switching.

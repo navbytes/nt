@@ -14,5 +14,6 @@
     "skill": {
       "nt": "allow"
     }
-  }
+  },
+  "instructions": ["nt-rules.md"]
 }

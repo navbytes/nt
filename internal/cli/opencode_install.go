@@ -46,7 +46,8 @@ var opencodeAssets = []struct{ src, dst string }{
 //  4. install the /learn and /recall commands     → commands/*.md
 //  5. install a starter AGENTS.md                 (only if none exists)
 //  6. allow the nt skill                          → opencode.json permission.skill.nt
-//  7. seed the rules/ + memory/ store folders and an initial nt-rules.md export
+//  7. load the file baseline                      → opencode.json instructions
+//  8. seed the rules/ + memory/ store folders and an initial nt-rules.md export
 //
 // Idempotent and safe to re-run; --print shows every step without writing.
 func cmdOpencodeInstall(args []string) int {
@@ -134,7 +135,23 @@ func cmdOpencodeInstall(args []string) int {
 		}
 	}
 
-	// 7. Seed the always-in-context folders + the initial rules export. The seeds
+	// 7. instructions = ["nt-rules.md", …] — the guaranteed file baseline hybrid
+	// mode (the plugin's default) writes at session start, loaded via a STABLE
+	// OpenCode config field rather than the experimental system-prompt
+	// transform some builds silently no-op (sst/opencode#17100).
+	if printOnly {
+		fmt.Printf("would ensure \"nt-rules.md\" is in instructions in %s\n", cfgPath)
+	} else {
+		changed, err := ensureOpencodeInstructions(cfgPath)
+		if err != nil {
+			return fail(err)
+		}
+		if changed {
+			fmt.Printf("added nt-rules.md to instructions in %s\n", cfgPath)
+		}
+	}
+
+	// 8. Seed the always-in-context folders + the initial rules export. The seeds
 	// are editable examples; the folders + tags are the convention that matters.
 	if printOnly {
 		fmt.Println("would seed the rules/ and memory/ nt folders (if empty) and export nt-rules.md")
@@ -179,6 +196,44 @@ func ensureOpencodeSkillPermission(path string) (changed bool, err error) {
 	skill["nt"] = "allow"
 	perm["skill"] = skill
 	root["permission"] = perm
+	if fresh {
+		if _, ok := root["$schema"]; !ok {
+			root["$schema"] = opencodeSchema
+		}
+	}
+	if err := writeConfigAtomic(path, root); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// ensureOpencodeInstructions ensures "nt-rules.md" is present in the OpenCode
+// config's top-level "instructions" array — the file hybrid/file injection
+// mode writes at session start (see plugins/nt-memory.ts). Preserves every
+// other entry and every other key; a non-array existing "instructions" value
+// is left alone with an error asking the user to fix it by hand (same policy
+// as ensureOpencodeSkillPermission).
+func ensureOpencodeInstructions(path string) (changed bool, err error) {
+	root, fresh, err := readConfigMap(path)
+	if err != nil {
+		return false, err
+	}
+	raw, exists := root["instructions"]
+	var list []any
+	if exists {
+		arr, ok := raw.([]any)
+		if !ok {
+			return false, fmt.Errorf("%s has a non-array \"instructions\" value; fix it and re-run", path)
+		}
+		list = arr
+	}
+	for _, v := range list {
+		if s, ok := v.(string); ok && s == "nt-rules.md" {
+			return false, nil // already present
+		}
+	}
+	list = append(list, "nt-rules.md")
+	root["instructions"] = list
 	if fresh {
 		if _, ok := root["$schema"]; !ok {
 			root["$schema"] = opencodeSchema

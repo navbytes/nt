@@ -818,16 +818,35 @@ func cmdHook(args []string) int {
 		return 0
 	}
 	_ = aisync.Sync(e, data)
+
+	// Error-triggered lesson recall (PostToolUse, matcher "Bash") — the same
+	// loop the OpenCode/Pi integrations already run: a failed bash command
+	// summons any recorded lesson that might explain it, instead of relying on
+	// the agent remembering to ask. Exit 2 + stderr is Claude Code's hook
+	// contract for feeding blocking feedback back to the model; every other
+	// path (including a non-Bash event, or nothing relevant on record) exits 0
+	// silently, matching the TodoWrite mirror above.
+	if msg, fire := hookBashErrorRecall(note.Active(mustNotes(e)), data); fire {
+		fmt.Fprintln(os.Stderr, msg)
+		return 2
+	}
 	return 0
 }
 
 func printHookHelp() {
-	fmt.Print(`nt hook — mirror a Claude Code TodoWrite list into your nt store.
+	fmt.Print(`nt hook — two Claude Code PostToolUse hooks in one command.
 
 It is a PostToolUse hook, not an interactive command: it reads the hook's JSON
-event from stdin, upserts each todo as a task (tagged src:claude, idempotent),
-is silent, and always exits 0. Wire it once into Claude Code's settings
-(~/.claude/settings.json or a project .claude/settings.json):
+event from stdin and dispatches on tool_name.
+  - matcher "TodoWrite": upserts each todo as a task (tagged src:claude,
+    idempotent), silent, always exits 0.
+  - matcher "Bash": on a FAILED command, searches recorded lessons for the
+    command + error tail (the same loop the OpenCode/Pi integrations run) and,
+    if it finds one, exits 2 with the lessons on stderr — Claude Code's
+    block+reason contract for feeding it back to the model. Exits 0 silently
+    otherwise (success, or nothing relevant on record).
+Wire both into Claude Code's settings (~/.claude/settings.json or a project
+.claude/settings.json):
 
   {
     "hooks": {
@@ -835,13 +854,18 @@ is silent, and always exits 0. Wire it once into Claude Code's settings
         {
           "matcher": "TodoWrite",
           "hooks": [ { "type": "command", "command": "nt hook" } ]
+        },
+        {
+          "matcher": "Bash",
+          "hooks": [ { "type": "command", "command": "nt hook" } ]
         }
       ]
     }
   }
 
-Then your agent's todo list is captured automatically as you work. Full setup
-and the status mapping: docs/claude-integration.md. For typed agent tools
-(nt_add, nt_index, nt_search, …) instead of the hook, see: nt mcp install.
+Then your agent's todo list is captured automatically as you work, and a
+failed command that matches a recorded lesson surfaces it on the next turn.
+Full setup: docs/claude-integration.md. For typed agent tools (nt_add,
+nt_index, nt_search, …) instead of the hook, see: nt mcp install.
 `)
 }

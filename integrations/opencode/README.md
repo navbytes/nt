@@ -66,14 +66,26 @@ which writes into `~/.config/opencode/opencode.json`:
 ```
 
 **2. Plugin (`plugins/nt-memory.ts`)** — injects the rules + core-memory block
-into the system prompt, recompiled **live from nt every session** via
-`experimental.chat.system.transform`. Edit a note → the next session sees it.
-Fully wrapped so a broken nt can't break a session. Modes:
-- `NT_INJECT=system` *(default)* — live injection via the transform.
-- `NT_INJECT=file` — instead refresh `~/.config/opencode/nt-rules.md` on
-  `session.created` for the `instructions` config (`"instructions":
-  ["nt-rules.md"]`); use this if your build lacks the experimental hook.
+into the system prompt, recompiled live from nt. Fully wrapped so a broken nt
+can't break a session. Modes:
+- `NT_INJECT=hybrid` *(default)* — writes a **session-start file baseline**
+  (the compiled rules+memory block, refreshed on `session.created`, loaded via
+  the STABLE `instructions` config — `install` sets `"instructions":
+  ["nt-rules.md"]`) AND pushes live updates via
+  `experimental.chat.system.transform` whenever the store changes after that
+  snapshot, deduped so a working hook never shows the same content twice. This
+  exists because `experimental.chat.system.transform` is reported to silently
+  discard its mutation on some OpenCode builds ([sst/opencode#17100][17100],
+  closed "not planned") — the old `system`-only default had no fallback, so a
+  default install on an affected build injected **zero** rules, silently. The
+  file baseline can't no-op the same way.
+- `NT_INJECT=system` — transform-only, no file baseline (the old default) —
+  keep this if you've confirmed your build's transform hook actually reaches
+  the model and prefer not to touch `opencode.json`.
+- `NT_INJECT=file` — file-only, no live transform push.
 - `NT_INJECT=off` — rely on `AGENTS.md` + on-demand MCP.
+
+[17100]: https://github.com/sst/opencode/issues/17100
 
 It also closes the loop automatically (each independently switchable):
 - **Compaction survival** (`NT_COMPACT=0`) — on `experimental.session.compacting`
@@ -140,8 +152,11 @@ end.
   over one global store). For project-scoped memory, set `NT_DIR=./.nt` (and `nt
   git-init`) and put `opencode.json`/`.opencode/` in the repo; isolate tasks per
   worktree with `NT_WORKSTREAM` while notes stay shared.
-- **Live vs file injection.** `system` is always-fresh but uses an *experimental*
-  hook; `file` is stable but refreshes once per session. Switch with `NT_INJECT`.
+- **Live vs file injection.** `hybrid` (default) gets both: a guaranteed
+  session-start file baseline plus live updates when the experimental
+  transform hook actually works on your build. `system` is always-fresh but
+  depends entirely on that experimental hook with no fallback; `file` is
+  stable but only refreshes once per session. Switch with `NT_INJECT`.
 - **Token budget is standing cost.** Anything tagged `rule`/`memory-core` is
   billed every turn — audit with `nt export --tag rule` and trim.
 
@@ -150,16 +165,18 @@ end.
 Provider-agnostic: everything runs in the OpenCode harness *before* the model
 call, so it works whether OpenCode talks to Claude or any model via a LiteLLM
 proxy / custom provider (no dependency on hosted models). Install only **merges**
-`mcp.nt` + `permission.skill.nt` — your provider/model config is untouched. The
+`mcp.nt` + `permission.skill.nt` + `instructions` — your provider/model config is untouched. The
 always-in-context layer is plain system-prompt text (no tool-calling needed); the
 on-demand `nt_*` tools need the routed model to support tool calling (Claude
 does), degrading gracefully otherwise.
 
 ## Requirements
 - `nt` on PATH (or `NT_BIN`).
-- OpenCode with MCP support (all current versions). Live injection +
-  error-triggered recall need `experimental.chat.system.transform`; compaction
-  survival needs `experimental.session.compacting` — both experimental, and the
-  plugin degrades gracefully without them (use `NT_INJECT=file` for rules). The
-  idle nudge and todo mirror use only stable hooks.
-- `node` is used only by `install.sh` to merge one config key; optional.
+- OpenCode with MCP support (all current versions) and a stable `instructions`
+  config (all current versions) — the default `hybrid` mode's guaranteed layer
+  needs only these. The *live* freshness layer + error-triggered recall use
+  `experimental.chat.system.transform`; compaction survival uses
+  `experimental.session.compacting` — both experimental and reported to no-op
+  on some builds, which is exactly why `hybrid` doesn't depend on them alone.
+  The idle nudge and todo mirror use only stable hooks.
+- `node` is used only by `install.sh` to merge two config keys; optional.

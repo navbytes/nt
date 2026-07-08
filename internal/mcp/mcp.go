@@ -919,6 +919,25 @@ func (s *server) note(a map[string]any) (string, error) {
 // a typo or extend a note without full-note churn; this closes that gap with
 // the same three edit modes the CLI offers: append, a literal full body
 // replace, or an old_string/new_string patch of exactly one match.
+// cloneNote returns an independent copy of n, safe to mutate ahead of Save.
+// notes/cache.go documents its returned *Note values as shared with the cache
+// and read-only ("the read-model treats them as read-only, so this is safe");
+// mutating one directly ahead of a Save that might fail (disk full,
+// permission error, concurrent delete) would poison the cache — a FAILED
+// write leaves the in-memory note mutated while the file on disk isn't, and
+// since the mtime/size didn't change, cache.List keeps serving the poisoned
+// pointer until eviction or restart. A shallow struct copy isn't enough on its
+// own: Tags/Aliases/Extra are slices, so `cp := *n` still shares their backing
+// arrays (mcpSetNoteDescription, for one, mutates Extra by index) — clone
+// those explicitly.
+func cloneNote(n *note.Note) *note.Note {
+	cp := *n
+	cp.Tags = append([]string(nil), n.Tags...)
+	cp.Aliases = append([]string(nil), n.Aliases...)
+	cp.Extra = append([]string(nil), n.Extra...)
+	return &cp
+}
+
 func (s *server) noteEdit(a map[string]any) (string, error) {
 	handle := strings.TrimSpace(str(a, "handle"))
 	if handle == "" {
@@ -928,25 +947,29 @@ func (s *server) noteEdit(a map[string]any) (string, error) {
 		return "", fmt.Errorf("handle is required (a note id, slug, or title)")
 	}
 	notes := s.listNotes()
-	var n *note.Note
+	var cached *note.Note
 	if s.cache != nil {
-		n = s.cache.ByID(handle)
+		cached = s.cache.ByID(handle)
 	}
-	if n == nil {
+	if cached == nil {
 		it, ok := links.Resolve(handle, nil, notes)
 		if !ok || it.Kind != "note" {
 			return "", fmt.Errorf("no note %q", handle)
 		}
 		for _, cand := range notes {
 			if cand.Path == it.Path {
-				n = cand
+				cached = cand
 				break
 			}
 		}
 	}
-	if n == nil {
+	if cached == nil {
 		return "", fmt.Errorf("no note %q", handle)
 	}
+	// Edit a copy — see cloneNote's doc comment. The cache picks up the change
+	// organically on its next List() call via the file's changed mtime/size; no
+	// cache-mutation API is needed here.
+	n := cloneNote(cached)
 
 	appendVal := strings.TrimSpace(str(a, "append"))
 	bodyVal := strings.TrimSpace(str(a, "body"))
@@ -1049,17 +1072,19 @@ func (s *server) relink(a map[string]any) (string, error) {
 		return "", fmt.Errorf("handle, old, and new are required")
 	}
 	notes := s.listNotes()
-	n, ok := resolveNoteMCP(notes, handle)
+	cached, ok := resolveNoteMCP(notes, handle)
 	if !ok {
 		return "", fmt.Errorf("no note %q", handle)
 	}
 	if _, ok := links.Resolve(newT, nil, notes); !ok {
 		return "", fmt.Errorf("new target [[%s]] doesn't resolve to any note", newT)
 	}
-	body, count := relinkBody(n.Body, oldT, newT)
+	body, count := relinkBody(cached.Body, oldT, newT)
 	if count == 0 {
 		return "", fmt.Errorf("no [[%s]] found in note %q", oldT, handle)
 	}
+	// Edit a copy — see cloneNote's doc comment (listNotes() is cache-backed).
+	n := cloneNote(cached)
 	n.Body = body
 	if err := n.Save(); err != nil {
 		return "", err
@@ -1080,13 +1105,15 @@ func relinkBody(body, oldT, newT string) (string, int) {
 
 // markSuperseded stamps oldHandle's note with superseded_by=newID.
 func (s *server) markSuperseded(oldHandle, newID string) error {
-	old, ok := resolveNoteMCP(s.listNotes(), oldHandle)
+	cached, ok := resolveNoteMCP(s.listNotes(), oldHandle)
 	if !ok {
 		return fmt.Errorf("no note %q to supersede", oldHandle)
 	}
-	if old.ID == newID {
+	if cached.ID == newID {
 		return fmt.Errorf("a note can't supersede itself")
 	}
+	// Edit a copy — see cloneNote's doc comment (listNotes() is cache-backed).
+	old := cloneNote(cached)
 	old.SupersededBy = newID
 	return old.Save()
 }
