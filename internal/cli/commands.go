@@ -580,6 +580,8 @@ func cmdNote(args []string) int {
 	force := fs.Bool("force", false, "create even if a near-duplicate note already exists")
 	lesson := fs.Bool("lesson", false, "record a durable lesson/gotcha: tags it 'lesson' and files it under lessons/ so 'nt recall' surfaces it before the mistake recurs")
 	kind := fs.String("kind", "", "note class: lesson|decision|ref|rule|memory — tags it and files it in the canonical folder (memory files under memory/ with tag memory-core — the always-loaded core-memory layer)")
+	validFrom := fs.String("valid-from", "", "this fact is only true from this date/time on (YYYY-MM-DD or RFC3339) — note stays visible before then, unflagged")
+	validUntil := fs.String("valid-until", "", "this fact stops being true after this date/time (YYYY-MM-DD or RFC3339) — nt_recall down-ranks and flags it 'expired' past this, but never hides it")
 	var fields stringSlice
 	asJSON := fs.Bool("json", false, "print the created note as JSON (id, title, path, …)")
 	fs.Var(&tags, "tag", "tag (repeatable)")
@@ -675,7 +677,14 @@ func cmdNote(args []string) int {
 	if p := strings.TrimSpace(*project); p != "" { // --project → project: frontmatter (recall's project boost matches it)
 		fields = append(fields, "project="+p)
 	}
-	if len(fields) > 0 { // --field key=value → extra frontmatter, preserved verbatim
+	vf, vu := strings.TrimSpace(*validFrom), strings.TrimSpace(*validUntil)
+	if vf != "" {
+		n.ValidFrom = vf
+	}
+	if vu != "" {
+		n.ValidUntil = vu
+	}
+	if len(fields) > 0 || vf != "" || vu != "" { // --field key=value → extra frontmatter, preserved verbatim
 		for _, f := range fields {
 			k, v, found := strings.Cut(f, "=")
 			if !found || strings.TrimSpace(k) == "" {
@@ -1482,10 +1491,21 @@ type noteJSON struct {
 	Updated     string   `json:"updated,omitempty"`
 	Body        string   `json:"body,omitempty"`
 	Path        string   `json:"path"`
+	// MTime is the optimistic-concurrency token: pass it back via `nt edit
+	// --expect-mtime` to refuse instead of overwrite if the note changed on
+	// disk since. See note.SaveIfUnchanged's doc comment.
+	MTime      string `json:"mtime,omitempty"`
+	ValidFrom  string `json:"validFrom,omitempty"`
+	ValidUntil string `json:"validUntil,omitempty"`
+	// Expired/NotYetValid are computed as of read time from ValidFrom/ValidUntil
+	// — see note.Note.Expired's doc comment. The note is never hidden either way.
+	Expired     bool `json:"expired,omitempty"`
+	NotYetValid bool `json:"notYetValid,omitempty"`
 }
 
 func notesToJSON(notes []*note.Note) []noteJSON {
 	out := make([]noteJSON, 0, len(notes))
+	now := time.Now()
 	for _, n := range notes {
 		// Include the body AND the untruncated description: an agent recalling a
 		// note needs the finding itself, and for stub-style notes the description
@@ -1496,6 +1516,11 @@ func notesToJSON(notes []*note.Note) []noteJSON {
 			Tags: n.Tags, Source: n.Source,
 			Created: n.Created, Updated: n.Updated,
 			Body: strings.TrimSpace(n.Body), Path: n.Path,
+			MTime:       n.MTimeToken(),
+			ValidFrom:   n.ValidFrom,
+			ValidUntil:  n.ValidUntil,
+			Expired:     n.Expired(now),
+			NotYetValid: n.NotYetValid(now),
 		})
 	}
 	return out

@@ -73,6 +73,8 @@ func Run(args []string) int {
 		return cmdRecall(rest)
 	case "export":
 		return cmdExport(rest)
+	case "import":
+		return cmdImport(rest)
 	case "tags":
 		return cmdTags(rest)
 	case "tag":
@@ -99,6 +101,8 @@ func Run(args []string) int {
 		return cmdGc(rest)
 	case "git-init":
 		return cmdGitInit(rest)
+	case "sync":
+		return cmdSync(rest)
 	case "hook":
 		return cmdHook(rest)
 	case "mcp":
@@ -145,8 +149,8 @@ var knownCommands = []string{
 	"add", "a", "note", "notes", "show", "cat", "journal", "j", "list", "ls",
 	"view", "views", "ready", "agenda", "review", "index", "log",
 	"done", "do", "skip", "start", "stop", "update", "up", "search", "q",
-	"recall", "export", "tags", "tag", "links", "mv", "rename", "rm", "delete",
-	"archive", "undo", "redo", "edit", "path", "doctor", "gc", "git-init", "hook", "mcp",
+	"recall", "export", "import", "tags", "tag", "links", "mv", "rename", "rm", "delete",
+	"archive", "undo", "redo", "edit", "path", "doctor", "gc", "git-init", "sync", "hook", "mcp",
 	"opencode", "pi", "store-hash", "web", "version", "help", "supersede", "relink",
 }
 
@@ -412,6 +416,8 @@ USAGE
                               by tag, folder, or project: frontmatter
                               (default: NT_WORKSTREAM; 'none' disables)
   nt export [--tag|--folder]  compile notes into one md/json doc (rules/instructions, SKILL.md)
+  nt import <file.json|dir>   bulk-load notes: an export --format json backup, or a folder of
+                              markdown (Obsidian vault); skips title near-dups (--force overrides)
   nt tags                     list the tag vocabulary with counts
   nt tag <id|note…> +x -y     retag tasks or notes (no $EDITOR; preserves frontmatter)
   nt links <id|note>          forward links + backlinks + deps  (--orphans, --json)
@@ -424,13 +430,15 @@ USAGE
                               -y/--yes confirms (required for tasks when non-interactive)
   nt archive                  move done tasks to done.txt
   nt archive <note> [--undo]  retire a note from the active views (reversible; still on disk)
-  nt undo / redo              revert / re-apply the last TASK change (notes aren't
-                              journaled — re-edit or supersede a note instead;
-                              workstream-safe: refuses another agent's change
-                              unless --force)
+  nt undo / redo              revert / re-apply the last change — a task OR a
+                              non-interactive note edit ('nt edit'/nt_note_edit),
+                              whichever was more recent; workstream-safe: refuses
+                              another agent's change unless --force
   nt path                     print the store directory
   nt version                  print the nt version (alias: -v, --version)
   nt git-init                 set up the store for git (union-merge + .gitignore)
+  nt sync [--no-push]         team memory over git: commit local edits, pull, 'doctor' reconciles
+                              merge duplicates, commit that, push (needs nt git-init + a remote)
   nt doctor [--check]         health check: reconcile tasks.txt (dedup ids) + lint notes
                               (dangling [[links]], missing descriptions, orphans)
   nt gc [--older-than 30d]    reclaim dead weight: superseded stubs + stranded task-detail
@@ -490,6 +498,8 @@ EDIT (non-interactive — agents)
   nt edit <note> --append-file P|-   append from a file or stdin
   nt edit <note> --body-file P|-     replace the body from a file or stdin
   nt edit <note> --desc TEXT         set the note's one-line description (no $EDITOR)
+  nt edit <note> --expect-mtime T    refuse instead of overwrite if the note changed
+                                      on disk since (T = mtime from 'nt show --json')
 
 LIST FLAGS
   --status open|doing|blocked|done   --tag NAME   --project NAME

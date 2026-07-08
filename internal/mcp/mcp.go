@@ -9,6 +9,7 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -218,6 +219,8 @@ func (s *server) dispatch(name string, a map[string]any) (string, error) {
 		return s.archive(a)
 	case "nt_rm":
 		return s.rm(a)
+	case "nt_doctor":
+		return s.doctor(a)
 	default:
 		if hint := unknownToolHint(name); hint != "" {
 			return "", fmt.Errorf("unknown tool %q — %s", name, hint)
@@ -829,6 +832,69 @@ func (s *server) rm(a map[string]any) (string, error) {
 	}), nil
 }
 
+// doctor is the read-only MCP counterpart of `nt doctor --check`: it reports
+// store-health problems but never writes — task-file fixes (duplicate/missing
+// ids) stay behind the CLI so an agent can't silently rewrite tasks.txt out
+// from under a session that only asked to look.
+func (s *server) doctor(a map[string]any) (string, error) {
+	rep, err := s.eng.Doctor(false) // dry-run: report only, never writes
+	if err != nil {
+		return "", err
+	}
+	allNotes := s.listNotes()
+	active := note.Active(allNotes)
+	d, _ := s.eng.Read()
+
+	var dangling []string
+	check := func(raw, src string) {
+		if _, ok := links.Resolve(raw, d, allNotes); !ok {
+			dangling = append(dangling, fmt.Sprintf("[[%s]] in %s", raw, src))
+		}
+	}
+	for _, n := range active {
+		for _, raw := range links.Wikilinks(n.Body) {
+			check(raw, n.ID+" "+n.Rel)
+		}
+	}
+	if d != nil {
+		for _, t := range d.Tasks() {
+			for _, raw := range links.Wikilinks(t.Text) {
+				check(raw, "task "+t.ID())
+			}
+		}
+	}
+
+	now := time.Now()
+	var expired []string
+	for _, n := range active {
+		if n.Expired(now) {
+			expired = append(expired, n.ID+" "+n.Title)
+		}
+	}
+
+	out := map[string]any{
+		"healthy": !rep.HasProblems() && len(dangling) == 0,
+	}
+	if rep.Issues() > 0 {
+		out["taskFileIssues"] = map[string]any{
+			"duplicateIDs":       rep.DupIDsRemoved,
+			"archivedDuplicates": rep.CrossFileDups,
+			"missingIDs":         rep.IDsAssigned,
+			"fix":                "run `nt doctor` (CLI) — this tool is read-only",
+		}
+	}
+	if len(rep.Warnings) > 0 {
+		out["taskWarnings"] = rep.Warnings
+	}
+	if len(dangling) > 0 {
+		out["danglingLinks"] = dangling
+	}
+	if len(expired) > 0 {
+		out["expiredNotes"] = expired
+	}
+	return jsonText(out), nil
+}
+
 func (s *server) note(a map[string]any) (string, error) {
 	title := strings.TrimSpace(str(a, "title"))
 	if title == "" {
@@ -881,6 +947,14 @@ func (s *server) note(a map[string]any) (string, error) {
 	// so nt_recall's same-project boost finds it even without a tag/folder match.
 	if proj := strings.TrimSpace(str(a, "project")); proj != "" {
 		n.Extra = append(n.Extra, "project: "+proj)
+		extraChanged = true
+	}
+	if vf := strings.TrimSpace(str(a, "valid_from")); vf != "" {
+		n.ValidFrom = vf
+		extraChanged = true
+	}
+	if vu := strings.TrimSpace(str(a, "valid_until")); vu != "" {
+		n.ValidUntil = vu
 		extraChanged = true
 	}
 	if extraChanged {
@@ -970,6 +1044,9 @@ func (s *server) noteEdit(a map[string]any) (string, error) {
 	// organically on its next List() call via the file's changed mtime/size; no
 	// cache-mutation API is needed here.
 	n := cloneNote(cached)
+	// Raw bytes before the edit, for note.RecordUndo below — best-effort: if
+	// this read fails, the edit still proceeds, just without an undo entry.
+	beforeRaw, _ := os.ReadFile(n.Path)
 
 	appendVal := strings.TrimSpace(str(a, "append"))
 	bodyVal := strings.TrimSpace(str(a, "body"))
@@ -1023,12 +1100,41 @@ func (s *server) noteEdit(a map[string]any) (string, error) {
 			verb = "set description of"
 		}
 	}
+	if vf := strings.TrimSpace(str(a, "valid_from")); vf != "" {
+		n.ValidFrom = vf
+		if verb == "" {
+			verb = "set validity of"
+		}
+	}
+	if vu := strings.TrimSpace(str(a, "valid_until")); vu != "" {
+		n.ValidUntil = vu
+		if verb == "" {
+			verb = "set validity of"
+		}
+	}
 	if verb == "" {
-		return "", fmt.Errorf("nothing to edit — pass append, body, old_string+new_string, and/or description")
+		return "", fmt.Errorf("nothing to edit — pass append, body, old_string+new_string, description, valid_from, and/or valid_until")
 	}
 	n.Updated = time.Now().Format(time.RFC3339)
-	if err := n.Save(); err != nil {
+	// expect_mtime is the token nt_get/nt_index hand back (mtime field); passing
+	// it makes this call best-effort optimistic-concurrency-safe — see
+	// note.SaveIfUnchanged's doc comment for exactly what it does and doesn't
+	// guarantee. Omitted (the common case), this behaves exactly like plain Save.
+	expectMtime := strings.TrimSpace(str(a, "expect_mtime"))
+	if err := n.SaveIfUnchanged(expectMtime); err != nil {
+		var stale *note.StaleNoteError
+		if errors.As(err, &stale) {
+			return "", fmt.Errorf("%s changed on disk since you loaded it — nt_get it again and retry your edit against the current body", n.ID)
+		}
 		return "", err
+	}
+	// Best-effort: a note edit is now undoable (`nt undo`), but a journal
+	// failure must never fail the edit itself — the write already succeeded.
+	if beforeRaw != nil {
+		_ = note.RecordUndo(s.eng.S, note.UndoEntry{
+			Op: verb, TS: time.Now().UTC().Format(time.RFC3339Nano), WS: workstream.Env(),
+			Path: n.Path, Before: string(beforeRaw),
+		})
 	}
 	res := toMap(noteToOut(n))
 	res["edited"] = verb
@@ -1446,6 +1552,27 @@ func (s *server) get(a map[string]any) (string, error) {
 	if desc := n.Description(1 << 20); desc != "" && desc != n.Title {
 		out["description"] = desc // for stub-style notes this IS the content
 	}
+	// Optimistic-concurrency token: round-trip this through nt_note_edit's
+	// expect_mtime to make an edit refuse instead of clobber if the note
+	// changed on disk between this fetch and that edit. See
+	// note.SaveIfUnchanged's doc comment for what this does and doesn't
+	// guarantee.
+	if mt := n.MTimeToken(); mt != "" {
+		out["mtime"] = mt
+	}
+	if n.ValidFrom != "" {
+		out["validFrom"] = n.ValidFrom
+	}
+	if n.ValidUntil != "" {
+		out["validUntil"] = n.ValidUntil
+	}
+	now := time.Now()
+	if n.Expired(now) {
+		out["expired"] = true
+	}
+	if n.NotYetValid(now) {
+		out["notYetValid"] = true
+	}
 	return jsonText(out), nil
 }
 
@@ -1577,6 +1704,7 @@ func (s *server) recall(a map[string]any) (string, error) {
 	if limit <= 0 {
 		limit = 8
 	}
+	_ = recall.LoadUserSynonyms(s.eng.S.Dir) // best-effort: a missing/bad file just means no extra synonyms
 	notes := note.Active(s.listNotes())
 	if lessonsOnly {
 		kept := notes[:0]
@@ -1832,17 +1960,25 @@ func tasksOut(ts []*task.Task) []taskOut {
 }
 
 type noteOut struct {
-	ID       string   `json:"id,omitempty"`
-	Rel      string   `json:"rel,omitempty"` // path handle (notes authored outside nt have no id)
-	Title    string   `json:"title"`
-	Tags     []string `json:"tags,omitempty"`
-	Source   string   `json:"source,omitempty"`
-	Archived bool     `json:"archived,omitempty"` // retired from search/status
-	Body     string   `json:"body,omitempty"`
+	ID          string   `json:"id,omitempty"`
+	Rel         string   `json:"rel,omitempty"` // path handle (notes authored outside nt have no id)
+	Title       string   `json:"title"`
+	Tags        []string `json:"tags,omitempty"`
+	Source      string   `json:"source,omitempty"`
+	Archived    bool     `json:"archived,omitempty"` // retired from search/status
+	Body        string   `json:"body,omitempty"`
+	ValidFrom   string   `json:"validFrom,omitempty"`
+	ValidUntil  string   `json:"validUntil,omitempty"`
+	Expired     bool     `json:"expired,omitempty"`     // valid_until has passed — down-ranked in nt_recall, never hidden
+	NotYetValid bool     `json:"notYetValid,omitempty"` // valid_from is in the future
 }
 
 func noteToOut(n *note.Note) noteOut {
-	return noteOut{ID: n.ID, Rel: n.Rel, Title: n.Title, Tags: n.Tags, Source: n.Source, Archived: n.Archived, Body: strings.TrimSpace(n.Body)}
+	now := time.Now()
+	return noteOut{
+		ID: n.ID, Rel: n.Rel, Title: n.Title, Tags: n.Tags, Source: n.Source, Archived: n.Archived, Body: strings.TrimSpace(n.Body),
+		ValidFrom: n.ValidFrom, ValidUntil: n.ValidUntil, Expired: n.Expired(now), NotYetValid: n.NotYetValid(now),
+	}
 }
 
 // noteStub is a note WITHOUT its body — the progressive-disclosure unit returned
@@ -1858,7 +1994,9 @@ type noteStub struct {
 	Folder      string   `json:"folder,omitempty"`
 	Source      string   `json:"source,omitempty"` // author/agent — ownership on a shared store
 	Updated     string   `json:"updated,omitempty"`
-	Tier        string   `json:"tier,omitempty"` // "pinned"|"recent" on a tiered nt_index catalog
+	Tier        string   `json:"tier,omitempty"`        // "pinned"|"recent" on a tiered nt_index catalog
+	Expired     bool     `json:"expired,omitempty"`     // valid_until has passed — see noteOut
+	NotYetValid bool     `json:"notYetValid,omitempty"` // valid_from is in the future
 }
 
 func noteToStub(n *note.Note, snippet string) noteStub {
@@ -1870,9 +2008,11 @@ func noteToStub(n *note.Note, snippet string) noteStub {
 	if desc == n.Title {
 		desc = "" // a description that echoes the title is pure token waste
 	}
+	now := time.Now()
 	return noteStub{
 		ID: n.ID, Rel: n.Rel, Title: n.Title, Description: desc,
 		Snippet: snippet, Tags: n.Tags, Folder: pathDir(n.Rel), Source: n.Source, Updated: shortDate(upd),
+		Expired: n.Expired(now), NotYetValid: n.NotYetValid(now),
 	}
 }
 

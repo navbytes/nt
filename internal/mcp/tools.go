@@ -100,19 +100,24 @@ var toolDefs = []toolDef{
 			"source":      st(),
 			"supersede":   sp("id of an existing note this replaces; the old note retires from active views"),
 			"force":       map[string]any{"type": "boolean", "description": "create even if a near-duplicate exists"},
+			"valid_from":  sp("optional: this fact is only true from this date/time on (YYYY-MM-DD or RFC3339)"),
+			"valid_until": sp("optional: this fact stops being true after this date/time (YYYY-MM-DD or RFC3339) — nt_recall down-ranks and flags it expired past this, never hides it"),
 		}, "title"),
 	},
 	{
 		Name:        "nt_note_edit",
 		Description: "Fix an EXISTING note in place — no new id, no retired-note churn (unlike nt_note supersede:, which replaces it with a brand new note). Exactly one of append / body / old_string+new_string per call: append adds to the end; body replaces the whole thing (build the full text yourself and send it — there's no partial form of body); old_string+new_string patches ONE exact match (must appear exactly once in the current body, or the call is refused — include more surrounding text to disambiguate). description replaces the one-line summary and can be combined with any of the three.",
 		InputSchema: obj(map[string]any{
-			"handle":      sp("note id, slug, or title"),
-			"id":          sp("alias for handle — pass a stub's id directly"),
-			"append":      sp("markdown to add to the end of the body"),
-			"body":        sp("replace the whole body with this literal text"),
-			"old_string":  sp("exact existing text in the body to replace — must match exactly once"),
-			"new_string":  sp("replacement for old_string (empty deletes the matched text); required together with old_string"),
-			"description": sp("replace the note's one-line description (frontmatter)"),
+			"handle":       sp("note id, slug, or title"),
+			"id":           sp("alias for handle — pass a stub's id directly"),
+			"append":       sp("markdown to add to the end of the body"),
+			"body":         sp("replace the whole body with this literal text"),
+			"old_string":   sp("exact existing text in the body to replace — must match exactly once"),
+			"new_string":   sp("replacement for old_string (empty deletes the matched text); required together with old_string"),
+			"description":  sp("replace the note's one-line description (frontmatter)"),
+			"expect_mtime": sp("optional: the `mtime` token from a prior nt_get of this note — refuses instead of overwriting if the note changed on disk since (best-effort; omit if you don't have one)"),
+			"valid_from":   sp("set the valid_from date/time (YYYY-MM-DD or RFC3339)"),
+			"valid_until":  sp("set the valid_until date/time (YYYY-MM-DD or RFC3339)"),
 		}),
 	},
 	{
@@ -198,6 +203,11 @@ var toolDefs = []toolDef{
 		InputSchema: obj(map[string]any{
 			"id": sp("stable task id (from nt_status, nt_index, or nt_search) — positional task:N is refused"),
 		}, "id"),
+	},
+	{
+		Name:        "nt_doctor",
+		Description: "Store health check — read-only, never writes (unlike `nt doctor`, which also fixes task-file issues). Reports dangling [[links]], task-file problems (duplicate/missing ids, dependency warnings) that need `nt doctor` (the CLI) to fix, and notes past their valid_until. Call when something feels off, or before a big cleanup pass.",
+		InputSchema: obj(map[string]any{}),
 	},
 	{
 		Name:        "nt_archive",

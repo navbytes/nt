@@ -13,47 +13,94 @@ import (
 // notes, task dedup parity, the doctor near-dup acknowledgment, non-TTY editor
 // guards, and note --project for recall's project boost.
 
-// `nt undo` right after a note edit must refuse: note operations aren't
-// journaled, so the "last change" it would revert is an older, unrelated TASK
-// change. --force proceeds and reverts that task change.
-func TestUndoRefusedAfterNoteEdit(t *testing.T) {
+// `nt undo` right after a note edit reverts the NOTE, not an older unrelated
+// task change: note edits are journaled (notes-undo.jsonl) exactly like tasks
+// (undo.jsonl), and undo/redo act on whichever journal's pending entry is
+// more recent — "the last thing I did," whether that touched a task or a note.
+func TestUndoRevertsNoteEditWhenMostRecent(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("NT_DIR", dir)
 	t.Setenv("NT_WORKSTREAM", "")
-	captureRun(t, "add", "task to revert")
+	captureRun(t, "add", "task to keep")
 	captureRun(t, "note", "scratch pad", "--body", "v1")
 	// Deliberately back-to-back, no artificial delay: this is agent-speed
 	// usage (a scripted caller issuing add/note/edit inside the same wall-clock
-	// second), and the guard must catch it WITHOUT needing seconds of gap —
-	// txn timestamps carry nanosecond precision precisely so this ordering is
-	// resolvable even when everything lands in the same second.
+	// second), and undo must pick the more recent journal entry WITHOUT
+	// needing seconds of gap — both journals carry nanosecond-precision
+	// timestamps precisely so this ordering is resolvable within one second.
 	captureRun(t, "edit", "scratch pad", "--append", "v2")
 
-	_, stderr, code := runWithStderr("undo")
-	if code == 0 {
-		t.Fatal("undo right after a note edit must be refused")
+	// The most recent action was the note edit — undo reverts THAT, not the
+	// older task add.
+	out := captureRun(t, "undo")
+	if !strings.Contains(out, "note") || !strings.Contains(out, "scratch-pad.md") {
+		t.Fatalf("undo should have reverted the note edit:\n%s", out)
 	}
-	if !strings.Contains(stderr, "NOTE edit") || !strings.Contains(stderr, "scratch-pad.md") {
-		t.Fatalf("refusal should name the note that was edited:\n%s", stderr)
+	if body := captureRun(t, "show", "scratch pad"); !strings.Contains(body, "v1") || strings.Contains(body, "v2") {
+		t.Fatalf("note should be back to v1 after undo:\n%s", body)
 	}
-	if !strings.Contains(stderr, `"add"`) || !strings.Contains(stderr, "--force") {
-		t.Fatalf("refusal should name the task change undo WOULD revert and the --force escape:\n%s", stderr)
-	}
-	// Nothing was reverted.
-	if out := captureRun(t, "list", "--json"); !strings.Contains(out, "task to revert") {
-		t.Fatalf("refused undo must not touch the task:\n%s", out)
+	if out := captureRun(t, "list", "--json"); !strings.Contains(out, "task to keep") {
+		t.Fatalf("the task must be untouched by the note undo:\n%s", out)
 	}
 
-	// --force reverts the TASK change (the note is untouched — not journaled).
-	out := captureRun(t, "undo", "--force")
+	// A second undo now reverts the older task add — the note journal's
+	// pending entry just flipped to a redo, so it's no longer undo-eligible.
+	out = captureRun(t, "undo")
 	if !strings.Contains(out, "undid: add") {
-		t.Fatalf("undo --force should revert the task add:\n%s", out)
+		t.Fatalf("the second undo should revert the task add:\n%s", out)
 	}
-	if out := captureRun(t, "list", "--json"); strings.Contains(out, "task to revert") {
-		t.Fatalf("task should be gone after undo --force:\n%s", out)
+	if out := captureRun(t, "list", "--json"); strings.Contains(out, "task to keep") {
+		t.Fatalf("task should be gone after the second undo:\n%s", out)
+	}
+
+	// Redo is LIFO: it replays the most-recently-undone action first (the
+	// task add, undone second), then the note edit (undone first) — the same
+	// timestamp comparison undo uses, just now over each journal's "redo:"
+	// entry instead of its forward one.
+	out = captureRun(t, "redo")
+	if !strings.Contains(out, "redid: add") {
+		t.Fatalf("the first redo should restore the task add:\n%s", out)
+	}
+	if out := captureRun(t, "list", "--json"); !strings.Contains(out, "task to keep") {
+		t.Fatalf("task should be back after the first redo:\n%s", out)
+	}
+	out = captureRun(t, "redo")
+	if !strings.Contains(out, "note") {
+		t.Fatalf("the second redo should restore the note edit:\n%s", out)
 	}
 	if body := captureRun(t, "show", "scratch pad"); !strings.Contains(body, "v2") {
-		t.Fatalf("the note itself must survive the undo:\n%s", body)
+		t.Fatalf("note should be back to v2 after both redos:\n%s", body)
+	}
+}
+
+// The shared-store ownership check applies to note reversals exactly like
+// task ones: a note edit made by a different workstream is refused unless
+// --force.
+func TestUndoRefusesAnotherWorkstreamsNoteEdit(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("NT_DIR", dir)
+	t.Setenv("NT_WORKSTREAM", "agent-a")
+	captureRun(t, "note", "shared note", "--body", "v1")
+	captureRun(t, "edit", "shared note", "--append", "v2")
+
+	t.Setenv("NT_WORKSTREAM", "agent-b")
+	_, stderr, code := runWithStderr("undo")
+	if code == 0 {
+		t.Fatal("undoing another workstream's note edit must be refused without --force")
+	}
+	if !strings.Contains(stderr, "agent-a") || !strings.Contains(stderr, "--force") {
+		t.Fatalf("refusal should name the owning workstream and the --force escape:\n%s", stderr)
+	}
+	if body := captureRun(t, "show", "shared note"); !strings.Contains(body, "v2") {
+		t.Fatalf("refused undo must not touch the note:\n%s", body)
+	}
+
+	out := captureRun(t, "undo", "--force")
+	if !strings.Contains(out, "note") {
+		t.Fatalf("undo --force should revert the note edit:\n%s", out)
+	}
+	if body := captureRun(t, "show", "shared note"); !strings.Contains(body, "v1") {
+		t.Fatalf("note should be back to v1 after undo --force:\n%s", body)
 	}
 }
 

@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -86,18 +87,25 @@ func archiveNotes(e *mutate.Engine, handles []string, unarchive bool) int {
 func cmdUndo(args []string) int { return runReversal(args, false) }
 func cmdRedo(args []string) int { return runReversal(args, true) }
 
-// runReversal implements `nt undo` and `nt redo`. On a shared multi-agent store
-// the journal interleaves every writer's transactions, so the last change is
-// often NOT yours: when NT_WORKSTREAM is set, reverting another workstream's
-// transaction is refused unless --force. Either way the affected tasks are
-// printed, so a reversal is never silent about what it touched.
+// runReversal implements `nt undo` and `nt redo`. Two independent single-level
+// journals exist — tasks (undo.jsonl, via mutate.Engine) and notes
+// (notes-undo.jsonl, via the note package) — because they revert completely
+// differently (a per-line inverse validated against a Doc, vs. a whole-file
+// byte restore). "The last thing I did" can be either, so this peeks both and
+// acts on whichever is more recent, rather than a task-only view that would
+// silently ignore a newer note edit (or vice versa).
+//
+// On a shared multi-agent store the journal interleaves every writer's
+// changes, so the last change is often NOT yours: when NT_WORKSTREAM is set,
+// reverting another workstream's change is refused unless --force. Either way
+// what was touched is printed, so a reversal is never silent about it.
 func runReversal(args []string, isRedo bool) int {
 	verb, past := "undo", "undid"
 	if isRedo {
 		verb, past = "redo", "redid"
 	}
 	fs := flag.NewFlagSet(verb, flag.ContinueOnError)
-	force := fs.Bool("force", false, "revert even if the last change belongs to another workstream, or a note was edited more recently")
+	force := fs.Bool("force", false, "revert even if the last change belongs to another workstream")
 	ws := fs.String("workstream", "", "act as this workstream (default: NT_WORKSTREAM)")
 	if err := fs.Parse(args); err != nil {
 		return 2
@@ -107,91 +115,74 @@ func runReversal(args []string, isRedo bool) int {
 		return 1
 	}
 	cur := workstream.Scope(*ws)
-	// Note-edit guard (undo only): note operations aren't journaled, so right
-	// after a note edit "the last change" an undo would revert is an OLDER,
-	// unrelated TASK change. Refuse (teaching the note-side fix) unless --force.
-	if !isRedo && !*force {
-		if err := noteEditedSinceLastTxn(e); err != nil {
+
+	taskTxn, _, taskPending := e.PeekUndoTxn()
+	_, taskIsRedo, _ := e.PeekUndo()
+	taskEligible := taskPending && taskIsRedo == isRedo
+
+	noteEntry, notePending, nerr := note.PeekUndo(e.S)
+	if nerr != nil {
+		return fail(fmt.Errorf("%s: %w", verb, nerr))
+	}
+	noteEligible := notePending && note.IsRedoEntry(noteEntry.Op) == isRedo
+
+	if !taskEligible && !noteEligible {
+		fmt.Printf("nothing to %s\n", verb)
+		return 0
+	}
+	useTask := taskEligible
+	if taskEligible && noteEligible {
+		taskTS, _ := time.Parse(time.RFC3339Nano, taskTxn.TS)
+		noteTS, _ := time.Parse(time.RFC3339Nano, noteEntry.TS)
+		useTask = !noteTS.After(taskTS) // note strictly newer -> revert the note instead
+	}
+
+	if useTask {
+		var txn undo.Txn
+		var did bool
+		var err error
+		if isRedo {
+			txn, did, err = e.Redo(cur, *force)
+		} else {
+			txn, did, err = e.UndoScoped(cur, *force)
+		}
+		if err != nil {
 			return fail(err)
 		}
+		if !did {
+			fmt.Printf("nothing to %s\n", verb)
+			return 0
+		}
+		op := strings.TrimPrefix(txn.Op, "redo:")
+		fmt.Printf("%s: %s (%d task(s) affected)\n", past, op, len(txn.Changes))
+		for _, c := range txn.Changes {
+			// After the reversal each task's live line is the change's Before image
+			// (redo swaps images when journaling, so Before is always "what it is now").
+			line, verbed := c.Before, "restored"
+			if line == "" {
+				line, verbed = c.After, "removed"
+			}
+			if t, ok := task.ParseLine(line); ok {
+				fmt.Printf("  %s %s  %s\n", verbed, shortID(c.ID), t.Text)
+			}
+		}
+		return 0
 	}
-	var txn undo.Txn
-	var did bool
-	var err error
-	if isRedo {
-		txn, did, err = e.Redo(cur, *force)
-	} else {
-		txn, did, err = e.UndoScoped(cur, *force)
-	}
+
+	path, op, did, err := note.ApplyReversal(e.S, cur, *force, isRedo)
 	if err != nil {
-		return fail(err)
+		return fail(fmt.Errorf("%s: %w", verb, err))
 	}
 	if !did {
 		fmt.Printf("nothing to %s\n", verb)
 		return 0
 	}
-	op := txn.Op
-	for strings.HasPrefix(op, "redo:") {
-		op = strings.TrimPrefix(op, "redo:")
+	rel := path
+	if r, rerr := filepath.Rel(e.S.NotesDir(), path); rerr == nil {
+		rel = r
 	}
-	fmt.Printf("%s: %s (%d task(s) affected)\n", past, op, len(txn.Changes))
-	for _, c := range txn.Changes {
-		// After the reversal each task's live line is the change's Before image
-		// (redo swaps images when journaling, so Before is always "what it is now").
-		line, verbed := c.Before, "restored"
-		if line == "" {
-			line, verbed = c.After, "removed"
-		}
-		if t, ok := task.ParseLine(line); ok {
-			fmt.Printf("  %s %s  %s\n", verbed, shortID(c.ID), t.Text)
-		}
-	}
+	fmt.Printf("%s: %s note %s\n", past, op, rel)
 	return 0
-}
-
-// noteEditGrace is how much newer than the pending transaction a note's mtime
-// must be before undo suspects "the user means the note, not the task". A task
-// body creates/appends its detail note BEFORE calling Apply (see cmdAdd/cmdUpdate
-// and mutate.Engine.Apply's time.Now() read), so that note's mtime always sorts
-// strictly before its own txn's timestamp — true causal ordering needs no
-// grace at all. This epsilon exists only for filesystem mtime truncation (some
-// filesystems round mtime to a coarser tick than Go's clock read); it must stay
-// tiny; multi-second slop is what let a genuine same-second agent-speed note
-// edit go undetected before.
-const noteEditGrace = time.Millisecond
-
-// noteEditedSinceLastTxn refuses an undo whose pending TASK transaction is older
-// than the newest note edit: notes aren't journaled, so the user who just edited
-// a note and typed `nt undo` would silently revert an unrelated task change.
-// Returns nil when there's nothing pending, the pending entry is a redo (plain
-// undo errors on those anyway), or no note was touched after the transaction.
-func noteEditedSinceLastTxn(e *mutate.Engine) error {
-	txn, label, ok := e.PeekUndoTxn()
-	if !ok {
-		return nil
-	}
-	if _, isRedoPending, _ := e.PeekUndo(); isRedoPending {
-		return nil
-	}
-	// RFC3339Nano parses older whole-second RFC3339 journal entries too (the
-	// fractional part is optional on read), so upgrading the write format never
-	// breaks a journal written by an older nt binary.
-	txnTS, perr := time.Parse(time.RFC3339Nano, txn.TS)
-	if perr != nil {
-		return nil
-	}
-	notes, _ := note.List(e.S)
-	var newest *note.Note
-	for _, n := range notes {
-		if newest == nil || n.ModTime.After(newest.ModTime) {
-			newest = n
-		}
-	}
-	if newest == nil || !newest.ModTime.After(txnTS.Add(noteEditGrace)) {
-		return nil
-	}
-	return fmt.Errorf("undo: your most recent store change looks like a NOTE edit (%s, %s) — note operations are not undoable (edit the note again, or nt archive/supersede it); `nt undo` would instead revert the older task change %q — rerun with --force to revert that task change",
-		newest.Rel, newest.ModTime.Format("15:04:05"), label)
 }
 
 func cmdEdit(args []string) int {
@@ -204,7 +195,12 @@ func cmdEdit(args []string) int {
 	newString := fs.String("new-string", "", "replacement text for --old-string (empty deletes the matched text)")
 	desc := fs.String("desc", "", "set the note's one-line description (frontmatter) without an editor")
 	fs.StringVar(desc, "description", "", "alias for --desc")
-	flags, positional := splitArgs(args, nil)
+	validFrom := fs.String("valid-from", "", "set: this fact is only true from this date/time on (YYYY-MM-DD or RFC3339)")
+	validUntil := fs.String("valid-until", "", "set: this fact stops being true after this date/time (YYYY-MM-DD or RFC3339) — nt_recall down-ranks and flags it 'expired' past this")
+	clearValidFrom := fs.Bool("clear-valid-from", false, "remove the valid_from constraint")
+	clearValidUntil := fs.Bool("clear-valid-until", false, "remove the valid_until constraint")
+	expectMtime := fs.String("expect-mtime", "", "optional: the mtime from a prior `nt show --json` of this note — refuse instead of overwriting if it changed on disk since (best-effort; omit if you don't have one)")
+	flags, positional := splitArgs(args, map[string]bool{"clear-valid-from": true, "clear-valid-until": true})
 	if err := fs.Parse(flags); err != nil {
 		return 2
 	}
@@ -233,6 +229,12 @@ func cmdEdit(args []string) int {
 	if replacing && strings.TrimSpace(*oldString) == "" {
 		return usageErr(fmt.Errorf("edit: --old-string cannot be empty — there's no text to search for"))
 	}
+	if strings.TrimSpace(*validFrom) != "" && *clearValidFrom {
+		return usageErr(fmt.Errorf("edit: --valid-from and --clear-valid-from are mutually exclusive"))
+	}
+	if strings.TrimSpace(*validUntil) != "" && *clearValidUntil {
+		return usageErr(fmt.Errorf("edit: --valid-until and --clear-valid-until are mutually exclusive"))
+	}
 	editModes := 0
 	for _, on := range []bool{appendVal != "", bodyVal != "", replacing} {
 		if on {
@@ -254,11 +256,15 @@ func cmdEdit(args []string) int {
 	// --new-string / --desc): the agent path. A mangled or growing note used to
 	// be fixable only via $EDITOR or a whole-note supersede (which churns the id
 	// and every inbound link); this edits in place.
-	if appendVal != "" || bodyVal != "" || replacing || strings.TrimSpace(*desc) != "" {
+	validitySet := strings.TrimSpace(*validFrom) != "" || strings.TrimSpace(*validUntil) != "" || *clearValidFrom || *clearValidUntil
+	if appendVal != "" || bodyVal != "" || replacing || strings.TrimSpace(*desc) != "" || validitySet {
 		n, nerr := resolveNote(notes, strings.TrimPrefix(handle, "note:"))
 		if nerr != nil {
 			return fail(fmt.Errorf("edit: %w (non-interactive edits apply to notes; for tasks use `nt update`)", nerr))
 		}
+		// Raw bytes before the edit, for note.RecordUndo below — best-effort: if
+		// this read fails, the edit still proceeds, just without an undo entry.
+		beforeRaw, _ := os.ReadFile(n.Path)
 		verb := ""
 		switch {
 		case appendVal != "":
@@ -289,9 +295,43 @@ func cmdEdit(args []string) int {
 				verb = "set description of"
 			}
 		}
+		if vf := strings.TrimSpace(*validFrom); vf != "" {
+			n.ValidFrom = vf
+			if verb == "" {
+				verb = "set validity of"
+			}
+		} else if *clearValidFrom {
+			n.ValidFrom = ""
+			if verb == "" {
+				verb = "set validity of"
+			}
+		}
+		if vu := strings.TrimSpace(*validUntil); vu != "" {
+			n.ValidUntil = vu
+			if verb == "" {
+				verb = "set validity of"
+			}
+		} else if *clearValidUntil {
+			n.ValidUntil = ""
+			if verb == "" {
+				verb = "set validity of"
+			}
+		}
 		n.Updated = time.Now().Format(time.RFC3339)
-		if err := n.Save(); err != nil {
+		if err := n.SaveIfUnchanged(strings.TrimSpace(*expectMtime)); err != nil {
+			var stale *note.StaleNoteError
+			if errors.As(err, &stale) {
+				return fail(fmt.Errorf("edit: %s changed on disk since you loaded it — `nt show %s --json` for the current text and mtime, then retry", shortID(n.ID), shortID(n.ID)))
+			}
 			return fail(err)
+		}
+		// Best-effort: the edit is now undoable (`nt undo`), but a journal
+		// failure must never fail the edit itself — the write already succeeded.
+		if beforeRaw != nil {
+			_ = note.RecordUndo(e.S, note.UndoEntry{
+				Op: verb, TS: time.Now().UTC().Format(time.RFC3339Nano), WS: workstream.Env(),
+				Path: n.Path, Before: string(beforeRaw),
+			})
 		}
 		warnDanglingLinks(e, n)
 		fmt.Printf("%s %s  %s\n", verb, shortID(n.ID), n.Rel)
@@ -763,6 +803,7 @@ func cmdGitInit(args []string) int {
 	}
 	const ignore = "# nt: machine-local / transient state — don't sync\n" +
 		"undo.jsonl\n" +
+		"notes-undo.jsonl\n" +
 		"tasks.txt.lock\n" +
 		"nt.log\n" +
 		".claude-sync.json\n"
@@ -788,6 +829,89 @@ func cmdGitInit(args []string) int {
 	}
 	fmt.Printf("next:  (cd %s && git add -A && git commit -m \"nt store\")\n", dir)
 	fmt.Println("after a merge:  nt doctor")
+	return 0
+}
+
+// cmdSync is the thin wrapper the git-native shared-team-memory pattern needs:
+// commit local edits, pull, reconcile the union-merge driver's duplicate-ULID
+// leftovers with `doctor`, commit the reconciliation, push. Every step reuses
+// plain git — `nt sync` doesn't invent a protocol, it just sequences the
+// commands a team would otherwise have to remember to run in this order after
+// `nt git-init` (SPEC §6.4). A merge CONFLICT (two people editing the same
+// note — tasks.txt/done.txt auto-merge via .gitattributes, but individual
+// note files don't) stops the sequence with git's own conflict markers left
+// in place; resolve by hand and re-run.
+func cmdSync(args []string) int {
+	fs := flag.NewFlagSet("sync", flag.ContinueOnError)
+	noPush := fs.Bool("no-push", false, "pull + reconcile only, don't push")
+	message := fs.String("message", "nt sync", "commit message for the local-edits commit")
+	flags, _ := splitArgs(args, map[string]bool{"no-push": true})
+	if err := fs.Parse(flags); err != nil {
+		return 2
+	}
+	e, ok := engine()
+	if !ok {
+		return 1
+	}
+	dir := e.S.Dir
+	if _, err := os.Stat(filepath.Join(dir, ".git")); os.IsNotExist(err) {
+		return fail(fmt.Errorf("sync: %s isn't a git repo yet — run `nt git-init` first", dir))
+	}
+	run := func(name string, args ...string) (string, error) {
+		cmd := exec.Command(name, args...)
+		cmd.Dir = dir
+		out, err := cmd.CombinedOutput()
+		return strings.TrimSpace(string(out)), err
+	}
+
+	// Commit local edits FIRST: pulling with a dirty tree either refuses outright
+	// or mixes uncommitted changes into the merge — committing first keeps this
+	// sync's edits as their own commit, mergeable like anyone else's.
+	if status, serr := run("git", "status", "--porcelain"); serr != nil {
+		return fail(fmt.Errorf("sync: git status: %s", status))
+	} else if status != "" {
+		if out, aerr := run("git", "add", "-A"); aerr != nil {
+			return fail(fmt.Errorf("sync: git add: %s", out))
+		}
+		if out, cerr := run("git", "commit", "-m", *message); cerr != nil {
+			return fail(fmt.Errorf("sync: git commit: %s", out))
+		}
+	}
+
+	// --no-rebase pins the strategy to an ordinary merge regardless of the
+	// caller's global git config (pull.rebase unset raises "divergent
+	// branches" instead of pulling) — a merge is also the right choice here:
+	// rebase would rewrite commit hashes another team member may have already
+	// pushed on top of.
+	if out, perr := run("git", "pull", "--no-edit", "--no-rebase"); perr != nil {
+		return fail(fmt.Errorf("sync: git pull failed — resolve the conflict (likely a note under notes/, since only tasks.txt/done.txt auto-merge), `git add`+`git commit`, then re-run `nt sync`:\n%s", out))
+	}
+
+	// The union-merge driver keeps BOTH sides' lines verbatim when concurrent
+	// branches added different tasks — doctor's existing duplicate-ULID
+	// reconciliation is exactly the fix, and always safe to run: a no-op when
+	// the pull introduced nothing to dedup.
+	rep, derr := e.Doctor(true)
+	if derr != nil {
+		return fail(fmt.Errorf("sync: doctor: %w", derr))
+	}
+	if rep.Issues() > 0 {
+		if out, aerr := run("git", "add", "-A"); aerr != nil {
+			return fail(fmt.Errorf("sync: git add (post-doctor): %s", out))
+		}
+		if out, cerr := run("git", "commit", "-m", "nt doctor: reconcile merge duplicates"); cerr != nil {
+			return fail(fmt.Errorf("sync: git commit (post-doctor): %s", out))
+		}
+	}
+
+	if *noPush {
+		fmt.Println("synced (pull + reconcile) — not pushed (--no-push)")
+		return 0
+	}
+	if out, perr := run("git", "push"); perr != nil {
+		return fail(fmt.Errorf("sync: git push: %s", out))
+	}
+	fmt.Println("synced: pulled, reconciled, pushed")
 	return 0
 }
 

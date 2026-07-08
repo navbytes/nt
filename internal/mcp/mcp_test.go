@@ -3,8 +3,10 @@ package mcp
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/navbytes/nt/internal/mutate"
 	"github.com/navbytes/nt/internal/note"
@@ -1379,5 +1381,227 @@ func TestCloneNoteIsIndependentOfOriginal(t *testing.T) {
 	}
 	if orig.Extra[0] != "description: original desc" {
 		t.Errorf("index-mutating the clone's Extra (mcpSetNoteDescription's pattern) leaked into the original: %v", orig.Extra)
+	}
+}
+
+// nt_get returns an mtime token; round-tripping a now-STALE one through
+// nt_note_edit's expect_mtime must refuse rather than clobber a concurrent
+// write, and must never actually touch the file when it refuses.
+func TestMCPNoteEditExpectMtimeGuardsAgainstConcurrentWrite(t *testing.T) {
+	s := newServer(t)
+	created, err := s.dispatch("nt_note", map[string]any{"title": "mtime guard", "body": "original"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var n noteOut
+	if err := json.Unmarshal([]byte(created), &n); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := s.dispatch("nt_get", map[string]any{"handle": n.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var getOut map[string]any
+	if err := json.Unmarshal([]byte(got), &getOut); err != nil {
+		t.Fatal(err)
+	}
+	token, _ := getOut["mtime"].(string)
+	if token == "" {
+		t.Fatal("nt_get should return a non-empty mtime token")
+	}
+
+	// Simulate a concurrent writer touching the file after this fetch.
+	cached := s.cache.ByID(n.ID)
+	if cached == nil {
+		t.Fatal("note not in cache")
+	}
+	time.Sleep(10 * time.Millisecond)
+	future := time.Now().Add(time.Hour)
+	if err := os.Chtimes(cached.Path, future, future); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = s.dispatch("nt_note_edit", map[string]any{"handle": n.ID, "append": "clobber", "expect_mtime": token})
+	if err == nil {
+		t.Fatal("expected nt_note_edit to refuse with a stale expect_mtime")
+	}
+	if !strings.Contains(err.Error(), "changed on disk") {
+		t.Errorf("error should mention the note changed on disk: %v", err)
+	}
+
+	after, aerr := s.dispatch("nt_get", map[string]any{"handle": n.ID})
+	if aerr != nil {
+		t.Fatal(aerr)
+	}
+	if strings.Contains(after, "clobber") {
+		t.Error("nt_note_edit wrote despite refusing — the file was clobbered")
+	}
+}
+
+// expect_mtime is optional — omitting it must behave exactly like today
+// (backward compatible for the common case, where the caller has no token).
+func TestMCPNoteEditWithoutExpectMtimeStillWorks(t *testing.T) {
+	s := newServer(t)
+	created, err := s.dispatch("nt_note", map[string]any{"title": "no token", "body": "original"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var n noteOut
+	if err := json.Unmarshal([]byte(created), &n); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.dispatch("nt_note_edit", map[string]any{"handle": n.ID, "append": "more"}); err != nil {
+		t.Fatalf("edit without expect_mtime should succeed: %v", err)
+	}
+}
+
+func TestMCPNoteValidFromUntilOnCreate(t *testing.T) {
+	s := newServer(t)
+	out, err := s.dispatch("nt_note", map[string]any{
+		"title": "token lifetime", "body": "24h access",
+		"valid_from": "2025-01-01", "valid_until": "2026-01-01",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var n noteOut
+	if err := json.Unmarshal([]byte(out), &n); err != nil {
+		t.Fatal(err)
+	}
+	if n.ValidFrom != "2025-01-01" || n.ValidUntil != "2026-01-01" {
+		t.Fatalf("valid_from/valid_until not set on create: %s", out)
+	}
+}
+
+func TestMCPNoteEditSetsValidUntil(t *testing.T) {
+	s := newServer(t)
+	created, err := s.dispatch("nt_note", map[string]any{"title": "will expire", "body": "text"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var n noteOut
+	json.Unmarshal([]byte(created), &n)
+
+	out, err := s.dispatch("nt_note_edit", map[string]any{"handle": n.ID, "valid_until": "2000-01-01"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var edited noteOut
+	json.Unmarshal([]byte(out), &edited)
+	if edited.ValidUntil != "2000-01-01" || !edited.Expired {
+		t.Fatalf("nt_note_edit should set valid_until and flag it expired: %s", out)
+	}
+}
+
+func TestMCPGetIndexSearchFlagExpiredNote(t *testing.T) {
+	s := newServer(t)
+	created, err := s.dispatch("nt_note", map[string]any{
+		"title": "expired fact", "body": "stale claim", "valid_until": "2000-01-01",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var n noteOut
+	json.Unmarshal([]byte(created), &n)
+
+	get, err := s.dispatch("nt_get", map[string]any{"handle": n.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(get, `"expired":true`) {
+		t.Fatalf("nt_get should flag the expired note: %s", get)
+	}
+
+	idx, err := s.dispatch("nt_index", map[string]any{"all": true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(idx, `"expired":true`) {
+		t.Fatalf("nt_index should flag the expired note stub: %s", idx)
+	}
+
+	search, err := s.dispatch("nt_search", map[string]any{"query": "expired fact"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(search, `"expired":true`) {
+		t.Fatalf("nt_search should flag the expired note stub: %s", search)
+	}
+}
+
+func TestMCPDoctorHealthyStore(t *testing.T) {
+	s := newServer(t)
+	if _, err := s.dispatch("nt_note", map[string]any{"title": "fine note", "body": "nothing wrong here"}); err != nil {
+		t.Fatal(err)
+	}
+	out, err := s.dispatch("nt_doctor", map[string]any{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var rep struct {
+		Healthy bool `json:"healthy"`
+	}
+	if err := json.Unmarshal([]byte(out), &rep); err != nil {
+		t.Fatal(err)
+	}
+	if !rep.Healthy {
+		t.Fatalf("a clean store should report healthy: %s", out)
+	}
+}
+
+func TestMCPDoctorReportsDanglingLinkAndExpiredNote(t *testing.T) {
+	s := newServer(t)
+	if _, err := s.dispatch("nt_note", map[string]any{"title": "broken ref", "body": "see [[nowhere]]"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.dispatch("nt_note", map[string]any{"title": "old fact", "body": "text", "valid_until": "2000-01-01"}); err != nil {
+		t.Fatal(err)
+	}
+	out, err := s.dispatch("nt_doctor", map[string]any{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var rep struct {
+		Healthy       bool     `json:"healthy"`
+		DanglingLinks []string `json:"danglingLinks"`
+		ExpiredNotes  []string `json:"expiredNotes"`
+	}
+	if err := json.Unmarshal([]byte(out), &rep); err != nil {
+		t.Fatal(err)
+	}
+	if rep.Healthy {
+		t.Fatalf("a store with a dangling link should not report healthy: %s", out)
+	}
+	if len(rep.DanglingLinks) != 1 || !strings.Contains(rep.DanglingLinks[0], "nowhere") {
+		t.Fatalf("expected one dangling link mentioning 'nowhere': %s", out)
+	}
+	if len(rep.ExpiredNotes) != 1 || !strings.Contains(rep.ExpiredNotes[0], "old fact") {
+		t.Fatalf("expected the expired note listed: %s", out)
+	}
+}
+
+func TestMCPDoctorNeverWrites(t *testing.T) {
+	s := newServer(t)
+	// Two duplicate-ULID lines is exactly what `nt doctor` (writing) would
+	// dedup — nt_doctor must report it without touching the file.
+	tasksPath := s.eng.S.TasksFile()
+	raw := "(A) 2026-01-01 dup task id:01ABCDEFGHJKMNPQRSTVWXYZ0\n(A) 2026-01-01 dup task id:01ABCDEFGHJKMNPQRSTVWXYZ0\n"
+	if err := os.WriteFile(tasksPath, []byte(raw), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out, err := s.dispatch("nt_doctor", map[string]any{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out, "taskFileIssues") {
+		t.Fatalf("nt_doctor should surface the duplicate-id task issue: %s", out)
+	}
+	after, rerr := os.ReadFile(tasksPath)
+	if rerr != nil {
+		t.Fatal(rerr)
+	}
+	if string(after) != raw {
+		t.Fatalf("nt_doctor must never write — tasks.txt changed:\nbefore: %q\nafter:  %q", raw, after)
 	}
 }

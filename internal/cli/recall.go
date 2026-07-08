@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/navbytes/nt/internal/note"
 	"github.com/navbytes/nt/internal/recall"
@@ -37,6 +38,7 @@ func cmdRecall(args []string) int {
 	if !ok {
 		return 1
 	}
+	_ = recall.LoadUserSynonyms(e.S.Dir) // best-effort: a missing/bad file just means no extra synonyms
 	notes := note.Active(mustNotes(e))
 	if *lessonsOnly {
 		kept := notes[:0]
@@ -52,7 +54,7 @@ func cmdRecall(args []string) int {
 		// Bare `nt recall --lessons-only`: enumerate the whole lesson book, newest
 		// first — the discoverable "what mistakes are on record?" read.
 		for _, n := range notes {
-			results = append(results, recall.Result{Note: n, Lesson: true})
+			results = append(results, recall.Result{Note: n, Lesson: true, Expired: n.Expired(time.Now())})
 		}
 		sort.SliceStable(results, func(i, j int) bool {
 			ui, uj := results[i].Note.Updated, results[j].Note.Updated
@@ -91,6 +93,9 @@ func cmdRecall(args []string) int {
 			if r.ProjectMatch {
 				row["projectMatch"] = true
 			}
+			if r.Expired {
+				row["expired"] = true
+			}
 			out = append(out, row)
 		}
 		return printJSON(out)
@@ -110,6 +115,9 @@ func cmdRecall(args []string) int {
 		}
 		if len(r.Note.Tags) > 0 {
 			line += "  @" + strings.Join(r.Note.Tags, " @")
+		}
+		if r.Expired {
+			line += "  ⚠ expired"
 		}
 		fmt.Println(line)
 	}
