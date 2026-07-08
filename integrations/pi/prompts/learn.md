@@ -23,6 +23,10 @@ candidate learnings in these buckets:
   (why an approach was chosen, how a subsystem actually works).
 - **task** — concrete unfinished follow-up work discovered but not done.
 
+Then **skip** anything re-discoverable by rereading the code/docs, one-off state,
+or raw data/log dumps — memory is for what you *couldn't* re-derive, not a
+transcript.
+
 Be **stingy** with `rule` and `memory-core` — those are injected into every
 future session and cost tokens forever; only propose them when the session
 gives clear evidence they're durable and always-relevant. Be **generous** with

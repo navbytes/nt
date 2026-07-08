@@ -153,8 +153,11 @@ export const NtMemory: Plugin = async ({ $, client }) => {
       } else if (isNote(b) && !kept.some(isNote) && !truncatedOne) {
         // Nothing substantive kept yet and this note alone overflows: keep it
         // truncated so a lone oversized rule is still (partly) shown, not dropped.
-        const room = Math.max(0, max - used - 48)
-        kept.push(b.slice(0, room).trimEnd() + "\n<!-- nt: rule truncated to fit NT_INJECT_MAX -->")
+        const room = Math.max(0, max - used - 100)
+        kept.push(
+          b.slice(0, room).trimEnd() +
+            "\n⚠ nt: this rule was truncated to fit NT_INJECT_MAX — tell the user to shorten it.",
+        )
         used = max
         truncatedOne = true
       } else if (isNote(b)) {
@@ -170,7 +173,12 @@ export const NtMemory: Plugin = async ({ $, client }) => {
     }
     let result = kept.join("\n")
     if (omitted > 0) {
-      result += `\n\n<!-- nt: ${omitted} note(s) omitted to fit NT_INJECT_MAX=${max}; trim rules/memory notes -->`
+      // An agent-visible imperative, not an HTML comment — models routinely ignore
+      // or strip comments, and the whole point is to pressure the user to curate.
+      result +=
+        `\n\n⚠ nt-memory is OVER its ${max}-char budget: ${omitted} rule/memory note(s) are NOT shown, ` +
+        `so some rules are currently invisible to you. Tell the user to consolidate or archive ` +
+        `rules/ + memory-core notes (or raise NT_INJECT_MAX).`
     }
     return result
   }
