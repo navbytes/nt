@@ -74,9 +74,18 @@ const CONFIG = {
   // append matching lessons onto the result. Disable with NT_ERROR_RECALL=0.
   errorRecall: process.env.NT_ERROR_RECALL !== "0",
 
-  // One-time toast when a session that used tools ends without a single nt write.
-  // Disable with NT_IDLE_NUDGE=0.
+  // One-time toast when a session that used tools goes several turns without a
+  // single nt write. Disable with NT_IDLE_NUDGE=0.
   idleNudge: process.env.NT_IDLE_NUDGE !== "0",
+
+  // How many tool-using agent_end turns to wait (with still no nt write)
+  // before nudging. agent_end fires per turn, not per session — nudging on
+  // the FIRST such turn was premature (a session legitimately writes on turn
+  // 4, not turn 1) and trains users to dismiss/ignore the toast. Threshold
+  // instead of "wait for a real session end": session_shutdown's firing
+  // conditions on /new//fork aren't confirmed (see the bridge's teardown
+  // comment below), so this needs no new assumption about Pi's lifecycle.
+  idleNudgeThreshold: Number(process.env.NT_IDLE_NUDGE_THRESHOLD || 3),
 
   // Per-request timeout for a bridged tool call (ms).
   callTimeoutMs: Number(process.env.NT_BRIDGE_TIMEOUT || 20000),
@@ -403,6 +412,7 @@ export default async function (pi: ExtensionAPI) {
   let usedTools = false
   let wroteNt = false
   let nudged = false
+  let toolTurnsWithoutWrite = 0 // consecutive tool-using agent_end turns with no nt write yet
   const recalledFailures = new Set<string>() // throttle: one recall per distinct failing command
 
   // ---- 1. MCP bridge: register nt's tools as native Pi tools ----
@@ -501,10 +511,11 @@ export default async function (pi: ExtensionAPI) {
     }
   })
 
-  // ---- 4. Idle capture nudge (once per session) ----
+  // ---- 4. Idle capture nudge (once per session, after several quiet turns) ----
   pi.on("agent_end", async (_event: any, ctx: any) => {
     try {
       if (!CONFIG.idleNudge || nudged || !usedTools || wroteNt) return
+      if (++toolTurnsWithoutWrite < CONFIG.idleNudgeThreshold) return
       nudged = true
       ctx?.ui?.notify?.(
         "nt: nothing captured this session — run /learn to review & save learnings",
@@ -520,6 +531,7 @@ export default async function (pi: ExtensionAPI) {
     usedTools = false
     wroteNt = false
     nudged = false
+    toolTurnsWithoutWrite = 0
     recalledFailures.clear()
   })
 }

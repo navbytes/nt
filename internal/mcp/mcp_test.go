@@ -1605,3 +1605,95 @@ func TestMCPDoctorNeverWrites(t *testing.T) {
 		t.Fatalf("nt_doctor must never write — tasks.txt changed:\nbefore: %q\nafter:  %q", raw, after)
 	}
 }
+
+func TestMCPDistillFindsNearDuplicatePair(t *testing.T) {
+	s := newServer(t)
+	if _, err := s.dispatch("nt_note", map[string]any{"title": "Token storage in httpOnly cookie"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.dispatch("nt_note", map[string]any{"title": "Token storage in HttpOnly Cookie", "force": true}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.dispatch("nt_note", map[string]any{"title": "Completely unrelated topic"}); err != nil {
+		t.Fatal(err)
+	}
+
+	out, err := s.dispatch("nt_distill", map[string]any{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var payload struct {
+		Pairs []struct {
+			A struct {
+				ID    string `json:"id"`
+				Title string `json:"title"`
+			} `json:"a"`
+			B struct {
+				ID    string `json:"id"`
+				Title string `json:"title"`
+			} `json:"b"`
+		} `json:"pairs"`
+	}
+	if err := json.Unmarshal([]byte(out), &payload); err != nil {
+		t.Fatalf("json output did not parse: %v\n%s", err, out)
+	}
+	if len(payload.Pairs) != 1 {
+		t.Fatalf("expected exactly 1 near-duplicate pair, got %d: %s", len(payload.Pairs), out)
+	}
+	titles := map[string]bool{payload.Pairs[0].A.Title: true, payload.Pairs[0].B.Title: true}
+	if !titles["Token storage in httpOnly cookie"] || !titles["Token storage in HttpOnly Cookie"] {
+		t.Fatalf("unexpected pair: %s", out)
+	}
+}
+
+func TestMCPDistillRespectsLimit(t *testing.T) {
+	s := newServer(t)
+	pairs := [][2]string{
+		{"Cache invalidation approach", "Cache Invalidation Approach"},
+		{"Retry backoff strategy", "Retry Backoff Strategy"},
+	}
+	for _, p := range pairs {
+		if _, err := s.dispatch("nt_note", map[string]any{"title": p[0]}); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s.dispatch("nt_note", map[string]any{"title": p[1], "force": true}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	out, err := s.dispatch("nt_distill", map[string]any{"limit": float64(1)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var payload struct {
+		Pairs     []map[string]any `json:"pairs"`
+		Truncated bool             `json:"truncated"`
+	}
+	if err := json.Unmarshal([]byte(out), &payload); err != nil {
+		t.Fatalf("json output did not parse: %v\n%s", err, out)
+	}
+	if len(payload.Pairs) != 1 || !payload.Truncated {
+		t.Fatalf("expected 1 pair and truncated:true, got %s", out)
+	}
+}
+
+func TestMCPDistillNeverWrites(t *testing.T) {
+	s := newServer(t)
+	created, err := s.dispatch("nt_note", map[string]any{"title": "Token storage in httpOnly cookie", "body": "original"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var n noteOut
+	json.Unmarshal([]byte(created), &n)
+	if _, err := s.dispatch("nt_note", map[string]any{"title": "Token storage in HttpOnly Cookie", "force": true}); err != nil {
+		t.Fatal(err)
+	}
+
+	before, _ := os.ReadFile(s.listNotes()[0].Path)
+	if _, err := s.dispatch("nt_distill", map[string]any{}); err != nil {
+		t.Fatal(err)
+	}
+	after, _ := os.ReadFile(s.listNotes()[0].Path)
+	if string(before) != string(after) {
+		t.Fatal("nt_distill must never write")
+	}
+}

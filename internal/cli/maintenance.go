@@ -471,9 +471,13 @@ func cmdMv(args []string) int {
 func cmdDoctor(args []string) int {
 	fs := flag.NewFlagSet("doctor", flag.ContinueOnError)
 	check := fs.Bool("check", false, "report problems without fixing (exit 1 if any)")
-	flags, _ := splitArgs(args, map[string]bool{"check": true})
+	integrations := fs.Bool("integrations", false, "check Claude Code/OpenCode/Pi integration wiring instead of the task/note store (read-only, never fixes)")
+	flags, _ := splitArgs(args, map[string]bool{"check": true, "integrations": true})
 	if err := fs.Parse(flags); err != nil {
 		return 2
+	}
+	if *integrations {
+		return runIntegrationsDoctor()
 	}
 	e, ok := engine()
 	if !ok {
@@ -631,7 +635,6 @@ func lintNotes(e *mutate.Engine) noteLint {
 			}
 		}
 	}
-	seen := make([]*note.Note, 0, len(active))
 	var pinnedNotes []*note.Note
 	for _, n := range active {
 		if n.Reserved() {
@@ -653,23 +656,13 @@ func lintNotes(e *mutate.Engine) noteLint {
 		if !linked[n.Path] && !standaloneKind(n) {
 			rep.Orphans = append(rep.Orphans, handle)
 		}
-		// Near-duplicate titles are the store rot that degrades recall most —
-		// surface them here since doctor is the curation entry point. A pair where
-		// EITHER note carries the `distinct` tag is a sanctioned fork (a deliberate
-		// --force the author already acknowledged) — nagging forever just teaches
-		// people to ignore doctor.
-		if !contains(n.Tags, "distinct") {
-			if sim := note.FindSimilar(seen, n.Title, n.Tags); len(sim) > 0 {
-				for _, s := range sim {
-					if contains(s.Tags, "distinct") {
-						continue
-					}
-					rep.NearDups = append(rep.NearDups, fmt.Sprintf("%s ≈ %s", handle, shortID(s.ID)+" "+s.Rel))
-					break
-				}
-			}
-		}
-		seen = append(seen, n)
+	}
+	// Near-duplicate titles are the store rot that degrades recall most —
+	// surface them here since doctor is the curation entry point (nt distill
+	// exposes the same pairs uncapped, with full stub fields, for an agent to
+	// review). One pass, shared logic — see note.NearDupPairs.
+	for _, p := range note.NearDupPairs(active) {
+		rep.NearDups = append(rep.NearDups, fmt.Sprintf("%s ≈ %s", shortID(p.A.ID)+" "+p.A.Rel, shortID(p.B.ID)+" "+p.B.Rel))
 	}
 	// When the pinned tier is oversized, name the oldest members with their age
 	// — "demote stale notes" is only actionable if nt says WHICH are stale.

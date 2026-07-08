@@ -210,6 +210,13 @@ var toolDefs = []toolDef{
 		InputSchema: obj(map[string]any{}),
 	},
 	{
+		Name:        "nt_distill",
+		Description: "List every near-duplicate note pair in the store (by title) — read-only, proposes nothing on its own. For each pair, review both (nt_get) and either fold one into the other (nt_note_edit append/old_string+new_string) then retire the old one (nt_archive with superseded_by set to the kept id), or tag one 'distinct' (nt_tag) if it's a deliberate fork. Always confirm with the user before merging — never merge silently.",
+		InputSchema: obj(map[string]any{
+			"limit": map[string]any{"type": "integer", "description": "cap the number of pairs returned (default: all)"},
+		}),
+	},
+	{
 		Name:        "nt_archive",
 		Description: "Retire a stale note from index/search/recall/status — reversible, the file stays on disk. Set superseded_by when another note replaces it (reconciling duplicates): the old note retires with a pointer preserving the trail. Set undo to bring an archived note back.",
 		InputSchema: obj(map[string]any{

@@ -2,8 +2,8 @@
 
 This bundle turns [`nt`](../../README.md) into the **memory, rules, and
 knowledge-base backend** for [OpenCode](https://opencode.ai), wired the way
-OpenCode is extended: an MCP server, a plugin, two commands (`/recall` in,
-`/learn` out), a skill, and a thin `AGENTS.md`. The result is a coding agent
+OpenCode is extended: an MCP server, a plugin, three commands (`/recall` in,
+`/learn` out, `/distill` to consolidate), a skill, and a thin `AGENTS.md`. The result is a coding agent
 whose memory survives across sessions, lives in plain files you can
 `grep`/`git diff`/open in Obsidian, and costs the right number of tokens per
 kind of content.
@@ -112,6 +112,12 @@ focus) and the agent reviews the session, extracts candidates in five buckets
 store, and presents a numbered list for approval **before writing**. Items headed
 for the always-injected layer are flagged with their standing cost. The approval
 gate keeps the injected core small.
+
+**4b. `/distill` command (`commands/distill.md`)** — the batch counterpart of
+the write-time near-duplicate guard: lists every near-duplicate note pair via
+`nt_distill` (read-only), then walks each pair to approval before merging
+(`nt_note_edit` + `nt_archive superseded_by`) or tagging a deliberate fork
+`distinct`. Nothing merges without approval.
 
 **5. Skill (`skills/nt/SKILL.md`)** — the recall-first / capture-the-why loop and
 folder+tag conventions, loaded on demand via OpenCode's `skill` tool.

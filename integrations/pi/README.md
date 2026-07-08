@@ -3,8 +3,8 @@
 This bundle makes [`nt`](../../README.md) the **memory, rules, and
 knowledge-base backend** for [Pi](https://github.com/badlogic/pi-mono) (the
 minimal terminal coding agent), wired the way Pi is extended: an in-process
-**extension**, two **prompt templates** (`/recall` in, `/learn` out), a
-**skill**, and a thin `AGENTS.md`. The agent's memory then survives across
+**extension**, three **prompt templates** (`/recall` in, `/learn` out, `/distill`
+to consolidate), a **skill**, and a thin `AGENTS.md`. The agent's memory then survives across
 sessions, lives in plain files you can `grep`/`git diff`/open in Obsidian, and
 costs the right number of tokens for each kind of content.
 
@@ -68,13 +68,18 @@ tokens only when recalled.
     survive compaction. `NT_INJECT=off` disables.
   - **Error-triggered recall** (`tool_result`, `NT_ERROR_RECALL=0` to disable).
   - **Idle nudge** (`agent_end`, `NT_IDLE_NUDGE=0` to disable) — one toast per
-    session suggesting `/learn` when tools were used but nothing was saved.
+    session suggesting `/learn`, after `NT_IDLE_NUDGE_THRESHOLD` (default 3)
+    tool-using turns with nothing saved (not the first — a session that writes
+    a few turns in shouldn't get nagged).
   - If the bridge can't start, the injected rules still apply and the agent
     falls back to the `nt` CLI.
 - **`skills/nt/SKILL.md`** — the recall-first / capture-the-why workflow
   (`/skill:nt`).
-- **`prompts/{learn,recall}.md`** — human-gated session harvest + on-demand
-  briefing (Pi's bash-style `$@` args).
+- **`prompts/{learn,recall,distill}.md`** — human-gated session harvest,
+  on-demand briefing, and near-duplicate note consolidation (Pi's bash-style
+  `$@` args). `/distill` lists every near-dup pair via `nt_distill`
+  (read-only), then walks each to approval before merging or tagging a
+  deliberate fork `distinct` — nothing merges without approval.
 - **`AGENTS.md`** — a thin nudge (Pi concatenates it from `~/.pi/agent/`, parent
   dirs, and cwd). **`README.md`**, **`install.sh`**, **`embed.go`**.
 
@@ -101,7 +106,7 @@ end.
 ## Config & environment
 
 Config dir `~/.pi/agent/` (override with `PI_CODING_AGENT_DIR`); files land in
-`extensions/nt-memory.ts`, `skills/nt/SKILL.md`, `prompts/{learn,recall}.md`,
+`extensions/nt-memory.ts`, `skills/nt/SKILL.md`, `prompts/{learn,recall,distill}.md`,
 `AGENTS.md`. `nt` must be on Pi's PATH, or set `NT_BIN`.
 
 | Var | Default | Effect |
@@ -110,6 +115,7 @@ Config dir `~/.pi/agent/` (override with `PI_CODING_AGENT_DIR`); files land in
 | `NT_BRIDGE` | on | `0` skips registering nt's tools (injection-only) |
 | `NT_ERROR_RECALL` | on | `0` disables failed-bash → lessons recall |
 | `NT_IDLE_NUDGE` | on | `0` disables the idle toast |
+| `NT_IDLE_NUDGE_THRESHOLD` | `3` | quiet tool-using turns before the idle toast fires |
 | `NT_INJECT_MAX` | `8000` | char cap on the injected block |
 | `NT_BIN` | `nt` | absolute path to the nt binary |
 

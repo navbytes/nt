@@ -35,6 +35,7 @@ var opencodeAssets = []struct{ src, dst string }{
 	{"skills/nt/SKILL.md", filepath.Join("skills", "nt", "SKILL.md")},
 	{"commands/learn.md", filepath.Join("commands", "learn.md")},
 	{"commands/recall.md", filepath.Join("commands", "recall.md")},
+	{"commands/distill.md", filepath.Join("commands", "distill.md")},
 }
 
 // cmdOpencodeInstall performs the complete nt ↔ OpenCode integration setup —
@@ -43,7 +44,7 @@ var opencodeAssets = []struct{ src, dst string }{
 //  1. register nt's MCP server                    → opencode.json mcp.nt
 //  2. install the nt-memory plugin                → plugins/nt-memory.ts
 //  3. install the nt skill                        → skills/nt/SKILL.md
-//  4. install the /learn and /recall commands     → commands/*.md
+//  4. install the /learn, /recall, /distill commands → commands/*.md
 //  5. install a starter AGENTS.md                 (only if none exists)
 //  6. allow the nt skill                          → opencode.json permission.skill.nt
 //  7. load the file baseline                      → opencode.json instructions
