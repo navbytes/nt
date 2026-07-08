@@ -1,6 +1,6 @@
 {
   "projectTitle": "nt",
-  "description": "A terminal task & note manager that stores everything as plain files — todo.txt tasks and markdown notes with YAML frontmatter — built to be the durable memory layer for AI coding sessions across Claude Code, OpenCode, and Pi.",
+  "description": "A terminal task & note manager storing everything as plain files — todo.txt tasks and markdown notes — the durable memory layer for AI coding sessions across Claude Code, OpenCode, and Pi.",
   "excludeFolders": [
     "internal/web/frontend/dist",
     "internal/web/frontend/node_modules",
