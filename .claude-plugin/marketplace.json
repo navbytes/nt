@@ -1,0 +1,17 @@
+{
+  "name": "navbytes-nt",
+  "description": "nt — a plain-text task & note manager that's the durable memory layer for AI coding sessions.",
+  "owner": {
+    "name": "navbytes"
+  },
+  "plugins": [
+    {
+      "name": "nt",
+      "source": "./",
+      "description": "Durable task & note memory for AI coding sessions — plain-text todo.txt tasks + markdown notes, with paraphrase-aware recall so lessons survive across sessions.",
+      "homepage": "https://github.com/navbytes/nt",
+      "category": "productivity",
+      "keywords": ["memory", "tasks", "notes", "knowledge-base", "recall", "todo"]
+    }
+  ]
+}

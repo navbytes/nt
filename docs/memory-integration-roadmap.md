@@ -123,17 +123,32 @@ met, don't schedule otherwise):
   model/context-window info in `before_agent_start`, unverified; the
   shipped flat-cap behavior already degrades gracefully (truncation +
   agent-visible warning).
-- **12** — publish to registries — **Homebrew tap done** (2026-07-08):
-  `navbytes/homebrew-tap` + the PAT secret now exist, `.goreleaser.yaml`
-  switched from the fully-removed `brews:` to `homebrew_casks:` (verified
-  against GoReleaser's own dogfooded config), `brew install navbytes/tap/nt`
-  ships from the next tag. Also documented `mise use -g github:navbytes/nt`
-  — works today via mise's `github:` backend with zero repo changes, since
-  nt's release assets already follow a standard name/version/os/arch
-  pattern. Still open: MCP directory listings, the Claude Code marketplace,
-  and the official mise registry (a `registry.toml` PR) are submissions to
-  *external* repositories outside this session's write access — left for
-  the maintainer, no more code-side prerequisites.
+- **12** — publish to registries — **mostly done** (2026-07-08):
+  - **Homebrew**: `navbytes/homebrew-tap` + the PAT secret exist,
+    `.goreleaser.yaml` switched from the fully-removed `brews:` to
+    `homebrew_casks:` (verified against GoReleaser's own dogfooded config),
+    `brew install navbytes/tap/nt` ships from the next tag.
+  - **mise**: documented `mise use -g github:navbytes/nt` — works today via
+    mise's `github:` backend with zero repo changes, since nt's release
+    assets already follow a standard name/version/os/arch pattern. The
+    *official* registry (bare `mise use nt`) needs a `registry.toml` PR to
+    `jdx/mise`, an external repo — left for the maintainer.
+  - **Claude Code plugin marketplace**: nt is now a self-hosted marketplace
+    (`.claude-plugin/marketplace.json` + `plugin.json` at repo root) —
+    `/plugin marketplace add navbytes/nt` + `/plugin install nt@navbytes-nt`
+    installs the skill and registers the MCP server in one step. Verified
+    with `claude plugin validate` and a local install/uninstall round-trip.
+    The *central* Anthropic-curated directory (`claude-plugins-official`)
+    is a separate, reviewed submission — left for the maintainer.
+  - **Still open, external submissions**: MCP directory listings (e.g. the
+    official `modelcontextprotocol/registry` — its `server.json` schema only
+    accepts npm/PyPI/NuGet/OCI/MCPB package types, not a raw GitHub-release
+    binary, so this needs a packaging decision — npm wrapper, a Docker/OCI
+    image, or an MCPB bundle — before it's a fit; not attempted without that
+    call), and the Claude Code marketplace's central directory. Context7
+    (`context7.json` already in the repo) needs the repo submitted at
+    context7.com. All left for the maintainer — no more code-side
+    prerequisites for Homebrew, mise, or the self-hosted plugin path.
 
 ## Explicitly out of scope (the team's `outOfScope`, with reasoning)
 
