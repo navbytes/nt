@@ -51,7 +51,7 @@ That's it — you're up. `nt help` lists every command; [more install options be
 - **⛓️ Real task semantics.** Full A–Z priorities, due dates (with optional time-of-day), start/defer dates, projects, tags, recurrence, sub-tasks and dependencies (`blocks:`/`parent:`) with **cycle detection**, time **estimates + start/stop tracking**, and typed provenance (`discovered-from`).
 - **🗓️ A planner, not just a list.** `nt agenda` groups your work by date, `nt review` is a weekly triage (overdue · stale · undated · stuck projects), and **daily notes** (`nt journal`) give you a dated log your agents can append to.
 - **🔒 Safe by construction.** Every write goes through one locking, atomic, ULID-keyed engine with transactional **undo/redo** — so a concurrent `nt add` from an AI session is never clobbered. Lossless todo.txt round-trip is enforced by test.
-- **🌿 Git-native.** `nt git-init` sets up `merge=union` so branches don't conflict on every add; `nt doctor` reconciles after a merge.
+- **🌿 Git-native.** `nt git-init` sets up `merge=union` so branches don't conflict on every add; `nt doctor` reconciles after a merge. `nt sync` wraps the whole loop (commit → pull → reconcile → push) for a team sharing one store over a git remote — no hosted service.
 
 ## 🧠 Durable memory for your AI agents
 
@@ -164,9 +164,11 @@ nt edit <id|task:N>         # safe $EDITOR round-trip        nt rm <note> [--for
 nt web [--port N]           # browser app, editing enabled (--detach to run in the background; --status / --stop)
 nt supersede <old> --by <new>   nt gc [--yes]   # curation: retire, then reclaim (dry-run default)
 nt export --tag rule            # compile the standing rules layer into CLAUDE.md/AGENTS.md
+nt import backup.json | vault/  # export's inverse: round-trip a JSON backup or bulk-load an Obsidian vault
 nt undo / redo              # workstream-safe: refuses another agent's change unless --force
 nt mcp [install]   nt hook
 nt git-init && nt doctor    # version-control the store + reconcile merges (+ dependency checks)
+nt sync [--no-push]         # team memory over git: commit, pull, doctor-reconcile, push
 nt path                     # print $NT_DIR  nt archive   nt --version   nt help
 # Optional defaults live in $NT_DIR/config.toml ([defaults]/[web]/[tui]).
 ```

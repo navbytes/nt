@@ -34,12 +34,52 @@ type Note struct {
 	// archived one — so a resume sees the single canonical decision, not both
 	// forks — while the pointer preserves the trail.
 	SupersededBy string
+	// ValidFrom/ValidUntil are optional frontmatter dates (YYYY-MM-DD or
+	// RFC3339) marking a fact's validity window — Zep's idea, without a
+	// temporal graph database: a note can be "true as of" or "true until"
+	// without a full supersede. Unlike Archived/SupersededBy (which retire a
+	// note from active views entirely), an expired note stays visible — just
+	// down-ranked in nt_recall and flagged, so an agent still finds it but
+	// knows to doubt it. See Expired/NotYetValid.
+	ValidFrom  string
+	ValidUntil string
 	// ModTime is the note file's last-modified time, set by List/Load/cache. It
 	// captures every change — including edits made outside nt (Obsidian, git) that
 	// never touch the `updated:` frontmatter — so "changed since T" is reliable.
 	ModTime time.Time
 	Body    string
 	Extra   []string // raw frontmatter lines for keys nt doesn't model (preserved verbatim)
+}
+
+// parseValidityDate parses a frontmatter validity date in either YYYY-MM-DD or
+// full RFC3339 form. ok=false for "", unparseable, or malformed input — always
+// treated as "no constraint" by Expired/NotYetValid, never as an error.
+func parseValidityDate(s string) (t time.Time, ok bool) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return time.Time{}, false
+	}
+	if t, err := time.Parse(time.RFC3339, s); err == nil {
+		return t, true
+	}
+	if t, err := time.Parse("2006-01-02", s); err == nil {
+		return t, true
+	}
+	return time.Time{}, false
+}
+
+// Expired reports whether n's valid_until has passed as of now. false when
+// valid_until is unset or unparseable — absence is never treated as expired.
+func (n *Note) Expired(now time.Time) bool {
+	t, ok := parseValidityDate(n.ValidUntil)
+	return ok && now.After(t)
+}
+
+// NotYetValid reports whether n's valid_from is still in the future as of now.
+// false when valid_from is unset or unparseable.
+func (n *Note) NotYetValid(now time.Time) bool {
+	t, ok := parseValidityDate(n.ValidFrom)
+	return ok && now.Before(t)
 }
 
 // Slug derives a filesystem-safe slug from a title, falling back to a timestamp
@@ -247,6 +287,12 @@ func (n *Note) Save() error {
 	if n.SupersededBy != "" {
 		fmt.Fprintf(&b, "superseded_by: %s\n", n.SupersededBy)
 	}
+	if n.ValidFrom != "" {
+		fmt.Fprintf(&b, "valid_from: %s\n", n.ValidFrom)
+	}
+	if n.ValidUntil != "" {
+		fmt.Fprintf(&b, "valid_until: %s\n", n.ValidUntil)
+	}
 	for _, line := range n.Extra { // unknown keys (Obsidian properties), verbatim
 		b.WriteString(line)
 		b.WriteByte('\n')
@@ -261,6 +307,53 @@ func (n *Note) Save() error {
 		b.WriteByte('\n')
 	}
 	return store.WriteAtomic(n.Path, []byte(b.String()), 0o644)
+}
+
+// StaleNoteError reports that a note changed on disk since the caller last
+// saw it — SaveIfUnchanged's refusal.
+type StaleNoteError struct {
+	Path string
+}
+
+func (e *StaleNoteError) Error() string {
+	return fmt.Sprintf("%s changed on disk since it was loaded", e.Path)
+}
+
+// MTimeToken returns a stable, comparable string for n's ModTime — the
+// optimistic-concurrency token callers round-trip through SaveIfUnchanged.
+// "" when ModTime is unset (e.g. a just-created note that hasn't been loaded
+// from disk).
+func (n *Note) MTimeToken() string {
+	if n.ModTime.IsZero() {
+		return ""
+	}
+	return n.ModTime.UTC().Format(time.RFC3339Nano)
+}
+
+// SaveIfUnchanged writes n atomically, refusing with a *StaleNoteError when
+// expect is non-empty and doesn't match the file's CURRENT on-disk mtime (a
+// fresh os.Stat, not n's own possibly-stale ModTime) — "only save if the file
+// still looks like what I last saw." expect == "" (the default — most callers
+// have no token to offer) skips the check entirely, matching plain Save.
+//
+// This is best-effort optimistic concurrency, not a hard guarantee: it
+// catches the dominant real case (an agent saving a copy it loaded some time
+// ago while another writer touched the file meanwhile), the same way the web
+// layer's If-Match does — except the web layer serializes through one
+// process, while the CLI/MCP path is multi-process, so a residual
+// stat-then-rename race window remains between the check and the write.
+func (n *Note) SaveIfUnchanged(expect string) error {
+	if expect != "" {
+		if info, err := os.Stat(n.Path); err == nil {
+			if cur := info.ModTime().UTC().Format(time.RFC3339Nano); cur != expect {
+				return &StaleNoteError{Path: n.Path}
+			}
+		}
+		// A missing file isn't "stale" in the sense this guards against — Save's
+		// own WriteAtomic recreates it, matching plain Save's existing behavior
+		// for a note deleted then re-saved.
+	}
+	return n.Save()
 }
 
 var fmDelim = "---"
@@ -331,6 +424,10 @@ func parseFrontmatter(fm string, n *Note) {
 			n.Favorite = unquote(val) == "true"
 		case "superseded_by":
 			n.SupersededBy = unquote(val)
+		case "valid_from":
+			n.ValidFrom = unquote(val)
+		case "valid_until":
+			n.ValidUntil = unquote(val)
 		case "title":
 			if v := unquote(val); v != "" {
 				n.Title = v

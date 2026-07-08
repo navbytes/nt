@@ -18,8 +18,11 @@ package recall
 import (
 	"fmt"
 	"math"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/navbytes/nt/internal/note"
 )
@@ -28,12 +31,20 @@ import (
 // first. Capture with `nt note --lesson` (or tag an existing note `lesson`).
 const LessonTag = "lesson"
 
+// expiredPenalty down-ranks (never hides) a note whose valid_until has
+// passed: it's still findable — the fact might still matter, or the caller
+// might specifically want the history — but a fresher, still-valid note on
+// the same topic should usually win the tie. Multiplicative, like the lesson
+// boost, so it scales with relevance rather than flatly subtracting.
+const expiredPenalty = 0.4
+
 // Result is one ranked note. Lesson notes sort first at equal relevance.
 type Result struct {
 	Note         *note.Note
 	Score        int
 	Lesson       bool
 	ProjectMatch bool // note belongs to the caller's project (soft ranking boost applied)
+	Expired      bool // note.Note.Expired() as of ranking time — valid_until has passed
 }
 
 // synGroups cluster words that mean the same thing to a coding agent. Matching any
@@ -65,21 +76,94 @@ var synGroups = [][]string{
 	{"i18n", "l10n", "locale", "translation", "rtl", "localization"},
 }
 
-// conceptOf maps a stemmed word to its group id ("g0", "g1", …) if it belongs to a
-// synonym group, else to itself — the canonical token used for overlap scoring.
-var conceptOf = func() map[string]string {
+// buildConceptOf maps each group's stemmed words to a shared group id ("g0",
+// "g1", …). fmt.Sprintf, not "g"+string(rune('0'+i)): the latter overflows
+// past i=9 into punctuation (':' at i=10, ';' at i=11, …) and eventually
+// collides with real word characters once the group count passes 74.
+func buildConceptOf(groups [][]string) map[string]string {
 	m := map[string]string{}
-	for i, g := range synGroups {
-		// fmt.Sprintf, not "g"+string(rune('0'+i)): the latter overflows past i=9
-		// into punctuation (':' at i=10, ';' at i=11, …) and eventually collides
-		// with real word characters once the group count passes 74.
+	for i, g := range groups {
 		id := fmt.Sprintf("g%d", i)
 		for _, w := range g {
 			m[stem(w)] = id
 		}
 	}
 	return m
-}()
+}
+
+// conceptOf maps a stemmed word to its group id if it belongs to a synonym
+// group, else to itself — the canonical token used for overlap scoring.
+// Starts as the built-in table; LoadUserSynonyms extends it.
+var conceptOf = buildConceptOf(synGroups)
+
+// LoadUserSynonyms reads $dir/synonyms.txt — one synonym group per line,
+// words separated by commas/whitespace, '#' starts a comment, blank lines
+// ignored — and merges it over the built-in table. A line sharing a word with
+// a built-in group extends that group (e.g. add a house term to
+// "concurrency" without knowing the rest of the list); an all-new line mints
+// its own group. Cheap enough to call before every ranking — callers do, so
+// an edited synonyms.txt takes effect on the next recall with no restart. A
+// missing file is not an error — nothing to load; treat any other error as
+// best-effort too (a malformed synonyms file shouldn't break recall).
+func LoadUserSynonyms(dir string) error {
+	data, err := os.ReadFile(filepath.Join(dir, "synonyms.txt"))
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	groups := parseSynonymFile(string(data))
+	if len(groups) == 0 {
+		return nil
+	}
+	m := buildConceptOf(synGroups)
+	nextID := len(synGroups)
+	for _, g := range groups {
+		targetID := ""
+		for _, w := range g {
+			if id, ok := m[stem(w)]; ok {
+				targetID = id
+				break
+			}
+		}
+		if targetID == "" {
+			targetID = fmt.Sprintf("g%d", nextID)
+			nextID++
+		}
+		for _, w := range g {
+			m[stem(w)] = targetID
+		}
+	}
+	conceptOf = m
+	return nil
+}
+
+// parseSynonymFile splits synonyms.txt into groups of >=2 words each — a
+// solo word has nothing to synonym-match against, so single-word lines are
+// dropped.
+func parseSynonymFile(data string) [][]string {
+	var groups [][]string
+	for _, line := range strings.Split(data, "\n") {
+		if i := strings.IndexByte(line, '#'); i >= 0 {
+			line = line[:i]
+		}
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		var words []string
+		for _, f := range strings.FieldsFunc(line, func(r rune) bool { return r == ',' || r == '\t' || r == ' ' }) {
+			if f = strings.ToLower(strings.TrimSpace(f)); f != "" {
+				words = append(words, f)
+			}
+		}
+		if len(words) >= 2 {
+			groups = append(groups, words)
+		}
+	}
+	return groups
+}
 
 // stop is a tiny stopword set — words too common to carry retrieval signal.
 var stop = map[string]bool{
@@ -313,7 +397,11 @@ func RankProject(notes []*note.Note, context string, limit int, project string) 
 		if isMine {
 			f *= projectBoost
 		}
-		out = append(out, scored{Result{Note: cd.n, Score: int(f*100 + 0.5), Lesson: cd.lesson, ProjectMatch: isMine}, f, exact, matched})
+		expired := cd.n.Expired(time.Now())
+		if expired {
+			f *= expiredPenalty
+		}
+		out = append(out, scored{Result{Note: cd.n, Score: int(f*100 + 0.5), Lesson: cd.lesson, ProjectMatch: isMine, Expired: expired}, f, exact, matched})
 	}
 	// Precision floor (field-study fix): a specific query (≥4 concepts) matching a
 	// note on a SINGLE concept is topical noise, not a memory hit — the lesson

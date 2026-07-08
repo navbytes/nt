@@ -77,8 +77,10 @@ text, forever readable, and directly writable by an AI agent without an integrat
 ~/.local/share/nt/            # $NT_DIR
 ├── tasks.txt                 # active tasks — todo.txt format, one line per task
 ├── done.txt                  # archived completed tasks (via `nt archive`)
-├── undo.jsonl                # append-only undo transaction journal (§6.3)
+├── undo.jsonl                # append-only undo transaction journal — tasks (§6.3)
+├── notes-undo.jsonl          # append-only undo journal — note body edits (§6.3)
 ├── views.json                # saved smart views — `nt view save/recall` (optional)
+├── synonyms.txt              # user synonym groups for recall, one per line (optional, §9)
 ├── web.pid / web.log         # a backgrounded `nt web --detach` server + its output (optional)
 ├── tasks.txt.lock            # advisory lock file (§6.4)
 ├── .trash/                   # gc + rm destination (recoverable)
@@ -185,6 +187,12 @@ Tokens expire after 24h; refresh window is 7d. See [[oauth-flow]].
   are not parsed).
 - Notes are one file each, so editing a note directly in `$EDITOR` is safe (atomic save, no
   shared-file lock needed).
+- **`valid_from:`/`valid_until:`** (optional, `YYYY-MM-DD` or RFC3339) mark a fact's validity
+  window — set via `nt note --valid-from/--valid-until`, `nt edit --valid-from/--valid-until`
+  (or `--clear-valid-from/--clear-valid-until`), or the `nt_note`/`nt_note_edit` MCP args of the
+  same name. Unlike `nt archive`, an expired note is never hidden — `nt recall`/`nt_recall`
+  down-rank it and every read path flags it `expired`/`notYetValid`, so an agent still finds it
+  but knows to doubt it.
 
 **Obsidian-compatible (use Obsidian as the notes GUI).** Point an Obsidian vault at `notes/`
 and it works both ways — nt already writes plain `.md` + YAML frontmatter + `[[wikilinks]]`
@@ -287,6 +295,16 @@ mutation writes, atomically and under the same lock, a transaction record:
   the same critical section as the mutation, so "last" is well-defined. Write the journal
   entry **before** the forward mutation so a crash can't leave a mutation without its inverse.
 
+**Note edits** (`nt edit`'s non-interactive flags, `nt_note_edit`) are undoable too, via a
+sibling journal (`notes-undo.jsonl`) rather than folding into `undo.jsonl`'s transaction
+shape: a note is a single file, so its "transaction" is just the file's raw bytes before the
+edit — no per-line ULID inverse, no Doc post-image to validate. Both journals are
+single-level (only the last entry is ever read or replaced, toggling between a forward op and
+its `redo:`-prefixed inverse) and independently capped/compacted past a size threshold. `nt
+undo`/`nt redo` peek both journals and act on whichever entry is more recent — "the last thing
+I did," whether it touched a task or a note — rather than a task-only view that would silently
+ignore a newer note edit.
+
 ### 6.4 Locking & sync honesty
 
 - **BSD `flock` on `tasks.txt.lock`** (a separate file, so the rename that replaces
@@ -302,7 +320,7 @@ mutation writes, atomically and under the same lock, a transaction record:
 - **Git-tracked stores (opt-in).** `nt git-init` drops a `.gitattributes`
   (`tasks.txt`/`done.txt` `merge=union`) so concurrent branches don't conflict on every
   append — git keeps both sides' lines instead of emitting markers — plus a `.gitignore` for
-  local/transient files (`undo.jsonl`, `tasks.txt.lock`, `nt.log`, `.claude-sync.json`), and
+  local/transient files (`undo.jsonl`, `notes-undo.jsonl`, `tasks.txt.lock`, `nt.log`, `.claude-sync.json`), and
   `git init`s the store. Union merges can leave duplicate-ULID lines, so **`nt doctor`**
   reconciles after a merge: it drops duplicate ids (keeping a completed line over an open one)
   and assigns ids to any id-less line, under the lock. **`nt doctor` also lints notes** —
@@ -312,6 +330,16 @@ mutation writes, atomically and under the same lock, a transaction record:
   task-ledger reconciliation. Not journaled — git is the recovery
   path; `nt doctor --check` is a non-mutating dry run (exit 1 if issues) for pre-commit/CI.
   This keeps the single greppable `tasks.txt`; per-task file sharding is deferred (§15).
+- **Shared team memory is git, not a service.** Point `$NT_DIR` at a shared git remote (a
+  private repo) instead of a hosted multi-user server (the Letta/Mem0/Zep model) — plain files
+  + git's merge machinery is the whole mechanism, no new infrastructure. `nt sync` is the thin
+  wrapper: commit local edits (so they merge like anyone else's, never lost to an overwrite),
+  `git pull --no-rebase` (an explicit merge — rebase would rewrite hashes a teammate may have
+  already pushed on top of), run **`nt doctor`** to reconcile any union-merge duplicate-ULID
+  lines and commit that, then `git push`. Note files merge with plain git (one file each, no
+  driver needed); a genuine same-note conflict (two people edited the same file) stops the
+  sequence with ordinary conflict markers — resolve by hand, then re-run `nt sync`. Needs `nt
+  git-init` plus a `git remote add origin …` done once per clone.
 
 ### 6.5 fsnotify refresh
 
@@ -375,6 +403,7 @@ nt links <id|task:N> [--json]        # forward links + backlinks for an item (§
 nt archive                           # move done tasks → done.txt
 nt gc [--older-than 30d] [--yes]     # sweep superseded stubs + stranded __tasks__ notes → .trash/ (dry-run default)
 nt export --tag rule                 # compile the standing rules layer (CLAUDE.md / AGENTS.md)
+nt import backup.json | vault/       # export's inverse: round-trip a JSON backup, or bulk-load an Obsidian vault
 nt undo / redo                       # transactional; workstream-safe (--force overrides)
 nt edit <id|task:N> | nt edit note:<slug>   # safe edit via temp file (§6.2)
 nt mv <note> <new-name|folder/path>  # rename/move a note, rewriting all [[links]] to it
@@ -446,6 +475,11 @@ findings cross-pollinate. A *workstream* is that isolation axis, distinct from
 - **Subtasks** — `--parent task:1`, one level deep, `s` expands inline with a `[done/total]`
   rollup. Archive of a parent with open children is refused (keeps the rollup honest).
 - **Full-text search** — ripgrep over notes; structured filter/sort over tasks (§7.1).
+- **Recall** — `nt recall`/`nt_recall`: paraphrase-aware note ranking (stemming + a small
+  dev-concept synonym table), lessons boosted first (§7.3). Extend the synonym table without
+  a rebuild by adding `$NT_DIR/synonyms.txt` — one group per line, words separated by commas
+  or whitespace, `#` for comments; a word already in a built-in group joins that group, an
+  all-new line mints its own.
 - **Linking & backlinks** — `[[…]]` cross-links any task or note in any direction; backlinks
   ("Linked from") computed on demand via ripgrep, no index (§5.1).
 - **Multi-select & bulk ops** (TUI) — `space`/`V` mark tasks (ULID-keyed, survive

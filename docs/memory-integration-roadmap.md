@@ -38,6 +38,22 @@ response to a Hermes-agent comparison): an agent-visible over-budget nudge
 when the injected rules+memory block exceeds `NT_INJECT_MAX` (both plugins),
 and a "what to skip" bullet in the `/learn` prompts.
 
+## Shipped in round 2
+
+Seven more items off the ranked list, continuing straight from round 1's
+merge — same bar (verifiable against nt's own code, full test coverage,
+clean build/vet/lint):
+
+| Rank | Item | Where |
+|------|------|-------|
+| 3 (rest) | Optimistic-concurrency write guard — `Note.MTimeToken()`/`SaveIfUnchanged(expect)` refuse a save whose on-disk mtime moved since the caller last read it, instead of silently overwriting a concurrent edit. Threaded through `nt_note_edit` (`expect_mtime`) and `nt edit --expect-mtime`; `nt_get`/`nt show --json` hand back the token to round-trip. Best-effort (multi-process, so a residual stat-then-rename race remains) — the same honesty the existing `flock` docs already give the task side. | `internal/note/note.go`, `internal/mcp/mcp.go`, `internal/cli/maintenance.go` |
+| 10 | Note body edits joined the undo/history model — previously `nt undo`/`nt redo` only ever touched tasks; a note edit outside the temp-file `$EDITOR` path had no revert. A parallel single-level journal (`internal/note/undo.go`, mirroring the task journal's append/compact/peek design) records a before-image per edit; `nt undo`/`nt redo` now peek BOTH journals and act on whichever is more recent, task or note. The old refusal (`noteEditedSinceLastTxn`) is gone — replaced by an actual revert. | `internal/note/undo.go`, `internal/cli/maintenance.go`, `internal/mcp/mcp.go` |
+| 16 | `valid_from`/`valid_until` frontmatter (Zep's idea, no graph DB) — a note can be "true as of" or "true until" a date/time without a full supersede. An expired note is never hidden, just down-ranked in `nt_recall`/`nt recall` (`expiredPenalty`) and flagged `expired`/`notYetValid` everywhere a note surfaces (`nt_get`, `nt_index`, `nt_search`, `nt show --json`). Set via `nt note --valid-from/--valid-until`, `nt edit --valid-from/--valid-until` (`--clear-*` to unset), or the matching `nt_note`/`nt_note_edit` MCP args. | `internal/note/note.go`, `internal/recall/recall.go`, `internal/mcp/mcp.go`, `internal/cli/commands.go`, `internal/cli/maintenance.go` |
+| 17 | Read-only `nt_doctor` MCP tool — an MCP-only agent (no CLI access) can now see its own store's hygiene: dangling `[[links]]`, task-file problems (duplicate/missing ids, dependency warnings), and notes past `valid_until`. Never writes — task-file fixes stay behind the CLI's `nt doctor` on purpose, so a read can't silently rewrite `tasks.txt`. | `internal/mcp/mcp.go`, `internal/mcp/tools.go` |
+| 9 (rest) | User-extensible synonym vocabulary — `$NT_DIR/synonyms.txt` (one group per line, `#` comments) merges over the in-code table at ranking time. A word already in a built-in group extends that group; an all-new line mints its own. Picks up edits with no restart (CLI: new process anyway; MCP: reloaded before every `nt_recall`). | `internal/recall/recall.go` |
+| 23 | `nt import` — the inverse `nt export` never had. Round-trips `nt export --format json`'s output into a fresh store, or bulk-loads a folder of markdown files (an Obsidian vault, since nt's note format already reads Obsidian's frontmatter conventions). Always mints fresh ids; skips a title/tag near-duplicate of an existing note unless `--force`; `--dry-run` reports without writing. | `internal/cli/import.go` |
+| 18 | Git-native shared-team-memory pattern + `nt sync` — documented the existing `nt git-init` union-merge + `nt doctor` reconciliation as a full pattern (SPEC §6.4), and added the thin wrapper: commit local edits, `git pull --no-rebase` (pinned so it doesn't depend on the caller's global git config), `nt doctor` to reconcile any union-merge duplicate-ULID lines and commit that, `git push`. A genuine same-note conflict stops the sequence with ordinary git conflict markers to resolve by hand. Verified end-to-end with a bare-remote + two-clone integration test. | `internal/cli/maintenance.go` |
+
 ## Deferred — the rest of the ranked backlog
 
 Not attempted this pass — either genuinely larger scope, dependent on a
@@ -45,8 +61,6 @@ deferred item, or resting on an assumption about external hook behavior that
 needs to be verified against a live build before shipping. Roughly in rank
 order:
 
-- **3 (rest)** — optimistic-concurrency write guard (`SaveIfUnchanged` +
-  staleness error), threaded through `nt_note_edit` and `nt edit`.
 - **7** — `nt doctor --integrations`: one command surfacing all three
   runtimes' silent-failure modes (Pi bridge death, OpenCode injection no-op,
   Claude Code hook wiring) plus config/asset-drift checks.
@@ -55,12 +69,6 @@ order:
   positioning nt as the durable backend behind it. Scoped-down reach note from
   the judge: this reaches developers who use the memory beta *and* choose nt
   for their storage handler, not "every Claude API user."
-- **9 (rest)** — user-extensible synonym vocabulary loaded from
-  `$NT_DIR/synonyms.txt`, merged over the in-code defaults.
-- **10** — bring note body edits into the undo/history model (currently
-  undo only covers tasks). Depends on item 11 (done) landing first; a note
-  before-image is much larger than a task line, so this should store a diff,
-  not a full body.
 - **12** — publish nt to plugin/MCP registries (Claude Code marketplace,
   OpenCode plugin registry, public MCP directories) — the one gap the team
   flagged as pure distribution, zero code.
@@ -76,13 +84,6 @@ order:
 - **15** — human-gated consolidation pass (`nt distill` / a `/learn` merge
   mode) — clusters near-duplicate lessons/notes and proposes merges, no silent
   auto-delete.
-- **16** — optional `valid_from`/`valid_until` frontmatter so a superseded
-  fact can be down-ranked/flagged automatically (Zep's idea, no graph DB).
-- **17** — a read-only `nt_doctor` MCP tool so an MCP-only agent can see its
-  own store's hygiene (near-dups, dangling links, reclaimable weight).
-- **18** — a documented git-native shared-team-memory pattern + a thin
-  `nt sync` wrapper, reusing `doctor`'s existing duplicate-id merge
-  reconciliation.
 - **19** — steering hints (`promptGuidelines`/`promptSnippet`) on the Pi
   bridge's key tools — first needs confirming Pi's `registerTool` actually
   exposes those fields in the installed version.
@@ -95,21 +96,20 @@ order:
 - **22** — Pi polish bundle: move the idle nudge off "first `agent_end`" to a
   real session end, and make the injection budget context-aware instead of a
   flat char cap.
-- **23** — a bulk `nt import` (Obsidian vault / JSON round-trip) — `nt export`
-  has no inverse today.
 
 ## Explicitly out of scope (the team's `outOfScope`, with reasoning)
 
 - A hosted/cloud multi-user memory **server** (the Letta/Mem0/Zep model) —
   conflicts head-on with nt's no-service local-first posture. The git-native
-  shared-team-memory pattern (item 18) is the in-philosophy answer.
+  shared-team-memory pattern (item 18, shipped round 2) is the in-philosophy
+  answer.
 - Native mobile app / always-reachable hosted access — nt's web viewer is a
   deliberate localhost PWA; ceded intentionally (see the README's "when nt is
   not for you").
 - A full temporal knowledge-graph database (Graphiti/Neo4j-style) — adds a
   heavyweight external dependency and abandons the plain-file substrate.
-  Lightweight validity-window frontmatter (item 16) is the in-philosophy
-  answer.
+  Lightweight validity-window frontmatter (item 16, shipped round 2) is the
+  in-philosophy answer.
 - Automatic silent LLM-driven consolidation/deletion (Mem0's unattended
   ADD/UPDATE/DELETE) — violates nt's approval-gate ethos. Human-gated distill
   (item 15) is the answer.
