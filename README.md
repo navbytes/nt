@@ -235,6 +235,9 @@ Rename/move is **nt-native**: `nt mv <note> <new>` (or `r` in the TUI) renames t
 # Curl — latest release binary to ~/.local/bin (no Go needed)
 curl -fsSL https://raw.githubusercontent.com/navbytes/nt/main/install.sh | bash
 
+# Homebrew (macOS/Linux)
+brew install navbytes/tap/nt
+
 # Go — install the latest tagged release
 go install github.com/navbytes/nt@latest
 

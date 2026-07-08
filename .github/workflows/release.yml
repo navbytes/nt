@@ -54,8 +54,8 @@ jobs:
         env:
           # Creates the GitHub Release (binaries + checksums) on this repo.
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # When you enable the Homebrew tap later (RELEASING.md), also set:
-          # HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
+          # Pushes the updated formula to navbytes/homebrew-tap (RELEASING.md).
+          HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
 
   # Native desktop bundles (Wails) for the /desktop module. Runs AFTER the
   # GoReleaser job so it uploads into the Release that job already created — no
