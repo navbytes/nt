@@ -48,20 +48,17 @@ changelog:
       - "^docs:"
       - "^test:"
 
-# Homebrew is deferred — day-1 install is the curl script + `go install` +
-# release binaries. To enable a tap later: create the navbytes/homebrew-tap repo,
-# add the HOMEBREW_TAP_GITHUB_TOKEN secret (RELEASING.md), and uncomment below.
-#
-# brews:
-#   - name: nt
-#     repository:
-#       owner: navbytes
-#       name: homebrew-tap
-#       token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
-#     homepage: "https://github.com/navbytes/nt"
-#     description: "Terminal task & note manager — durable memory for AI coding sessions"
-#     license: MIT
-#     install: |
-#       bin.install "nt"
-#     test: |
-#       system "#{bin}/nt", "--version"
+# Homebrew tap: navbytes/homebrew-tap, pushed to on every release via
+# HOMEBREW_TAP_GITHUB_TOKEN (a fine-grained PAT scoped to that repo's
+# Contents: read/write — see RELEASING.md). homebrew_casks, not the
+# deprecated brews (fully removed in GoReleaser v2.16, May 2026) — casks are
+# the supported format for precompiled binaries; name/binary default to
+# project_name ("nt") by convention, same as GoReleaser's own cask config.
+homebrew_casks:
+  - repository:
+      owner: navbytes
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    homepage: "https://github.com/navbytes/nt"
+    description: "Terminal task & note manager — durable memory for AI coding sessions"
+    license: MIT

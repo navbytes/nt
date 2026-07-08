@@ -93,14 +93,19 @@ Pi/OpenCode test rigs, or lack a demonstrated need (see Deferred below).
 **Parked behind an explicit precondition** (revisit if the precondition is
 met, don't schedule otherwise):
 
-- **8** — `nt memory-serve` (Anthropic Memory Tool adapter) — parked on "a
-  user actually asks, or the beta's adoption changes." The audience is
-  narrow even scoped down, and there's a real impedance mismatch the
-  original write-up glossed over: the Memory Tool's line-oriented
-  view/insert/str_replace ops don't map cleanly onto frontmatter-bearing
-  notes (the model would see/corrupt frontmatter, or line-number bookkeeping
-  breaks once it's hidden). If ever built: a raw-files `memories/` subtree,
-  not notes.
+- **8** — `nt memory-serve` (Anthropic Memory Tool adapter) — re-checked
+  post-round-3 (2026-07-08): the Memory Tool is now **GA, no beta header**
+  (it was beta when originally scoped), which cuts the other way from what
+  you'd expect — Anthropic's own SDKs (Python/TypeScript) now ship a **free
+  local-filesystem memory backend** (`BetaLocalFilesystemMemoryTool`) out of
+  the box, so "just store memory files locally" no longer needs a
+  third-party adapter at all. Combined with the pre-existing impedance
+  mismatch (the protocol's exact line-numbered `view`/`insert`/`str_replace`
+  contract — 1-indexed, 6-char right-aligned line numbers, precise error
+  strings — doesn't map onto frontmatter-bearing notes without either
+  exposing frontmatter to the model or breaking line-number bookkeeping),
+  this **hardens the skip**, not just holds it. Still parked on "a user
+  actually asks"; if ever built, a raw-files `memories/` subtree, not notes.
 - **13** — opt-in local embedding recall — parked on "the paraphrase eval
   shows the synonym-table baseline (now user-extensible, round 2) actually
   failing on a real store." No evidence of that yet, and nt's go.mod is
@@ -118,13 +123,17 @@ met, don't schedule otherwise):
   model/context-window info in `before_agent_start`, unverified; the
   shipped flat-cap behavior already degrades gracefully (truncation +
   agent-visible warning).
-- **12** — publish to registries — the in-repo prerequisite (GoReleaser +
-  the `install.sh`/`go install` path) is done; MCP directory and Claude Code
-  marketplace listings are submissions to *external* repositories outside
-  this session's write access, and the Homebrew tap needs a new
-  `navbytes/homebrew-tap` repo plus a maintainer-created PAT secret — both
-  repo-owner actions, not code. Left for the maintainer; RELEASING.md
-  already documents the Homebrew steps.
+- **12** — publish to registries — **Homebrew tap done** (2026-07-08):
+  `navbytes/homebrew-tap` + the PAT secret now exist, `.goreleaser.yaml`
+  switched from the fully-removed `brews:` to `homebrew_casks:` (verified
+  against GoReleaser's own dogfooded config), `brew install navbytes/tap/nt`
+  ships from the next tag. Also documented `mise use -g github:navbytes/nt`
+  — works today via mise's `github:` backend with zero repo changes, since
+  nt's release assets already follow a standard name/version/os/arch
+  pattern. Still open: MCP directory listings, the Claude Code marketplace,
+  and the official mise registry (a `registry.toml` PR) are submissions to
+  *external* repositories outside this session's write access — left for
+  the maintainer, no more code-side prerequisites.
 
 ## Explicitly out of scope (the team's `outOfScope`, with reasoning)
 
@@ -165,7 +174,7 @@ met, don't schedule otherwise):
 
 | Alternative | What they do better | nt's response |
 |---|---|---|
-| Anthropic Memory Tool | First-party, model self-edits `/memories` via the Messages API | Adapt: `nt memory-serve` (item 8, deferred) as the storage handler behind it — reaches app-builders who adopt the beta *and* pick nt, not every API user |
+| Anthropic Memory Tool | First-party, GA on the Messages API, and Anthropic's own SDKs now ship a free local-filesystem backend | Skip (item 8) — the free official backend covers the exact niche `nt memory-serve` would have; not worth building a competing adapter without a user asking |
 | Mem0 / OpenMemory | Automatic LLM-driven consolidation over vector nearest-neighbors | Adapt: opt-in embeddings as a candidate source (item 13, deferred) + human-gated distill (item 15, shipped round 3), deliberately not silent auto-delete |
 | Zep / Graphiti | Temporal knowledge graph, facts have validity windows | Adapt: `valid_from`/`valid_until` frontmatter (item 16), no graph DB |
 | Letta / MemGPT | Self-editing core memory + archival memory on Postgres+pgvector, hosted multi-user | Adapt retrieval quality (item 13, deferred) and consolidation (item 15, shipped round 3); deliberately skip the hosted server — local-first is the point |

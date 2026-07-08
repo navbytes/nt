@@ -19,7 +19,15 @@ with:
 curl -fsSL https://raw.githubusercontent.com/navbytes/nt/main/install.sh | bash
 # or
 go install github.com/navbytes/nt@latest
+# or
+brew install navbytes/tap/nt
+# or (not yet in the official mise registry — installs straight from GitHub releases)
+mise use -g github:navbytes/nt
 ```
+
+Each tag also commits an updated `Casks/nt.rb` to `navbytes/homebrew-tap`, via
+the `HOMEBREW_TAP_GITHUB_TOKEN` secret (a fine-grained PAT scoped to that repo's
+Contents: read/write — the default `GITHUB_TOKEN` can't push to a different repo).
 
 ## Local dry run
 
@@ -29,16 +37,3 @@ No tag, no publish — just verify the build:
 make snapshot        # goreleaser release --snapshot --clean
 goreleaser check     # validate .goreleaser.yaml
 ```
-
-## Enabling Homebrew later (optional)
-
-Deferred for now. To add `brew install navbytes/tap/nt`:
-
-1. Create an empty public repo `navbytes/homebrew-tap`.
-2. Create a fine-grained PAT with **Contents: read/write** on that tap repo and
-   add it to *this* repo as the secret **`HOMEBREW_TAP_GITHUB_TOKEN`** (the
-   default `GITHUB_TOKEN` can't push to a different repo).
-3. Uncomment the `brews:` block in `.goreleaser.yaml` and the
-   `HOMEBREW_TAP_GITHUB_TOKEN` line in `.github/workflows/release.yml`.
-
-The next tag will then also commit `Formula/nt.rb` into the tap.
