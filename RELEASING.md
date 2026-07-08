@@ -21,9 +21,11 @@ curl -fsSL https://raw.githubusercontent.com/navbytes/nt/main/install.sh | bash
 go install github.com/navbytes/nt@latest
 # or
 brew install navbytes/tap/nt
+# or (not yet in the official mise registry — installs straight from GitHub releases)
+mise use -g github:navbytes/nt
 ```
 
-Each tag also commits an updated `Formula/nt.rb` to `navbytes/homebrew-tap`, via
+Each tag also commits an updated `Casks/nt.rb` to `navbytes/homebrew-tap`, via
 the `HOMEBREW_TAP_GITHUB_TOKEN` secret (a fine-grained PAT scoped to that repo's
 Contents: read/write — the default `GITHUB_TOKEN` can't push to a different repo).
 

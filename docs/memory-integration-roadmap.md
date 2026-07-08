@@ -123,13 +123,17 @@ met, don't schedule otherwise):
   model/context-window info in `before_agent_start`, unverified; the
   shipped flat-cap behavior already degrades gracefully (truncation +
   agent-visible warning).
-- **12** — publish to registries — the in-repo prerequisite (GoReleaser +
-  the `install.sh`/`go install` path) is done; MCP directory and Claude Code
-  marketplace listings are submissions to *external* repositories outside
-  this session's write access, and the Homebrew tap needs a new
-  `navbytes/homebrew-tap` repo plus a maintainer-created PAT secret — both
-  repo-owner actions, not code. Left for the maintainer; RELEASING.md
-  already documents the Homebrew steps.
+- **12** — publish to registries — **Homebrew tap done** (2026-07-08):
+  `navbytes/homebrew-tap` + the PAT secret now exist, `.goreleaser.yaml`
+  switched from the fully-removed `brews:` to `homebrew_casks:` (verified
+  against GoReleaser's own dogfooded config), `brew install navbytes/tap/nt`
+  ships from the next tag. Also documented `mise use -g github:navbytes/nt`
+  — works today via mise's `github:` backend with zero repo changes, since
+  nt's release assets already follow a standard name/version/os/arch
+  pattern. Still open: MCP directory listings, the Claude Code marketplace,
+  and the official mise registry (a `registry.toml` PR) are submissions to
+  *external* repositories outside this session's write access — left for
+  the maintainer, no more code-side prerequisites.
 
 ## Explicitly out of scope (the team's `outOfScope`, with reasoning)
 
