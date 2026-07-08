@@ -221,6 +221,8 @@ func (s *server) dispatch(name string, a map[string]any) (string, error) {
 		return s.rm(a)
 	case "nt_doctor":
 		return s.doctor(a)
+	case "nt_distill":
+		return s.distill(a)
 	default:
 		if hint := unknownToolHint(name); hint != "" {
 			return "", fmt.Errorf("unknown tool %q — %s", name, hint)
@@ -893,6 +895,45 @@ func (s *server) doctor(a map[string]any) (string, error) {
 		out["expiredNotes"] = expired
 	}
 	return jsonText(out), nil
+}
+
+// distill lists every near-duplicate note pair in the store — read-only,
+// the MCP counterpart of `nt distill`. It proposes nothing on its own;
+// merging is an explicit, separate nt_note_edit + nt_archive (or nt_tag
+// +distinct) the caller does after review. See note.NearDupPairs for the
+// matching rule (shared with `nt doctor`'s near-dup lint).
+func (s *server) distill(a map[string]any) (string, error) {
+	active := note.Active(s.listNotes())
+	pairs := note.NearDupPairs(active)
+	limit := intArg(a, "limit")
+	truncated := false
+	if limit > 0 && len(pairs) > limit {
+		pairs = pairs[:limit]
+		truncated = true
+	}
+	out := make([]map[string]any, 0, len(pairs))
+	for _, p := range pairs {
+		out = append(out, map[string]any{"a": distillStubMCP(p.A), "b": distillStubMCP(p.B)})
+	}
+	payload := map[string]any{"pairs": out}
+	if truncated {
+		payload["truncated"] = true
+	}
+	return jsonText(payload), nil
+}
+
+// distillStubMCP is the JSON shape for one note in an nt_distill pair — a
+// stub, not the full body: the caller fetches bodies on demand (nt_get), the
+// same progressive-disclosure shape nt_index/nt_search already use.
+func distillStubMCP(n *note.Note) map[string]any {
+	out := map[string]any{"id": n.ID, "title": n.Title, "rel": n.Rel, "tags": n.Tags}
+	if d := n.Description(160); d != "" && d != n.Title {
+		out["description"] = d
+	}
+	if u := n.ChangedDate(); u != "" {
+		out["updated"] = u
+	}
+	return out
 }
 
 func (s *server) note(a map[string]any) (string, error) {

@@ -54,48 +54,77 @@ clean build/vet/lint):
 | 23 | `nt import` — the inverse `nt export` never had. Round-trips `nt export --format json`'s output into a fresh store, or bulk-loads a folder of markdown files (an Obsidian vault, since nt's note format already reads Obsidian's frontmatter conventions). Always mints fresh ids; skips a title/tag near-duplicate of an existing note unless `--force`; `--dry-run` reports without writing. | `internal/cli/import.go` |
 | 18 | Git-native shared-team-memory pattern + `nt sync` — documented the existing `nt git-init` union-merge + `nt doctor` reconciliation as a full pattern (SPEC §6.4), and added the thin wrapper: commit local edits, `git pull --no-rebase` (pinned so it doesn't depend on the caller's global git config), `nt doctor` to reconcile any union-merge duplicate-ULID lines and commit that, `git push`. A genuine same-note conflict stops the sequence with ordinary git conflict markers to resolve by hand. Verified end-to-end with a bare-remote + two-clone integration test. | `internal/cli/maintenance.go` |
 
-## Deferred — the rest of the ranked backlog
+## Shipped in round 3
 
-Not attempted this pass — either genuinely larger scope, dependent on a
-deferred item, or resting on an assumption about external hook behavior that
-needs to be verified against a live build before shipping. Roughly in rank
-order:
+Before this round, an independent model (Fable 5, no prior context on this
+session) reviewed all ten remaining backlog items against nt's actual code —
+not just the roadmap's description — and gave each a DO/SKIP/REWORK verdict.
+Its cross-cutting finding: the team's own verification bar ("verifiable
+against nt's actual code, not speculation about external hook behavior no
+one could test live") cleanly sorts the list — the three items below passed
+it today; the rest structurally can't until someone stands up live
+Pi/OpenCode test rigs, or lack a demonstrated need (see Deferred below).
 
-- **7** — `nt doctor --integrations`: one command surfacing all three
-  runtimes' silent-failure modes (Pi bridge death, OpenCode injection no-op,
-  Claude Code hook wiring) plus config/asset-drift checks.
-- **8** — an `nt memory-serve` adapter implementing Anthropic's Memory Tool
-  protocol (view/create/str_replace/insert/delete/rename) against nt's notes,
-  positioning nt as the durable backend behind it. Scoped-down reach note from
-  the judge: this reaches developers who use the memory beta *and* choose nt
-  for their storage handler, not "every Claude API user."
-- **12** — publish nt to plugin/MCP registries (Claude Code marketplace,
-  OpenCode plugin registry, public MCP directories) — the one gap the team
-  flagged as pure distribution, zero code.
-- **13** — opt-in local embedding recall as a parallel candidate *source*
-  (unioned with lexical candidates, never a re-ranker of them — re-ranking
-  can't recover a paraphrase the lexical scorer never surfaced), gated behind
-  an eval proving lift over the synonym-table baseline.
+| Rank | Item | Where |
+|------|------|-------|
+| 7 | `nt doctor --integrations` — rescoped from the original "surface Pi bridge death / OpenCode injection no-op" framing (a CLI command can't observe another process's in-memory state) to static wiring/drift/staleness checks nt's own install code already has the oracle for: MCP registration + hook matchers (Claude Code), permission/instructions/asset-drift (OpenCode), asset-drift (Pi) — all read-only, reusing the exact assumptions `nt mcp/opencode/pi install` already commit to. | `internal/cli/integrations_doctor.go` |
+| 15 | `nt distill` (human-gated consolidation) — every primitive it composes (`note.FindSimilar`, doctor's near-dup lint, `superseded_by`, the round-2 note-undo journal as a safety net) already shipped; this adds the missing batch flow: `nt distill`/`nt_distill` list EVERY near-duplicate pair uncapped (doctor's lint samples 5), and a `/distill` prompt per runtime walks each pair to approval before merging or tagging a deliberate fork `distinct` — nothing merges without approval. | `internal/note/dedup.go`, `internal/cli/distill.go`, `internal/mcp/mcp.go`, `integrations/{opencode,pi}/…/distill.md` |
+| 22 (half) | Pi idle-nudge threshold — the nudge fired on the *first* tool-using turn with no nt write (premature, trains users to ignore it); fixed with `NT_IDLE_NUDGE_THRESHOLD` (default 3 quiet turns), not the originally-proposed "real session end," which rests on the same unconfirmed `session_shutdown` semantics the extension's own code already flags as unverified. Verified with a standalone runtime harness (threshold timing, write-anywhere suppression, per-session reset). | `integrations/pi/extensions/nt-memory.ts` |
+
+## Deferred backlog — triaged by an independent advisor (Fable 5)
+
+**Dropped from the backlog entirely** (advisor verdict: SKIP, not "later"):
+
+- **19** — Pi steering hints (`promptGuidelines`/`promptSnippet`) — rests on
+  an unverified Pi API, and the MCP tool catalog already carries steering
+  guidance token-trimmed on purpose; hints would spend back what that trim
+  saved for an unmeasured lift.
+- **20** — nt-aware subagent definitions — ships opinionated files built on
+  an unverified inheritance assumption (do OpenCode/Pi subagents get the
+  bridged tools but not the injection loop?) for a need no user has
+  expressed. If real, the honest zero-risk fix is a paragraph in the
+  integration READMEs, not a shipped asset.
+- **21** — persisted note-index sidecar — the problem statement overstates
+  the cost (stats are cheap; the MCP server's mtime cache already skips
+  re-parsing unchanged notes), and a derived on-disk cache adds real
+  complexity (schema versioning, corruption handling, invalidation) for a
+  store size nt has no evidence anyone has hit. Design kept, item dropped.
+
+**Parked behind an explicit precondition** (revisit if the precondition is
+met, don't schedule otherwise):
+
+- **8** — `nt memory-serve` (Anthropic Memory Tool adapter) — parked on "a
+  user actually asks, or the beta's adoption changes." The audience is
+  narrow even scoped down, and there's a real impedance mismatch the
+  original write-up glossed over: the Memory Tool's line-oriented
+  view/insert/str_replace ops don't map cleanly onto frontmatter-bearing
+  notes (the model would see/corrupt frontmatter, or line-number bookkeeping
+  breaks once it's hidden). If ever built: a raw-files `memories/` subtree,
+  not notes.
+- **13** — opt-in local embedding recall — parked on "the paraphrase eval
+  shows the synonym-table baseline (now user-extensible, round 2) actually
+  failing on a real store." No evidence of that yet, and nt's go.mod is
+  CGO-free/single-binary on purpose — bundling an embedding model or
+  depending on an external service both cut against that. The cheap,
+  philosophy-neutral first move (build only if curious) is extending
+  `recall_precision_test.go` into a paraphrase corpus.
 - **14** — OpenCode `chat.message` + `tool.execute.before` proactive recall
-  (push, not pull) — downgraded in the final pass because `chat.message`
-  content is also reported to be droppable on some builds, so it needs to be
-  gated behind the same kind of build-detection as item 1, not shipped
-  unconditionally.
-- **15** — human-gated consolidation pass (`nt distill` / a `/learn` merge
-  mode) — clusters near-duplicate lessons/notes and proposes merges, no silent
-  auto-delete.
-- **19** — steering hints (`promptGuidelines`/`promptSnippet`) on the Pi
-  bridge's key tools — first needs confirming Pi's `registerTool` actually
-  exposes those fields in the installed version.
-- **20** — nt-aware subagent definitions for OpenCode/Pi subagents, which
-  inherit the bridged `nt_*` tools but not the plugin's injection/recall loop
-  (that runs on the top-level session only).
-- **21** — a persisted note-index sidecar for stores past ~10k notes (every
-  MCP read currently stats every note file); consumes item 4's store-hash for
-  invalidation.
-- **22** — Pi polish bundle: move the idle nudge off "first `agent_end`" to a
-  real session end, and make the injection budget context-aware instead of a
-  flat char cap.
+  — parked on "a live OpenCode build matrix to test against," the same
+  precondition item 1 needed before it could ship safely. Also lower-value
+  than it looks: push-on-failure recall already ships in all three
+  runtimes, and the compaction hook already pushes a re-recall directive —
+  the only new capability is recall-on-topic-shift.
+- **22 (other half)** — context-aware injection budget — needs Pi to expose
+  model/context-window info in `before_agent_start`, unverified; the
+  shipped flat-cap behavior already degrades gracefully (truncation +
+  agent-visible warning).
+- **12** — publish to registries — the in-repo prerequisite (GoReleaser +
+  the `install.sh`/`go install` path) is done; MCP directory and Claude Code
+  marketplace listings are submissions to *external* repositories outside
+  this session's write access, and the Homebrew tap needs a new
+  `navbytes/homebrew-tap` repo plus a maintainer-created PAT secret — both
+  repo-owner actions, not code. Left for the maintainer; RELEASING.md
+  already documents the Homebrew steps.
 
 ## Explicitly out of scope (the team's `outOfScope`, with reasoning)
 
@@ -112,7 +141,7 @@ order:
   in-philosophy answer.
 - Automatic silent LLM-driven consolidation/deletion (Mem0's unattended
   ADD/UPDATE/DELETE) — violates nt's approval-gate ethos. Human-gated distill
-  (item 15) is the answer.
+  (item 15, shipped round 3) is the answer.
 - Embeddings/a vector DB as a **hard dependency or source of truth** — only
   permitted as an opt-in, git-ignored, deletable derived cache that degrades
   to lexical when absent (item 13); markdown stays authoritative.
@@ -137,9 +166,9 @@ order:
 | Alternative | What they do better | nt's response |
 |---|---|---|
 | Anthropic Memory Tool | First-party, model self-edits `/memories` via the Messages API | Adapt: `nt memory-serve` (item 8, deferred) as the storage handler behind it — reaches app-builders who adopt the beta *and* pick nt, not every API user |
-| Mem0 / OpenMemory | Automatic LLM-driven consolidation over vector nearest-neighbors | Adapt: opt-in embeddings as a candidate source (item 13) + human-gated distill (item 15), deliberately not silent auto-delete |
+| Mem0 / OpenMemory | Automatic LLM-driven consolidation over vector nearest-neighbors | Adapt: opt-in embeddings as a candidate source (item 13, deferred) + human-gated distill (item 15, shipped round 3), deliberately not silent auto-delete |
 | Zep / Graphiti | Temporal knowledge graph, facts have validity windows | Adapt: `valid_from`/`valid_until` frontmatter (item 16), no graph DB |
-| Letta / MemGPT | Self-editing core memory + archival memory on Postgres+pgvector, hosted multi-user | Adapt retrieval quality (item 13) and consolidation (item 15); deliberately skip the hosted server — local-first is the point |
+| Letta / MemGPT | Self-editing core memory + archival memory on Postgres+pgvector, hosted multi-user | Adapt retrieval quality (item 13, deferred) and consolidation (item 15, shipped round 3); deliberately skip the hosted server — local-first is the point |
 | Cognee | Graph-native ETL with ontology grounding, GraphRAG over enterprise sources | Skip — enterprise scope mismatch |
 | Basic Memory | nt's closest philosophical twin — local-first markdown KB from AI conversations, already in MCP directories | nt already exceeds it (unified task model, lessons-first ranked recall, three-runtime integrations); close its distribution lead (item 12) |
 | Claude native chat memory | Auto-distilled user profile, zero setup, all Claude surfaces | Complement, not compete — it's a non-searchable profile; nt is the searchable, git-diffable, cross-tool durable store |

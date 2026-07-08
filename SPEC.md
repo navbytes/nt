@@ -330,6 +330,12 @@ ignore a newer note edit.
   task-ledger reconciliation. Not journaled — git is the recovery
   path; `nt doctor --check` is a non-mutating dry run (exit 1 if issues) for pre-commit/CI.
   This keeps the single greppable `tasks.txt`; per-task file sharding is deferred (§15).
+  `nt doctor --integrations` is a separate, always-read-only mode: it checks the Claude
+  Code/OpenCode/Pi config wiring (MCP registration, hook matchers, permissions/instructions)
+  and diffs each installed plugin/skill/prompt file against the copy embedded in this binary,
+  flagging drift — scoped to what nt's own install code can actually verify; it can't observe
+  another process's in-memory state (a dead Pi bridge, a build silently discarding an
+  injection), so it never claims to.
 - **Shared team memory is git, not a service.** Point `$NT_DIR` at a shared git remote (a
   private repo) instead of a hosted multi-user server (the Letta/Mem0/Zep model) — plain files
   + git's merge machinery is the whole mechanism, no new infrastructure. `nt sync` is the thin
@@ -404,6 +410,7 @@ nt archive                           # move done tasks → done.txt
 nt gc [--older-than 30d] [--yes]     # sweep superseded stubs + stranded __tasks__ notes → .trash/ (dry-run default)
 nt export --tag rule                 # compile the standing rules layer (CLAUDE.md / AGENTS.md)
 nt import backup.json | vault/       # export's inverse: round-trip a JSON backup, or bulk-load an Obsidian vault
+nt distill [--json]                  # every near-duplicate note pair, uncapped — proposes, never merges
 nt undo / redo                       # transactional; workstream-safe (--force overrides)
 nt edit <id|task:N> | nt edit note:<slug>   # safe edit via temp file (§6.2)
 nt mv <note> <new-name|folder/path>  # rename/move a note, rewriting all [[links]] to it
@@ -657,9 +664,9 @@ the identical UI in a native window (see `desktop/`, ADR 0001).
   todo→ULID map, status-mapped, `src:claude`); the bundled `/nt` skill teaches Claude to
   capture and `nt index`. Setup: docs/claude-integration.md.
 - `nt mcp` runs a stdio **MCP server** (newline-delimited JSON-RPC 2.0, no SDK dep) exposing
-  typed tools (**16**: nt_status, nt_view, nt_add, nt_update, nt_note, nt_note_edit,
+  typed tools (**18**: nt_status, nt_view, nt_add, nt_update, nt_note, nt_note_edit,
   nt_relink, nt_index, nt_get, nt_search, nt_recall, nt_links, nt_mv, nt_tag, nt_archive,
-  nt_rm) with strict unknown-param rejection, for MCP clients. A thin driving adapter over
+  nt_rm, nt_doctor, nt_distill) with strict unknown-param rejection, for MCP clients. A thin driving adapter over
   the same engine/domain as the CLI and TUI; defaults `source` to `claude` and refuses
   positional handles. nt_note_edit fixes an existing note in place (append/body/
   old_string+new_string/description) — the MCP counterpart of `nt edit`, so an MCP-only

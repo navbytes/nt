@@ -53,6 +53,8 @@ func Run(args []string) int {
 		return cmdIndex(rest)
 	case "supersede":
 		return cmdSupersede(rest)
+	case "distill":
+		return cmdDistill(rest)
 	case "relink":
 		return cmdRelink(rest)
 	case "log":
@@ -151,7 +153,7 @@ var knownCommands = []string{
 	"done", "do", "skip", "start", "stop", "update", "up", "search", "q",
 	"recall", "export", "import", "tags", "tag", "links", "mv", "rename", "rm", "delete",
 	"archive", "undo", "redo", "edit", "path", "doctor", "gc", "git-init", "sync", "hook", "mcp",
-	"opencode", "pi", "store-hash", "web", "version", "help", "supersede", "relink",
+	"opencode", "pi", "store-hash", "web", "version", "help", "supersede", "relink", "distill",
 }
 
 // suggestCommand returns the closest known command to cmd within a small edit
@@ -424,6 +426,8 @@ USAGE
   nt edit <id|note>           edit a task or note in $EDITOR
   nt mv <note> <new|path>     rename/move a note, updating all [[links]] to it
   nt supersede <old> --by <new>  mark a note replaced by another (retires the old from views)
+  nt distill [--json]         list every near-duplicate note pair in the store (uncapped) so you
+                              can merge or 'nt tag +distinct' a deliberate fork — proposes, never merges
   nt relink <note> <old> <new>   fix a wrong outbound [[link]] in a note's body
   nt rm <id|note> [flags]     delete tasks (undoable) or notes (to .trash/)
                               notes: --unlink strips inbound links, --force keeps them;
@@ -441,6 +445,8 @@ USAGE
                               merge duplicates, commit that, push (needs nt git-init + a remote)
   nt doctor [--check]         health check: reconcile tasks.txt (dedup ids) + lint notes
                               (dangling [[links]], missing descriptions, orphans)
+  nt doctor --integrations    check Claude Code/OpenCode/Pi config wiring + asset drift vs
+                              this binary (read-only, never fixes)
   nt gc [--older-than 30d]    reclaim dead weight: superseded stubs + stranded task-detail
                               notes → .trash/ (dry-run by default; --yes applies)
   nt hook                     sync a Claude Code TodoWrite event (PostToolUse hook)

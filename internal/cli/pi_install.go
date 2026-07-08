@@ -48,6 +48,7 @@ var piAssets = []struct{ src, dst string }{
 	{"skills/nt/SKILL.md", filepath.Join("skills", "nt", "SKILL.md")},
 	{"prompts/learn.md", filepath.Join("prompts", "learn.md")},
 	{"prompts/recall.md", filepath.Join("prompts", "recall.md")},
+	{"prompts/distill.md", filepath.Join("prompts", "distill.md")},
 }
 
 // cmdPiInstall performs the complete nt ↔ Pi integration setup — the built-in,
@@ -55,7 +56,7 @@ var piAssets = []struct{ src, dst string }{
 //
 //  1. install the nt-memory extension            → extensions/nt-memory.ts
 //  2. install the nt skill                        → skills/nt/SKILL.md
-//  3. install the /learn and /recall prompts      → prompts/*.md
+//  3. install the /learn, /recall, /distill prompts → prompts/*.md
 //  4. install a starter AGENTS.md                 (only if none exists)
 //  5. seed the rules/ + memory/ store folders and an initial nt-rules.md export
 //
