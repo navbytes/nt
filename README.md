@@ -66,13 +66,15 @@ That's it — you're up. `nt help` lists every command; [more install options be
   nt mcp install --client opencode  # …or OpenCode (~/.config/opencode/opencode.json)
   nt opencode install               # …or the FULL OpenCode integration: MCP + memory plugin +
                                     #    skill + /learn + /recall + AGENTS.md + seeded rules/memory
+  nt pi install                     # …or the FULL Pi integration: an extension that bridges nt's
+                                    #    tools (Pi has no MCP) + skill + /learn + /recall + AGENTS.md
   ```
 - **The `/nt` skill + read-back loop** — teach the agent to capture as it works and load prior context (`nt index`, then fetch on demand) when it resumes.
 - **Learn from past mistakes** — record a footgun or dead-end as a **lesson** (`nt note … --lesson`), then `nt recall "<what you're about to do>"` surfaces relevant notes with lessons flagged ⚑ first — paraphrase-aware, returns nothing when nothing is relevant (a precision floor, so it's safe to run before every task), and softly boosts same-project notes (`NT_WORKSTREAM`/`--project`; `none` disables). See [docs/claude-integration.md](docs/claude-integration.md).
 - **Parallel agents, one store** — set `NT_WORKSTREAM` per agent to isolate in-flight tasks (`list`/`ready`/`log`/`review`/`index` scope to it; `"*"` widens) while notes stay shared; `undo`/`redo` refuse another workstream's change unless `--force`.
 - **Curate, don't hoard** — `nt doctor` flags near-duplicates, orphans, and an oversized pinned tier; `nt supersede`/`nt archive` retire stale notes; `nt gc` sweeps superseded stubs and stranded task-detail notes to `.trash/` (dry-run by default).
 
-Beyond Claude Code, any MCP-speaking agent can drive the same store — including **OpenCode**, whose rules / knowledge-base / memory layers map cleanly onto nt. Full mapping & phased plan → **[docs/opencode-integration.md](docs/opencode-integration.md)**.
+Beyond Claude Code, any MCP-speaking agent can drive the same store — including **OpenCode**, whose rules / knowledge-base / memory layers map cleanly onto nt. Full mapping & phased plan → **[docs/opencode-integration.md](docs/opencode-integration.md)**. **[Pi](https://github.com/badlogic/pi-mono)** has no built-in MCP, so `nt pi install` ships an in-process extension that bridges nt's tools in and injects rules + memory live → **[integrations/pi/README.md](integrations/pi/README.md)**.
 
 ```bash
 # During a session (the hook does this for you, or call it directly):

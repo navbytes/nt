@@ -111,6 +111,8 @@ func Run(args []string) int {
 		return 0
 	case "opencode":
 		return cmdOpencode(rest)
+	case "pi":
+		return cmdPi(rest)
 	case "web":
 		return cmdWeb(rest)
 	case "status":
@@ -143,7 +145,7 @@ var knownCommands = []string{
 	"done", "do", "skip", "start", "stop", "update", "up", "search", "q",
 	"recall", "export", "tags", "tag", "links", "mv", "rename", "rm", "delete",
 	"archive", "undo", "redo", "edit", "path", "doctor", "gc", "git-init", "hook", "mcp",
-	"opencode", "web", "version", "help", "supersede", "relink",
+	"opencode", "pi", "web", "version", "help", "supersede", "relink",
 }
 
 // suggestCommand returns the closest known command to cmd within a small edit
@@ -439,6 +441,9 @@ USAGE
   nt opencode install         full OpenCode integration: MCP server + memory plugin +
                               nt skill + /learn + /recall commands + AGENTS.md +
                               seeded rules/ and memory/ folders (--print supported)
+  nt pi install               full Pi integration: nt-memory extension (bridges nt's
+                              tools — Pi has no MCP) + nt skill + /learn + /recall
+                              prompts + AGENTS.md + seeded folders (--print supported)
   nt web [--port N]           browse and edit notes in a browser (localhost only)
   nt web --detach             run the viewer in the background (--status / --stop to manage)
 

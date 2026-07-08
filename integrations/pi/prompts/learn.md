@@ -1,10 +1,11 @@
 ---
 description: Review this session for learnings and save the approved ones to nt (lessons, rules, memory, notes, tasks)
+argument-hint: "[focus]"
 ---
 
 Review this session and harvest what should outlive it into nt — the durable
-memory store. Optional focus: "$ARGUMENTS" (if non-empty, only propose items
-related to it).
+memory store. Optional focus: "$@" (if non-empty, only propose items related to
+it).
 
 ## 1. Extract candidates
 
@@ -57,7 +58,7 @@ Then ask the user which to save (all, numbers like "1 3 4", edits, or none) and
 
 - Notes/rules/memory/lessons → `nt_note` (title, `description`, `body` with the
   detail; `kind:"lesson"|"rule"|"decision"|"ref"|"memory"` applies the canonical
-  tag+folder). Set `source:"opencode"`. Apply any edits the user gave.
+  tag+folder). Set `source:"pi"`. Apply any edits the user gave.
 - Tasks → `nt_add` (verb-first title ≤ ~60 chars, detail in `body`, link related
   work with `discovered_from`).
 - `nt_note` always creates; if its response includes a `similar` list, check
@@ -68,7 +69,7 @@ Then ask the user which to save (all, numbers like "1 3 4", edits, or none) and
   near-duplicates — follow its printed guidance.)
 - Finish with a short receipt: each saved item's id and where it went.
 
-If the `nt_*` MCP tools are unavailable, fall back to the `nt` CLI over bash
+If the `nt_*` tools are unavailable, fall back to the `nt` CLI over bash
 (`nt note …`, `nt add …`, `nt recall …`; multi-line or backtick-laden bodies:
 `--body-file -` with the body piped in); if that's missing too, tell the user
-to run `nt mcp install --client opencode` and stop.
+to run `nt pi install` and stop.
