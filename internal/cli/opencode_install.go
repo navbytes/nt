@@ -6,10 +6,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 
 	opencodeassets "github.com/navbytes/nt/integrations/opencode"
-	"github.com/navbytes/nt/internal/note"
 )
 
 // cmdOpencode dispatches the `nt opencode` namespace.
@@ -142,7 +140,7 @@ func cmdOpencodeInstall(args []string) int {
 		fmt.Println("would seed the rules/ and memory/ nt folders (if empty) and export nt-rules.md")
 		return 0
 	}
-	if code := seedOpencodeStore(cfgDir); code != 0 {
+	if code := seedMemoryStore(cfgDir, "opencode"); code != 0 {
 		return code
 	}
 
@@ -190,61 +188,4 @@ func ensureOpencodeSkillPermission(path string) (changed bool, err error) {
 		return false, err
 	}
 	return true, nil
-}
-
-// seedOpencodeStore seeds the rules/ and memory/ folders with one editable
-// example note each (only when the folder is empty) and writes the initial
-// nt-rules.md export for file-mode users (harmless in system-injection mode).
-func seedOpencodeStore(cfgDir string) int {
-	e, ok := engine()
-	if !ok {
-		return 1
-	}
-	notes := note.Active(mustNotes(e))
-	hasFolder := func(prefix string) bool {
-		for _, n := range notes {
-			if strings.HasPrefix(n.Rel, prefix+"/") {
-				return true
-			}
-		}
-		return false
-	}
-	seed := func(title, desc, body, folder, tag string) {
-		n, err := note.Create(e.S, title, body, []string{tag}, "opencode", folder)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "opencode install: seed %s/: %v (skipping)\n", folder, err)
-			return
-		}
-		n.Extra = append(n.Extra, "description: "+desc)
-		if err := n.Save(); err != nil {
-			fmt.Fprintf(os.Stderr, "opencode install: seed %s/: %v\n", folder, err)
-			return
-		}
-		// Rel is only set by note.List; Path is what Create fills in.
-		fmt.Printf("seeded      %s/ (%s — edit or remove)\n", folder, filepath.Base(n.Path))
-	}
-	if !hasFolder("rules") {
-		seed(
-			"Output style: terse factual bullets",
-			"How the agent should phrase answers by default",
-			"- Answer in bullet points, not prose.\n"+
-				"- Plain, direct words. No filler, hedging, or fancy phrasing.\n"+
-				"- Lead with the fact/answer; skip preamble and restating the question.\n"+
-				"- Elaborate only when asked.",
-			"rules", "rule",
-		)
-	}
-	if !hasFolder("memory") {
-		seed(
-			"Project + user facts the agent should always know",
-			"Durable user preferences and project conventions (edit me)",
-			"Edit this note (or add siblings tagged memory-core) with durable preferences and conventions.",
-			"memory", "memory-core",
-		)
-	}
-	// Initial export; a failure here shouldn't fail the install (mirrors install.sh).
-	if code := cmdExport([]string{"--tag", "rule", "--title", "Rules", "--out", filepath.Join(cfgDir, "nt-rules.md")}); code != 0 {
-		fmt.Fprintln(os.Stderr, "opencode install: initial nt-rules.md export failed (continuing)")
-	}
-	return 0
 }
