@@ -1,0 +1,17 @@
+{
+  "projectTitle": "nt",
+  "description": "A terminal task & note manager that stores everything as plain files — todo.txt tasks and markdown notes with YAML frontmatter — built to be the durable memory layer for AI coding sessions across Claude Code, OpenCode, and Pi.",
+  "excludeFolders": [
+    "internal/web/frontend/dist",
+    "internal/web/frontend/node_modules",
+    "internal/web/frontend/src",
+    ".claude"
+  ],
+  "rules": [
+    "nt is a CLI: tasks live in todo.txt-format tasks.txt, notes are markdown files with YAML frontmatter under notes/.",
+    "For AI agents, prefer the MCP server (`nt mcp`) — it exposes typed tools (nt_add, nt_note, nt_recall, nt_index, ...) instead of shell-quoting CLI calls.",
+    "Run `nt recall \"<what you're about to do>\"` before starting a task to surface past lessons before repeating a mistake.",
+    "Capture findings with `nt note \"<title>\" --kind lesson|decision|ref|rule|memory --description \"...\"` — kind picks the canonical tag and folder.",
+    "`nt index` is the session-start catalog (tiered on large stores); `nt show <id>`/`nt_get` fetches one note's full body on demand."
+  ]
+}
