@@ -70,6 +70,7 @@ That's it — you're up. `nt help` lists every command; [more install options be
                                     #    tools (Pi has no MCP) + skill + /learn + /recall + /distill + AGENTS.md
   ```
 - **Claude Code plugin marketplace** — this repo is a self-hosted marketplace (`.claude-plugin/`): `/plugin marketplace add navbytes/nt` then `/plugin install nt@navbytes-nt` installs the skill + registers the MCP server in one step, no separate `nt mcp install` needed.
+- **Context7** — nt's docs are indexed for the [Context7 MCP](https://context7.com) (`context7.json` at repo root), so any Context7-connected agent can pull them in with `use context7` / resolving `navbytes/nt`, no extra setup here.
 - **The `/nt` skill + read-back loop** — teach the agent to capture as it works and load prior context (`nt index`, then fetch on demand) when it resumes.
 - **Learn from past mistakes** — record a footgun or dead-end as a **lesson** (`nt note … --lesson`), then `nt recall "<what you're about to do>"` surfaces relevant notes with lessons flagged ⚑ first — paraphrase-aware, returns nothing when nothing is relevant (a precision floor, so it's safe to run before every task), and softly boosts same-project notes (`NT_WORKSTREAM`/`--project`; `none` disables). See [docs/claude-integration.md](docs/claude-integration.md).
 - **Parallel agents, one store** — set `NT_WORKSTREAM` per agent to isolate in-flight tasks (`list`/`ready`/`log`/`review`/`index` scope to it; `"*"` widens) while notes stay shared; `undo`/`redo` refuse another workstream's change unless `--force`.
@@ -249,7 +250,7 @@ go install github.com/navbytes/nt@latest
 git clone https://github.com/navbytes/nt && cd nt && make install
 ```
 
-Single static binary for Linux, macOS & Windows (amd64/arm64). Releases are automated by GoReleaser on a `vX.Y.Z` tag ([RELEASING.md](RELEASING.md)). Homebrew is planned (`brew install navbytes/tap/nt`).
+Single static binary for Linux, macOS & Windows (amd64/arm64). Releases are automated by GoReleaser on a `vX.Y.Z` tag ([RELEASING.md](RELEASING.md)).
 
 **Desktop app** — each release also attaches native **`nt-desktop`** bundles (macOS / Linux / Windows): the same web UI in a native window over your local store, editing included, with **no port opened at all** (the webview talks to the Go server in-process). See [desktop/README.md](desktop/README.md).
 
