@@ -67,6 +67,35 @@
   let hoveredId = $state<string | null>(null);
   let focusedId = $state("root");
 
+  // Fullscreen: the map's default home is the note's (narrow) prose column, so
+  // an Expand toggle lifts it to a fixed inset:0 overlay for real working room.
+  // A CSS overlay (not the Fullscreen API) works identically in the browser and
+  // the desktop webview, and none of the note's ancestors trap position:fixed.
+  let expanded = $state(false);
+  function toggleExpand() {
+    expanded = !expanded;
+    // Reframe to the new size once the browser has applied it.
+    requestAnimationFrame(() => fit());
+  }
+  // While expanded: Escape exits, and the page behind is scroll-locked. The
+  // effect's cleanup also runs if the component unmounts mid-fullscreen.
+  $effect(() => {
+    if (!expanded) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.stopPropagation();
+        expanded = false;
+      }
+    };
+    window.addEventListener("keydown", onKey, true);
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      window.removeEventListener("keydown", onKey, true);
+      document.body.style.overflow = prevOverflow;
+    };
+  });
+
   // fit frames the current layout bounds with padding for labels.
   function fit() {
     if (!svgEl) return;
@@ -298,7 +327,7 @@
   );
 </script>
 
-<div class="mm">
+<div class="mm" class:mm--full={expanded}>
   <svg
     bind:this={svgEl}
     class="mm__svg"
@@ -380,6 +409,12 @@
     <div class="mm__seg" aria-label="Zoom">
       <button class="mm__zoom" title="Zoom out" aria-label="Zoom out" onclick={() => zoomStep(1.3)}>−</button>
       <button class="mm__zoom" title="Zoom in" aria-label="Zoom in" onclick={() => zoomStep(1 / 1.3)}>+</button>
+      <button
+        class="mm__zoom"
+        title={expanded ? "Exit fullscreen (Esc)" : "Fullscreen"}
+        aria-label={expanded ? "Exit fullscreen" : "Fullscreen"}
+        aria-pressed={expanded}
+        onclick={toggleExpand}>{expanded ? "⤡" : "⤢"}</button>
     </div>
     {#if depth > 1}
       <div class="mm__rings" aria-label="Show rings">
@@ -408,6 +443,19 @@
       radial-gradient(circle at 50% 42%, color-mix(in srgb, var(--spectral-glow, var(--accent-color)) 8%, transparent), transparent 60%),
       var(--bg-inset, var(--bg));
     overflow: hidden;
+  }
+  /* Fullscreen: lift the map out of the narrow prose column to fill the viewport.
+     A plain fixed overlay (none of the note's ancestors trap position:fixed) —
+     works the same in the browser and the desktop webview. */
+  .mm--full {
+    position: fixed;
+    inset: 0;
+    z-index: 1000;
+    width: 100vw;
+    height: 100dvh;
+    max-height: none;
+    border: none;
+    border-radius: 0;
   }
   .mm__svg {
     width: 100%;

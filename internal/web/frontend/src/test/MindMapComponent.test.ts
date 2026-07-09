@@ -96,6 +96,21 @@ describe("MindMap component", () => {
     expect(getByLabelText("Zoom out")).toBeTruthy();
   });
 
+  it("toggles a fullscreen overlay via the button and Escape", async () => {
+    const { container, getByLabelText } = mount();
+    const mm = container.querySelector(".mm")!;
+    expect(mm.classList.contains("mm--full")).toBe(false);
+
+    await fireEvent.click(getByLabelText("Fullscreen"));
+    expect(mm.classList.contains("mm--full")).toBe(true);
+    expect(document.body.style.overflow).toBe("hidden"); // page scroll-locked
+
+    // Escape exits fullscreen and restores scrolling.
+    await fireEvent.keyDown(window, { key: "Escape" });
+    expect(mm.classList.contains("mm--full")).toBe(false);
+    expect(document.body.style.overflow).not.toBe("hidden");
+  });
+
   it("culls deep labels on a dense map but keeps the root", () => {
     // >60 nodes trips dense mode; depth-4 leaves (deepN) are culled, root stays.
     const deep = Array.from({ length: 62 }, (_, i) => `<li>deep${i}</li>`).join("");
