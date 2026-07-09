@@ -13,10 +13,22 @@
     root,
     truncated = false,
     onJump,
+    editable = false,
+    onAddChild,
+    onAddSibling,
+    onRename,
+    onDelete,
   }: {
     root: OutlineNode;
     truncated?: boolean;
     onJump?: (anchor: string) => void;
+    // Editing (outline source only): the parent owns the raw-Markdown edit + save;
+    // this component just collects the intent (which node, what text).
+    editable?: boolean;
+    onAddChild?: (id: string, text: string) => void;
+    onAddSibling?: (id: string, text: string) => void;
+    onRename?: (id: string, text: string) => void;
+    onDelete?: (id: string) => void;
   } = $props();
 
   // --- collapse state -------------------------------------------------------
@@ -95,6 +107,44 @@
       document.body.style.overflow = prevOverflow;
     };
   });
+
+  // --- editing (outline source only) ---------------------------------------
+  // A single inline text field serves both renaming an existing node and naming
+  // a new child/sibling before it's created; the parent does the actual save.
+  type EditIntent = { mode: "rename" | "child" | "sibling"; id: string; value: string };
+  let editing = $state<EditIntent | null>(null);
+  let editInput = $state<HTMLInputElement | undefined>();
+
+  function openEdit(mode: EditIntent["mode"], n: MapNode) {
+    editing = { mode, id: n.id, value: mode === "rename" ? n.text : "" };
+    queueMicrotask(() => {
+      editInput?.focus();
+      editInput?.select();
+    });
+  }
+  function commitEdit() {
+    const e = editing;
+    editing = null;
+    if (!e) return;
+    const text = e.value.trim();
+    if (!text) return;
+    if (e.mode === "rename") onRename?.(e.id, text);
+    else if (e.mode === "child") onAddChild?.(e.id, text);
+    else onAddSibling?.(e.id, text);
+  }
+
+  // worldToLocal maps layout (world) coordinates to pixels within the .mm box, so
+  // the HTML edit field / toolbar can be positioned over a node.
+  function worldToLocal(wx: number, wy: number): { x: number; y: number } {
+    if (!svgEl) return { x: 0, y: 0 };
+    const rect = svgEl.getBoundingClientRect();
+    return {
+      x: ((wx - vb.x) / vb.w) * rect.width,
+      y: ((wy - vb.y) / vb.h) * rect.height,
+    };
+  }
+  const editNode = $derived(editing ? (layout.nodes.find((n) => n.id === editing!.id) ?? null) : null);
+  const focusedNode = $derived(layout.nodes.find((n) => n.id === focusedId) ?? null);
 
   // fit frames the current layout bounds with padding for labels.
   function fit() {
@@ -255,6 +305,29 @@
   }
 
   function onNodeKey(e: KeyboardEvent, n: MapNode) {
+    // Edit-mode keymap (mirrors mind-map apps): Tab = child, Enter = sibling,
+    // F2 = rename, Delete = remove. Space still toggles collapse; arrows navigate.
+    if (editable) {
+      switch (e.key) {
+        case "Tab":
+          e.preventDefault();
+          openEdit("child", n);
+          return;
+        case "Enter":
+          e.preventDefault();
+          openEdit("sibling", n);
+          return;
+        case "F2":
+          e.preventDefault();
+          openEdit("rename", n);
+          return;
+        case "Delete":
+        case "Backspace":
+          e.preventDefault();
+          if (n.kind !== "root") onDelete?.(n.id);
+          return;
+      }
+    }
     switch (e.key) {
       case "Enter":
       case " ":
@@ -333,7 +406,9 @@
     class="mm__svg"
     viewBox="{vb.x} {vb.y} {vb.w} {vb.h}"
     role="application"
-    aria-label="Mind map. Drag to pan, scroll or pinch to zoom, click a branch to collapse it. Arrow keys move between nodes; Enter collapses or jumps."
+    aria-label={editable
+      ? "Editable mind map. Tab adds a child, Enter a sibling, F2 renames, Delete removes the focused node. Arrow keys move between nodes."
+      : "Mind map. Drag to pan, scroll or pinch to zoom, click a branch to collapse it. Arrow keys move between nodes; Enter collapses or jumps."}
     onwheel={onWheel}
     onpointerdown={onPointerDown}
     onpointermove={onPointerMove}
@@ -370,7 +445,8 @@
           }}
           ondblclick={(e) => {
             e.stopPropagation();
-            if (n.anchor && onJump) onJump(n.anchor);
+            if (editable) openEdit("rename", n);
+            else if (n.anchor && onJump) onJump(n.anchor);
           }}
           onkeydown={(e) => onNodeKey(e, n)}
           onpointerenter={() => (hoveredId = n.id)}
@@ -398,6 +474,37 @@
       {/each}
     </g>
   </svg>
+
+  {#if editable && focusedNode && !editing}
+    <!-- Per-node edit toolbar, floated at the focused node. -->
+    {@const p = worldToLocal(focusedNode.x, focusedNode.y)}
+    <div class="mm__nodebar" style="left:{p.x}px; top:{p.y}px" role="toolbar" aria-label="Edit node">
+      <button title="Add child (Tab)" aria-label="Add child" onclick={() => openEdit("child", focusedNode!)}><Icon name="plus" size={13} /></button>
+      {#if focusedNode.kind !== "root"}
+        <button title="Add sibling (Enter)" aria-label="Add sibling" onclick={() => openEdit("sibling", focusedNode!)}>↵</button>
+        <button title="Rename (F2)" aria-label="Rename" onclick={() => openEdit("rename", focusedNode!)}><Icon name="edit" size={13} /></button>
+        <button class="mm__nodebar-del" title="Delete (Del)" aria-label="Delete" onclick={() => onDelete?.(focusedNode!.id)}><Icon name="trash" size={13} /></button>
+      {/if}
+    </div>
+  {/if}
+
+  {#if editing && editNode}
+    <!-- Inline text field for rename / new node. -->
+    {@const p = worldToLocal(editNode.x, editNode.y)}
+    <input
+      bind:this={editInput}
+      class="mm__edit"
+      style="left:{p.x}px; top:{p.y}px"
+      placeholder={editing.mode === "rename" ? "" : editing.mode === "child" ? "New child…" : "New sibling…"}
+      bind:value={editing.value}
+      onkeydown={(e) => {
+        e.stopPropagation();
+        if (e.key === "Enter") commitEdit();
+        else if (e.key === "Escape") editing = null;
+      }}
+      onblur={commitEdit}
+    />
+  {/if}
 
   <!-- controls -->
   <div class="mm__ctl" role="group" aria-label="Mind map controls">
@@ -519,6 +626,60 @@
   }
   .mm__node--collapsed .mm__label {
     fill: var(--fg-soft, var(--fg));
+  }
+
+  /* Edit affordances (edit mode) — an HTML toolbar + text field floated over the
+     SVG at the target node's screen position (worldToLocal). */
+  .mm__nodebar {
+    position: absolute;
+    transform: translate(-50%, -180%);
+    display: flex;
+    gap: 2px;
+    padding: 2px;
+    background: color-mix(in srgb, var(--bg-elevated) 92%, transparent);
+    -webkit-backdrop-filter: saturate(1.4) blur(8px);
+    backdrop-filter: saturate(1.4) blur(8px);
+    border: 0.5px solid var(--separator-strong, var(--separator));
+    border-radius: var(--radius-sm, 6px);
+    box-shadow: var(--shadow-float, 0 4px 16px rgba(0, 0, 0, 0.15));
+    z-index: 5;
+  }
+  .mm__nodebar button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 24px;
+    min-height: 22px;
+    padding: 1px 4px;
+    background: transparent;
+    border: none;
+    border-radius: var(--radius-xs, 4px);
+    color: var(--fg-soft, var(--fg));
+    cursor: pointer;
+    font-size: 12px;
+  }
+  .mm__nodebar button:hover {
+    background: var(--fill);
+    color: var(--fg);
+  }
+  .mm__nodebar-del:hover {
+    color: var(--red, var(--danger)) !important;
+  }
+  .mm__edit {
+    position: absolute;
+    transform: translate(-50%, -50%);
+    z-index: 6;
+    min-width: 120px;
+    max-width: 260px;
+    padding: 3px 7px;
+    font-size: 12px;
+    font-family: var(--font-ui, system-ui);
+    color: var(--fg);
+    background: var(--bg-elevated);
+    border: 1px solid var(--accent-color);
+    border-radius: var(--radius-sm, 6px);
+    box-shadow: var(--shadow-float, 0 4px 16px rgba(0, 0, 0, 0.15));
+    outline: none;
   }
 
   /* control panel — compact glass strip, echoing the graph cockpit */

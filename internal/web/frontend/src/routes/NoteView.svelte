@@ -9,6 +9,19 @@
   import { parseOutline } from "../lib/outline";
   import { mapSearch } from "../lib/mindmap";
   import { wikiTree } from "../lib/wikimap";
+  import {
+    splitFrontmatter,
+    parseOutlineSource,
+    addChild,
+    addSibling,
+    renameNode,
+    deleteNode,
+    findByPath,
+    flattenSrc,
+    type SrcNode,
+  } from "../lib/outlineSource";
+  import { SaveConflict } from "../lib/api";
+  import { showToast } from "../lib/toast.svelte";
   import { renderMermaidIn, observeTheme } from "../lib/mermaid";
   import { tick } from "svelte";
 
@@ -27,6 +40,7 @@
   let mapSource = $state<"outline" | "links">(
     new URLSearchParams(location.search).get("map") === "links" ? "links" : "outline",
   );
+  let editMode = $state(false); // edit the outline structure (writes back to Markdown)
   let activeId = $state("");
   // Ref to the rendered note body, so Mermaid renders into THIS note's prose and
   // not the editor preview's also-".prose" pane (W33).
@@ -214,8 +228,56 @@
   const linkTree = $derived.by(() =>
     $graphQ.data ? wikiTree($graphQ.data, handle, 3) : null,
   );
-  // The tree MindMap renders: internal outline, or the wikilink tree once loaded.
-  const mapTree = $derived(mapSource === "links" ? linkTree : outline);
+  // --- editing the outline (writes back to the note's Markdown) -------------
+  // Only the outline source is editable (the wikilink tree spans other notes).
+  // The edit tree is parsed from the RAW body — which carries source line spans —
+  // fetched lazily while editing. Edits splice the raw text and save through the
+  // same conflict-safe endpoint the editor uses (If-Match etag), then invalidate
+  // so the map and prose both refresh from disk.
+  const canEdit = $derived(mapView && mapSource === "outline" && hasOutline);
+  const rawQ = $derived(
+    createQuery({ queryKey: ["raw", handle], queryFn: () => api.raw(handle), enabled: canEdit && editMode }),
+  );
+  const editOutline = $derived.by(() =>
+    $rawQ.data ? parseOutlineSource(splitFrontmatter($rawQ.data.text).body, $noteQ.data?.title ?? "") : null,
+  );
+  const editReady = $derived(editMode && canEdit && !!editOutline);
+
+  // The tree MindMap renders: wikilink tree, the source tree while editing, else
+  // the HTML-derived outline (which also carries goldmark ids for jump-to-heading).
+  const mapTree = $derived(
+    mapSource === "links" ? linkTree : editReady ? editOutline : outline,
+  );
+
+  async function applyEdit(op: (file: string, node: SrcNode, flat: SrcNode[]) => string, id: string) {
+    const raw = $rawQ.data;
+    const tree = editOutline;
+    if (!raw || !tree) return;
+    const node = findByPath(tree.root, id);
+    if (!node) {
+      showToast("Couldn't locate that node in the source — edit it in the text editor.");
+      return;
+    }
+    const next = op(raw.text, node, flattenSrc(tree.root));
+    try {
+      await api.save(handle, next, raw.etag);
+      await qc.invalidateQueries({ queryKey: ["raw", handle] });
+      await qc.invalidateQueries({ queryKey: ["note", handle] });
+      qc.invalidateQueries({ queryKey: ["notes"] });
+    } catch (err) {
+      if (err instanceof SaveConflict) {
+        showToast("Note changed on disk — reloaded, try again.");
+        qc.invalidateQueries({ queryKey: ["raw", handle] });
+        qc.invalidateQueries({ queryKey: ["note", handle] });
+      } else {
+        showToast("Couldn't save the edit.");
+      }
+    }
+  }
+  const onAddChild = (id: string, text: string) => applyEdit((f, n, fl) => addChild(f, n, text, fl), id);
+  const onAddSibling = (id: string, text: string) => applyEdit((f, n, fl) => addSibling(f, n, text, fl), id);
+  const onRename = (id: string, text: string) => applyEdit((f, n) => renameNode(f, n, text), id);
+  const onDeleteNode = (id: string) => applyEdit((f, n, fl) => deleteNode(f, n, fl), id);
 
   // Mirror the map state into the URL so it survives reload and is shareable. We
   // edit the real address bar (not the router) so it never remounts this view;
@@ -438,16 +500,39 @@
             <button
               class:seg--on={mapSource === "links"}
               aria-pressed={mapSource === "links"}
-              onclick={() => (mapSource = "links")}
+              onclick={() => {
+                mapSource = "links";
+                editMode = false;
+              }}
               title="Map notes linked from here via [[wikilinks]]"
             >Links</button>
           </div>
+          {#if canEdit}
+            <button
+              class="mapbar__edit"
+              class:mapbar__edit--on={editMode}
+              aria-pressed={editMode}
+              onclick={() => (editMode = !editMode)}
+              title={editMode ? "Done editing" : "Edit the outline — add, rename, delete nodes"}
+            ><Icon name="edit" size={14} /> {editMode ? "Done" : "Edit"}</button>
+          {/if}
         </div>
         {#if mapSource === "links" && $graphQ.isPending}
           <div class="map-msg muted">Loading the link graph…</div>
+        {:else if editMode && canEdit && !editReady}
+          <div class="map-msg muted">Loading the editor…</div>
         {:else if mapTree && mapTree.root.children.length}
-          {#key mapSource}
-            <MindMap root={mapTree.root} truncated={mapTree.truncated} onJump={onMapJump} />
+          {#key mapSource + (editReady ? ":edit" : "")}
+            <MindMap
+              root={mapTree.root}
+              truncated={mapTree.truncated}
+              onJump={onMapJump}
+              editable={editReady}
+              {onAddChild}
+              {onAddSibling}
+              {onRename}
+              onDelete={onDeleteNode}
+            />
           {/key}
         {:else if mapSource === "links"}
           <div class="map-msg muted">No linked notes yet — add <code>[[wikilinks]]</code> to build a web.</div>
@@ -532,7 +617,33 @@
      (mirrors the graph cockpit's segmented control, kept local to this view). */
   .mapbar {
     display: flex;
+    align-items: center;
+    gap: var(--space-3, 10px);
     margin: var(--space-3, 10px) 0;
+  }
+  /* Edit toggle sits to the right of the source picker. */
+  .mapbar__edit {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    margin-left: auto;
+    padding: 5px 12px;
+    background: var(--fill);
+    border: 0.5px solid var(--separator-strong, var(--separator));
+    border-radius: var(--radius-sm, 6px);
+    color: var(--fg-soft);
+    cursor: pointer;
+    font-size: var(--text-callout, 12px);
+  }
+  .mapbar__edit:hover {
+    color: var(--fg);
+    border-color: var(--fg-soft);
+  }
+  .mapbar__edit--on {
+    background: color-mix(in srgb, var(--accent-color) 18%, var(--bg-elevated));
+    border-color: color-mix(in srgb, var(--accent-color) 55%, transparent);
+    color: var(--fg);
+    font-weight: 600;
   }
   .mapbar .seg {
     display: inline-flex;
