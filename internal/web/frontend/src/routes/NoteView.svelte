@@ -5,7 +5,11 @@
   import { navigate } from "../lib/router.svelte";
   import Editor from "../lib/Editor.svelte";
   import Icon from "../lib/Icon.svelte";
+  import MindMap from "../lib/MindMap.svelte";
+  import { parseOutline } from "../lib/outline";
+  import { wikiTree } from "../lib/wikimap";
   import { renderMermaidIn, observeTheme } from "../lib/mermaid";
+  import { tick } from "svelte";
 
   let { handle }: { handle: string } = $props();
 
@@ -14,6 +18,8 @@
   const notesQ = createQuery({ queryKey: ["notes"], queryFn: api.notes });
 
   let editing = $state(false);
+  let mapView = $state(false); // note body ↔ mind-map
+  let mapSource = $state<"outline" | "links">("outline"); // outline vs wikilink tree
   let activeId = $state("");
   // Ref to the rendered note body, so Mermaid renders into THIS note's prose and
   // not the editor preview's also-".prose" pane (W33).
@@ -185,6 +191,46 @@
 
   const toc = $derived(extractToc($noteQ.data?.bodyHTML ?? ""));
 
+  // The mind map is the note's own outline (headings + nested lists) as a radial
+  // tree, parsed from the same server-rendered HTML the prose shows — so its
+  // heading nodes carry goldmark's ids and can scroll the reader to that section.
+  const outline = $derived(parseOutline($noteQ.data?.bodyHTML ?? "", $noteQ.data?.title ?? ""));
+  const hasOutline = $derived(outline.root.children.length > 0);
+
+  // The "Links" source roots on this note and radiates along wikilinks. The graph
+  // payload is fetched lazily — only while the links map is on — and shares the
+  // /graph route's cache. Wrapping createQuery in $derived makes `enabled` react.
+  const wantLinks = $derived(mapView && mapSource === "links");
+  const graphQ = $derived(
+    createQuery({ queryKey: ["graph"], queryFn: api.graph, enabled: wantLinks }),
+  );
+  const linkTree = $derived.by(() =>
+    $graphQ.data ? wikiTree($graphQ.data, handle, 3) : null,
+  );
+  // The tree MindMap renders: internal outline, or the wikilink tree once loaded.
+  const mapTree = $derived(mapSource === "links" ? linkTree : outline);
+
+  // Activating a map node: outline headings scroll the prose (anchor is a heading
+  // id); wikilink nodes navigate to that note (anchor is a "/n/…" url).
+  async function onMapJump(anchor: string) {
+    if (anchor.startsWith("/")) {
+      navigate(anchor);
+      return;
+    }
+    mapView = false;
+    await tick();
+    document.getElementById(anchor)?.scrollIntoView({ behavior: "smooth", block: "start" });
+    history.replaceState(null, "", "#" + anchor);
+    activeId = anchor;
+  }
+
+  // Entering the map: prefer the outline, but fall back to links for a note with
+  // no internal structure (e.g. a pure hub note).
+  function openMap() {
+    mapSource = hasOutline ? "outline" : "links";
+    mapView = true;
+  }
+
   // Scroll-spy: highlight the heading nearest the top of the viewport.
   $effect(() => {
     const items = toc;
@@ -215,7 +261,8 @@
   // theme (shared with the editor's live preview via lib/mermaid).
   $effect(() => {
     const html = $noteQ.data?.bodyHTML;
-    if (!html) return;
+    void mapView; // re-run when returning from the mind map so diagrams re-render
+    if (!html || mapView) return;
     let cancelled = false;
     const render = () => {
       // Scope to THIS note's body via a ref — the global ".prose" selector also
@@ -257,6 +304,14 @@
         <div class="pillbar__row">
           <div class="pillbar">
             <a class="pillbar__btn" href={`/graph?focus=${encodeURIComponent(handle)}`} title="Graph"><Icon name="focus" size={15} /> <span class="pillbar__btn-label">Graph</span></a>
+            <span class="pillbar__sep"></span>
+            <button
+              class="pillbar__btn"
+              class:pillbar__btn--on={mapView}
+              onclick={() => (mapView ? (mapView = false) : openMap())}
+              aria-pressed={mapView}
+              title={mapView ? "Show the note" : "Mind map of this note"}
+            ><Icon name="graph" size={15} /> <span class="pillbar__btn-label">{mapView ? "Note" : "Mind map"}</span></button>
             <span class="pillbar__sep"></span>
             <button
               class="pillbar__btn pillbar__btn--icon"
@@ -353,8 +408,39 @@
         {/if}
       </div>
 
-      <!-- bodyHTML is rendered server-side by goldmark (safe mode, escaped). -->
-      <div class="prose" bind:this={bodyEl}>{@html n.bodyHTML}</div>
+      {#if mapView}
+        <div class="mapbar" role="group" aria-label="Mind map source">
+          <div class="seg">
+            <button
+              class:seg--on={mapSource === "outline"}
+              aria-pressed={mapSource === "outline"}
+              disabled={!hasOutline}
+              onclick={() => (mapSource = "outline")}
+              title={hasOutline ? "Map this note's headings & lists" : "This note has no headings or lists to map"}
+            >Outline</button>
+            <button
+              class:seg--on={mapSource === "links"}
+              aria-pressed={mapSource === "links"}
+              onclick={() => (mapSource = "links")}
+              title="Map notes linked from here via [[wikilinks]]"
+            >Links</button>
+          </div>
+        </div>
+        {#if mapSource === "links" && $graphQ.isPending}
+          <div class="map-msg muted">Loading the link graph…</div>
+        {:else if mapTree && mapTree.root.children.length}
+          {#key mapSource}
+            <MindMap root={mapTree.root} truncated={mapTree.truncated} onJump={onMapJump} />
+          {/key}
+        {:else if mapSource === "links"}
+          <div class="map-msg muted">No linked notes yet — add <code>[[wikilinks]]</code> to build a web.</div>
+        {:else}
+          <div class="map-msg muted">Nothing to map — this note has no headings or lists.</div>
+        {/if}
+      {:else}
+        <!-- bodyHTML is rendered server-side by goldmark (safe mode, escaped). -->
+        <div class="prose" bind:this={bodyEl}>{@html n.bodyHTML}</div>
+      {/if}
 
       {#if n.taskRefs.length}
         <section class="panel">
@@ -424,6 +510,61 @@
 {/if}
 
 <style>
+  /* ── Mind-map source bar ─────────────────────────────────────────────────
+     A small segmented control above the map to pick outline vs wikilink source
+     (mirrors the graph cockpit's segmented control, kept local to this view). */
+  .mapbar {
+    display: flex;
+    margin: var(--space-3, 10px) 0;
+  }
+  .mapbar .seg {
+    display: inline-flex;
+    gap: 2px;
+    padding: 2px;
+    background: var(--fill);
+    border: 0.5px solid var(--separator);
+    border-radius: var(--radius-sm, 6px);
+  }
+  .mapbar .seg button {
+    padding: 4px 12px;
+    background: transparent;
+    border: 0.5px solid transparent;
+    border-radius: var(--radius-xs, 4px);
+    color: var(--fg-soft);
+    cursor: pointer;
+    font-size: var(--text-callout, 12px);
+  }
+  .mapbar .seg button:hover:not(.seg--on):not(:disabled) {
+    color: var(--fg);
+  }
+  .mapbar .seg button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+  .mapbar .seg--on {
+    background: color-mix(in srgb, var(--spectral-2) 40%, var(--bg-elevated));
+    border-color: color-mix(in srgb, var(--spectral-2) 60%, transparent);
+    color: var(--fg);
+    font-weight: 600;
+  }
+  .map-msg {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 200px;
+    text-align: center;
+    border: 0.5px dashed var(--separator);
+    border-radius: var(--radius-lg, 12px);
+    padding: var(--space-4, 16px);
+  }
+  .map-msg code {
+    font-family: var(--font-mono, monospace);
+    font-size: 0.9em;
+    padding: 1px 4px;
+    background: var(--fill);
+    border-radius: 4px;
+  }
+
   /* The action bar (crumbs + tools) is chrome above the article: a refined mono
      breadcrumb trail, and the note tools grouped into frosted-glass .pillbar
      clusters (styled globally in app.css). */
