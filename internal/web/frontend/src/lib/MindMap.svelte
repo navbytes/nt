@@ -79,6 +79,7 @@
   // is what makes the map usable on touch (no wheel there).
   const pointers = new Map<number, { x: number; y: number }>();
   let pinchDist = 0; // last two-finger distance, world-independent (screen px)
+  let panning = false; // a single-pointer drag has crossed the click→pan threshold
 
   // hoveredId / focusedId drive label emphasis and the roving-tabindex keyboard
   // model (only the focused node is tab-reachable; arrows move between nodes).
@@ -171,6 +172,7 @@
   // Markdown move. dragId is the node being dragged, dropId the hovered target.
   let dragId = $state<string | null>(null);
   let dropId = $state<string | null>(null);
+  let dragStartPt = { x: 0, y: 0 }; // where the node press began (drag threshold)
 
   function finalizeDrag() {
     const from = dragId;
@@ -287,7 +289,12 @@
   function onPointerDown(e: PointerEvent) {
     if (e.button !== 0 && e.pointerType === "mouse") return;
     pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
-    (e.currentTarget as SVGElement).setPointerCapture(e.pointerId);
+    // NOTE: we do NOT setPointerCapture here. Capturing on pointerdown redirects
+    // the pointerup (and the derived click) to the SVG, so a plain click on a
+    // node never reaches its onclick — collapse/jump/focus all silently break.
+    // Instead we capture lazily on the first real drag (past a threshold), so a
+    // click stays a click and only a genuine pan grabs the pointer.
+    panning = false;
     if (pointers.size === 1) {
       dragStart = { x: e.clientX, y: e.clientY, vbx: vb.x, vby: vb.y };
     } else if (pointers.size === 2) {
@@ -316,7 +323,8 @@
     pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
     const rect = svgEl.getBoundingClientRect();
     if (pointers.size >= 2) {
-      // Pinch: zoom by the change in finger distance, about the pinch midpoint.
+      // Pinch: two fingers is unambiguously a gesture — capture immediately.
+      capture(e);
       const [a, b] = [...pointers.values()];
       const dist = Math.hypot(a!.x - b!.x, a!.y - b!.y);
       if (pinchDist > 0 && dist > 0) {
@@ -325,10 +333,24 @@
       pinchDist = dist;
       return;
     }
-    // Single pointer: pan.
+    // Single pointer: pan, but only once it moves past a small threshold, so a
+    // click (or a click with micro-jitter) still reaches the node's onclick.
+    if (!panning) {
+      if (Math.hypot(e.clientX - dragStart.x, e.clientY - dragStart.y) < 4) return;
+      panning = true;
+      capture(e);
+    }
     const dx = ((e.clientX - dragStart.x) / rect.width) * vb.w;
     const dy = ((e.clientY - dragStart.y) / rect.height) * vb.h;
     vb = { ...vb, x: dragStart.vbx - dx, y: dragStart.vby - dy };
+  }
+
+  function capture(e: PointerEvent) {
+    try {
+      (e.currentTarget as SVGElement).setPointerCapture(e.pointerId);
+    } catch {
+      /* capture unsupported — pan/pinch still work without it */
+    }
   }
   function onPointerUp(e: PointerEvent) {
     if (dragId) {
@@ -337,6 +359,7 @@
     }
     pointers.delete(e.pointerId);
     pinchDist = 0;
+    panning = false;
     // A lone remaining finger becomes the new pan anchor so pan resumes smoothly.
     if (pointers.size === 1) {
       const [p] = [...pointers.values()];
@@ -541,6 +564,7 @@
               e.stopPropagation();
               dragId = n.id;
               dropId = null;
+              dragStartPt = { x: e.clientX, y: e.clientY };
               try {
                 (e.currentTarget as SVGGElement).setPointerCapture(e.pointerId);
               } catch {
@@ -549,7 +573,11 @@
             }
           }}
           onpointermove={(e) => {
-            if (dragId === n.id) dropId = nodeIdAtPoint(e.clientX, e.clientY, dragId);
+            // Only treat it as a drag once past a threshold, so a click (or a
+            // click with micro-jitter) never triggers an accidental reparent.
+            if (dragId === n.id && Math.hypot(e.clientX - dragStartPt.x, e.clientY - dragStartPt.y) >= 4) {
+              dropId = nodeIdAtPoint(e.clientX, e.clientY, dragId);
+            }
           }}
           onpointerup={() => dragId === n.id && finalizeDrag()}
           onpointercancel={() => {
@@ -560,7 +588,7 @@
           }}
           onclick={(e) => {
             e.stopPropagation();
-            focusedId = n.id;
+            focusNode(n.id); // DOM-focus so arrow keys work right after a click
             activate(n);
           }}
           ondblclick={(e) => {
