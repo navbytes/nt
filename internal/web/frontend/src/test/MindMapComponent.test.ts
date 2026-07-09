@@ -90,6 +90,27 @@ describe("MindMap component", () => {
     expect(container.querySelectorAll("g.mm__node").length).toBe(before - 2);
   });
 
+  it("a tap (down→up, no drag) does not pan — so it can register as a node click", async () => {
+    // Regression: capturing the pointer on pointerdown redirected the click to
+    // the SVG, breaking collapse/jump/focus. Panning must only begin past a
+    // movement threshold, leaving a plain tap free to become a click.
+    const { container } = mount();
+    const svg = container.querySelector("svg.mm__svg")! as SVGSVGElement;
+    const vb0 = svg.getAttribute("viewBox");
+    await fireEvent.pointerDown(svg, { clientX: 100, clientY: 100, button: 0, pointerId: 1 });
+    await fireEvent.pointerMove(svg, { clientX: 101, clientY: 101, pointerId: 1 }); // 1px jitter
+    await fireEvent.pointerUp(svg, { pointerId: 1 });
+    expect(svg.getAttribute("viewBox")).toBe(vb0); // no pan from a jittery tap
+  });
+
+  it("clicking a node still collapses it (interaction contract)", async () => {
+    const { container } = mount();
+    const before = container.querySelectorAll("g.mm__node").length;
+    const ship = [...container.querySelectorAll("g.mm__node")].find((g) => g.textContent?.includes("Ship"))!;
+    await fireEvent.click(ship);
+    expect(container.querySelectorAll("g.mm__node").length).toBe(before - 2);
+  });
+
   it("exposes zoom controls", () => {
     const { getByLabelText } = mount();
     expect(getByLabelText("Zoom in")).toBeTruthy();
