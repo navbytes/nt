@@ -96,6 +96,73 @@ describe("MindMap component", () => {
     expect(getByLabelText("Zoom out")).toBeTruthy();
   });
 
+  // --- editable mode -------------------------------------------------------
+  function mountEditable() {
+    const spies = {
+      onAddChild: vi.fn(),
+      onAddSibling: vi.fn(),
+      onRename: vi.fn(),
+      onDelete: vi.fn(),
+    };
+    const { root, truncated } = parseOutline(html, "Project");
+    return { spies, ...render(MindMap, { props: { root, truncated, editable: true, ...spies } }) };
+  }
+  const nodeByText = (c: HTMLElement, t: string) =>
+    [...c.querySelectorAll("g.mm__node")].find((g) => g.textContent?.includes(t)) as SVGGElement;
+
+  it("shows an edit toolbar on the focused node", async () => {
+    const { container } = mountEditable();
+    await fireEvent.click(nodeByText(container, "Billing")); // a leaf
+    const bar = container.querySelector(".mm__nodebar");
+    expect(bar).toBeTruthy();
+    expect(bar!.querySelector('[aria-label="Rename"]')).toBeTruthy();
+    expect(bar!.querySelector('[aria-label="Delete"]')).toBeTruthy();
+  });
+
+  it("renames via the inline field (Enter commits onRename)", async () => {
+    const { container, spies, getByLabelText } = mountEditable();
+    await fireEvent.click(nodeByText(container, "Billing")); // root.0.0.1
+    await fireEvent.click(getByLabelText("Rename"));
+    const input = container.querySelector("input.mm__edit") as HTMLInputElement;
+    expect(input).toBeTruthy();
+    input.value = "Billing v2";
+    await fireEvent.input(input);
+    await fireEvent.keyDown(input, { key: "Enter" });
+    expect(spies.onRename).toHaveBeenCalledWith("root.0.0.1", "Billing v2");
+  });
+
+  it("Tab opens a child field that commits onAddChild", async () => {
+    const { container, spies } = mountEditable();
+    const auth = nodeByText(container, "Auth"); // root.0.0.0
+    await fireEvent.click(auth);
+    await fireEvent.keyDown(auth, { key: "Tab" });
+    const input = container.querySelector("input.mm__edit") as HTMLInputElement;
+    input.value = "TOTP";
+    await fireEvent.input(input);
+    await fireEvent.keyDown(input, { key: "Enter" });
+    expect(spies.onAddChild).toHaveBeenCalledWith("root.0.0.0", "TOTP");
+  });
+
+  it("Delete key removes a non-root node", async () => {
+    const { container, spies } = mountEditable();
+    const auth = nodeByText(container, "Auth");
+    await fireEvent.click(auth);
+    await fireEvent.keyDown(auth, { key: "Delete" });
+    expect(spies.onDelete).toHaveBeenCalledWith("root.0.0.0");
+  });
+
+  it("Escape cancels an inline edit without committing", async () => {
+    const { container, spies } = mountEditable();
+    await fireEvent.click(nodeByText(container, "Billing"));
+    await fireEvent.keyDown(nodeByText(container, "Billing"), { key: "F2" });
+    const input = container.querySelector("input.mm__edit") as HTMLInputElement;
+    input.value = "nope";
+    await fireEvent.input(input);
+    await fireEvent.keyDown(input, { key: "Escape" });
+    expect(spies.onRename).not.toHaveBeenCalled();
+    expect(container.querySelector("input.mm__edit")).toBeNull();
+  });
+
   it("toggles a fullscreen overlay via the button and Escape", async () => {
     const { container, getByLabelText } = mount();
     const mm = container.querySelector(".mm")!;
