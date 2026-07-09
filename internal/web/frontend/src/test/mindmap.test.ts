@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { radialLayout } from "../lib/mindmap";
+import { radialLayout, mapSearch } from "../lib/mindmap";
 import { parseOutline } from "../lib/outline";
 
 const tree = () => parseOutline("<h2>A</h2><h3>A1</h3><h3>A2</h3><h2>B</h2>", "T").root;
@@ -46,5 +46,27 @@ describe("radialLayout", () => {
     const { nodes } = radialLayout(tree());
     expect(nodes.find((n) => n.id === "root.0")!.hasChildren).toBe(true);
     expect(nodes.find((n) => n.id === "root.1")!.hasChildren).toBe(false); // B is a leaf
+  });
+});
+
+describe("mapSearch (deep-link query)", () => {
+  it("adds view=map when the outline map is open", () => {
+    expect(mapSearch("", true, "outline")).toBe("view=map");
+  });
+
+  it("adds map=links for the wikilink source", () => {
+    expect(mapSearch("", true, "links")).toBe("view=map&map=links");
+  });
+
+  it("clears both params when the map is closed", () => {
+    expect(mapSearch("?view=map&map=links", false, "outline")).toBe("");
+  });
+
+  it("drops map=links when switching back to outline", () => {
+    expect(mapSearch("?view=map&map=links", true, "outline")).toBe("view=map");
+  });
+
+  it("preserves unrelated params", () => {
+    expect(mapSearch("?missing=1", true, "outline")).toBe("missing=1&view=map");
   });
 });

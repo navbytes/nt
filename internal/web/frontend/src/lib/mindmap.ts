@@ -12,6 +12,27 @@
 
 import type { OutlineNode } from "./outline";
 
+// mapSearch computes the note page's query string for a given map state, so the
+// view is a shareable, reload-surviving deep link (?view=map[&map=links]). It
+// preserves any other params already present (e.g. ?missing=1) and returns the
+// query WITHOUT a leading "?". Pure, so the URL contract is unit-tested.
+export function mapSearch(
+  currentSearch: string,
+  mapView: boolean,
+  mapSource: "outline" | "links",
+): string {
+  const q = new URLSearchParams(currentSearch);
+  if (mapView) {
+    q.set("view", "map");
+    if (mapSource === "links") q.set("map", "links");
+    else q.delete("map");
+  } else {
+    q.delete("view");
+    q.delete("map");
+  }
+  return q.toString();
+}
+
 export interface MapNode {
   id: string;
   text: string;

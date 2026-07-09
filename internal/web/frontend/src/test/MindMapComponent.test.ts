@@ -60,4 +60,54 @@ describe("MindMap component", () => {
     expect(shown).toBeLessThan(6);
     expect(shown).toBeGreaterThanOrEqual(3);
   });
+
+  // The focused node is the only tab-reachable one (roving tabindex); arrows move.
+  const focusedLabel = (c: HTMLElement) =>
+    c.querySelector('g.mm__node[tabindex="0"]')?.textContent?.trim();
+
+  it("arrow keys move focus down to a child, across siblings, and up to the parent", async () => {
+    const { container } = mount();
+    const rootG = container.querySelector('g.mm__node[tabindex="0"]')!;
+    expect(focusedLabel(container)).toContain("Project"); // root starts focused
+
+    await fireEvent.keyDown(rootG, { key: "ArrowDown" });
+    expect(focusedLabel(container)).toContain("Goals"); // stepped into first child
+
+    await fireEvent.keyDown(container.querySelector('g.mm__node[tabindex="0"]')!, { key: "ArrowRight" });
+    expect(focusedLabel(container)).toContain("Risks"); // sibling of Goals
+
+    await fireEvent.keyDown(container.querySelector('g.mm__node[tabindex="0"]')!, { key: "ArrowUp" });
+    expect(focusedLabel(container)).toContain("Project"); // back to parent (root)
+  });
+
+  it("Enter collapses the focused branch", async () => {
+    const { container } = mount();
+    const ship = [...container.querySelectorAll("g.mm__node")].find((g) =>
+      g.textContent?.includes("Ship"),
+    )!;
+    const before = container.querySelectorAll("g.mm__node").length;
+    await fireEvent.keyDown(ship, { key: "Enter" });
+    expect(container.querySelectorAll("g.mm__node").length).toBe(before - 2);
+  });
+
+  it("exposes zoom controls", () => {
+    const { getByLabelText } = mount();
+    expect(getByLabelText("Zoom in")).toBeTruthy();
+    expect(getByLabelText("Zoom out")).toBeTruthy();
+  });
+
+  it("culls deep labels on a dense map but keeps the root", () => {
+    // >60 nodes trips dense mode; depth-4 leaves (deepN) are culled, root stays.
+    const deep = Array.from({ length: 62 }, (_, i) => `<li>deep${i}</li>`).join("");
+    const denseHtml = `<h2>H</h2><ul><li>A<ul><li>B<ul>${deep}</ul></li></ul></li></ul>`;
+    const { root, truncated } = parseOutline(denseHtml, "BigNote");
+    const { container } = render(MindMap, { props: { root, truncated } });
+    const labels = [...container.querySelectorAll("text.mm__label")].map((t) => t.textContent ?? "");
+    expect(labels.some((l) => l.includes("BigNote"))).toBe(true); // root label kept
+    expect(labels.some((l) => l.includes("deep"))).toBe(false); // deep leaves culled
+    // Fewer labels than nodes → culling actually happened.
+    expect(container.querySelectorAll("text.mm__label").length).toBeLessThan(
+      container.querySelectorAll("g.mm__node").length,
+    );
+  });
 });
