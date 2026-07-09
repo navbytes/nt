@@ -337,6 +337,16 @@ export function moveNode(file: string, node: SrcNode, newParent: SrcNode, flat: 
     if (newParent.kind === "item") return file; // a heading under a bullet is invalid
     const base = newParent.kind === "root" ? 0 : newParent.level;
     headingDelta = base + 1 - node.level;
+    // Refuse a move that would push any heading past H6 — clamping would collapse
+    // distinct levels into a flat run of H6s (silent hierarchy loss).
+    if (headingDelta > 0) {
+      let maxLevel = 0;
+      for (const line of block) {
+        const h = /^(#{1,6})\s/.exec(line);
+        if (h) maxLevel = Math.max(maxLevel, h[1]!.length);
+      }
+      if (maxLevel + headingDelta > 6) return file;
+    }
   } else {
     const curIndent = indentWidth(/^(\s*)/.exec(lines[node.srcLine] ?? "")?.[1] ?? "");
     const target =

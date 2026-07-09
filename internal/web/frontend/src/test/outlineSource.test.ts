@@ -170,6 +170,15 @@ describe("edit ops", () => {
     expect(shape(t2.root)).toBe("T[A,B[A1]]");
   });
 
+  it("moveNode refuses a heading move that would overflow H6 (no silent flatten)", () => {
+    // A 4-level branch (##/###/####/#####) dropped under an H5 would need H6..H9.
+    const f = FM + "## Deep\n### D1\n#### D2\n##### D3\n## Host\n### H1\n#### H2\n##### Anchor\n";
+    const t = parse(f);
+    const deep = findByPath(t.root, "root.0")!; // ## Deep (spans D1..D3)
+    const anchor = findByPath(t.root, "root.1.0.0.0")!; // ##### Anchor (H5)
+    expect(moveNode(f, deep, anchor, flattenSrc(t.root))).toBe(f); // refused, unchanged
+  });
+
   it("moveNode refuses to drop a node into its own subtree", () => {
     const f = FM + "## A\n### A1\n";
     const t = parse(f);

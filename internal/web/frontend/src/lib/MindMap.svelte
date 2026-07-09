@@ -172,6 +172,26 @@
   let dragId = $state<string | null>(null);
   let dropId = $state<string | null>(null);
 
+  function finalizeDrag() {
+    const from = dragId;
+    const to = dropId;
+    dragId = null;
+    dropId = null;
+    if (from && to && to !== from) onReparent?.(from, to);
+  }
+  // Safety net: a pointerup anywhere (even outside the SVG, after the drag left
+  // the narrow prose column) ends the drag, so it can never wedge pan/pinch.
+  $effect(() => {
+    if (!dragId) return;
+    const end = () => finalizeDrag();
+    window.addEventListener("pointerup", end, true);
+    window.addEventListener("pointercancel", end, true);
+    return () => {
+      window.removeEventListener("pointerup", end, true);
+      window.removeEventListener("pointercancel", end, true);
+    };
+  });
+
   // One-time keyboard coach mark for edit mode (dismissal persisted).
   const COACH_KEY = "nt.mm.coachDismissed";
   let coachDismissed = $state(
@@ -312,11 +332,7 @@
   }
   function onPointerUp(e: PointerEvent) {
     if (dragId) {
-      const from = dragId;
-      const to = dropId;
-      dragId = null;
-      dropId = null;
-      if (to && to !== from) onReparent?.(from, to);
+      finalizeDrag();
       return;
     }
     pointers.delete(e.pointerId);
@@ -519,10 +535,26 @@
           aria-label={`${n.text}${n.hasChildren ? (n.collapsed ? `, collapsed, ${n.hiddenCount} hidden` : ", branch") : ""}`}
           onpointerdown={(e) => {
             // Edit mode: begin a drag-to-reparent on a non-root node. Stopping
-            // propagation keeps the background pan from also starting.
+            // propagation keeps the background pan from also starting; capturing
+            // the pointer routes move/up to this node even off-canvas.
             if (editable && n.kind !== "root") {
               e.stopPropagation();
               dragId = n.id;
+              dropId = null;
+              try {
+                (e.currentTarget as SVGGElement).setPointerCapture(e.pointerId);
+              } catch {
+                /* capture unsupported — the window fallback still ends the drag */
+              }
+            }
+          }}
+          onpointermove={(e) => {
+            if (dragId === n.id) dropId = nodeIdAtPoint(e.clientX, e.clientY, dragId);
+          }}
+          onpointerup={() => dragId === n.id && finalizeDrag()}
+          onpointercancel={() => {
+            if (dragId === n.id) {
+              dragId = null;
               dropId = null;
             }
           }}

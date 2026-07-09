@@ -25,7 +25,7 @@
     type SrcNode,
   } from "../lib/outlineSource";
   import { SaveConflict } from "../lib/api";
-  import { showToast } from "../lib/toast.svelte";
+  import { showToast, clearUndoToast } from "../lib/toast.svelte";
   import { renderMermaidIn, observeTheme } from "../lib/mermaid";
   import { tick } from "svelte";
 
@@ -284,12 +284,22 @@
   // save writes the new text through the same conflict-safe endpoint the editor
   // uses; on success it refreshes and (for destructive edits) offers an Undo that
   // restores the pre-edit text. focus points the map at a node afterwards.
-  async function save(next: string, prev: string, opts: { undo?: string; focus?: string } = {}) {
+  async function save(
+    next: string,
+    prev: string,
+    opts: { undo?: string; focus?: string; collapse?: () => void } = {},
+  ) {
     try {
       await api.save(handle, next, $rawQ.data!.etag);
+      // Single-level undo: a new write invalidates any prior Undo toast, so a
+      // stale Undo can never silently revert a later edit (shared app rule).
+      clearUndoToast();
       await qc.invalidateQueries({ queryKey: ["raw", handle] });
       await qc.invalidateQueries({ queryKey: ["note", handle] });
       qc.invalidateQueries({ queryKey: ["notes"] });
+      // Collapse remap runs only on success, so a save-conflict never leaves the
+      // collapse set shifted against an unchanged tree.
+      opts.collapse?.();
       if (opts.focus) focusRequest = opts.focus;
       if (opts.undo) showToast(opts.undo, () => restore(prev));
     } catch (err) {
@@ -308,6 +318,7 @@
     try {
       const cur = await api.raw(handle);
       await api.save(handle, text, cur.etag);
+      clearUndoToast();
       invalidateNote();
     } catch {
       showToast("Couldn't undo.");
@@ -327,8 +338,10 @@
     const parent = id.slice(0, dot);
     const idx = Number(id.slice(dot + 1));
     // addSibling inserts right after the target → it lands at parent index idx+1.
-    mapCollapsed = collapseAfterInsert(mapCollapsed, parent, idx + 1);
-    save(addSibling(e.raw.text, e.node, text, e.flat), e.raw.text, { focus: `${parent}.${idx + 1}` });
+    save(addSibling(e.raw.text, e.node, text, e.flat), e.raw.text, {
+      focus: `${parent}.${idx + 1}`,
+      collapse: () => (mapCollapsed = collapseAfterInsert(mapCollapsed, parent, idx + 1)),
+    });
   }
   function onRename(id: string, text: string) {
     const e = resolve(id);
@@ -342,10 +355,13 @@
     const extra = proseLines ? ` and ${proseLines} line${proseLines === 1 ? "" : "s"} of notes under it` : "";
     const dot = id.lastIndexOf(".");
     const parent = id === "root" ? "root" : id.slice(0, dot);
-    if (id !== "root") mapCollapsed = collapseAfterDelete(mapCollapsed, parent, Number(id.slice(dot + 1)));
+    const childIdx = id === "root" ? -1 : Number(id.slice(dot + 1));
     save(deleteNode(e.raw.text, e.node, e.flat), e.raw.text, {
       focus: parent,
       undo: `Removed “${e.node.text || "node"}”${extra}.`,
+      collapse: () => {
+        if (childIdx >= 0) mapCollapsed = collapseAfterDelete(mapCollapsed, parent, childIdx);
+      },
     });
   }
   function onReparent(id: string, newParentId: string) {
@@ -353,10 +369,12 @@
     if (!e || newParentId === id) return;
     const parent = findByPath(editOutline!.root, newParentId);
     if (!parent) return;
+    const next = moveNode(e.raw.text, e.node, parent, e.flat);
+    if (next === e.raw.text) return; // invalid/no-op drop — don't write or toast
     // A move shifts paths unpredictably; reset collapse and don't chase focus.
-    mapCollapsed = new Set();
-    save(moveNode(e.raw.text, e.node, parent, e.flat), e.raw.text, {
+    save(next, e.raw.text, {
       undo: `Moved “${e.node.text || "node"}”.`,
+      collapse: () => (mapCollapsed = new Set()),
     });
   }
 
