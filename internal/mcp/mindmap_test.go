@@ -47,6 +47,33 @@ func TestMCPMindmap(t *testing.T) {
 		t.Fatalf("depth 1 should stop before list items:\n%s", raw)
 	}
 
+	// format=json returns the raw tree.
+	jsonOut, err := s.dispatch("nt_mindmap", map[string]any{"handle": created.ID, "format": "json"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(jsonOut, `"text"`) || !strings.Contains(jsonOut, `"children"`) || strings.Contains(jsonOut, "mermaid") {
+		t.Fatalf("json format wrong:\n%s", jsonOut)
+	}
+
+	// source=links maps wikilinked notes; wire up a second, linked note.
+	if _, err := s.dispatch("nt_note", map[string]any{"title": "Risks Register", "body": "## Sec\n- token"}); err != nil {
+		t.Fatal(err)
+	}
+	// Re-create Project so its body links the other note (nt_note dedup: use a new title).
+	linker, _ := s.dispatch("nt_note", map[string]any{"title": "Hub", "body": "see [[Risks Register]]"})
+	var hub noteOut
+	if err := json.Unmarshal([]byte(linker), &hub); err != nil {
+		t.Fatal(err)
+	}
+	linksOut, err := s.dispatch("nt_mindmap", map[string]any{"handle": hub.ID, "source": "links"})
+	if err != nil {
+		t.Fatalf("links source: %v", err)
+	}
+	if !strings.Contains(strings.ToLower(linksOut), "risks register") {
+		t.Fatalf("links map missing the linked note:\n%s", linksOut)
+	}
+
 	// A note with no headings/lists is an error, not an empty diagram.
 	empty, _ := s.dispatch("nt_note", map[string]any{"title": "Flat", "body": "just a paragraph"})
 	var flat noteOut

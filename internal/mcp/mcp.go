@@ -1858,15 +1858,39 @@ func (s *server) mindmap(a map[string]any) (string, error) {
 	if handle == "" {
 		return "", fmt.Errorf("handle is required")
 	}
-	n, ok := resolveNoteMCP(s.listNotes(), handle)
+	notes := s.listNotes()
+	n, ok := resolveNoteMCP(notes, handle)
 	if !ok {
 		return "", fmt.Errorf("no note %q", handle)
 	}
-	root := mindmap.Outline(n.Body, n.Title)
-	if len(root.Children) == 0 {
-		return "", fmt.Errorf("%q has no headings or lists to map", n.Title)
+
+	depth := intArg(a, "depth")
+	var root *mindmap.Node
+	if str(a, "source") == "links" {
+		d, _ := s.eng.Read()
+		hops := depth
+		if hops == 0 {
+			hops = 3
+		}
+		root = mindmap.WikiTree(n, notes, d, hops)
+		if len(root.Children) == 0 {
+			return "", fmt.Errorf("%q links to no other notes — add [[wikilinks]] first", n.Title)
+		}
+	} else {
+		root = mindmap.Outline(n.Body, n.Title)
+		if len(root.Children) == 0 {
+			return "", fmt.Errorf("%q has no headings or lists to map", n.Title)
+		}
 	}
-	out := mindmap.Mermaid(root, intArg(a, "depth"))
+
+	if str(a, "format") == "json" {
+		b, err := json.MarshalIndent(root, "", "  ")
+		if err != nil {
+			return "", err
+		}
+		return string(b), nil
+	}
+	out := mindmap.Mermaid(root, depth)
 	if !boolArg(a, "no_fence") {
 		out = mindmap.Fence(out)
 	}

@@ -17,8 +17,8 @@ import (
 
 // Node is one entry in the outline tree (the root carries the note title).
 type Node struct {
-	Text     string
-	Children []*Node
+	Text     string  `json:"text"`
+	Children []*Node `json:"children,omitempty"`
 }
 
 // MaxNodes bounds a single map so a pathological note can't produce a runaway
@@ -66,7 +66,20 @@ func Outline(body, title string) *Node {
 	inFence := false
 	fence := ""
 
-	for _, raw := range strings.Split(body, "\n") {
+	pushHeading := func(level int, text string) {
+		for len(hstack) > 1 && hstack[len(hstack)-1].level >= level {
+			hstack = hstack[:len(hstack)-1]
+		}
+		n := &Node{Text: sanitize(text)}
+		hstack[len(hstack)-1].node.Children = append(hstack[len(hstack)-1].node.Children, n)
+		hstack = append(hstack, hframe{n, level})
+		lstack = nil // headings reset the list context
+		count++
+	}
+
+	lines := strings.Split(body, "\n")
+	for i := 0; i < len(lines); i++ {
+		raw := lines[i]
 		trimmed := strings.TrimSpace(raw)
 
 		// Fenced code blocks toggle on ``` or ~~~ and swallow everything between.
@@ -78,10 +91,10 @@ func Outline(body, title string) *Node {
 			}
 			continue
 		}
+		// A blank line does NOT end a list run (CommonMark loose lists keep nesting
+		// across blanks, and goldmark's nested <ul> agrees) — only a heading or a
+		// genuine prose paragraph resets the list context.
 		if inFence || trimmed == "" {
-			if trimmed == "" {
-				lstack = nil // a blank line ends the current list run
-			}
 			continue
 		}
 		if count >= MaxNodes {
@@ -89,16 +102,7 @@ func Outline(body, title string) *Node {
 		}
 
 		if m := headingRe.FindStringSubmatch(trimmed); m != nil {
-			level := len(m[1])
-			for len(hstack) > 1 && hstack[len(hstack)-1].level >= level {
-				hstack = hstack[:len(hstack)-1]
-			}
-			n := &Node{Text: sanitize(m[2])}
-			parent := hstack[len(hstack)-1].node
-			parent.Children = append(parent.Children, n)
-			hstack = append(hstack, hframe{n, level})
-			lstack = nil // headings reset the list context
-			count++
+			pushHeading(len(m[1]), m[2])
 			continue
 		}
 
@@ -120,8 +124,16 @@ func Outline(body, title string) *Node {
 			continue
 		}
 
-		// Any other prose line ends the current list run (a following list starts
-		// fresh under the heading, not nested under the previous item).
+		// Setext heading: a prose line underlined by === (H1) or --- (H2).
+		if len(lstack) == 0 && i+1 < len(lines) {
+			if lvl := setextLevel(lines[i+1]); lvl != 0 {
+				pushHeading(lvl, trimmed)
+				i++ // consume the underline
+				continue
+			}
+		}
+
+		// A genuine prose paragraph ends the current list run.
 		lstack = nil
 	}
 	return root
@@ -192,6 +204,23 @@ func stripTitleH1(body, title string) string {
 		return body
 	}
 	return strings.TrimLeft(rest, "\n")
+}
+
+var (
+	setextH1Re = regexp.MustCompile(`^=+$`)
+	setextH2Re = regexp.MustCompile(`^-+$`)
+)
+
+// setextLevel returns 1 for an "===" underline, 2 for "---", else 0.
+func setextLevel(line string) int {
+	t := strings.TrimSpace(line)
+	switch {
+	case setextH1Re.MatchString(t):
+		return 1
+	case setextH2Re.MatchString(t):
+		return 2
+	}
+	return 0
 }
 
 // fenceMarker returns "```" or "~~~" if the line opens/closes a code fence.

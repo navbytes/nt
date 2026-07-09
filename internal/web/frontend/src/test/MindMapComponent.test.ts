@@ -151,6 +151,33 @@ describe("MindMap component", () => {
     expect(spies.onDelete).toHaveBeenCalledWith("root.0.0.0");
   });
 
+  it("focuses the requested node when the parent asks (focus-follows-new-node)", async () => {
+    const { root, truncated } = parseOutline(html, "Project");
+    const { container, rerender } = render(MindMap, {
+      props: { root, truncated, editable: true, focusRequest: null },
+    });
+    // Ask to focus "Billing" (root.0.0.1) as if it were just added.
+    await rerender({ root, truncated, editable: true, focusRequest: "root.0.0.1" });
+    expect(container.querySelector('g.mm__node[tabindex="0"]')?.textContent).toContain("Billing");
+  });
+
+  it("reparents on drag-drop (pointer down on a node, up on another)", async () => {
+    const onReparent = vi.fn();
+    const { root, truncated } = parseOutline(html, "Project");
+    const { container } = render(MindMap, { props: { root, truncated, editable: true, onReparent } });
+    const auth = nodeByText(container, "Auth"); // root.0.0.0
+    const risks = nodeByText(container, "Risks"); // root.1
+    // Begin dragging Auth, then release over Risks. elementsFromPoint is stubbed
+    // in jsdom, so drive dropId through the same code path via a spy on the DOM.
+    await fireEvent.pointerDown(auth);
+    // Simulate the move resolving Risks as the drop target, then release.
+    const svg = container.querySelector("svg.mm__svg")!;
+    (document as any).elementsFromPoint = () => [risks];
+    await fireEvent.pointerMove(svg, { clientX: 10, clientY: 10 });
+    await fireEvent.pointerUp(svg);
+    expect(onReparent).toHaveBeenCalledWith("root.0.0.0", "root.1");
+  });
+
   it("Escape cancels an inline edit without committing", async () => {
     const { container, spies } = mountEditable();
     await fireEvent.click(nodeByText(container, "Billing"));
