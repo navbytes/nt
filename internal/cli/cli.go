@@ -83,6 +83,8 @@ func Run(args []string) int {
 		return cmdTag(rest)
 	case "links":
 		return cmdLinks(rest)
+	case "mindmap", "mm":
+		return cmdMindmap(rest)
 	case "mv", "rename":
 		return cmdMv(rest)
 	case "rm", "delete":
@@ -423,6 +425,7 @@ USAGE
   nt tags                     list the tag vocabulary with counts
   nt tag <id|note…> +x -y     retag tasks or notes (no $EDITOR; preserves frontmatter)
   nt links <id|note>          forward links + backlinks + deps  (--orphans, --json)
+  nt mindmap <id|note>        Mermaid mind map of a note's outline  (--depth N, --no-fence; alias: mm)
   nt edit <id|note>           edit a task or note in $EDITOR
   nt mv <note> <new|path>     rename/move a note, updating all [[links]] to it
   nt supersede <old> --by <new>  mark a note replaced by another (retires the old from views)

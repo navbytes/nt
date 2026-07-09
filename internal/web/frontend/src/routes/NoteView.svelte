@@ -7,6 +7,7 @@
   import Icon from "../lib/Icon.svelte";
   import MindMap from "../lib/MindMap.svelte";
   import { parseOutline } from "../lib/outline";
+  import { mapSearch } from "../lib/mindmap";
   import { wikiTree } from "../lib/wikimap";
   import { renderMermaidIn, observeTheme } from "../lib/mermaid";
   import { tick } from "svelte";
@@ -18,8 +19,14 @@
   const notesQ = createQuery({ queryKey: ["notes"], queryFn: api.notes });
 
   let editing = $state(false);
-  let mapView = $state(false); // note body ↔ mind-map
-  let mapSource = $state<"outline" | "links">("outline"); // outline vs wikilink tree
+  // The map view + source are seeded from the URL (?view=map[&map=links]) so a
+  // mind map is a shareable, reload-surviving deep link. NoteView is keyed on the
+  // handle alone, so it remounts per note — reading the query at init is enough;
+  // an effect below writes changes back to the address bar.
+  let mapView = $state(new URLSearchParams(location.search).get("view") === "map");
+  let mapSource = $state<"outline" | "links">(
+    new URLSearchParams(location.search).get("map") === "links" ? "links" : "outline",
+  );
   let activeId = $state("");
   // Ref to the rendered note body, so Mermaid renders into THIS note's prose and
   // not the editor preview's also-".prose" pane (W33).
@@ -209,6 +216,16 @@
   );
   // The tree MindMap renders: internal outline, or the wikilink tree once loaded.
   const mapTree = $derived(mapSource === "links" ? linkTree : outline);
+
+  // Mirror the map state into the URL so it survives reload and is shareable. We
+  // edit the real address bar (not the router) so it never remounts this view;
+  // mapSearch preserves any other params and we only write on an actual change.
+  $effect(() => {
+    const next = mapSearch(location.search, mapView, mapSource);
+    if (next !== location.search.replace(/^\?/, "")) {
+      history.replaceState(history.state, "", location.pathname + (next ? `?${next}` : ""));
+    }
+  });
 
   // Activating a map node: outline headings scroll the prose (anchor is a heading
   // id); wikilink nodes navigate to that note (anchor is a "/n/…" url).

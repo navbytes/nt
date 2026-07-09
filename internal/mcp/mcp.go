@@ -19,6 +19,7 @@ import (
 
 	"github.com/navbytes/nt/internal/dateparse"
 	"github.com/navbytes/nt/internal/links"
+	"github.com/navbytes/nt/internal/mindmap"
 	"github.com/navbytes/nt/internal/mutate"
 	"github.com/navbytes/nt/internal/note"
 	"github.com/navbytes/nt/internal/quickadd"
@@ -211,6 +212,8 @@ func (s *server) dispatch(name string, a map[string]any) (string, error) {
 		return s.recall(a)
 	case "nt_links":
 		return s.links(a)
+	case "nt_mindmap":
+		return s.mindmap(a)
 	case "nt_mv":
 		return s.mv(a)
 	case "nt_tag":
@@ -1845,6 +1848,29 @@ func (s *server) links(a map[string]any) (string, error) {
 		}
 	}
 	return "", fmt.Errorf("no task or note %q", handle)
+}
+
+// mindmap renders a note's outline as a Mermaid mindmap diagram (see the
+// internal/mindmap package). The result is meant to be written back into a note
+// via nt_note/nt_note_edit, where the web viewer renders it.
+func (s *server) mindmap(a map[string]any) (string, error) {
+	handle := strings.TrimSpace(str(a, "handle"))
+	if handle == "" {
+		return "", fmt.Errorf("handle is required")
+	}
+	n, ok := resolveNoteMCP(s.listNotes(), handle)
+	if !ok {
+		return "", fmt.Errorf("no note %q", handle)
+	}
+	root := mindmap.Outline(n.Body, n.Title)
+	if len(root.Children) == 0 {
+		return "", fmt.Errorf("%q has no headings or lists to map", n.Title)
+	}
+	out := mindmap.Mermaid(root, intArg(a, "depth"))
+	if !boolArg(a, "no_fence") {
+		out = mindmap.Fence(out)
+	}
+	return out, nil
 }
 
 func (s *server) mv(a map[string]any) (string, error) {

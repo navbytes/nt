@@ -181,6 +181,15 @@ var toolDefs = []toolDef{
 		InputSchema: obj(map[string]any{"handle": sp("a note handle (slug/title/id) or task id")}, "handle"),
 	},
 	{
+		Name:        "nt_mindmap",
+		Description: "Render a note's outline (its headings + nested lists) as a Mermaid `mindmap` diagram — a compact visual summary of a topic's structure. Returns a ```mermaid``` fence you can drop into a note (nt's web viewer, Obsidian, and GitHub render it) via nt_note/nt_note_edit. Use depth to cap levels; no_fence for the raw diagram. Errors if the note has no headings or lists to map.",
+		InputSchema: obj(map[string]any{
+			"handle":   sp("a note handle (slug/title/id)"),
+			"depth":    map[string]any{"type": "integer", "description": "limit to N levels below the root (omit/0 = all)"},
+			"no_fence": map[string]any{"type": "boolean", "description": "return the raw mindmap without the ```mermaid``` code fence"},
+		}, "handle"),
+	},
+	{
 		Name:        "nt_mv",
 		Description: "Refile a note: rename or move it into a folder, rewriting every [[link]] to it.",
 		InputSchema: obj(map[string]any{
