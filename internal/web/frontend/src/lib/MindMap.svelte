@@ -6,7 +6,7 @@
   // honours prefers-reduced-motion through the global transition rules.
   import { onMount } from "svelte";
   import Icon from "./Icon.svelte";
-  import { radialLayout, type MapNode } from "./mindmap";
+  import { radialLayout, type MapNode, type MapEdge } from "./mindmap";
   import { maxDepth, collapseToDepth, type OutlineNode } from "./outline";
 
   let {
@@ -18,6 +18,9 @@
     onAddSibling,
     onRename,
     onDelete,
+    onReparent,
+    focusRequest = null,
+    collapsed = $bindable(new Set<string>()),
   }: {
     root: OutlineNode;
     truncated?: boolean;
@@ -29,10 +32,13 @@
     onAddSibling?: (id: string, text: string) => void;
     onRename?: (id: string, text: string) => void;
     onDelete?: (id: string) => void;
+    onReparent?: (id: string, newParentId: string) => void;
+    // After an edit the parent asks us to focus + pan to a node (e.g. a new one).
+    focusRequest?: string | null;
+    // Bindable so the parent can remap it across structural edits (ids are paths).
+    collapsed?: Set<string>;
   } = $props();
 
-  // --- collapse state -------------------------------------------------------
-  let collapsed = $state<Set<string>>(new Set());
   const depth = $derived(maxDepth(root));
 
   const layout = $derived(radialLayout(root, { collapsed }));
@@ -146,6 +152,60 @@
   const editNode = $derived(editing ? (layout.nodes.find((n) => n.id === editing!.id) ?? null) : null);
   const focusedNode = $derived(layout.nodes.find((n) => n.id === focusedId) ?? null);
 
+  // Focus-follows-edit: when the parent requests a node (e.g. a freshly-added
+  // one), adopt focus + pan the camera to it once the re-parsed tree includes it.
+  // Guarded by appliedFocus so a request is honoured exactly once.
+  let appliedFocus: string | null = null;
+  $effect(() => {
+    const req = focusRequest;
+    if (req == null || req === appliedFocus || !visibleIds.has(req)) return;
+    appliedFocus = req;
+    focusedId = req;
+    const n = layout.nodes.find((x) => x.id === req);
+    if (n) vb = { ...vb, x: n.x - vb.w / 2, y: n.y - vb.h / 2 }; // pan, keep zoom
+    queueMicrotask(() => svgEl?.querySelector<SVGGElement>(`[data-nid="${CSS.escape(req)}"]`)?.focus());
+  });
+
+  // --- drag-to-reparent (edit mode) ----------------------------------------
+  // Dragging a node onto another reparents its whole subtree; the parent does the
+  // Markdown move. dragId is the node being dragged, dropId the hovered target.
+  let dragId = $state<string | null>(null);
+  let dropId = $state<string | null>(null);
+
+  function finalizeDrag() {
+    const from = dragId;
+    const to = dropId;
+    dragId = null;
+    dropId = null;
+    if (from && to && to !== from) onReparent?.(from, to);
+  }
+  // Safety net: a pointerup anywhere (even outside the SVG, after the drag left
+  // the narrow prose column) ends the drag, so it can never wedge pan/pinch.
+  $effect(() => {
+    if (!dragId) return;
+    const end = () => finalizeDrag();
+    window.addEventListener("pointerup", end, true);
+    window.addEventListener("pointercancel", end, true);
+    return () => {
+      window.removeEventListener("pointerup", end, true);
+      window.removeEventListener("pointercancel", end, true);
+    };
+  });
+
+  // One-time keyboard coach mark for edit mode (dismissal persisted).
+  const COACH_KEY = "nt.mm.coachDismissed";
+  let coachDismissed = $state(
+    typeof localStorage !== "undefined" && localStorage.getItem(COACH_KEY) === "1",
+  );
+  function dismissCoach() {
+    coachDismissed = true;
+    try {
+      localStorage.setItem(COACH_KEY, "1");
+    } catch {
+      /* private mode / storage disabled — fine, it just shows again next time */
+    }
+  }
+
   // fit frames the current layout bounds with padding for labels.
   function fit() {
     if (!svgEl) return;
@@ -235,7 +295,23 @@
       pinchDist = Math.hypot(a!.x - b!.x, a!.y - b!.y);
     }
   }
+  // nodeIdAtPoint hit-tests for a node under the cursor (excluding the dragged
+  // one) so drag-to-reparent can highlight and pick a drop target.
+  function nodeIdAtPoint(x: number, y: number, exclude: string | null): string | null {
+    if (typeof document.elementsFromPoint !== "function") return null;
+    for (const el of document.elementsFromPoint(x, y)) {
+      const g = (el as Element).closest?.("[data-nid]");
+      const id = g?.getAttribute("data-nid");
+      if (id && id !== exclude) return id;
+    }
+    return null;
+  }
+
   function onPointerMove(e: PointerEvent) {
+    if (dragId) {
+      dropId = nodeIdAtPoint(e.clientX, e.clientY, dragId);
+      return;
+    }
     if (!pointers.has(e.pointerId) || !svgEl) return;
     pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
     const rect = svgEl.getBoundingClientRect();
@@ -255,6 +331,10 @@
     vb = { ...vb, x: dragStart.vbx - dx, y: dragStart.vby - dy };
   }
   function onPointerUp(e: PointerEvent) {
+    if (dragId) {
+      finalizeDrag();
+      return;
+    }
     pointers.delete(e.pointerId);
     pinchDist = 0;
     // A lone remaining finger becomes the new pan anchor so pan resumes smoothly.
@@ -398,6 +478,22 @@
   const hiddenTotal = $derived(
     layout.nodes.reduce((s, n) => s + (n.collapsed ? n.hiddenCount : 0), 0),
   );
+
+  // edgePath draws a radial-following curve: it leaves the parent heading outward
+  // (along the parent's spoke) and sweeps to the child, rather than the old
+  // vertical-S that bowed against the radial layout. The control point sits at the
+  // child's radius but the parent's angle, giving a clean petal shape.
+  function edgePath(e: MapEdge): string {
+    const pr = Math.hypot(e.x1, e.y1);
+    const cr = Math.hypot(e.x2, e.y2);
+    if (pr < 1) {
+      // Root spoke: straight from centre to the first-ring node.
+      return `M ${e.x1} ${e.y1} L ${e.x2} ${e.y2}`;
+    }
+    const qx = (e.x1 / pr) * cr; // child radius along the parent's unit vector
+    const qy = (e.y1 / pr) * cr;
+    return `M ${e.x1} ${e.y1} Q ${qx} ${qy}, ${e.x2} ${e.y2}`;
+  }
 </script>
 
 <div class="mm" class:mm--full={expanded}>
@@ -418,10 +514,7 @@
     <!-- edges under nodes -->
     <g class="mm__edges" fill="none">
       {#each layout.edges as e (e.from + ">" + e.to)}
-        <path
-          d="M {e.x1} {e.y1} C {e.x1} {(e.y1 + e.y2) / 2}, {e.x2} {(e.y1 + e.y2) / 2}, {e.x2} {e.y2}"
-          class="mm__edge"
-        />
+        <path d={edgePath(e)} class="mm__edge" />
       {/each}
     </g>
 
@@ -433,11 +526,38 @@
           class="mm__node"
           class:mm__node--collapsed={n.collapsed}
           class:mm__node--focused={n.id === focusedId}
+          class:mm__node--dragging={n.id === dragId}
+          class:mm__node--drop={n.id === dropId}
           data-nid={n.id}
           transform="translate({n.x} {n.y})"
           role="button"
           tabindex={n.id === focusedId ? 0 : -1}
           aria-label={`${n.text}${n.hasChildren ? (n.collapsed ? `, collapsed, ${n.hiddenCount} hidden` : ", branch") : ""}`}
+          onpointerdown={(e) => {
+            // Edit mode: begin a drag-to-reparent on a non-root node. Stopping
+            // propagation keeps the background pan from also starting; capturing
+            // the pointer routes move/up to this node even off-canvas.
+            if (editable && n.kind !== "root") {
+              e.stopPropagation();
+              dragId = n.id;
+              dropId = null;
+              try {
+                (e.currentTarget as SVGGElement).setPointerCapture(e.pointerId);
+              } catch {
+                /* capture unsupported — the window fallback still ends the drag */
+              }
+            }
+          }}
+          onpointermove={(e) => {
+            if (dragId === n.id) dropId = nodeIdAtPoint(e.clientX, e.clientY, dragId);
+          }}
+          onpointerup={() => dragId === n.id && finalizeDrag()}
+          onpointercancel={() => {
+            if (dragId === n.id) {
+              dragId = null;
+              dropId = null;
+            }
+          }}
           onclick={(e) => {
             e.stopPropagation();
             focusedId = n.id;
@@ -536,6 +656,15 @@
     </p>
     <p class="mm__hint">Click a branch to collapse · double-click to jump · arrow keys to navigate</p>
   </div>
+
+  {#if editable && !coachDismissed}
+    <div class="mm__coach" role="note">
+      <span class="mm__coach-keys">
+        <kbd>Tab</kbd> child · <kbd>Enter</kbd> sibling · <kbd>F2</kbd> rename · <kbd>Del</kbd> delete · drag to move
+      </span>
+      <button class="mm__coach-x" aria-label="Dismiss" onclick={dismissCoach}><Icon name="close" size={13} /></button>
+    </div>
+  {/if}
 </div>
 
 <style>
@@ -626,6 +755,66 @@
   }
   .mm__node--collapsed .mm__label {
     fill: var(--fg-soft, var(--fg));
+  }
+  /* drag-to-reparent feedback */
+  .mm__node--dragging .mm__dot {
+    opacity: 0.4;
+  }
+  .mm__node--drop .mm__dot {
+    stroke-width: 3.5;
+    filter: drop-shadow(0 0 5px var(--accent-color));
+  }
+
+  /* One-time keyboard coach mark, docked bottom-centre in edit mode. */
+  .mm__coach {
+    position: absolute;
+    bottom: 10px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    align-items: center;
+    gap: var(--space-2, 6px);
+    max-width: calc(100% - 20px);
+    padding: 5px 6px 5px 12px;
+    background: color-mix(in srgb, var(--bg-elevated) 92%, transparent);
+    -webkit-backdrop-filter: saturate(1.4) blur(8px);
+    backdrop-filter: saturate(1.4) blur(8px);
+    border: 0.5px solid var(--separator-strong, var(--separator));
+    border-radius: 999px;
+    box-shadow: var(--shadow-float, 0 4px 16px rgba(0, 0, 0, 0.15));
+    z-index: 5;
+    font-size: var(--text-callout, 12px);
+    color: var(--fg-soft);
+  }
+  .mm__coach kbd {
+    font-family: var(--font-mono, monospace);
+    font-size: 0.85em;
+    padding: 1px 4px;
+    background: var(--fill);
+    border: 0.5px solid var(--separator-strong, var(--separator));
+    border-radius: 4px;
+    color: var(--fg);
+  }
+  .mm__coach-x {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 22px;
+    min-height: 22px;
+    background: transparent;
+    border: none;
+    border-radius: 50%;
+    color: var(--muted);
+    cursor: pointer;
+  }
+  .mm__coach-x:hover {
+    color: var(--fg);
+    background: var(--fill);
+  }
+  @media (max-width: 640px) {
+    .mm__coach {
+      font-size: var(--text-footnote, 10px);
+    }
   }
 
   /* Edit affordances (edit mode) — an HTML toolbar + text field floated over the

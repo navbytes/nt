@@ -13,13 +13,17 @@ describe("radialLayout", () => {
     expect(root.depth).toBe(0);
   });
 
-  it("puts each node on the ring for its depth", () => {
+  it("puts each node on a monotonically-larger ring for its depth", () => {
     const { nodes } = radialLayout(tree(), { ringGap: 100 });
     const byId = new Map(nodes.map((n) => [n.id, n]));
+    const root = byId.get("root")!;
     const a = byId.get("root.0")!; // depth 1
     const a1 = byId.get("root.0.0")!; // depth 2
-    expect(Math.hypot(a.x, a.y)).toBeCloseTo(100);
-    expect(Math.hypot(a1.x, a1.y)).toBeCloseTo(200);
+    // Rings are pushed out by a constant (inner-crowding relief): 0, 1.25r, 2.25r.
+    expect(Math.hypot(root.x, root.y)).toBeCloseTo(0);
+    expect(Math.hypot(a.x, a.y)).toBeCloseTo(125);
+    expect(Math.hypot(a1.x, a1.y)).toBeCloseTo(225);
+    expect(Math.hypot(a1.x, a1.y)).toBeGreaterThan(Math.hypot(a.x, a.y));
   });
 
   it("emits an edge per parent→child and finite coordinates", () => {

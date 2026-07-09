@@ -6,8 +6,12 @@ import {
   addSibling,
   renameNode,
   deleteNode,
+  deletePreview,
+  moveNode,
   findByPath,
   flattenSrc,
+  collapseAfterInsert,
+  collapseAfterDelete,
   type SrcNode,
 } from "../lib/outlineSource";
 
@@ -45,6 +49,27 @@ describe("parseOutlineSource", () => {
     const { root } = parseOutlineSource(body, "My Note");
     expect(shape(root)).toBe("My Note[A]");
     expect(root.children[0]!.srcLine).toBe(2); // "## A" is on line index 2
+  });
+
+  it("keeps a loose list nested across a blank line (matches the HTML map)", () => {
+    // A blank line between siblings must NOT flatten A2 to the top level.
+    const body = "- A\n  - A1\n\n  - A2\n";
+    const { root } = parseOutlineSource(body, "T");
+    expect(shape(root)).toBe("T[A[A1,A2]]");
+  });
+
+  it("parses setext headings (=== / ---) like the rendered map", () => {
+    const body = "Overview\n===\n\nDetails\n---\n";
+    const { root } = parseOutlineSource(body, "T");
+    expect(shape(root)).toBe("T[Overview[Details]]"); // H1 then H2 nests under it
+    expect(root.children[0]!.level).toBe(1);
+  });
+
+  it("adds a heading child under a setext heading (uses stored level)", () => {
+    const file = "Overview\n===\n";
+    const t = parseOutlineSource(file, "T");
+    const out = addChild(file, findByPath(t.root, "root.0")!, "Sub", flattenSrc(t.root));
+    expect(out).toContain("## Sub"); // H1 → H2 child, not a bullet
   });
 });
 
@@ -118,6 +143,59 @@ describe("edit ops", () => {
     const { root } = parse(file);
     const out = addChild(file, findByPath(root, "root.0")!, "a\nb", flattenSrc(root));
     expect(out).toContain("### a b");
+  });
+
+  it("deletePreview reports prose lines the map never showed", () => {
+    const withProse = FM + "## Decisions\nrationale one\nrationale two\n- keep flock\n## Risks\n";
+    const t = parse(withProse);
+    const info = deletePreview(withProse, findByPath(t.root, "root.0")!, flattenSrc(t.root));
+    expect(info.nodeCount).toBe(2); // Decisions + the bullet
+    expect(info.proseLines).toBe(2); // the two rationale paragraphs
+  });
+
+  it("deleteNode still removes the whole section (prose included) — but callers warn", () => {
+    const withProse = FM + "## Decisions\nrationale\n## Risks\n";
+    const t = parse(withProse);
+    const out = deleteNode(withProse, findByPath(t.root, "root.0")!, flattenSrc(t.root));
+    expect(out).not.toContain("rationale");
+    expect(out).toContain("## Risks");
+  });
+
+  it("moveNode reparents a subtree and re-levels headings", () => {
+    const f = FM + "## A\n### A1\n## B\n";
+    const t = parse(f);
+    // Move A1 (root.0.0, an H3) to be a child of B (root.1, an H2) → becomes H3.
+    const out = moveNode(f, findByPath(t.root, "root.0.0")!, findByPath(t.root, "root.1")!, flattenSrc(t.root));
+    const t2 = parse(out);
+    expect(shape(t2.root)).toBe("T[A,B[A1]]");
+  });
+
+  it("moveNode refuses a heading move that would overflow H6 (no silent flatten)", () => {
+    // A 4-level branch (##/###/####/#####) dropped under an H5 would need H6..H9.
+    const f = FM + "## Deep\n### D1\n#### D2\n##### D3\n## Host\n### H1\n#### H2\n##### Anchor\n";
+    const t = parse(f);
+    const deep = findByPath(t.root, "root.0")!; // ## Deep (spans D1..D3)
+    const anchor = findByPath(t.root, "root.1.0.0.0")!; // ##### Anchor (H5)
+    expect(moveNode(f, deep, anchor, flattenSrc(t.root))).toBe(f); // refused, unchanged
+  });
+
+  it("moveNode refuses to drop a node into its own subtree", () => {
+    const f = FM + "## A\n### A1\n";
+    const t = parse(f);
+    const a = findByPath(t.root, "root.0")!;
+    const a1 = findByPath(t.root, "root.0.0")!;
+    expect(moveNode(f, a, a1, flattenSrc(t.root))).toBe(f); // unchanged
+  });
+
+  it("collapseAfterInsert/Delete keep collapse pointing at the same nodes", () => {
+    // Under "root", nodes 0,1,2 collapsed. Insert a new sibling at index 1.
+    const set = new Set(["root.0", "root.1", "root.2", "root.1.0"]);
+    const after = collapseAfterInsert(set, "root", 1);
+    // 1→2, 2→3 (and their descendants), 0 unchanged.
+    expect([...after].sort()).toEqual(["root.0", "root.2", "root.2.0", "root.3"].sort());
+    // Delete index 1: drop it + its descendants, shift later down.
+    const del = collapseAfterDelete(after, "root", 2); // "root.2" is the collapsed one
+    expect([...del].sort()).toEqual(["root.0", "root.2"].sort()); // root.3→root.2
   });
 
   it("round-trips: edit output re-parses into the expected tree (the app's cycle)", () => {

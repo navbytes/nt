@@ -16,12 +16,16 @@
     addSibling,
     renameNode,
     deleteNode,
+    deletePreview,
+    moveNode,
     findByPath,
     flattenSrc,
+    collapseAfterInsert,
+    collapseAfterDelete,
     type SrcNode,
   } from "../lib/outlineSource";
   import { SaveConflict } from "../lib/api";
-  import { showToast } from "../lib/toast.svelte";
+  import { showToast, clearUndoToast } from "../lib/toast.svelte";
   import { renderMermaidIn, observeTheme } from "../lib/mermaid";
   import { tick } from "svelte";
 
@@ -249,35 +253,130 @@
     mapSource === "links" ? linkTree : editReady ? editOutline : outline,
   );
 
-  async function applyEdit(op: (file: string, node: SrcNode, flat: SrcNode[]) => string, id: string) {
+  // After an edit the map re-parses from disk and node paths may shift; focusRequest
+  // tells MindMap which node to focus + pan to next (e.g. a freshly-added node), so
+  // authoring flows Tab→type→Enter→type without the camera or focus getting lost.
+  let focusRequest = $state<string | null>(null);
+  // Collapse state lives here (not in MindMap) while editing, so we can remap it
+  // across structural edits — otherwise positional ids shift and collapse "jumps".
+  let mapCollapsed = $state<Set<string>>(new Set());
+
+  function invalidateNote() {
+    qc.invalidateQueries({ queryKey: ["raw", handle] });
+    qc.invalidateQueries({ queryKey: ["note", handle] });
+    qc.invalidateQueries({ queryKey: ["notes"] });
+  }
+
+  // resolve looks up the target node in a FRESH parse of the current raw body, so
+  // an edit never acts on a stale tree.
+  function resolve(id: string): { raw: { text: string; etag: string }; node: SrcNode; flat: SrcNode[] } | null {
     const raw = $rawQ.data;
     const tree = editOutline;
-    if (!raw || !tree) return;
+    if (!raw || !tree) return null;
     const node = findByPath(tree.root, id);
     if (!node) {
       showToast("Couldn't locate that node in the source — edit it in the text editor.");
-      return;
+      return null;
     }
-    const next = op(raw.text, node, flattenSrc(tree.root));
+    return { raw, node, flat: flattenSrc(tree.root) };
+  }
+
+  // save writes the new text through the same conflict-safe endpoint the editor
+  // uses; on success it refreshes and (for destructive edits) offers an Undo that
+  // restores the pre-edit text. focus points the map at a node afterwards.
+  async function save(
+    next: string,
+    prev: string,
+    opts: { undo?: string; focus?: string; collapse?: () => void } = {},
+  ) {
     try {
-      await api.save(handle, next, raw.etag);
+      await api.save(handle, next, $rawQ.data!.etag);
+      // Single-level undo: a new write invalidates any prior Undo toast, so a
+      // stale Undo can never silently revert a later edit (shared app rule).
+      clearUndoToast();
       await qc.invalidateQueries({ queryKey: ["raw", handle] });
       await qc.invalidateQueries({ queryKey: ["note", handle] });
       qc.invalidateQueries({ queryKey: ["notes"] });
+      // Collapse remap runs only on success, so a save-conflict never leaves the
+      // collapse set shifted against an unchanged tree.
+      opts.collapse?.();
+      if (opts.focus) focusRequest = opts.focus;
+      if (opts.undo) showToast(opts.undo, () => restore(prev));
     } catch (err) {
       if (err instanceof SaveConflict) {
         showToast("Note changed on disk — reloaded, try again.");
-        qc.invalidateQueries({ queryKey: ["raw", handle] });
-        qc.invalidateQueries({ queryKey: ["note", handle] });
+        invalidateNote();
       } else {
         showToast("Couldn't save the edit.");
       }
     }
   }
-  const onAddChild = (id: string, text: string) => applyEdit((f, n, fl) => addChild(f, n, text, fl), id);
-  const onAddSibling = (id: string, text: string) => applyEdit((f, n, fl) => addSibling(f, n, text, fl), id);
-  const onRename = (id: string, text: string) => applyEdit((f, n) => renameNode(f, n, text), id);
-  const onDeleteNode = (id: string) => applyEdit((f, n, fl) => deleteNode(f, n, fl), id);
+
+  // restore re-saves an earlier body (the Undo path). It re-reads the current etag
+  // first so it never trips the lost-update guard on its own prior write.
+  async function restore(text: string) {
+    try {
+      const cur = await api.raw(handle);
+      await api.save(handle, text, cur.etag);
+      clearUndoToast();
+      invalidateNote();
+    } catch {
+      showToast("Couldn't undo.");
+    }
+  }
+
+  function onAddChild(id: string, text: string) {
+    const e = resolve(id);
+    if (!e) return;
+    // addChild appends as the last child → its path is node.id + "." + oldChildCount.
+    save(addChild(e.raw.text, e.node, text, e.flat), e.raw.text, { focus: `${id}.${e.node.children.length}` });
+  }
+  function onAddSibling(id: string, text: string) {
+    const e = resolve(id);
+    if (!e) return;
+    const dot = id.lastIndexOf(".");
+    const parent = id.slice(0, dot);
+    const idx = Number(id.slice(dot + 1));
+    // addSibling inserts right after the target → it lands at parent index idx+1.
+    save(addSibling(e.raw.text, e.node, text, e.flat), e.raw.text, {
+      focus: `${parent}.${idx + 1}`,
+      collapse: () => (mapCollapsed = collapseAfterInsert(mapCollapsed, parent, idx + 1)),
+    });
+  }
+  function onRename(id: string, text: string) {
+    const e = resolve(id);
+    if (!e) return;
+    save(renameNode(e.raw.text, e.node, text), e.raw.text, { focus: id });
+  }
+  function onDeleteNode(id: string) {
+    const e = resolve(id);
+    if (!e) return;
+    const { proseLines } = deletePreview(e.raw.text, e.node, e.flat);
+    const extra = proseLines ? ` and ${proseLines} line${proseLines === 1 ? "" : "s"} of notes under it` : "";
+    const dot = id.lastIndexOf(".");
+    const parent = id === "root" ? "root" : id.slice(0, dot);
+    const childIdx = id === "root" ? -1 : Number(id.slice(dot + 1));
+    save(deleteNode(e.raw.text, e.node, e.flat), e.raw.text, {
+      focus: parent,
+      undo: `Removed “${e.node.text || "node"}”${extra}.`,
+      collapse: () => {
+        if (childIdx >= 0) mapCollapsed = collapseAfterDelete(mapCollapsed, parent, childIdx);
+      },
+    });
+  }
+  function onReparent(id: string, newParentId: string) {
+    const e = resolve(id);
+    if (!e || newParentId === id) return;
+    const parent = findByPath(editOutline!.root, newParentId);
+    if (!parent) return;
+    const next = moveNode(e.raw.text, e.node, parent, e.flat);
+    if (next === e.raw.text) return; // invalid/no-op drop — don't write or toast
+    // A move shifts paths unpredictably; reset collapse and don't chase focus.
+    save(next, e.raw.text, {
+      undo: `Moved “${e.node.text || "node"}”.`,
+      collapse: () => (mapCollapsed = new Set()),
+    });
+  }
 
   // Mirror the map state into the URL so it survives reload and is shareable. We
   // edit the real address bar (not the router) so it never remounts this view;
@@ -512,7 +611,10 @@
               class="mapbar__edit"
               class:mapbar__edit--on={editMode}
               aria-pressed={editMode}
-              onclick={() => (editMode = !editMode)}
+              onclick={() => {
+                editMode = !editMode;
+                mapCollapsed = new Set(); // fresh collapse state per edit session
+              }}
               title={editMode ? "Done editing" : "Edit the outline — add, rename, delete nodes"}
             ><Icon name="edit" size={14} /> {editMode ? "Done" : "Edit"}</button>
           {/if}
@@ -532,6 +634,9 @@
               {onAddSibling}
               {onRename}
               onDelete={onDeleteNode}
+              {onReparent}
+              {focusRequest}
+              bind:collapsed={mapCollapsed}
             />
           {/key}
         {:else if mapSource === "links"}

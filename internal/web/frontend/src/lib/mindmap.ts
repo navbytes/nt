@@ -114,7 +114,10 @@ export function radialLayout(root: OutlineNode, opts: LayoutOpts = {}): MapLayou
       for (const c of node.children) sum += place(c, depth + 1);
       angle = sum / node.children.length;
     }
-    const r = depth * ringGap;
+    // Push every ring outward by a constant so the crowded inner ring (depth 1)
+    // gets ~25% more circumference — relieving label overlap between many H2s
+    // without spreading a sparse map too thin.
+    const r = depth === 0 ? 0 : ringGap * (depth + 0.25);
     const mn: MapNode = {
       id: node.id,
       text: node.text,

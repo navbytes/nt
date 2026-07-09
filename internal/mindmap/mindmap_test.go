@@ -41,6 +41,20 @@ func TestOutlinePreHeadingListUnderRoot(t *testing.T) {
 	}
 }
 
+func TestOutlineLooseListStaysNested(t *testing.T) {
+	body := "- A\n  - A1\n\n  - A2\n"
+	if got := shape(Outline(body, "T")); got != "T[A[A1,A2]]" {
+		t.Fatalf("loose list flattened: %q", got)
+	}
+}
+
+func TestOutlineSetextHeadings(t *testing.T) {
+	body := "Overview\n===\n\nDetails\n---\n"
+	if got := shape(Outline(body, "T")); got != "T[Overview[Details]]" {
+		t.Fatalf("setext headings wrong: %q", got)
+	}
+}
+
 func TestOutlineSkipsFencedCode(t *testing.T) {
 	body := "## A\n```\n## not a heading\n- not a bullet\n```\n- real\n"
 	got := shape(Outline(body, "T"))

@@ -104,23 +104,21 @@ export function parseOutlineSource(body: string, title: string): SrcOutline {
       }
       continue;
     }
-    if (inFence || trimmed === "") {
-      if (trimmed === "") lstack.length = 0;
-      continue;
-    }
+    // A blank line does NOT end a list run — CommonMark loose lists keep nesting
+    // across blank lines, and the HTML parser (goldmark's nested <ul>) agrees. We
+    // only reset the list context on a heading or a genuine prose paragraph.
+    if (inFence || trimmed === "") continue;
+
+    const pushHeading = (level: number, text: string, srcLine: number) => {
+      while (hstack.length > 1 && hstack[hstack.length - 1]!.level >= level) hstack.pop();
+      const node = add(hstack[hstack.length - 1]!.node, { text: text.trim(), kind: "heading", level, srcLine });
+      if (node) hstack.push({ node, level });
+      lstack.length = 0;
+    };
 
     const hm = headingRe.exec(trimmed);
     if (hm) {
-      const level = hm[1]!.length;
-      while (hstack.length > 1 && hstack[hstack.length - 1]!.level >= level) hstack.pop();
-      const node = add(hstack[hstack.length - 1]!.node, {
-        text: hm[2]!.trim(),
-        kind: "heading",
-        level,
-        srcLine: i,
-      });
-      if (node) hstack.push({ node, level });
-      lstack.length = 0;
+      pushHeading(hm[1]!.length, hm[2]!, i);
       continue;
     }
 
@@ -134,10 +132,29 @@ export function parseOutlineSource(body: string, title: string): SrcOutline {
       continue;
     }
 
-    // Any other prose line ends the current list run.
+    // Setext heading: a prose line UNDERLINED by === (H1) or --- (H2). Matches
+    // goldmark/CommonMark so the edit map doesn't reshape vs the rendered map.
+    const under = setextLevel(lines[i + 1]);
+    if (under && lstack.length === 0) {
+      pushHeading(under, trimmed, i);
+      i++; // consume the underline line
+      continue;
+    }
+
+    // A genuine prose paragraph ends the current list run.
     lstack.length = 0;
   }
   return out;
+}
+
+// setextLevel returns 1 for an "===" underline, 2 for "---", else 0. A setext
+// underline is a line of only = or only - (no other content).
+function setextLevel(line: string | undefined): number {
+  if (line == null) return 0;
+  const t = line.trim();
+  if (/^=+$/.test(t)) return 1;
+  if (/^-+$/.test(t)) return 2;
+  return 0;
 }
 
 // --- edit operations -------------------------------------------------------
@@ -195,23 +212,22 @@ function withBody(file: string, transform: (lines: string[]) => string[]): strin
   return prefix + next.join("\n") + "\n";
 }
 
-// childLine builds the source line for a new child of `node`.
+// childLine builds the source line for a new child of `node`. Headings use the
+// node's stored level (so setext headings — whose source line carries no marker
+// — still nest correctly); list items read their own indent/marker.
 function childLine(node: SrcNode, bodyLines: string[], text: string): string {
   if (node.kind === "root") return `## ${text}`;
-  const src = bodyLines[node.srcLine!] ?? "";
-  const p = linePrefix(src);
-  if (p.kind === "heading") {
-    if (p.hashes.length < 6) return `${p.hashes}# ${text}`;
-    return `- ${text}`; // past H6, drop to a bullet
+  if (node.kind === "heading") {
+    return node.level < 6 ? `${"#".repeat(node.level + 1)} ${text}` : `- ${text}`;
   }
+  const p = linePrefix(bodyLines[node.srcLine!] ?? "");
   return `${p.indent}  ${p.marker} ${text}`;
 }
 
 // siblingLine builds a source line matching `node`'s own kind/level.
 function siblingLine(node: SrcNode, bodyLines: string[], text: string): string {
-  const src = bodyLines[node.srcLine!] ?? "";
-  const p = linePrefix(src);
-  if (p.kind === "heading") return `${p.hashes} ${text}`;
+  if (node.kind === "heading") return `${"#".repeat(node.level)} ${text}`;
+  const p = linePrefix(bodyLines[node.srcLine!] ?? "");
   return `${p.indent}${p.marker} ${text}`;
 }
 
@@ -253,6 +269,138 @@ export function deleteNode(file: string, node: SrcNode, flat: SrcNode[]): string
   });
 }
 
+// deletePreview reports what a delete would remove: how many mapped nodes (the
+// node + its descendants) and how many extra *prose* lines the map never showed
+// (paragraphs/quotes/tables/code under a heading) — so the UI can warn before a
+// delete silently eats unseen text and always offer an undo.
+export function deletePreview(
+  file: string,
+  node: SrcNode,
+  flat: SrcNode[],
+): { nodeCount: number; proseLines: number } {
+  if (node.srcLine == null) return { nodeCount: 0, proseLines: 0 };
+  const { body } = splitFrontmatter(file);
+  const lines = body.split("\n");
+  const end = subtreeEnd(node, flat, lines.length);
+  // Node lines within the range (the node itself + its descendants).
+  const nodeLines = new Set<number>([node.srcLine]);
+  for (const d of flat) if (d.id.startsWith(node.id + ".") && d.srcLine != null) nodeLines.add(d.srcLine);
+  let proseLines = 0;
+  let inFence = false;
+  let fence = "";
+  for (let i = node.srcLine; i < end && i < lines.length; i++) {
+    const t = lines[i]!.trim();
+    const fm = fenceMarker(t);
+    if (fm) {
+      if (!inFence) ((inFence = true), (fence = fm));
+      else if (t.startsWith(fence)) inFence = false;
+      proseLines++; // code fences count as prose being removed
+      continue;
+    }
+    if (inFence) {
+      proseLines++;
+      continue;
+    }
+    if (t === "" || nodeLines.has(i) || setextLevel(lines[i + 1])) continue;
+    if (setextLevel(t)) continue; // a setext underline belongs to its heading
+    proseLines++;
+  }
+  return { nodeCount: nodeLines.size, proseLines };
+}
+
+// isAncestor reports whether `maybe` is `node` or one of its descendants (by path
+// id), so a reparent can refuse to drop a node into its own subtree.
+export function isAncestor(node: SrcNode, maybe: SrcNode): boolean {
+  return maybe.id === node.id || maybe.id.startsWith(node.id + ".");
+}
+
+// moveNode reparents `node`'s subtree under `newParent` by relocating its source
+// lines and shifting outline levels by a uniform delta — headings by heading
+// level, list items by indent — so prose/code inside the subtree moves intact and
+// only the nesting changes. Invalid drops (into itself, or a heading under a list
+// item) return the file unchanged.
+export function moveNode(file: string, node: SrcNode, newParent: SrcNode, flat: SrcNode[]): string {
+  if (node.srcLine == null || isAncestor(node, newParent)) return file;
+  const { prefix, body } = splitFrontmatter(file);
+  const lines = body.split("\n");
+  if (lines.length && lines[lines.length - 1] === "") lines.pop();
+
+  const end = subtreeEnd(node, flat, lines.length);
+  const block = lines.slice(node.srcLine, end);
+
+  // Target base: children of the new parent sit at heading level (parentLevel+1)
+  // or indent (parentIndent+2); under the root/a heading, moved bullets go to
+  // indent 0.
+  let headingDelta = 0;
+  let indentDelta = 0;
+  if (node.kind === "heading") {
+    if (newParent.kind === "item") return file; // a heading under a bullet is invalid
+    const base = newParent.kind === "root" ? 0 : newParent.level;
+    headingDelta = base + 1 - node.level;
+    // Refuse a move that would push any heading past H6 — clamping would collapse
+    // distinct levels into a flat run of H6s (silent hierarchy loss).
+    if (headingDelta > 0) {
+      let maxLevel = 0;
+      for (const line of block) {
+        const h = /^(#{1,6})\s/.exec(line);
+        if (h) maxLevel = Math.max(maxLevel, h[1]!.length);
+      }
+      if (maxLevel + headingDelta > 6) return file;
+    }
+  } else {
+    const curIndent = indentWidth(/^(\s*)/.exec(lines[node.srcLine] ?? "")?.[1] ?? "");
+    const target =
+      newParent.kind === "item"
+        ? indentWidth(/^(\s*)/.exec(lines[newParent.srcLine!] ?? "")?.[1] ?? "") + 2
+        : 0;
+    indentDelta = target - curIndent;
+  }
+
+  const shifted = block.map((line) => {
+    const h = /^(#{1,6})(\s+)(.*)$/.exec(line);
+    if (h && headingDelta) {
+      const lvl = Math.min(6, Math.max(1, h[1]!.length + headingDelta));
+      return "#".repeat(lvl) + h[2] + h[3];
+    }
+    const l = /^(\s*)([-*+]|\d+[.)])(\s+.*)$/.exec(line);
+    if (l && indentDelta) {
+      const indent = Math.max(0, indentWidth(l[1]!) + indentDelta);
+      return " ".repeat(indent) + l[2] + l[3];
+    }
+    return line;
+  });
+
+  // Remove the block, then insert at the new parent's subtree end (recomputed
+  // against the shortened array — adjust for a removal that was above it).
+  lines.splice(node.srcLine, block.length);
+  const flatAfter = flat.filter((n) => !isAncestor(node, n));
+  let insertAt =
+    newParent.kind === "root"
+      ? lines.length
+      : subtreeEndAfterRemoval(newParent, flatAfter, lines.length, node.srcLine, block.length);
+  insertAt = Math.min(Math.max(insertAt, 0), lines.length);
+  lines.splice(insertAt, 0, ...shifted);
+  return prefix + lines.join("\n") + "\n";
+}
+
+// subtreeEndAfterRemoval is subtreeEnd for the new parent, but with source lines
+// at/after `removedAt` shifted up by `removedCount` (the moved block is gone).
+function subtreeEndAfterRemoval(
+  parent: SrcNode,
+  flat: SrcNode[],
+  totalLines: number,
+  removedAt: number,
+  removedCount: number,
+): number {
+  const shift = (ln: number) => (ln >= removedAt + removedCount ? ln - removedCount : ln);
+  const idx = flat.indexOf(parent);
+  for (let i = idx + 1; i < flat.length; i++) {
+    const other = flat[i]!;
+    if (!other.id.startsWith(parent.id + ".")) return shift(other.srcLine!);
+  }
+  return totalLines;
+}
+
 // findByPath locates a node by its stable path id in a freshly parsed tree — the
 // component re-parses the current raw body before each edit, then resolves the
 // clicked node's id here, so edits never act on a stale tree.
@@ -269,3 +417,38 @@ export function findByPath(root: SrcNode, id: string): SrcNode | null {
 }
 
 export { flatten as flattenSrc };
+
+// --- collapse-state remapping ----------------------------------------------
+// Node ids are positional paths, so inserting/removing a sibling shifts the ids
+// of later siblings. These keep a collapse Set pointing at the same *nodes*
+// across a structural edit (issue: collapse/focus "jumping" after edits).
+
+function reindexUnder(set: ReadonlySet<string>, parentId: string, fromIndex: number, delta: number): Set<string> {
+  const prefix = parentId + ".";
+  const out = new Set<string>();
+  for (const id of set) {
+    if (!id.startsWith(prefix)) {
+      out.add(id);
+      continue;
+    }
+    const rest = id.slice(prefix.length);
+    const dot = rest.indexOf(".");
+    const idx = Number(dot === -1 ? rest : rest.slice(0, dot));
+    const tail = dot === -1 ? "" : rest.slice(dot);
+    out.add(!Number.isNaN(idx) && idx >= fromIndex ? `${parentId}.${idx + delta}${tail}` : id);
+  }
+  return out;
+}
+
+// collapseAfterInsert shifts ids for a sibling inserted at `index` under parent.
+export function collapseAfterInsert(set: ReadonlySet<string>, parentId: string, index: number): Set<string> {
+  return reindexUnder(set, parentId, index, 1);
+}
+
+// collapseAfterDelete drops the removed subtree's ids, then shifts later siblings.
+export function collapseAfterDelete(set: ReadonlySet<string>, parentId: string, index: number): Set<string> {
+  const gone = `${parentId}.${index}`;
+  const kept = new Set<string>();
+  for (const id of set) if (id !== gone && !id.startsWith(gone + ".")) kept.add(id);
+  return reindexUnder(kept, parentId, index + 1, -1);
+}
