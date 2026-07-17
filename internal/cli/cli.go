@@ -497,7 +497,9 @@ NOTE FLAGS (nt note)
   --kind lesson|decision|ref|rule|memory   note class: canonical tag + folder — use it
                       instead of inventing a folder (--lesson = --kind lesson)
   --folder DIR        file under notes/DIR/ (created as needed; or path-style:
-                      nt note "decisions/Chose flock over SQLite")
+                      nt note "decisions/Chose flock over SQLite" — the prefix
+                      is a folder only when it contains no spaces; a slash in
+                      prose, or a trailing slash, stays part of the title)
   --field key=value   set extra frontmatter at capture (repeatable, preserved)
   --supersede <id>    replace an existing note (retires it from views)
   --force             create even if a near-duplicate note already exists
