@@ -610,9 +610,8 @@ func (s *Server) apiNoteCreate(w http.ResponseWriter, r *http.Request) {
 	title := strings.TrimSpace(r.FormValue("title"))
 	folder := strings.TrimSpace(r.FormValue("folder"))
 	if folder == "" { // "work/Auth design" → folder "work", title "Auth design"
-		if i := strings.LastIndex(title, "/"); i >= 0 {
-			folder = strings.TrimSpace(title[:i])
-			title = strings.TrimSpace(title[i+1:])
+		if f, t := note.SplitPathTitle(title); f != "" {
+			folder, title = f, t
 		}
 	}
 	if title == "" {

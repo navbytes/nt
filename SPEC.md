@@ -180,7 +180,9 @@ Tokens expire after 24h; refresh window is 7d. See [[oauth-flow]].
 - Notes may live in **subfolders** of `notes/`. Create into one with
   `nt note "…" --folder work/auth` (or path-style `nt note "work/auth/…"`); the
   folder is created as needed, and folders that would escape `notes/` (absolute or
-  `..`) are refused. `List` recurses the tree, and `[[bare-name]]` links resolve
+  `..`) are refused. Path-style applies only when the prefix before the last
+  slash is whitespace-free and a title remains after it — a slash inside prose
+  ("valid at .claude/x/") is part of the title, never a filing choice. `List` recurses the tree, and `[[bare-name]]` links resolve
   across folders by shortest path-suffix (§5.1), so foldering never breaks links.
 - `[[…]]` links resolve to a **note** (by filename, title, or `id:`) or a **task** (by
   ULID / short prefix) — see §5.1. Tags come from frontmatter `tags:` (inline body `#tags`

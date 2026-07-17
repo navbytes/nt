@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode"
 
 	"github.com/navbytes/nt/internal/store"
 	"github.com/navbytes/nt/internal/ulid"
@@ -101,10 +102,41 @@ func Slug(title string) string {
 		}
 	}
 	slug := strings.Trim(b.String(), "-")
+	// Cap the slug well under the filesystem's 255-byte filename limit (slug is
+	// pure ASCII, so len == bytes); cut at a word boundary so capped slugs stay
+	// readable. claimPath's -N suffixing disambiguates any resulting collisions.
+	const maxSlug = 120
+	if len(slug) > maxSlug {
+		cut := slug[:maxSlug]
+		if j := strings.LastIndexByte(cut, '-'); j > 0 {
+			cut = cut[:j]
+		}
+		slug = strings.Trim(cut, "-")
+	}
 	if slug == "" {
 		slug = time.Now().Format("2006-01-02-150405")
 	}
 	return slug
+}
+
+// SplitPathTitle interprets the path-style filing shorthand shared by the CLI
+// and web note-create surfaces: "work/Auth design" files "Auth design" under
+// work/. The slash counts as filing syntax ONLY when everything before the
+// last slash is path-like (non-empty, no whitespace) and a non-empty title
+// remains after it. Otherwise the slash is prose — "…valid at .claude/x/",
+// "docs live under apps/web" — and the whole string stays the title; returning
+// folder "" tells the caller no filing choice was made.
+func SplitPathTitle(raw string) (folder, title string) {
+	title = strings.TrimSpace(raw)
+	i := strings.LastIndex(title, "/")
+	if i < 0 {
+		return "", title
+	}
+	prefix, rest := title[:i], strings.TrimSpace(title[i+1:])
+	if prefix == "" || rest == "" || strings.ContainsFunc(prefix, unicode.IsSpace) {
+		return "", title
+	}
+	return prefix, rest
 }
 
 // TaskNoteFolder is the subfolder under notes/ where a task's "body" notes live

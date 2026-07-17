@@ -630,11 +630,12 @@ func cmdNote(args []string) int {
 	// when no explicit --folder was given. This runs BEFORE the kind's default
 	// folder applies — a path in the title is an explicit filing choice, so
 	// `nt note "custom/x" --kind lesson` lands in custom/ (tagged lesson), not
-	// in lessons/ with "custom" mangled into the filename.
+	// in lessons/ with "custom" mangled into the filename. Prose titles that
+	// merely contain (or end with) a slash are NOT filing choices — see
+	// note.SplitPathTitle for the boundary.
 	if fold == "" {
-		if i := strings.LastIndex(title, "/"); i >= 0 {
-			fold = strings.TrimSpace(title[:i])
-			title = strings.TrimSpace(title[i+1:])
+		if f, t := note.SplitPathTitle(title); f != "" {
+			fold, title = f, t
 		}
 	}
 	// The kind's canonical folder is the default only when neither --folder nor a
