@@ -178,13 +178,36 @@ func parseSynonymFile(data string) [][]string {
 	return groups
 }
 
-// stop is a tiny stopword set — words too common to carry retrieval signal.
+// stop is a stopword set — closed-class English words too common (in English
+// generally, not just in this store) to carry retrieval signal. This matters
+// more than it looks: IDF alone can't tell "uninformative in English" from
+// "rare in this store" — on a real 218-note store, the modal "should" (df=5,
+// IDF 3.69) outscored "swift", the headline token of an iOS-heavy store (IDF
+// 3.12), and a function word in a title earned it the full strong-bag weight.
+// Measured: the function-word share of the winning note's score was 0.02 on a
+// hit vs 0.44 on a miss, and two misses were carried entirely by function
+// words ("should"+"where"+"can", "where"+"keep") beating the actual target.
+//
+// Deliberately NOT stopped despite being common light verbs, because each is
+// also a real technical term in this codebase's domain: "get"/"set" (HTTP
+// GET, `go get`, getters/setters, Set data structures), "make" (Go's `make()`
+// builtin, `make build`/Makefile targets).
 var stop = map[string]bool{
 	"the": true, "a": true, "an": true, "and": true, "or": true, "to": true, "of": true,
 	"in": true, "on": true, "for": true, "with": true, "is": true, "are": true, "be": true,
 	"it": true, "this": true, "that": true, "when": true, "how": true, "do": true, "i": true,
 	"my": true, "we": true, "add": true, "use": true, "using": true, "new": true, "some": true,
 	"about": true, "into": true, "from": true, "at": true, "by": true, "as": true, "not": true,
+	// Modals: never a topical term, always a hedge/permission/necessity marker.
+	"should": true, "would": true, "could": true, "can": true, "must": true,
+	"will": true, "might": true,
+	// Wh-words: how/when were already covered; the rest of the question set.
+	"where": true, "what": true, "which": true, "why": true,
+	// Auxiliary "do"-support in questions ("does X work", "did it fail").
+	"does": true, "did": true,
+	// Light verbs with no technical sense of their own in this domain (unlike
+	// get/set/make above): "keep the file", "need to fix".
+	"keep": true, "need": true,
 }
 
 // stem is a light suffix stripper — enough to fold plural/verb forms to a common
@@ -195,6 +218,13 @@ func stem(w string) string {
 	switch {
 	case len(w) > 4 && strings.HasSuffix(w, "ies"):
 		w = w[:len(w)-3] + "y" // retries→retry, libraries→library
+	// A plain 4-letter-noun + "s" plural (modes, names, files…) is not the same
+	// pattern as a true sibilant -es plural (boxes, matches, caches): English
+	// only inserts the extra vowel when the base ends in a sibilant sound.
+	// Handled before the general "es" case below so "modes" keeps its silent e
+	// like "mode" does, instead of folding to "mod" (see sibilantE).
+	case len(w) == 5 && strings.HasSuffix(w, "es") && !sibilantE(w[:4]):
+		w = w[:4] // modes→mode, names→name
 	case len(w) > 4 && strings.HasSuffix(w, "es"):
 		w = w[:len(w)-2] // boxes→box, matches→match, caches→cach (canonicalized below)
 	case len(w) > 4 && strings.HasSuffix(w, "ing"):
@@ -206,10 +236,39 @@ func stem(w string) string {
 	}
 	// Canonicalize a trailing 'e' so cache/caches and race/races fold to the same
 	// token (English -es is inconsistent; folding both sides makes stem stable).
-	if len(w) > 3 && strings.HasSuffix(w, "e") {
+	//
+	// Guarded for a bare 4-letter word after a non-sibilant consonant (mode, not
+	// cache/race): stripping those collides with an unrelated, shorter real word
+	// that's meaningful in this store — "mode"→"mod" landed on the same stem as
+	// the literal "mod" token split out of "go.mod", so a nonsense "dark mode"
+	// query confidently matched unrelated go.mod notes. Longer words (5+) keep
+	// the unconditional strip: it's what folds migrate/migrated,
+	// duplicate/duplicated, etc. — their inflected forms are already stripped by
+	// the "ed"/"es" cases above regardless of sibilance, so gating those too
+	// would break that symmetry instead of fixing a real collision.
+	if len(w) > 3 && strings.HasSuffix(w, "e") && (len(w) != 4 || sibilantE(w)) {
 		w = w[:len(w)-1]
 	}
 	return w
+}
+
+// sibilantE reports whether w (which must end in "e") has a sibilant sound
+// (s/x/z/soft c/soft g, or the "ch"/"sh" digraphs) right before that final e —
+// the phonetic condition under which English actually needs the extra vowel to
+// form a pronounceable plural (cache→caches, race→races). Words that fail this
+// check (mode, name, file…) pluralize with a plain "+s" and should keep their e.
+func sibilantE(w string) bool {
+	if len(w) < 2 {
+		return false
+	}
+	switch w[len(w)-2] {
+	case 's', 'x', 'z', 'c', 'g':
+		return true
+	case 'h':
+		return len(w) >= 3 && (w[len(w)-3] == 'c' || w[len(w)-3] == 's')
+	default:
+		return false
+	}
 }
 
 func notWord(r rune) bool {
