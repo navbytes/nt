@@ -1,6 +1,8 @@
 ---
-description: Review this session for learnings and save the approved ones to nt (lessons, rules, memory, notes, tasks)
+name: nt-learn
+description: Harvest this session's durable learnings into the user's nt store — lessons, rules, core memory, notes, and follow-up tasks. Use when the user asks to save what was learned, record lessons or mistakes from this session, remember something for future sessions, or when they type /nt-learn. Proposes every item and waits for approval; never writes silently.
 ---
+
 
 Review this session and harvest what should outlive it into nt — the durable
 memory store. Optional focus: "$ARGUMENTS" (if non-empty, only propose items
@@ -42,7 +44,7 @@ Show a numbered list. Per item: bucket, proposed **title**, one-line
 folder+tag (`lessons/`+`lesson`, `rules/`+`rule`, `memory/`+`memory-core`,
 `decisions/`/`ref/` for notes). Flag `rule`/`memory-core` items ⚠
 *always-in-context — costs tokens on every future request*. (The reverse pass —
-pruning rules that stopped earning that cost — is `/distill rules`.) Then ask which
+pruning rules that stopped earning that cost — is `/nt-distill rules`.) Then ask which
 to save (all, numbers, edits, or none) and **wait**. Save nothing without
 approval.
 
@@ -50,17 +52,15 @@ approval.
 
 - Notes/rules/memory/lessons → `nt_note` (title, `description`, `body`;
   `kind:"lesson"|"rule"|"decision"|"ref"|"memory"` applies the canonical
-  tag+folder). Set `source:"opencode"`. Apply the user's edits.
+  tag+folder). Set `source:"claude"`. Apply the user's edits.
 - Tasks → `nt_add` (verb-first title ≤ ~60 chars, detail in `body`, link via
   `discovered_from`).
 - If `nt_note`'s response has a `similar` list, check whether you doubled a note;
   if so, consolidate — extend the original (`nt_note_edit` append or
   `old_string`+`new_string`; CLI `nt edit --append`) or retire the duplicate
-  (`nt_archive superseded_by=<kept id>`). (The CLI `nt note` refuses
-  near-duplicates — follow its printed guidance.)
+  (`nt_archive superseded_by=<kept id>`).
 - Finish with a short receipt: each saved item's id and where it went.
 
-If the `nt_*` MCP tools are unavailable, fall back to the `nt` CLI over bash (`nt
+If the `nt_*` tools are unavailable, fall back to the `nt` CLI over bash (`nt
 note …`, `nt add …`, `nt recall …`; multi-line/backtick bodies via `--body-file
--`); if that's missing too, tell the user to run `nt mcp install --client
-opencode` and stop.
+-`); if that's missing too, tell the user to run `nt mcp install` and stop.

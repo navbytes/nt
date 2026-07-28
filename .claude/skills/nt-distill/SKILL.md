@@ -1,13 +1,15 @@
 ---
-description: Consolidate the nt store — merge near-duplicate notes, then prune the always-loaded rules/memory block (human-gated, never silent)
+name: nt-distill
+description: Consolidate the user's nt store — merge near-duplicate notes and prune the always-loaded rules/memory block, human-gated. Use when the user asks to clean up, compact, distill, dedupe, or tidy their notes/lessons/memory, when they want to trim what nt injects into every session or into CLAUDE.md, or when they type /nt-distill. Proposes every change and waits for approval; never merges or deletes silently.
 ---
+
 
 Two hygiene passes over the nt store, both human-gated. Pass 1 fixes the store
 rot that degrades **recall**; pass 2 fixes the rot you pay **tokens** for on
 every single request.
 
-Optional "$ARGUMENTS": a focus term (only review items touching it), or the
-literal `rules` to skip pass 1 and run pass 2 alone.
+Optional "$ARGUMENTS": a focus term (only review items touching it), or the literal
+`rules` to skip pass 1 and run pass 2 alone.
 
 Run pass 1 first even when the store looks clean — it's one read-only call.
 A clean result means "go to pass 2", **not** "stop".
@@ -121,8 +123,8 @@ Finish with a short receipt: what was merged, demoted, retired, tagged
 `CLAUDE.md`, remind them to re-run `nt export --tag rule` — otherwise the
 pruning never reaches the place it was being paid for.
 
-If the `nt_*` MCP tools are unavailable, fall back to the `nt` CLI over bash (`nt
+If the `nt_*` tools are unavailable, fall back to the `nt` CLI over bash (`nt
 distill`, `nt show`, `nt index --tag rule`, `nt export --tag rule`, `nt edit
 --append`, `nt supersede <old> --by <new>`, `nt mv <note> lessons/<name>`, `nt
 tag <id> +lesson -rule`, `nt archive <id>`); if that's missing too, tell the
-user to run `nt mcp install --client opencode` and stop.
+user to run `nt mcp install` and stop.
