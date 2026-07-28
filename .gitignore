@@ -16,3 +16,10 @@
 
 # Claude Code scheduler runtime lock (leaks session id/pid — never track)
 .claude/scheduled_tasks.lock
+
+# Agent engagement scratch and linked worktrees. These hold verbatim titles and
+# handles copied out of the user's private nt store while investigating recall,
+# so they must never reach this public repo. A global gitignore covered them on
+# one machine only — one `git add -A` elsewhere would have published them.
+.claude/company/
+.claude/worktrees/
