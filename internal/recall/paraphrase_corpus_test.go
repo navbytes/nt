@@ -78,6 +78,26 @@ func TestParaphraseCorpusHitAtOne(t *testing.T) {
 	}
 }
 
+// The calibration guard for the tier thresholds: every corpus query that hits
+// its target at #1 must show at least "medium" confidence. This is what
+// TestTierBoundaries can't catch on its own — hand-built cases pin the
+// arithmetic, but only a real paraphrase corpus proves the threshold isn't
+// so strict it demotes genuine hits to "weak" (which would read as "nothing
+// recorded" to an agent and defeat the whole signal).
+func TestParaphraseCorpusConfidence(t *testing.T) {
+	notes := corpusNotes()
+	for _, c := range paraphraseCases {
+		got := Rank(notes, c.query, 5)
+		if len(got) == 0 || got[0].Note.Title != c.want {
+			continue // HIT@1 failures are TestParaphraseCorpusHitAtOne's job
+		}
+		if got[0].Tier() == "weak" {
+			t.Errorf("%q: target %q hit #1 but tier is weak (conf %.3f) — thresholds are miscalibrated",
+				c.query, c.want, got[0].Confidence)
+		}
+	}
+}
+
 // The glossary note enumerates other notes' vocabulary, which made it a
 // universal attractor in the field test — it out-ranked the specific lessons
 // about its own terms. It must never take #1 on a query aimed elsewhere.

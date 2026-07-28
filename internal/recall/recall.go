@@ -45,6 +45,52 @@ type Result struct {
 	Lesson       bool
 	ProjectMatch bool // note belongs to the caller's project (soft ranking boost applied)
 	Expired      bool // note.Note.Expired() as of ranking time — valid_until has passed
+	// Confidence is the PRE-BOOST score over the best score this query could
+	// possibly award (see fMax below) — comparable across queries and store
+	// sizes, unlike Score, which is IDF-scaled and therefore query-dependent.
+	// Boosts (lesson/project/expired) are deliberately excluded: they express
+	// preference, not evidence, and folding them in would let a thinly-matched
+	// lesson print as confident — the exact promotion pathology the precision
+	// floor already fights. Matched/QueryTerms are the raw coverage fraction
+	// (m/n query words that hit at all), shown alongside the tier because a
+	// tier alone hides *how much* of the query a note actually covers.
+	Confidence float64
+	Matched    int
+	QueryTerms int
+}
+
+// Tier thresholds, calibrated against the paraphrase corpus (see
+// TestParaphraseCorpusConfidence) and the real-store tailwind-dark-mode
+// acceptance case: every corpus #1 hit clears "medium", and a nonsense query
+// against a real store does not present as "strong". Boundaries are two named
+// constants (not scattered magic numbers) precisely so recalibration is a
+// one-line change with a test that catches drift.
+const (
+	// tierStrong sits a notch above the design doc's illustrative "exact match
+	// on every term, but only in the body" worked example (0.50): a real-store
+	// probe surfaced a note that verbatim QUOTES a test query as meta-commentary
+	// (a field-test agent recording "recall X returns noise" using X as literal
+	// example text) — full body-exact coverage on every term, landing at
+	// precisely 0.50. Bag-of-words scoring cannot tell "topically about X" from
+	// "contains the string X while talking about something else"; 0.55 costs
+	// nothing against genuine hits (title/tag matches clear 0.6+ easily; see
+	// TestParaphraseCorpusConfidence) and keeps that coincidence out of "strong".
+	tierStrong = 0.55
+	tierMedium = 0.15
+)
+
+// Tier buckets Confidence into a word an agent never has to interpret as a
+// float: "strong" | "medium" | "weak". Kept as a method (not a package func)
+// so CLI and MCP read it off the Result and can't drift into re-deriving it.
+func (r Result) Tier() string {
+	switch {
+	case r.Confidence >= tierStrong:
+		return "strong"
+	case r.Confidence >= tierMedium:
+		return "medium"
+	default:
+		return "weak"
+	}
 }
 
 // synGroups cluster words that mean the same thing to a coding agent. Matching any
@@ -368,9 +414,36 @@ func matchesProject(n *note.Note, proj map[string]bool) bool {
 // rank above equally-relevant notes from other projects. Empty project means
 // no preference (identical to Rank).
 func RankProject(notes []*note.Note, context string, limit int, project string) []Result {
+	res, _ := rankProject(notes, context, limit, project, nil)
+	return res
+}
+
+// candScore is a mid-pipeline candidate: the Result plus the bookkeeping
+// needed to sort, floor, trim, and (when tracing) explain it. f is the FINAL
+// (boosted) score used for ranking; raw is the pre-boost score Confidence is
+// derived from. hits/excludeReason are only populated when trace != nil —
+// building a TermHit slice per candidate on every call would be wasted work
+// on the hot untraced path.
+type candScore struct {
+	Result
+	f             float64
+	exact         int
+	matched       int
+	raw           float64
+	hits          []TermHit
+	excludeReason string
+	strongTerms   []string // only set for the ExplainNote target
+}
+
+// rankProject is RankProject's body. trace == nil is the normal hot path (one
+// nil-check per candidate/term, no extra allocation); trace != nil records a
+// term-by-term decomposition plus excluded candidates for ExplainProject/
+// ExplainNote. Kept as a single function (not a second scorer) so the traced
+// and untraced paths can never diverge — see TestExplainMatchesRank.
+func rankProject(notes []*note.Note, context string, limit int, project string, trace *Trace) ([]Result, *Trace) {
 	q := newBag(context)
 	if len(q.words) == 0 {
-		return nil
+		return nil, trace
 	}
 	proj := projectTokens(project)
 	// Pass 1: build each note's bags and tally document frequency per concept, so a
@@ -409,24 +482,13 @@ func RankProject(notes []*note.Note, context string, limit int, project string) 
 		}
 		cands = append(cands, c)
 	}
-	n := len(cands)
+	numNotes := len(cands)
 	idf := func(concept string) float64 {
 		d := df[concept]
 		if d < 1 {
 			d = 1
 		}
-		return math.Log(1 + float64(n)/float64(d))
-	}
-	// Pass 2: score. Per query concept: exact word in a high-signal field is
-	// strongest, then a synonym there, then the body — each weighted by the
-	// concept's IDF. The lesson boost is MULTIPLICATIVE (not a flat add), so it
-	// tilts ties toward recorded mistakes without letting a one-concept lesson
-	// outrank a genuinely more-relevant note.
-	type scored struct {
-		Result
-		f       float64
-		exact   int
-		matched int
+		return math.Log(1 + float64(numNotes)/float64(d))
 	}
 	// Iterate query words in a FIXED order: float accumulation is not
 	// associative, so map-order iteration makes tied notes differ in their last
@@ -437,30 +499,62 @@ func RankProject(notes []*note.Note, context string, limit int, project string) 
 		qwords = append(qwords, w)
 	}
 	sort.Strings(qwords)
-	var out []scored
+	// fMax is the best score ANY note could earn against this query — every
+	// term matched exact-in-title (base 4) — so raw/fMax is comparable across
+	// queries and store sizes by construction (numerator and denominator carry
+	// the same IDF mass). idf(concept) doesn't depend on the candidate, so this
+	// is computed once, not per note.
+	fMax := 0.0
+	for _, w := range qwords {
+		fMax += 4 * idf(conceptID(w))
+	}
+	// Pass 2: score. Per query concept: exact word in a high-signal field is
+	// strongest, then a synonym there, then the body — each weighted by the
+	// concept's IDF. The lesson boost is MULTIPLICATIVE (not a flat add), so it
+	// tilts ties toward recorded mistakes without letting a one-concept lesson
+	// outrank a genuinely more-relevant note.
+	var out []candScore
 	for _, cd := range cands {
 		var f float64
 		exact, matched := 0, 0
+		var hits []TermHit
 		for _, w := range qwords {
 			c := conceptID(w)
 			var base float64
+			where := ""
 			switch {
 			case cd.strong.words[w]:
-				base, exact = 4, exact+1
+				base, exact, where = 4, exact+1, "strong-exact"
 			case cd.strong.concepts[c]:
-				base = 2
+				base, where = 2, "strong-syn"
 			case cd.weak.words[w]:
-				base, exact = 2, exact+1
+				base, exact, where = 2, exact+1, "weak-exact"
 			case cd.weak.concepts[c]:
-				base = 1
+				base, where = 1, "weak-syn"
 			}
 			if base > 0 {
 				matched++
 			}
-			f += base * idf(c)
+			termIDF := idf(c)
+			f += base * termIDF
+			if trace != nil {
+				hits = append(hits, TermHit{Term: w, Concept: c, Where: where, Base: base, IDF: termIDF})
+			}
 		}
+		isTarget := trace != nil && trace.TargetID != "" && cd.n.ID == trace.TargetID
 		if f == 0 {
+			if isTarget {
+				trace.Notes = append(trace.Notes, NoteTrace{
+					ID: cd.n.ID, Title: cd.n.Title, Hits: hits,
+					Excluded: "no-match", StrongTerms: strongTermsOf(cd.strong),
+				})
+			}
 			continue
+		}
+		raw := f
+		confidence := 0.0
+		if fMax > 0 {
+			confidence = raw / fMax
 		}
 		if cd.lesson {
 			f *= 1.6 // surface recorded mistakes, without swamping relevance
@@ -473,7 +567,17 @@ func RankProject(notes []*note.Note, context string, limit int, project string) 
 		if expired {
 			f *= expiredPenalty
 		}
-		out = append(out, scored{Result{Note: cd.n, Score: int(f*100 + 0.5), Lesson: cd.lesson, ProjectMatch: isMine, Expired: expired}, f, exact, matched})
+		var strongTerms []string
+		if isTarget {
+			strongTerms = strongTermsOf(cd.strong)
+		}
+		out = append(out, candScore{
+			Result: Result{
+				Note: cd.n, Score: int(f*100 + 0.5), Lesson: cd.lesson, ProjectMatch: isMine, Expired: expired,
+				Confidence: confidence, Matched: matched, QueryTerms: len(qwords),
+			},
+			f: f, exact: exact, matched: matched, raw: raw, hits: hits, strongTerms: strongTerms,
+		})
 	}
 	// Precision floor (field-study fix): a specific query (≥4 concepts) matching a
 	// note on a SINGLE concept is topical noise, not a memory hit — the lesson
@@ -489,6 +593,8 @@ func RankProject(notes []*note.Note, context string, limit int, project string) 
 	// SHORTER. When no candidate reaches two concepts, one shared concept is all
 	// the signal the query carries, and the ranked list beats an empty answer;
 	// the score the caller sees already reflects how weak the match is.
+	var excluded []candScore
+	floorActive := false
 	if len(q.words) >= 4 {
 		anyClears := false
 		for _, s := range out {
@@ -498,10 +604,14 @@ func RankProject(notes []*note.Note, context string, limit int, project string) 
 			}
 		}
 		if anyClears {
+			floorActive = true
 			kept := out[:0]
 			for _, s := range out {
 				if s.matched >= 2 {
 					kept = append(kept, s)
+				} else if trace != nil {
+					s.excludeReason = "precision-floor"
+					excluded = append(excluded, s)
 				}
 			}
 			out = kept
@@ -531,16 +641,28 @@ func RankProject(notes []*note.Note, context string, limit int, project string) 
 		for _, s := range out[1:] {
 			if s.f >= floor {
 				kept = append(kept, s)
+			} else if trace != nil {
+				s.excludeReason = "tail-trim"
+				excluded = append(excluded, s)
 			}
 		}
 		out = kept
 	}
 	if limit > 0 && len(out) > limit {
+		if trace != nil {
+			for _, s := range out[limit:] {
+				s.excludeReason = "limit"
+				excluded = append(excluded, s)
+			}
+		}
 		out = out[:limit]
+	}
+	if trace != nil {
+		fillTrace(trace, qwords, numNotes, floorActive, out, excluded)
 	}
 	res := make([]Result, len(out))
 	for i := range out {
 		res[i] = out[i].Result
 	}
-	return res
+	return res, trace
 }
