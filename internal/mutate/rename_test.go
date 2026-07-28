@@ -134,3 +134,29 @@ func TestTrashNoteNeverClobbers(t *testing.T) {
 		}
 	}
 }
+
+// TestRenameNoteSlugsDestination: `nt mv` used to write the destination
+// verbatim, so a human-readable name produced the one file in the store with
+// literal spaces in it — unlike `nt note`, which always slugs.
+func TestRenameNoteSlugsDestination(t *testing.T) {
+	e := newEngine(t)
+	p := filepath.Join(e.S.NotesDir(), "start.md")
+	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(p, []byte("# Start\n\nbody\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	src := &note.Note{Path: p, Rel: "start.md", Title: "Start"}
+
+	newRel, _, err := e.RenameNote(src, []*note.Note{src}, "ref/My Long Name")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if newRel != "ref/my-long-name.md" {
+		t.Errorf("destination should be slugged, got %q", newRel)
+	}
+	if _, err := os.Stat(filepath.Join(e.S.NotesDir(), "ref", "my-long-name.md")); err != nil {
+		t.Errorf("slugged file missing: %v", err)
+	}
+}

@@ -48,3 +48,30 @@ func TestCmdEditWithoutExpectMtimeStillWorks(t *testing.T) {
 		t.Errorf("edit without --expect-mtime should still apply: %s", after)
 	}
 }
+
+// TestEditTitleRepairsAMangledTitle covers the gap that made a wrong title
+// permanent from the CLI: `nt edit` had --desc but no --title, and `nt mv`
+// pins the OLD title into frontmatter where it beats the body H1 — so there
+// was no non-interactive way to fix one. This is also the recovery path for a
+// title the path-style shorthand truncated.
+func TestEditTitleRepairsAMangledTitle(t *testing.T) {
+	t.Setenv("NT_DIR", t.TempDir())
+	captureRun(t, "note", "cli test-gap audit", "--body", "# cli test-gap audit\n\nfindings here")
+
+	out := captureRun(t, "edit", "cli test-gap audit", "--title", "internal/cli test-gap audit")
+	if !strings.Contains(out, "retitled") && !strings.Contains(out, "edited") {
+		t.Errorf("edit --title should report what it did: %s", out)
+	}
+
+	shown := captureRun(t, "show", "internal/cli test-gap audit")
+	if !strings.Contains(shown, "internal/cli test-gap audit") {
+		t.Errorf("the new title should be resolvable and displayed:\n%s", shown)
+	}
+	// The stale H1 must not survive to contradict the frontmatter.
+	if strings.Contains(shown, "# cli test-gap audit\n") {
+		t.Errorf("the old H1 should have been rewritten with the title:\n%s", shown)
+	}
+	if !strings.Contains(shown, "findings here") {
+		t.Errorf("retitling must not disturb the body:\n%s", shown)
+	}
+}

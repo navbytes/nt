@@ -333,8 +333,9 @@ func Backlinks(s *store.Store, id, rel string) []search.Hit {
 		h, _ := search.Literal(id, s.TasksFile(), s.NotesDir())
 		add(h)
 	}
-	if rel != "" {
-		// Any wikilink is a candidate; references() does the precise suffix check.
+	// Any wikilink is a candidate; references() does the precise check. This
+	// runs for an id-only target too (a task), so a short-id link finds it.
+	if id != "" || rel != "" {
 		h, _ := search.Literal("[[", s.TasksFile(), s.NotesDir())
 		add(h)
 	}
@@ -348,6 +349,24 @@ func references(line, id, rel string) bool {
 			strings.Contains(line, "parent:"+id) ||
 			strings.Contains(line, "blocks:"+id) {
 			return true
+		}
+		// Short-id form: nt prints the 6-char id suffix everywhere (note
+		// creation, index, search, recall), Resolve accepts it, and the skill
+		// documents `[[<id>]]` as a supported link — but only the full ULID was
+		// matched here. So an id-form link resolved FORWARD while producing no
+		// backlink, and `nt links --orphans` called the target an orphan.
+		//
+		// Restricted to Crockford base32 (the ULID alphabet, which excludes
+		// I/L/O/U) so an ordinary slug can't be mistaken for an id suffix —
+		// Resolve gets to disambiguate against the real note list, and this
+		// function does not, so it errs narrow.
+		if idU := strings.ToUpper(id); idU != "" {
+			for _, raw := range wikilinks(line) {
+				key, _ := NormalizeTarget(raw)
+				if len(key) >= 4 && isCrockford(key) && strings.HasSuffix(idU, strings.ToUpper(key)) {
+					return true
+				}
+			}
 		}
 	}
 	if rel != "" {
@@ -376,4 +395,19 @@ func itoa(n int) string {
 		n /= 10
 	}
 	return string(b[i:])
+}
+
+// isCrockford reports whether s is entirely Crockford base32 — the ULID
+// alphabet (digits plus A-Z minus I, L, O and U). Used to tell a short-id
+// wikilink from an ordinary slug without a note list to check against.
+func isCrockford(s string) bool {
+	for _, r := range strings.ToUpper(s) {
+		switch {
+		case r >= '0' && r <= '9':
+		case r >= 'A' && r <= 'Z' && r != 'I' && r != 'L' && r != 'O' && r != 'U':
+		default:
+			return false
+		}
+	}
+	return s != ""
 }
