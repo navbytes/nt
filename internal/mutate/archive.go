@@ -13,7 +13,7 @@ import (
 // cross-file move is the open question in SPEC §15, so `nt undo` does not
 // revert it (the CLI says so). Returns the number of tasks moved.
 func (e *Engine) Archive() (int, error) {
-	h, err := lock.Acquire(e.S.LockFile(), lock.DefaultTimeout)
+	h, err := lock.Acquire(e.S.LockFile(), e.lockTimeout())
 	if err != nil {
 		return 0, err
 	}

@@ -20,6 +20,22 @@ import (
 // Engine owns the store and serializes all task-file writes.
 type Engine struct {
 	S *store.Store
+	// LockTimeout bounds how long a mutation waits for the store lock. Zero
+	// means lock.DefaultTimeout, which is what every production path uses.
+	// It exists for tests that deliberately pile many concurrent writers onto
+	// one store: writers there serialize behind each other, so the tail of the
+	// queue can exceed the default budget on a loaded machine and report the
+	// store busy — a property of the test's own contention, not of the
+	// lock-and-re-read contract it means to assert.
+	LockTimeout time.Duration
+}
+
+// lockTimeout is the effective wait for this engine's mutations.
+func (e *Engine) lockTimeout() time.Duration {
+	if e.LockTimeout > 0 {
+		return e.LockTimeout
+	}
+	return lock.DefaultTimeout
 }
 
 // Open resolves the store and returns an engine.
@@ -93,7 +109,7 @@ func (r *Recorder) finalize() []undo.Change {
 // resulting transaction, and atomically writes the file. fn mutates the Doc and
 // uses rec to record what it touched.
 func (e *Engine) Apply(op string, fn func(d *task.Doc, rec *Recorder) error) error {
-	h, err := lock.Acquire(e.S.LockFile(), lock.DefaultTimeout)
+	h, err := lock.Acquire(e.S.LockFile(), e.lockTimeout())
 	if err != nil {
 		return err
 	}

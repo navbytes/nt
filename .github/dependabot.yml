@@ -7,6 +7,18 @@ updates:
     groups:
       go-deps:
         patterns: ["*"]
+  # desktop/ is a SEPARATE module. Dependabot v2 does not auto-discover nested
+  # modules, so without this entry it never received an update PR — and no root
+  # check reaches it either (govulncheck/vet/golangci/CodeQL all run from the
+  # root, where `go list ./...` returns zero desktop packages). That gap is why
+  # x/net, x/crypto and x/text there have needed hand-written catch-up bumps.
+  - package-ecosystem: gomod
+    directory: "/desktop"
+    schedule:
+      interval: weekly
+    groups:
+      desktop-go-deps:
+        patterns: ["*"]
   - package-ecosystem: github-actions
     directory: "/"
     schedule:
