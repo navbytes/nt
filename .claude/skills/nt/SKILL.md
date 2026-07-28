@@ -11,8 +11,9 @@ persist as plain text — tasks in `tasks.txt`, notes as markdown in `notes/` (w
 subfolders) — that the user and the next session can read back, `grep`, and open
 in Obsidian.
 
-Everything is the `nt` CLI. Always pass `--source claude` so AI-created items are
-distinguishable from what the user typed by hand.
+Everything is the `nt` CLI. Pass `--source claude` on **write commands**
+(`add`, `note`, `update`) so AI-created items are distinguishable from what the
+user typed by hand.
 
 > If the `nt` MCP server is registered with your client, **prefer the typed
 > `nt_*` tools over shelling out** — they go through the same store, default
@@ -33,14 +34,18 @@ reasoning).
 
 ```bash
 nt index --json                     # KB catalog: note stubs (id·title·description) + active tasks — no bodies
+nt index --since 14d --json         # what's new since last session (also: today | YYYY-MM-DD)
 nt ready --json                     # open, UNBLOCKED tasks by urgency
 ```
 
 On large stores the index is **tiered**: pinned standing notes (rules/, memory/,
 ref/, or tag `pin`) + everything changed in the last 14 days, with the older
 remainder as per-folder counts. Expand a folder with `--folder <f>`, or pass
-`--all` for every stub. Standing knowledge belongs in the pinned layers — file
-it with `--kind rule|ref` (or tag `pin`) so every future session sees it.
+`--all` for every stub. **`--project <name>` hard-filters to that project**
+(via `project:` frontmatter or `+project` tag) — unlike `recall --project`,
+which is a soft ranking preference. Standing knowledge belongs in the pinned
+layers — file it with `--kind rule|ref` (or tag `pin`) so every future session
+sees it.
 
 `nt index` is your "what's here" catalog; `nt ready` is the task feed. **Before
 creating anything, retrieve first** (`nt index` / `nt search`) so you don't
@@ -59,17 +64,23 @@ differs (it's paraphrase-aware, unlike substring `nt search`):
 
 ```bash
 nt recall "adding concurrent token refresh"    # MCP: nt_recall(context: "...")
+nt recall --json "adding concurrent token refresh"   # JSON adds confidence fields
+nt recall --explain "adding concurrent token refresh"   # term-by-term scoring + why notes were dropped
+nt recall --explain-note <id>      # explain one note's score (or why it scored zero)
 ```
 
-An empty result usually means nothing relevant is recorded — proceed. If the
-query was long and oddly specific, one **shorter** retry is worth it: recall
-weighs how many distinct concepts a note shares with the query, so a wordy
-question can dilute the two or three that actually carry the meaning. Retry
-shorter, not looser — more synonyms of the same idea won't help.
+An empty result usually means nothing relevant is recorded — proceed. **Each
+hit shows a confidence tier** `[strong 4/4]`, `[medium 2/4]`, `[weak 1/4]` —
+the tier and concept coverage (how many of your query's ideas matched). **Read
+the tier, not any internal score** — the tier is normalized across queries; a
+raw score is query-dependent and not comparable. When the top hit is weak, a
+banner warns you. If your query was long and oddly specific, one **shorter**
+retry is worth it: recall weighs distinct concepts a note shares with you, so
+wordiness can dilute meaning. Retry shorter, not looser.
 
 When `NT_WORKSTREAM` is set, your own project's notes get a soft ranking
-preference (`projectMatch: true` in JSON) — cross-project results stay visible
-below. Override with `--project <name>` or disable with `--project none`.
+preference in results — cross-project results stay visible below. Override
+with `--project <name>` or disable with `--project none`.
 
 When you hit a mistake, footgun, or dead-end, capture it as a **lesson** so the
 next session recalls it — put the trigger in the description ("when X, do Y — not Z"):
@@ -78,6 +89,12 @@ next session recalls it — put the trigger in the description ("when X, do Y �
 nt note "single-flight the refresh; parallel calls double-spend" --lesson --source claude
 nt recall --lessons-only                     # bare: list every recorded lesson
 ```
+
+**Precision note:** recall returns the top-8 results by default (top-N, no hard
+precision guarantee). A very unrelated query can still return results that look
+confident — always check the **tier** before trusting a hit. There is an internal
+precision floor for multi-concept queries, but it's loose by design: better to
+surface a weak match you dismiss than to hide something that needed finding.
 
 ## Capture tasks
 
@@ -228,17 +245,18 @@ the returned id directly with `nt links` / `nt tag` / `nt mv` / `nt rm`.
 
 ## Workstreams (parallel sessions, shared store)
 
-When several agents share one store (e.g. parallel git worktrees), tasks are
-**isolated per workstream** so your in-flight work doesn't mix with another
-session's, while **notes stay shared** so knowledge cross-pollinates. This is
-automatic via the MCP tools and CLI `nt add` when `NT_WORKSTREAM` is set (grove/CI/harness export
-it; `auto` derives it from the git branch, falling back to the working
-directory's basename outside a git repo — prefer a literal id there). You don't stamp anything — `nt_add`
-records it, and `nt_index`/`nt_status` scope to it.
+When several agents share one store (e.g. parallel git worktrees), `NT_WORKSTREAM`
+**scopes tasks only** — your in-flight work doesn't mix with another session's.
+**Notes always stay shared** across all agents, never scoped. Set via environment
+(grove/CI/harness export it; `auto` derives it from git branch, falling back to
+working directory basename — prefer a literal id). The MCP tools and CLI `nt add`
+record it; `nt_index`/`nt_status` then scope to it.
 
 - Tasks with no workstream (the human's CLI/TUI/web backlog) stay visible to
   everyone — only *another* agent's stamped tasks are hidden.
-- `nt_search` and `nt_view` are never scoped — knowledge discovery is store-wide.
+- Notes and `nt_search` are never scoped — knowledge and discovery are store-wide.
+- `nt recall --project` defaults to `NT_WORKSTREAM` as a soft ranking preference
+  (cross-project results stay visible below; pass `none` to disable).
 - Pass `workstream: "*"` on a read to see every workstream's tasks; pass an
   explicit `workstream` to target another one. With `NT_WORKSTREAM` unset there
   is no scoping and behavior is unchanged.
