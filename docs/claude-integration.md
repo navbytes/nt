@@ -92,7 +92,8 @@ teaches Claude to use `nt` directly. With it installed, you can say things like:
 - or just type `/nt`
 
 Claude will run the right `nt` commands (`ready`, `add`, `note`, `index`,
-`recall`, `show`, `done`, `links`, `search`), always passing `--source claude`.
+`recall`, `show`, `done`, `links`, `search`), passing `--source claude` on write
+operations (`add`, `note`, `update`).
 
 **Start a session with `nt ready`.** It returns only actionable work — open
 tasks that aren't done and aren't waiting on a dependency — newest-urgency
