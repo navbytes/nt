@@ -1808,6 +1808,9 @@ func (s *server) recall(a map[string]any) (string, error) {
 		if r.ProjectMatch {
 			row["projectMatch"] = true
 		}
+		if r.Expired {
+			row["expired"] = true // pre-existing drift: CLI JSON already includes this, the MCP stub didn't
+		}
 		stubs = append(stubs, row)
 	}
 	return jsonText(map[string]any{"results": stubs}), nil
