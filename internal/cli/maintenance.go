@@ -208,6 +208,7 @@ func cmdEdit(args []string) int {
 	newString := fs.String("new-string", "", "replacement text for --old-string (empty deletes the matched text)")
 	desc := fs.String("desc", "", "set the note's one-line description (frontmatter) without an editor")
 	fs.StringVar(desc, "description", "", "alias for --desc")
+	descFile := fs.String("desc-file", "", "read the description from a file ('-' = stdin); immune to shell quoting, same as --body-file")
 	validFrom := fs.String("valid-from", "", "set: this fact is only true from this date/time on (YYYY-MM-DD or RFC3339)")
 	validUntil := fs.String("valid-until", "", "set: this fact stops being true after this date/time (YYYY-MM-DD or RFC3339) — nt_recall down-ranks and flags it 'expired' past this")
 	clearValidFrom := fs.Bool("clear-valid-from", false, "remove the valid_from constraint")
@@ -228,6 +229,12 @@ func cmdEdit(args []string) int {
 	bodyVal, berr := resolveBody(*body, *bodyFile)
 	if berr != nil {
 		return usageErr(fmt.Errorf("edit: %w", berr))
+	}
+	// Same shell-quoting escape hatch --body-file gives the body: backticks in a
+	// --desc value are expanded before nt sees them, silently truncating it.
+	descVal, derr := resolveBody(*desc, *descFile)
+	if derr != nil {
+		return usageErr(fmt.Errorf("edit: %s", strings.ReplaceAll(derr.Error(), "--body", "--desc")))
 	}
 	// --old-string/--new-string only make sense as a pair: one alone has no
 	// target (new-string) or nothing to put in its place (old-string), and
@@ -302,7 +309,7 @@ func cmdEdit(args []string) int {
 				return fail(fmt.Errorf("edit: --old-string matches %d times in %s's body — make it longer/more specific so the match is unambiguous", count, shortID(n.ID)))
 			}
 		}
-		if d := strings.TrimSpace(*desc); d != "" {
+		if d := strings.TrimSpace(descVal); d != "" {
 			setNoteDescription(n, d)
 			if verb == "" {
 				verb = "set description of"
