@@ -120,49 +120,83 @@ met, don't schedule otherwise):
     *nothing* for 3 of 8 paraphrased queries; softening it took HIT@1 from
     5/8 to 8/8.
   - **Length normalization ruled out (honest eval confirms); real blocker
-    identified.** A prior field test reported HIT@1 falling 65% → 41% as a
-    store grew, diagnosing length as the cause. Tested against a user's actual
-    218-note store under controlled conditions (22-query corpus built by
+    identified — do not re-attempt length normalization without new
+    evidence.** A prior field test reported HIT@1 falling 65% → 41% as a
+    store grew, diagnosing length as the cause. Tested against a user's
+    actual store under controlled conditions (22-query corpus built by
     enforced information asymmetry: one agent wrote scenarios from real notes
     with distinctive vocabulary stripped; a second agent, unseen notes/titles,
     wrote queries from scenarios alone):
-    - **Growth-driven degradation is real.** HIT@1 by corpus size — smooth
-      decline, no cliff: size 22 → 18/22, size 40 → 16/22, size 100 → 13/22,
-      size 160 → 11/22, size 218 → 12/22. (At 22 queries per hit ≈ 4.5pp;
-      the 11-vs-12 wobble at the tail sits within noise.)
+    - **Growth-driven degradation is real, and the curve below is corrected.**
+      The harness originally counted `__tasks__/` reserved notes toward each
+      corpus size and toward IDF's document-frequency `n`, even though
+      `RankProject` never scores them as candidates — inflating every labeled
+      size by ~10% (of 218 "active" notes, 23 were reserved). Fixed
+      (`note.Reserved()` now filtered alongside `note.Active()`) and
+      re-measured: HIT@1 by corpus size — smooth, in fact fully monotone,
+      decline: size 22 → 18/22 (targets only, no distractors — every
+      competitor at this size is another correct answer, a different regime
+      from the rest of the curve), size 40 → 16/22, size 100 → 15/22, size
+      160 → 13/22, size 195 (whole store; the true scored size, not 218) →
+      12/22. (At 22 queries per hit ≈ 4.5pp.) The reserved-note fix changed
+      the counts at 100 and 160 and relabeled "218" to "195," but the
+      degradation conclusion is unchanged — if anything the corrected curve
+      is cleaner (no tail wobble).
     - **Length normalization is flat — swept `b` ∈ {0, 0.25, 0.5, 0.75, 1.0}:**
       HIT@1 was 16/22 at size 40 and 12/22 at full store at **every** value,
       with the paraphrase corpus staying 8/8 throughout. The knob moved scores
       (computed norms ranged 0.27–1.40) but never rankings — length is not
       the operative variable. This *refines* the earlier verdict: length does
       not cause the harm.
+    - **Unresolved: this result disagrees with the earlier field test's own
+      `b` sweep.** That sweep (`b` ∈ {0, 0.1, 0.2, 0.3, 0.4, 0.55, 0.75, 1.0})
+      found **every** non-zero `b` — including the same 0.75 and 1.0 tested
+      here — dropped the paraphrase corpus 8/8 → 7/8. This session's sweep,
+      over the same 0.75/1.0 values, found 8/8 throughout. Both cannot be
+      literally true at once; this was not re-reconciled and is left open. Do
+      not read the "partial mitigations" bullet below as an explanation —
+      combining stopwords with `b=0.75` is a different, later experiment that
+      also produced an 8/8 → 7/8 drop, and it is not established that it is
+      the same effect the earlier session hit with `b` alone.
     - **The actual mechanism:** Closed-class function words are scored as
-      topical terms. Over 218 terse notes, IDF cannot distinguish
+      topical terms. Over the store's terse notes, IDF cannot distinguish
       "uninformative in English" from "rare in store": `should` (df=5) scores
       IDF 3.69, above `swift` (3.12) in an iOS-heavy store; a function word in
       a title then earns full strong-bag weight. Growth trigger: target score
-      stays fixed; max distractor score rises sharply. Measured size 25 → 218:
-      **target +19.7%, best distractor +106.9%**. Function-word share of
-      winning note's score: **0.02 on a hit, 0.44 on a miss.**
+      stays fixed; max distractor score rises sharply. Measured size 25 →
+      218 (this instrumented run predates the reserved-note fix and was not
+      rerun — see provenance note below): **target +19.7%, best distractor
+      +106.9%**. Function-word share of winning note's score: **0.02 on a
+      hit, 0.44 on a miss.**
     - **Hard ceiling: lexical retrieval cannot cross it by reweighting.**
       Targets sharing ≤2 query concepts scored 0/6; those sharing ≥3 scored
       12/16.
     - **Partial mitigations bounded.** Expanded stopwords gained +1–2
       mid-range precision but did not fix growth; combined with `b=0.75`
       reached 21/22 at size 40 but collapsed by size 100 and broke the
-      paraphrase corpus 8/8 → 7/8 — the same regression the earlier session
-      encountered. The precondition holds: embeddings/semantic retrieval
-      cannot land without semantic-distance quality, which lexical scoring
-      architecturally cannot provide.
-    - **Evaluation methodology (reusable asset).** Both synthetic (earlier
-      session's planted near-duplicates) and this session's honest-corpus
-      trials isolated corpus distortion from scorer weaknesses via the
+      paraphrase corpus 8/8 → 7/8. The precondition holds: embeddings/semantic
+      retrieval cannot land without semantic-distance quality, which lexical
+      scoring architecturally cannot provide.
+    - **Evaluation methodology.** This session's honest-corpus trial used the
       information-asymmetry protocol (scenario-writer unsees notes+titles;
-      query-writer unsees source) — that discipline is why these numbers are
-      trustable. Live harness exists: `internal/recall/realstore_eval_test.go`,
-      driven by `NT_EVAL_STORE` and `NT_EVAL_CORPUS` env vars. No real note
-      content is committed (store holds private client data); anyone can
-      re-run against their own store.
+      query-writer unsees source) to isolate corpus distortion from scorer
+      weaknesses — that discipline is why these numbers are trustable. The
+      earlier session's growth case did **not** use this protocol: its
+      distractors were found adversarial by construction only after the fact
+      (one contained "the wait budget for writers" against a query of
+      "writers exceed the wait budget"). Standing caveat, independent of
+      either session's results: planted near-duplicates must not be used to
+      tune the ranker.
+    - **Provenance.** The corpus-size HIT@1 curve above is exactly what the
+      committed harness, `internal/recall/realstore_eval_test.go`
+      (`NT_EVAL_STORE`/`NT_EVAL_CORPUS`/`NT_EVAL_SIZES` env vars; run with
+      `go test ./internal/recall/ -run RealStore -v`), regenerates against a
+      real store and corpus. The `b` sweep, the IDF and function-word-share
+      numbers, and the score-growth percentages above were one-off
+      instrumented runs during this and the earlier session, not reproducible
+      from this branch as committed. No real note content is committed
+      (stores hold private client data); anyone can re-run the harness
+      against their own store.
 - **14** — OpenCode `chat.message` + `tool.execute.before` proactive recall
   — parked on "a live OpenCode build matrix to test against," the same
   precondition item 1 needed before it could ship safely. Also lower-value
