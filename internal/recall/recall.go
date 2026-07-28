@@ -52,7 +52,7 @@ type Result struct {
 // worded differently. Small and dev-focused on purpose — precision matters too.
 //
 // Groups are kept NARROW and non-overlapping: ambiguous cross-domain tokens
-// (column, index, origin, lock, database) are deliberately NOT grouped, because
+// (column, index, origin, lock, database, gc) are deliberately NOT grouped, because
 // one overloaded word ("column" → migration) would otherwise drag a whole wrong
 // domain into an unrelated query (a CSS-column question surfacing DB migrations).
 // nil/null and panic/crash are separate groups so distinct failure modes don't
@@ -69,11 +69,24 @@ var synGroups = [][]string{
 	{"config", "configuration", "setting", "dotenv"},
 	{"panic", "crash", "segfault", "stacktrace"},
 	{"nil", "null", "nullpointer", "npe", "nullptr"},
-	{"leak", "oom", "allocation", "gc"},
+	{"leak", "oom", "allocation", "heap"},
 	// Domains a coding agent hits that the map was previously blind to:
 	{"css", "flexbox", "flex", "grid", "layout", "overflow", "responsive", "viewport", "zindex"},
 	{"billing", "payment", "invoice", "charge", "webhook", "idempotency", "refund", "stripe", "subscription"},
 	{"i18n", "l10n", "locale", "translation", "rtl", "localization"},
+	// Everyday software-engineering vocabulary the table was blind to: a field
+	// test of 48 natural paraphrase pairs from a Go CLI codebase linked only 3.
+	// Same rule as above — narrow, and no token that carries a second domain
+	// (flag/option and module/package are deliberately absent: a feature flag
+	// and a CLI flag are not the same thing).
+	{"undo", "revert", "rollback", "undelete"},
+	{"lint", "linter", "vet", "staticcheck", "gofmt", "formatter"},
+	{"duplicate", "dedupe", "deduplicate", "duplication", "clobber", "overwrite"},
+	{"regex", "regexp", "matcher"},
+	{"serialize", "serialization", "marshal", "unmarshal", "encode", "decode"},
+	{"dependency", "dependabot", "vendoring", "bump", "upgrade"},
+	{"ci", "cicd", "pipeline"},
+	{"frontmatter", "yaml", "toml"},
 }
 
 // buildConceptOf maps each group's stemmed words to a shared group id ("g0",
@@ -407,14 +420,33 @@ func RankProject(notes []*note.Note, context string, limit int, project string) 
 	// note on a SINGLE concept is topical noise, not a memory hit — the lesson
 	// boost was promoting exactly those to the top of adjacent-topic queries. For
 	// short queries a single shared concept is legitimately all the signal there is.
+	//
+	// The floor applies ONLY when something actually clears it. As an
+	// unconditional filter it was a cliff in both directions: a heavily
+	// paraphrased query that shares just one concept with its target returned
+	// NOTHING, while the same intent in three words returned the right note —
+	// so the documented recovery ("an empty result means nothing is recorded;
+	// don't retry with looser words") was backwards, and the fix was to retry
+	// SHORTER. When no candidate reaches two concepts, one shared concept is all
+	// the signal the query carries, and the ranked list beats an empty answer;
+	// the score the caller sees already reflects how weak the match is.
 	if len(q.words) >= 4 {
-		kept := out[:0]
+		anyClears := false
 		for _, s := range out {
 			if s.matched >= 2 {
-				kept = append(kept, s)
+				anyClears = true
+				break
 			}
 		}
-		out = kept
+		if anyClears {
+			kept := out[:0]
+			for _, s := range out {
+				if s.matched >= 2 {
+					kept = append(kept, s)
+				}
+			}
+			out = kept
+		}
 	}
 	sort.SliceStable(out, func(i, j int) bool {
 		if out[i].f != out[j].f {

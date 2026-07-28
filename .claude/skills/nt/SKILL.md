@@ -61,8 +61,11 @@ differs (it's paraphrase-aware, unlike substring `nt search`):
 nt recall "adding concurrent token refresh"    # MCP: nt_recall(context: "...")
 ```
 
-An empty result means nothing relevant is recorded (recall has a precision
-floor) — proceed, don't retry with looser words.
+An empty result usually means nothing relevant is recorded — proceed. If the
+query was long and oddly specific, one **shorter** retry is worth it: recall
+weighs how many distinct concepts a note shares with the query, so a wordy
+question can dilute the two or three that actually carry the meaning. Retry
+shorter, not looser — more synonyms of the same idea won't help.
 
 When `NT_WORKSTREAM` is set, your own project's notes get a soft ranking
 preference (`projectMatch: true` in JSON) — cross-project results stay visible
