@@ -973,9 +973,16 @@ func (s *server) note(a map[string]any) (string, error) {
 	// and refusing would silently DROP a capture (a learning lost). So we always
 	// create the note, and if near-duplicates exist we return them in `similar` so
 	// the agent can choose to consolidate (nt_archive superseded_by=…) on its next turn.
+	// project: frontmatter — the note self-identifies as belonging to a project,
+	// so nt_recall's same-project boost finds it even without a tag/folder match.
+	// Read before the dedup check too: FindSimilar folds it into the tag set it
+	// compares on, since a note whose only tag is a class marker (lesson/rule/
+	// memory-core) would otherwise have an empty tag set and never pair.
+	proj := strings.TrimSpace(str(a, "project"))
+
 	var similar []*note.Note
 	if supersede == "" && !boolArg(a, "force") {
-		similar = note.FindSimilar(note.Active(s.listNotes()), title, tags)
+		similar = note.FindSimilar(note.Active(s.listNotes()), title, tags, proj)
 	}
 
 	n, err := note.Create(s.eng.S, title, str(a, "body"), tags, source, folder)
@@ -987,9 +994,7 @@ func (s *server) note(a map[string]any) (string, error) {
 		n.Extra = append(n.Extra, "description: "+desc)
 		extraChanged = true
 	}
-	// project: frontmatter — the note self-identifies as belonging to a project,
-	// so nt_recall's same-project boost finds it even without a tag/folder match.
-	if proj := strings.TrimSpace(str(a, "project")); proj != "" {
+	if proj != "" {
 		n.Extra = append(n.Extra, "project: "+proj)
 		extraChanged = true
 	}

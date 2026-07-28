@@ -72,7 +72,9 @@ func cmdImport(args []string) int {
 		}
 		allTags := dedupStrings(append(append([]string{}, it.Tags...), tags...))
 		if !*force {
-			if sim := note.FindSimilar(existing, it.Title, allTags); len(sim) > 0 {
+			// Imported items have no project concept (see importItem) — "" is a
+			// no-op for FindSimilar's project-aware tag set.
+			if sim := note.FindSimilar(existing, it.Title, allTags, ""); len(sim) > 0 {
 				skipped = append(skipped, it.Title)
 				continue
 			}
