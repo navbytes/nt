@@ -36,7 +36,7 @@ func (r DoctorReport) HasProblems() bool { return r.Issues() > 0 || len(r.Warnin
 func (e *Engine) Doctor(apply bool) (DoctorReport, error) {
 	var rep DoctorReport
 
-	h, err := lock.Acquire(e.S.LockFile(), lock.DefaultTimeout)
+	h, err := lock.Acquire(e.S.LockFile(), e.lockTimeout())
 	if err != nil {
 		return rep, err
 	}
