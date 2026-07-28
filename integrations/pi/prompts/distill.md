@@ -128,8 +128,12 @@ written without approval.
 - `nt_mv` the note to `lessons/` (or `ref/` if it's reference material rather
   than a hard-won mistake), then `nt_tag` `remove:["rule"]` (or
   `["memory-core"]`) `add:["lesson"]`. The body stays; only its class changes.
-- Lessons rank best in trigger-form — if the description isn't already
-  "when X, do Y — not Z", rewrite it with `nt_note_edit` `description`.
+- A demoted note is reached by `nt_recall` or not at all, so its description
+  stops being a label and becomes load-bearing — it's the highest-weighted
+  field in the ranker. Lead with the **symptom** a future session would search
+  for, not the remedy it arrives at: "when X" first, the fix after. Keep it
+  tight — a padded description measurably degrades ranking across the whole
+  store, not just that note. Rewrite with `nt_note_edit` `description`.
 
 **Dead triggers (pass 2):** `nt_archive` — no `superseded_by`, nothing replaced
 it. Reversible via `nt_archive undo:true`.
