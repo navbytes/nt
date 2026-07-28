@@ -158,8 +158,48 @@ func (e *Engine) TrashNote(n *note.Note) error {
 			rel = filepath.ToSlash(r)
 		}
 	}
-	dest := filepath.Join(trash, strings.ReplaceAll(rel, "/", "_"))
+	dest, err := trashDest(trash, rel)
+	if err != nil {
+		return err
+	}
 	return os.Rename(n.Path, dest)
+}
+
+// trashDest picks a free filename inside .trash/ for rel and claims it
+// atomically (O_CREATE|O_EXCL), so the subsequent os.Rename can only ever land
+// on a name nothing else holds.
+//
+// This matters because os.Rename silently overwrites its destination, and
+// .trash/ is the ONLY recovery path for a trashed note — TrashNote is
+// deliberately not a journaled undo transaction, so a clobbered copy is gone
+// for good. Two collisions are reachable in normal use: deleting the same rel
+// twice (create → delete → recreate → delete), and two distinct notes whose
+// paths flatten to the same name (`a/b.md` and `a_b.md` both → `a_b.md`).
+// `nt gc --yes` trashes in a loop, so a single run could destroy several notes
+// while reporting only "collected N note(s) → .trash/ (recoverable)".
+//
+// Colliding names get a -2, -3, … suffix before the extension.
+func trashDest(trash, rel string) (string, error) {
+	flat := strings.ReplaceAll(rel, "/", "_")
+	stem, ext := flat, ""
+	if e := filepath.Ext(flat); e != "" {
+		stem, ext = strings.TrimSuffix(flat, e), e
+	}
+	for i := 1; i <= 10000; i++ {
+		cand := filepath.Join(trash, stem+ext)
+		if i > 1 {
+			cand = filepath.Join(trash, fmt.Sprintf("%s-%d%s", stem, i, ext))
+		}
+		f, err := os.OpenFile(cand, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+		if err == nil {
+			_ = f.Close() // reclaimed by the rename below
+			return cand, nil
+		}
+		if !os.IsExist(err) {
+			return "", err
+		}
+	}
+	return "", fmt.Errorf("trash: no free name for %q after 10000 attempts", flat)
 }
 
 func base(rel string) string {

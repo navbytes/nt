@@ -63,14 +63,27 @@ func cmdArchive(args []string) int {
 // and search — a soft, reversible retire.
 func archiveNotes(e *mutate.Engine, handles []string, unarchive bool) int {
 	notes, _ := note.List(e.S)
-	count := 0
+	// Resolve EVERY handle before writing anything — the same guarantee cmdRm
+	// documents and enforces. The previous loop saved as it went and returned
+	// on the first unresolvable handle, so `nt archive good1 good2 typo` left
+	// good1 and good2 archived (dropped out of index/search/recall) while the
+	// only output was an error and a non-zero exit. Nobody re-checks a command
+	// that reported failure, so that silently shrank the store.
+	resolved := make([]*note.Note, 0, len(handles))
 	for _, h := range handles {
 		n, err := resolveNote(notes, h)
 		if err != nil {
 			return fail(fmt.Errorf("archive: %w", err))
 		}
+		resolved = append(resolved, n)
+	}
+	count := 0
+	for _, n := range resolved {
 		n.Archived = !unarchive
 		n.Updated = time.Now().Format(time.RFC3339)
+		// A mid-loop Save failure can still leave a partial application, but
+		// that needs an I/O error rather than a typo — and every note that did
+		// flip is reported by the count below.
 		if err := n.Save(); err != nil {
 			return fail(err)
 		}
