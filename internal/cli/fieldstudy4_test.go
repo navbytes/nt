@@ -157,12 +157,9 @@ func TestNoteExplicitKindBeatsPathStyleAndKeepsTitle(t *testing.T) {
 }
 
 func TestNoteKindFolderStillAppliesWithoutPath(t *testing.T) {
-	dir := t.TempDir()
-	t.Setenv("NT_DIR", dir)
-	_ = dir
-	var out string
+	t.Setenv("NT_DIR", t.TempDir())
 	// Without a path or --folder, the kind's folder still applies (unchanged).
-	out = captureRun(t, "note", "plain lesson capture", "--kind", "lesson")
+	out := captureRun(t, "note", "plain lesson capture", "--kind", "lesson")
 	if !strings.Contains(out, "notes/lessons/plain-lesson-capture.md") {
 		t.Fatalf("kind folder should still be the default: %s", out)
 	}
