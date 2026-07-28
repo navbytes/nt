@@ -40,9 +40,12 @@ ground but is outdated, propose an **update**/**supersede** of it (by id) instea
 ## 3. Present for approval — do not write yet
 
 Show a numbered list. Per item: bucket, proposed **title**, one-line
-**description** (lessons in trigger-form "when X, do Y — not Z"), and target
-folder+tag (`lessons/`+`lesson`, `rules/`+`rule`, `memory/`+`memory-core`,
-`decisions/`/`ref/` for notes). Flag `rule`/`memory-core` items ⚠
+**description** (lessons in trigger-form "when X, do Y — not Z"), a
+**`--project` or topical `--tag`** (never omit it — the structural
+`lesson`/`rule` tag is stripped before the duplicate check, so a note carrying
+only that one silently bypasses the guard and duplicates an existing lesson),
+and target folder+tag (`lessons/`+`lesson`, `rules/`+`rule`,
+`memory/`+`memory-core`, `decisions/`/`ref/` for notes). Flag `rule`/`memory-core` items ⚠
 *always-in-context — costs tokens on every future request*. (The reverse pass —
 pruning rules that stopped earning that cost — is `/nt-distill rules`.) Then ask which
 to save (all, numbers, edits, or none) and **wait**. Save nothing without

@@ -86,9 +86,18 @@ When you hit a mistake, footgun, or dead-end, capture it as a **lesson** so the
 next session recalls it — put the trigger in the description ("when X, do Y — not Z"):
 
 ```bash
-nt note "single-flight the refresh; parallel calls double-spend" --lesson --source claude
+nt note "single-flight the refresh; parallel calls double-spend" --lesson \
+  --project tripto --source claude          # ALWAYS a --project or --tag; see below
 nt recall --lessons-only                     # bare: list every recorded lesson
 ```
+
+**Always give a lesson a `--project` or a topical `--tag`.** This is not
+housekeeping — it is what keeps the duplicate guard alive. `--lesson` applies
+only the *structural* `lesson` tag, which the near-duplicate check strips before
+comparing; with nothing else on the note its tag set is empty, the check can
+never fire, and nt will silently accept a near-copy of a lesson you already
+have. A store captured without topical tags fragments into many one-line notes
+saying the same thing, and neither `nt note` nor `nt distill` will tell you.
 
 **Precision note:** recall returns the top-8 results by default (top-N, no hard
 precision guarantee). A very unrelated query can still return results that look
