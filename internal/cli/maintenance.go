@@ -206,6 +206,7 @@ func cmdEdit(args []string) int {
 	bodyFile := fs.String("body-file", "", "replace the note body from a file ('-' = stdin); immune to shell quoting")
 	oldString := fs.String("old-string", "", "exact existing text in the body to replace — must match exactly once; pair with --new-string for a targeted fix without resending the whole body")
 	newString := fs.String("new-string", "", "replacement text for --old-string (empty deletes the matched text)")
+	title := fs.String("title", "", "set the note's title (frontmatter + body H1) without an editor")
 	desc := fs.String("desc", "", "set the note's one-line description (frontmatter) without an editor")
 	fs.StringVar(desc, "description", "", "alias for --desc")
 	validFrom := fs.String("valid-from", "", "set: this fact is only true from this date/time on (YYYY-MM-DD or RFC3339)")
@@ -270,7 +271,7 @@ func cmdEdit(args []string) int {
 	// be fixable only via $EDITOR or a whole-note supersede (which churns the id
 	// and every inbound link); this edits in place.
 	validitySet := strings.TrimSpace(*validFrom) != "" || strings.TrimSpace(*validUntil) != "" || *clearValidFrom || *clearValidUntil
-	if appendVal != "" || bodyVal != "" || replacing || strings.TrimSpace(*desc) != "" || validitySet {
+	if appendVal != "" || bodyVal != "" || replacing || strings.TrimSpace(*desc) != "" || strings.TrimSpace(*title) != "" || validitySet {
 		n, nerr := resolveNote(notes, strings.TrimPrefix(handle, "note:"))
 		if nerr != nil {
 			return fail(fmt.Errorf("edit: %w (non-interactive edits apply to notes; for tasks use `nt update`)", nerr))
@@ -300,6 +301,21 @@ func cmdEdit(args []string) int {
 				verb = "edited"
 			default:
 				return fail(fmt.Errorf("edit: --old-string matches %d times in %s's body — make it longer/more specific so the match is unambiguous", count, shortID(n.ID)))
+			}
+		}
+		// --title was the missing repair path. Without it a wrong title was
+		// permanent from the CLI: `nt mv` renames the file but pins the OLD
+		// title into frontmatter, where it then beats the body H1, so editing
+		// the H1 changed nothing visible. Rewrite the H1 too when it still
+		// carries the previous title, so frontmatter, heading and filename
+		// don't drift apart.
+		if tt := strings.TrimSpace(*title); tt != "" {
+			if old := strings.TrimSpace(n.Title); old != "" {
+				n.Body = replaceLeadingHeading(n.Body, old, tt)
+			}
+			n.Title = tt
+			if verb == "" {
+				verb = "retitled"
 			}
 		}
 		if d := strings.TrimSpace(*desc); d != "" {
@@ -998,4 +1014,25 @@ failed command that matches a recorded lesson surfaces it on the next turn.
 Full setup: docs/claude-integration.md. For typed agent tools (nt_add,
 nt_index, nt_search, …) instead of the hook, see: nt mcp install.
 `)
+}
+
+// replaceLeadingHeading rewrites a body's opening "# old" heading to "# new"
+// when it still carries the previous title, so `nt edit --title` doesn't leave
+// the H1 contradicting the frontmatter. Bodies whose H1 was already something
+// else are left alone — that heading is the author's, not a mirror of the title.
+func replaceLeadingHeading(body, old, new string) string {
+	trimmed := strings.TrimLeft(body, "\n")
+	lead := body[:len(body)-len(trimmed)]
+	if !strings.HasPrefix(trimmed, "# ") {
+		return body
+	}
+	line, rest, _ := strings.Cut(trimmed, "\n")
+	if strings.TrimSpace(strings.TrimPrefix(line, "# ")) != strings.TrimSpace(old) {
+		return body
+	}
+	out := lead + "# " + new
+	if rest != "" {
+		out += "\n" + rest
+	}
+	return out
 }

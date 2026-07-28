@@ -633,9 +633,19 @@ func cmdNote(args []string) int {
 	// in lessons/ with "custom" mangled into the filename. Prose titles that
 	// merely contain (or end with) a slash are NOT filing choices — see
 	// note.SplitPathTitle for the boundary.
-	if fold == "" {
+	// An explicit --kind is a stated filing choice too, so it now suppresses the
+	// inference rather than losing to it. Field use showed why: engineering
+	// titles routinely open with a bare directory token ("internal/cli test-gap
+	// audit", "README/SPEC drift", "CI/CD"), and the shorthand not only ignored
+	// --kind but STRIPPED that word from the title permanently — with no way to
+	// put it back, since the CLI had no --title. `nt note "custom/x"` with no
+	// flags still files under custom/, unchanged.
+	if fold == "" && kindFolder == "" {
 		if f, t := note.SplitPathTitle(title); f != "" {
 			fold, title = f, t
+			// Say so. The whole failure mode was that this happened silently:
+			// the only signal was the created path in the success line.
+			fmt.Fprintf(os.Stderr, "note: filed under %s/ and dropped %q from the title (path-style shorthand) — pass --folder to choose explicitly, or rephrase to keep the word\n", f, f)
 		}
 	}
 	// The kind's canonical folder is the default only when neither --folder nor a
