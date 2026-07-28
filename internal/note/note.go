@@ -660,6 +660,11 @@ func FindSimilar(notes []*Note, title string, tags []string, project string) []*
 // that class look topically related. project stands in for a tag here because
 // that's the role it plays for dedup purposes — "which topic/scope does this
 // note belong to" — even though it lives in a separate frontmatter field.
+// project is trimmed and lowercased before folding in: it's compared exactly
+// (unlike TAG case, which is pre-existing and left alone), and the write path
+// (commands.go) trims before storing while callers here don't always trim
+// before calling — without normalizing, "wtc" and " WTC " would silently
+// stop pairing, matching recall.go's projectTokens normalization.
 func similarityTags(tags []string, project string) map[string]bool {
 	out := map[string]bool{}
 	for _, t := range tags {
@@ -668,8 +673,8 @@ func similarityTags(tags []string, project string) map[string]bool {
 		}
 		out[t] = true
 	}
-	if project != "" {
-		out[project] = true
+	if p := strings.ToLower(strings.TrimSpace(project)); p != "" {
+		out[p] = true
 	}
 	return out
 }
@@ -701,12 +706,14 @@ func parallelSiblings(title string, tags []string, project string, n *Note) bool
 
 // tagsWithProject appends project to tags (as a plain string, not stripped of
 // structural tags — parallelSiblings works over the raw tag/word vocabulary),
-// leaving tags untouched when project is unset.
+// leaving tags untouched when project is unset. project is trimmed and
+// lowercased for the same reason as similarityTags above.
 func tagsWithProject(tags []string, project string) []string {
-	if project == "" {
+	p := strings.ToLower(strings.TrimSpace(project))
+	if p == "" {
 		return tags
 	}
-	return append(append([]string{}, tags...), project)
+	return append(append([]string{}, tags...), p)
 }
 
 // TitleOverlap is the word-set Jaccard (0..1) of two titles, ignoring short and

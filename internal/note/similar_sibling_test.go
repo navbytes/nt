@@ -77,3 +77,45 @@ func TestFindSimilarStructuralOnlyNoProject(t *testing.T) {
 		t.Fatalf("structural-only lessons with no project were flagged as near-duplicates: %v", sim)
 	}
 }
+
+// TestFindSimilarSameProjectDifferentTopics is the other main regression risk
+// of the project fix: folding project into the tag set must not turn a shared
+// project into a blanket topic match. Two lessons in the same project but
+// about unrelated things share the project "tag" but nothing in title
+// Jaccard, so they must not pair — otherwise every lesson in a project would
+// nuisance-pair with every other, training users to reach for --force.
+func TestFindSimilarSameProjectDifferentTopics(t *testing.T) {
+	existing := &Note{
+		Title: "postgres connection pool exhaustion",
+		Tags:  []string{"lesson"},
+		Extra: []string{"project: wtcockpit"},
+		Rel:   "lessons/postgres-connection-pool-exhaustion.md",
+	}
+	sim := FindSimilar([]*Note{existing}, "vitest mocks leak between files",
+		[]string{"lesson"}, "wtcockpit")
+	if len(sim) != 0 {
+		t.Fatalf("same-project, different-topic notes flagged as near-duplicates: %v", sim)
+	}
+}
+
+// TestFindSimilarProjectCaseWhitespaceNormalized pins the fold-point
+// normalization: project is compared trimmed and lowercased, so an agent
+// writing "wtc" one turn and " WTC " (or "WTC") the next still gets caught by
+// the dedup guard instead of silently reverting to the pre-fix dead-gate
+// behaviour. TAG case-sensitivity is unrelated and untouched.
+func TestFindSimilarProjectCaseWhitespaceNormalized(t *testing.T) {
+	existing := &Note{
+		Title: "postgres connection pool exhaustion",
+		Tags:  []string{"lesson"},
+		Extra: []string{"project: wtc"},
+		Rel:   "lessons/postgres-connection-pool-exhaustion.md",
+	}
+	if sim := FindSimilar([]*Note{existing}, "postgres connection pool exhaustion issue",
+		[]string{"lesson"}, "WTC"); len(sim) != 1 {
+		t.Fatalf("case-differing project not folded together: got %d", len(sim))
+	}
+	if sim := FindSimilar([]*Note{existing}, "postgres connection pool exhaustion issue",
+		[]string{"lesson"}, "  wtc  "); len(sim) != 1 {
+		t.Fatalf("whitespace-differing project not folded together: got %d", len(sim))
+	}
+}
