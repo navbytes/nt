@@ -610,32 +610,34 @@ func (n *Note) Project() string {
 func (n *Note) Reserved() bool { return strings.HasPrefix(n.Rel, "__tasks__/") }
 
 // FindSimilar returns active, non-reserved notes that look like near-duplicates of
-// a note with the given title and tags — a guard against concurrent forks (two
-// agents independently recording the same decision). A candidate matches when it
-// has the identical slug, OR it shares a tag AND its title word-set overlaps
-// heavily (Jaccard ≥ 0.5) — UNLESS the pair is a "parallel sibling": each note
-// carries a distinguishing tag the other lacks that also appears in its own
-// title ("taskly repo map" @taskly vs "ratelim repo map" @ratelim). Multi-project
-// stores legitimately hold same-shaped notes per project; the project tag in the
-// title is how the pair self-identifies as distinct. This is a cheap heuristic,
-// not semantic dedup.
-func FindSimilar(notes []*Note, title string, tags []string) []*Note {
+// a note with the given title, tags and project — a guard against concurrent
+// forks (two agents independently recording the same decision). A candidate
+// matches when it has the identical slug, OR it shares a tag AND its title
+// word-set overlaps heavily (Jaccard ≥ 0.5) — UNLESS the pair is a "parallel
+// sibling": each note carries a distinguishing tag the other lacks that also
+// appears in its own title ("taskly repo map" @taskly vs "ratelim repo map"
+// @ratelim). Multi-project stores legitimately hold same-shaped notes per
+// project; the project tag in the title is how the pair self-identifies as
+// distinct. This is a cheap heuristic, not semantic dedup.
+//
+// project is folded into the shared-tag test alongside tags: `--project` stores
+// it as a separate `project:` frontmatter field, not a tag, but for a note whose
+// only tag is a class marker (lesson/rule/memory-core — stripped by
+// structuralTag below) the tag set would otherwise be empty and the Jaccard
+// branch could never fire, silently disabling the guard for the most common
+// kind of note. project isn't written to disk as a tag; it only joins the
+// in-memory set this function compares on.
+func FindSimilar(notes []*Note, title string, tags []string, project string) []*Note {
 	want := titleTokens(title)
 	slug := Slug(title)
-	tagset := map[string]bool{}
-	for _, t := range tags {
-		if structuralTag[t] {
-			continue // class markers (lesson/rule/memory-core) aren't a topical match
-		}
-		tagset[t] = true
-	}
+	tagset := similarityTags(tags, project)
 	var out []*Note
 	for _, n := range notes {
 		if n.Archived || n.SupersededBy != "" || n.Reserved() {
 			continue
 		}
 		sharedTag := false
-		for _, t := range n.Tags {
+		for t := range similarityTags(n.Tags, n.Project()) {
 			if tagset[t] {
 				sharedTag = true
 				break
@@ -645,21 +647,42 @@ func FindSimilar(notes []*Note, title string, tags []string) []*Note {
 			out = append(out, n)
 			continue
 		}
-		if sharedTag && jaccard(want, titleTokens(n.Title)) >= 0.5 && !parallelSiblings(title, tags, n) {
+		if sharedTag && jaccard(want, titleTokens(n.Title)) >= 0.5 && !parallelSiblings(title, tags, project, n) {
 			out = append(out, n)
 		}
 	}
 	return out
 }
 
-// parallelSiblings reports whether the (title, tags) pair and note n look like
-// the same kind of note for two DIFFERENT projects: each side has a tag the
-// other lacks, and that tag appears as a word in its own title but not the
-// other's. Such pairs share their title shape ("X repo map" / "Y repo map") yet
-// are deliberately distinct — refusing them as duplicates was the dedup guard's
-// worst failure mode in multi-project field use.
-func parallelSiblings(title string, tags []string, n *Note) bool {
+// similarityTags is the tag set FindSimilar/parallelSiblings compare on: a
+// note's ordinary tags plus its project (if any), with class-marker tags
+// (lesson/rule/memory-core) stripped since they'd otherwise make every note of
+// that class look topically related. project stands in for a tag here because
+// that's the role it plays for dedup purposes — "which topic/scope does this
+// note belong to" — even though it lives in a separate frontmatter field.
+func similarityTags(tags []string, project string) map[string]bool {
+	out := map[string]bool{}
+	for _, t := range tags {
+		if structuralTag[t] {
+			continue // class markers (lesson/rule/memory-core) aren't a topical match
+		}
+		out[t] = true
+	}
+	if project != "" {
+		out[project] = true
+	}
+	return out
+}
+
+// parallelSiblings reports whether the (title, tags, project) triple and note n
+// look like the same kind of note for two DIFFERENT projects: each side has a
+// tag (or project) the other lacks, and that word appears in its own title but
+// not the other's. Such pairs share their title shape ("X repo map" / "Y repo
+// map") yet are deliberately distinct — refusing them as duplicates was the
+// dedup guard's worst failure mode in multi-project field use.
+func parallelSiblings(title string, tags []string, project string, n *Note) bool {
 	aTokens, bTokens := titleTokens(title), titleTokens(n.Title)
+	aTags, bTags := tagsWithProject(tags, project), tagsWithProject(n.Tags, n.Project())
 	distinguishes := func(ownTags []string, otherTags []string, ownTokens, otherTokens map[string]bool) bool {
 		other := map[string]bool{}
 		for _, t := range otherTags {
@@ -673,7 +696,17 @@ func parallelSiblings(title string, tags []string, n *Note) bool {
 		}
 		return false
 	}
-	return distinguishes(tags, n.Tags, aTokens, bTokens) && distinguishes(n.Tags, tags, bTokens, aTokens)
+	return distinguishes(aTags, bTags, aTokens, bTokens) && distinguishes(bTags, aTags, bTokens, aTokens)
+}
+
+// tagsWithProject appends project to tags (as a plain string, not stripped of
+// structural tags — parallelSiblings works over the raw tag/word vocabulary),
+// leaving tags untouched when project is unset.
+func tagsWithProject(tags []string, project string) []string {
+	if project == "" {
+		return tags
+	}
+	return append(append([]string{}, tags...), project)
 }
 
 // TitleOverlap is the word-set Jaccard (0..1) of two titles, ignoring short and

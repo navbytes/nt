@@ -672,7 +672,7 @@ func cmdNote(args []string) int {
 	// Dedup-on-write guard: don't silently fork a decision a teammate already
 	// captured. Skipped when --force, or when --supersede is explicitly replacing.
 	if !*force && strings.TrimSpace(*supersede) == "" {
-		if sim := note.FindSimilar(note.Active(mustNotes(e)), title, tags); len(sim) > 0 {
+		if sim := note.FindSimilar(note.Active(mustNotes(e)), title, tags, *project); len(sim) > 0 {
 			fmt.Fprintf(os.Stderr, "note: a near-duplicate already exists — not creating. Did you mean to update it?\n")
 			for _, s := range sim {
 				fmt.Fprintf(os.Stderr, "  %s  %s  %s\n", shortID(s.ID), s.Rel, s.Title)

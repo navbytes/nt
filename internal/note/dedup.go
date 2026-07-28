@@ -29,7 +29,7 @@ func NearDupPairs(active []*Note) []Pair {
 			continue
 		}
 		if !containsStr(n.Tags, "distinct") {
-			if sim := FindSimilar(seen, n.Title, n.Tags); len(sim) > 0 {
+			if sim := FindSimilar(seen, n.Title, n.Tags, n.Project()); len(sim) > 0 {
 				for _, s := range sim {
 					if containsStr(s.Tags, "distinct") {
 						continue
