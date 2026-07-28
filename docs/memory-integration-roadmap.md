@@ -113,6 +113,27 @@ met, don't schedule otherwise):
   depending on an external service both cut against that. The cheap,
   philosophy-neutral first move (build only if curious) is extending
   `recall_precision_test.go` into a paraphrase corpus.
+  - **The corpus now exists** (`internal/recall/paraphrase_corpus_test.go`,
+    2026-07-28): 12 notes, 8 queries sharing no verbatim content word with
+    their target, an asserted HIT@1 floor, and a guard that a glossary note
+    never takes #1. It immediately found the precision floor returning
+    *nothing* for 3 of 8 paraphrased queries; softening it took HIT@1 from
+    5/8 to 8/8.
+  - **Length normalization was tried against it and does not work — do not
+    re-attempt without new evidence.** A multi-agent field test had reported
+    HIT@1 falling 65% → 41% purely as a store grew, and diagnosed the cause as
+    the scorer summing `base*idf` per matched concept with no BM25-style
+    length divisor. Implemented (dividing by `1-b + b*(dl/avgdl)` over the
+    combined strong+weak bag) and swept `b` across 0, 0.1, 0.2, 0.3, 0.4,
+    0.55, 0.75, 1.0: **every** non-zero `b` dropped the corpus from 8/8 to
+    7/8, and none changed a synthetic growth case at all. Reverted unshipped.
+    Caveat on the growth case: the distractors used to reproduce it turned out
+    to be adversarial by construction (one contained "the wait budget for
+    writers" against a query of "writers exceed the wait budget"), so it is a
+    planted near-duplicate rather than organic growth and must not be used to
+    tune the ranker. Reproducing the reported degradation honestly needs a
+    real store's notes, not synthesized ones — that, not the normalization
+    itself, is the actual blocker.
 - **14** — OpenCode `chat.message` + `tool.execute.before` proactive recall
   — parked on "a live OpenCode build matrix to test against," the same
   precondition item 1 needed before it could ship safely. Also lower-value
