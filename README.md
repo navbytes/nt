@@ -60,7 +60,7 @@ That's it — you're up. `nt help` lists every command; [more install options be
 `nt` is the place that memory lives. Because the store is plain text, an agent doesn't need a special database or a running service to remember — it just reads and writes files. Three ways to wire it up:
 
 - **PostToolUse hooks** — `nt hook` mirrors Claude Code's `TodoWrite` list into your store automatically (idempotent, tagged `src:claude`), and on a **failed Bash command** surfaces any matching recorded lesson back to Claude (block+reason). Wire both matchers once in `~/.claude/settings.json` — see [docs/claude-integration.md](docs/claude-integration.md).
-- **MCP server** — `nt mcp` exposes **18 typed tools** (`nt_index`, `nt_recall`, `nt_add`, `nt_note`, `nt_note_edit`, `nt_get`, `nt_status`, `nt_search`, `nt_update`, `nt_doctor`, `nt_distill`, …) with strict unknown-parameter rejection, over stdio. Register it with one command:
+- **MCP server** — `nt mcp` exposes **19 typed tools** (`nt_index`, `nt_recall`, `nt_add`, `nt_note`, `nt_note_edit`, `nt_get`, `nt_status`, `nt_search`, `nt_update`, `nt_doctor`, `nt_distill`, `nt_mindmap`, …) with strict unknown-parameter rejection, over stdio. Register it with one command:
   ```bash
   nt mcp install                    # add nt to Claude Code / Claude Desktop (absolute path, idempotent)
   nt mcp install --client opencode  # …or OpenCode (~/.config/opencode/opencode.json)
