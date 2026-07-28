@@ -50,9 +50,11 @@ type indexNote struct {
 //	nt index --json          # structured
 //	nt index --tag auth      # scope to a tag (AND, repeatable)
 //	nt index --folder ref    # scope to a folder
+//	nt index --project foo   # scope to a project (hard filter, unlike `recall --project`)
 func cmdIndex(args []string) int {
 	fs := flag.NewFlagSet("index", flag.ContinueOnError)
 	folder := fs.String("folder", "", `only notes under this folder, e.g. ref ("." = root notes)`)
+	project := fs.String("project", "", `only notes/tasks in this project — a hard filter on the note's "project:" frontmatter and a task's +project tag (unlike "recall --project", which only ranks, never excludes)`)
 	asJSON := fs.Bool("json", false, "machine-readable output")
 	noTasks := fs.Bool("no-tasks", false, "omit the active-task section")
 	all := fs.Bool("all", false, "full catalog: every note stub, no tiering (large stores tier by default)")
@@ -113,6 +115,9 @@ func cmdIndex(args []string) int {
 		if !match {
 			continue
 		}
+		if *project != "" && n.Project() != *project {
+			continue
+		}
 		if since != "" && n.ChangedDate() < since {
 			continue // "what's changed since T" — skip anything older
 		}
@@ -136,7 +141,7 @@ func cmdIndex(args []string) int {
 	// recent stubs in full, the long tail as per-folder counts. Any explicit
 	// scope (--all/--tag/--folder/--updated-since) means the caller is already
 	// narrowing — show every match, exactly as before.
-	scoped := *all || prefix != "" || len(tags) > 0 || since != ""
+	scoped := *all || prefix != "" || len(tags) > 0 || since != "" || *project != ""
 	tiers := note.Tiers{Recent: filtered}
 	if !scoped {
 		tiers = note.TierIndex(filtered, time.Now())
@@ -205,6 +210,9 @@ func cmdIndex(args []string) int {
 						keep = false // a tag scope matches @tag or +project — projects ARE the task-side project identity
 						break
 					}
+				}
+				if keep && *project != "" && !contains(t.Projects(), *project) {
+					keep = false
 				}
 				if !keep {
 					continue
@@ -374,8 +382,29 @@ func cmdIndex(args []string) int {
 			fmt.Printf("- [x] %s `%s`\n", strings.TrimSpace(t.Text), shortID(t.ID()))
 		}
 	}
-	if len(stubs) == 0 && len(active) == 0 && len(recent) == 0 {
-		fmt.Println("index is empty" + freshHint(e))
+	// The empty-state line must be honest about BOTH halves of the catalog —
+	// agents reading only this line, not the header comment, mistook a
+	// tasks-only "add your first task" nudge for proof the store had no
+	// notes at all. --no-tasks means the caller excluded tasks on purpose,
+	// so this stays silent on task counts rather than misreport a filter as
+	// the store's real state.
+	notesEmpty := len(stubs) == 0 && len(pinned) == 0
+	tasksEmpty := len(active) == 0 && len(blockedTasks) == 0 && len(recent) == 0
+	switch {
+	case *noTasks:
+		if notesEmpty {
+			fmt.Println("no notes — add one: nt note \"title\"")
+		}
+	case notesEmpty && tasksEmpty:
+		msg := "index is empty — 0 notes, 0 tasks"
+		if h := freshHint(e); h != "" {
+			msg += "\n  add a note:  nt note \"my first note\"" + h
+		}
+		fmt.Println(msg)
+	case notesEmpty:
+		fmt.Println("no notes — add one: nt note \"title\"")
+	case tasksEmpty:
+		fmt.Println("no active tasks — add one: nt add \"title\"")
 	}
 	return 0
 }
