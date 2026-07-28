@@ -34,7 +34,10 @@ type evalQuery struct {
 // docs/memory-integration-roadmap.md item 13. 0 means "the whole store",
 // whatever size that currently is. Override with NT_EVAL_SIZES (a
 // comma-separated int list) to reproduce a different curve.
-var publishedEvalSizes = []int{22, 40, 100, 160, 218, 0}
+// 0 (whole store) is last and deliberately unpaired with a literal full size:
+// the scored store is ~195 after reserved notes are dropped, so listing 218
+// here would clamp to the same corpus and print a duplicate row.
+var publishedEvalSizes = []int{22, 40, 100, 160, 0}
 
 // evalSizes returns publishedEvalSizes, or the sizes from NT_EVAL_SIZES when
 // set.
