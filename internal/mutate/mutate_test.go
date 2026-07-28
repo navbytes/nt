@@ -207,6 +207,13 @@ func TestUndoRefusesWhenChangedUnderneath(t *testing.T) {
 // and confirms none are lost — the lock + re-read-before-write contract holds.
 func TestConcurrentAddsNoLostUpdate(t *testing.T) {
 	e := newEngine(t)
+	// Every Apply serializes a full acquire-read-mutate-write cycle, so the
+	// last of n writers waits behind n-1 predecessors. Against the 2s default
+	// that is a wall-clock race with no margin, and it loses on a loaded CI
+	// runner — the store reports "busy" and the test fails for a reason that
+	// has nothing to do with what it asserts. Give the queue room; the
+	// lost-update check below is the actual assertion.
+	e.LockTimeout = 60 * time.Second
 	const n = 25
 	done := make(chan error, n)
 	for i := 0; i < n; i++ {

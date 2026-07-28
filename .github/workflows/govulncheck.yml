@@ -23,3 +23,10 @@ jobs:
         run: go install golang.org/x/vuln/cmd/govulncheck@latest
       - name: Run govulncheck
         run: govulncheck ./...
+      # desktop/ is a separate module and `./...` from the root does not reach
+      # it (`go list ./...` returns zero desktop packages there). Scanned
+      # without Wails build tags, same as ci.yml's compile step — that covers
+      # the dependency graph, which is what this check is about.
+      - name: Run govulncheck (desktop module)
+        working-directory: desktop
+        run: govulncheck ./...
