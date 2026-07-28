@@ -20,8 +20,9 @@ A clean result means "go to pass 2", **not** "stop".
 
 ## 1.1 List the candidates
 
-Call `nt_distill` (read-only — it never merges anything). Empty result means the
-note corpus is clean; say so and go straight to pass 2.
+Call `nt_distill` (read-only — it never merges anything). It catches the
+title-level duplicates cheaply; an empty result does **not** mean the corpus is
+clean — see §1.3 for what it structurally cannot see.
 
 ## 1.2 Review each pair
 
@@ -34,7 +35,22 @@ For each pair, `nt_get` both notes (don't guess from the stub). Decide:
   never merge these.
 - **Unclear** — say so and ask, don't guess.
 
-## 1.3 Hold the proposals
+## 1.3 Sweep for what the title detector can't see
+
+`nt_distill` pairs notes by TITLE overlap, and only when they also share a
+**non-structural** tag. A note filed with `--kind lesson` carries just the
+`lesson` tag — which is structural, and excluded on purpose so that every lesson
+isn't treated as related to every other one. The consequence: **two lessons
+about the same thing, written by different sessions, are invisible to it.** An
+empty pass-1 result is not proof the corpus is clean.
+
+So don't stop there. `nt_index` with `folder:"lessons"` returns stubs (id, title,
+description — no bodies, so it's cheap) — read the descriptions for the semantic
+overlap the tokens miss. Do the same for `decisions/` and `ref/` if they've
+grown. Propose any real overlap exactly like a §1.2 pair, and `nt_get` both
+notes before proposing — never merge on the strength of a stub.
+
+## 1.4 Hold the proposals
 
 Don't write yet — pass 2's proposals join the same approval list (§3).
 
@@ -72,7 +88,9 @@ what compiles into `AGENTS.md`/`CLAUDE.md`.)
   unrelated request.
 
 Be conservative in the other direction too: a short, genuinely always-on rule
-earns its tokens. Don't propose pruning something just to have a finding.
+earns its tokens. Don't propose pruning something just to have a finding — and
+if `rules/` and `memory/` are empty or tiny, say so and stop. A small
+always-loaded block is a healthy store, not a problem to solve.
 
 ---
 
