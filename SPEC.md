@@ -84,10 +84,9 @@ text, forever readable, and directly writable by an AI agent without an integrat
 ├── web.pid / web.log         # a backgrounded `nt web --detach` server + its output (optional)
 ├── tasks.txt.lock            # advisory lock file (§6.4)
 ├── .trash/                   # gc + rm destination (recoverable)
-├── notes/
-│   ├── jwt-token-lifetime.md
-│   └── 2026-06-05-standup.md
-└── nt.log                    # JSON logs, rotated at 10MB
+└── notes/
+    ├── jwt-token-lifetime.md
+    └── 2026-06-05-standup.md
 ```
 
 The directory is created on first run. `tasks.txt` and `notes/` are independent and can be
@@ -403,10 +402,10 @@ nt index [--all] [--tag t] [--folder f] [--since 14d] [--json]   # tiered stub c
 nt log [--since 2026-06-01] [--days 7] [--source claude] [--json]   # completed tasks, newest first
 nt done <id|task:N>                  # mark done  (do)
 nt update <id|task:N> --status doing --pri med --due +3d     # (up)
-nt search "race condition" [--type note|task] [--limit 8] [--full]   # ranked stubs (q)
+nt search "race condition" [--type note|task] [--limit 8]   # ranked stubs (q)
 nt recall "adding a cache layer" [--lessons-only] [--project p]   # lessons ⚑ first, paraphrase-aware, precision floor (empty = nothing relevant), soft same-project boost (NT_WORKSTREAM default; 'none' disables)
 nt note "gotcha" --kind lesson --description "trigger"   # taxonomy: lesson|decision|ref|rule|memory → canonical tag + folder (--lesson = --kind lesson)
-nt show <id|slug|title> [--section "Heading"]   # one note's full body, on demand
+nt show <id|slug|title>   # one note's full body, on demand
 nt links <id|task:N> [--json]        # forward links + backlinks for an item (§5.1)
 nt archive                           # move done tasks → done.txt
 nt gc [--older-than 30d] [--yes]     # sweep superseded stubs + stranded __tasks__ notes → .trash/ (dry-run default)
@@ -446,8 +445,9 @@ nt show token-refresh-race               # then fetch a specific note's body on 
 - **Stable, machine-readable contract:** appending a todo.txt line to `tasks.txt`, or calling
   `nt add`, with `--json` read back out via `nt index`. No MCP server, no schema, no auth.
 - **`src:`** distinguishes AI-created items; the TUI badges them.
-- **Claude Code polish (Phase 4):** a PostToolUse hook mirroring `TaskCreate`/`TaskUpdate`
-  into `nt add`/`nt update`, and a `/nt` skill — built on the Phase 1 loop, not inventing it.
+- **Claude Code polish (Phase 4):** PostToolUse hooks mirroring `TodoWrite` into `nt
+  add`/`nt update` and matching failed `Bash` commands against recorded lessons, plus the
+  `/nt`, `/nt-learn` and `/nt-distill` skills — built on the Phase 1 loop, not inventing it.
 
 **Capture hygiene.** `nt note` refuses a near-duplicate of an active note (echoing repair
 commands: `nt edit --append`, `--supersede`; `--force` overrides; parallel-project siblings
@@ -514,9 +514,7 @@ findings cross-pollinate. A *workstream* is that isolation axis, distinct from
 ## 10. Onboarding & install
 
 - **First run** creates `$NT_DIR`, seeds one example task + note, and prints the three
-  commands that matter (`nt add`, `nt ready`, `nt index`). No config, no account.
-- **`tasks.txt` header**: a leading blank-safe hint line documenting the `key:value`
-  conventions so hand-editors aren't lost (kept compatible — not a todo.txt comment).
+  commands that matter (`nt add`, `nt`, `nt index`). No config, no account.
 - **Install** should offer a plain release binary / `brew` tap in addition to any
   build-from-source path; a `gh api | base64 | bash` one-liner is an adoption blocker.
 
@@ -528,12 +526,16 @@ findings cross-pollinate. A *workstream* is that isolation axis, distinct from
 |----------|-------------|---------|
 | `NT_DIR` | Store directory | `~/.local/share/nt` |
 | `EDITOR` | Editor for `nt edit` / body editing | `vi` |
-| `NT_ICONS` | `nerd` for Nerd Font icons | standard Unicode |
-| `NT_GIT` | `1` to auto-commit each change (multi-machine history) | off |
 | `NT_WORKSTREAM` | Workstream identity for the MCP server — isolates parallel agents' tasks (`auto` = derive from git branch / cwd) | unset (no isolation) |
+| `NT_THEME` | TUI colour theme | auto |
+| `NT_MOUSE` | `0` disables TUI mouse capture | on |
+| `NT_ASCII` | `1` forces ASCII glyphs instead of Unicode | off |
+| `XDG_DATA_HOME` | Consulted before `~/.local/share` when `NT_DIR` is unset | unset |
+
+Optional `$NT_DIR/config.toml` sets the same knobs from a file (§13).
 
 Everything is plain text under `$NT_DIR`. Back it up or `git init` it. For multi-machine use,
-prefer `NT_GIT=1` over file-syncing the store (§6.4).
+prefer the git-native pattern (`nt git-init` + `nt sync`) over file-syncing the store (§6.4).
 
 ---
 
@@ -627,7 +629,7 @@ the identical UI in a native window (see `desktop/`, ADR 0001).
 
 ## 13. Tech stack
 
-- **Go 1.24+**, single static binary, no CGo.
+- **Go 1.25+**, single static binary, no CGo.
 - [Bubble Tea](https://github.com/charmbracelet/bubbletea) + [Lipgloss](https://github.com/charmbracelet/lipgloss) — TUI.
 - [Glamour](https://github.com/charmbracelet/glamour) — markdown rendering.
 - [fsnotify](https://github.com/fsnotify/fsnotify) — directory-watch refresh.
@@ -666,9 +668,9 @@ the identical UI in a native window (see `desktop/`, ADR 0001).
   todo→ULID map, status-mapped, `src:claude`); the bundled `/nt` skill teaches Claude to
   capture and `nt index`. Setup: docs/claude-integration.md.
 - `nt mcp` runs a stdio **MCP server** (newline-delimited JSON-RPC 2.0, no SDK dep) exposing
-  typed tools (**18**: nt_status, nt_view, nt_add, nt_update, nt_note, nt_note_edit,
+  typed tools (**19**: nt_status, nt_view, nt_add, nt_update, nt_note, nt_note_edit,
   nt_relink, nt_index, nt_get, nt_search, nt_recall, nt_links, nt_mv, nt_tag, nt_archive,
-  nt_rm, nt_doctor, nt_distill) with strict unknown-param rejection, for MCP clients. A thin driving adapter over
+  nt_rm, nt_doctor, nt_distill, nt_mindmap) with strict unknown-param rejection, for MCP clients. A thin driving adapter over
   the same engine/domain as the CLI and TUI; defaults `source` to `claude` and refuses
   positional handles. nt_note_edit fixes an existing note in place (append/body/
   old_string+new_string/description) — the MCP counterpart of `nt edit`, so an MCP-only

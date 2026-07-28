@@ -40,9 +40,20 @@ func resolveNote(notes []*note.Note, handle string) (*note.Note, error) {
 func cmdShow(args []string) int {
 	flags, positional := splitArgs(args, map[string]bool{"json": true})
 	asJSON := false
+	// Reject anything that isn't --json instead of dropping it. Every other
+	// command parses through a FlagSet, which refuses unknown flags; show
+	// hand-parses, so it used to swallow them and exit 0 — `nt show <note>
+	// --section "Heading"` printed the whole note and reported success, which
+	// reads as "the flag worked". (--section and --full exist on the MCP tools,
+	// not on the CLI, so the mistake is an easy one to make.)
 	for _, f := range flags {
-		if f == "--json" || f == "-json" {
+		switch f {
+		case "--json", "-json":
 			asJSON = true
+		default:
+			if strings.HasPrefix(f, "-") {
+				return usageErr(fmt.Errorf("show: unknown flag %q (show takes a handle and --json)", f))
+			}
 		}
 	}
 	if len(positional) == 0 {
