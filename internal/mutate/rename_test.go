@@ -82,3 +82,55 @@ func TestPureMoveNoRewrite(t *testing.T) {
 		t.Fatal("file was not moved into the subfolder")
 	}
 }
+
+// TestTrashNoteNeverClobbers is the regression guard for silent data loss:
+// TrashNote used to os.Rename straight onto .trash/<flattened rel>, and
+// os.Rename overwrites. Deleting the same rel twice therefore destroyed the
+// first copy — and .trash/ is the only recovery path, since TrashNote is not a
+// journaled undo transaction.
+func TestTrashNoteNeverClobbers(t *testing.T) {
+	e := newEngine(t)
+	trash := filepath.Join(e.S.Dir, ".trash")
+
+	write := func(rel, body string) *note.Note {
+		t.Helper()
+		p := filepath.Join(e.S.NotesDir(), filepath.FromSlash(rel))
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return &note.Note{Path: p, Rel: rel}
+	}
+
+	// Same rel, trashed twice: both copies must survive.
+	if err := e.TrashNote(write("ref/retry-policy.md", "VERSION ONE")); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.TrashNote(write("ref/retry-policy.md", "VERSION TWO")); err != nil {
+		t.Fatal(err)
+	}
+	// Distinct notes that FLATTEN to the same trash name must also both survive.
+	if err := e.TrashNote(write("ref_retry-policy.md", "FLATTENED")); err != nil {
+		t.Fatal(err)
+	}
+
+	found := map[string]bool{}
+	entries, err := os.ReadDir(trash)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, de := range entries {
+		b, err := os.ReadFile(filepath.Join(trash, de.Name()))
+		if err != nil {
+			t.Fatal(err)
+		}
+		found[string(b)] = true
+	}
+	for _, want := range []string{"VERSION ONE", "VERSION TWO", "FLATTENED"} {
+		if !found[want] {
+			t.Errorf("trash lost %q — .trash/ holds %d file(s): %v", want, len(entries), found)
+		}
+	}
+}
