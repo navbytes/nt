@@ -50,7 +50,7 @@ func (e *Engine) Redo(ws string, force bool) (undo.Txn, bool, error) {
 // the forward image and its inverse, so both operations apply the same way —
 // redo just insists the pending entry IS a redo entry, and undo that it isn't.
 func (e *Engine) applyReversal(ws string, force, wantRedo bool) (undo.Txn, bool, error) {
-	h, err := lock.Acquire(e.S.LockFile(), lock.DefaultTimeout)
+	h, err := lock.Acquire(e.S.LockFile(), e.lockTimeout())
 	if err != nil {
 		return undo.Txn{}, false, err
 	}
