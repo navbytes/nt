@@ -576,6 +576,7 @@ func cmdNote(args []string) int {
 	folder := fs.String("folder", "", "subfolder under notes/ (e.g. work or work/auth)")
 	project := fs.String("project", "", "project this note belongs to (stored as project: frontmatter; 'nt recall --project' matches it)")
 	desc := fs.String("description", "", "one-line summary shown in 'nt index'")
+	descFile := fs.String("description-file", "", "read the description from a file ('-' = stdin); immune to shell quoting, same as --body-file")
 	supersede := fs.String("supersede", "", "mark this note as replacing an existing one (its handle) — the old note retires from active views")
 	force := fs.Bool("force", false, "create even if a near-duplicate note already exists")
 	lesson := fs.Bool("lesson", false, "record a durable lesson/gotcha: tags it 'lesson' and files it under lessons/ so 'nt recall' surfaces it before the mistake recurs")
@@ -596,6 +597,14 @@ func cmdNote(args []string) int {
 	bodyVal, bodyErr := resolveBody(*body, *bodyFile)
 	if bodyErr != nil {
 		return usageErr(fmt.Errorf("note: %w", bodyErr))
+	}
+	// --description carries the same shell-quoting hazard --body-file exists for:
+	// backticks in it are expanded by the shell before nt sees them, silently
+	// truncating the description while the command still exits 0. The skill's
+	// escaping warning was scoped to bodies, so this had no escape hatch.
+	descVal, descErr := resolveBody(*desc, *descFile)
+	if descErr != nil {
+		return usageErr(fmt.Errorf("note: %s", strings.ReplaceAll(descErr.Error(), "--body", "--description")))
 	}
 	// --lesson is shorthand for the lesson convention: tag `lesson` + folder
 	// lessons/ (unless an explicit --folder overrides). Keeps captured mistakes a
@@ -682,7 +691,7 @@ func cmdNote(args []string) int {
 			return code
 		}
 	}
-	if d := strings.TrimSpace(*desc); d != "" { // --description → a modeled frontmatter key
+	if d := strings.TrimSpace(descVal); d != "" { // --description → a modeled frontmatter key
 		fields = append(fields, "description="+d)
 	}
 	if p := strings.TrimSpace(*project); p != "" { // --project → project: frontmatter (recall's project boost matches it)

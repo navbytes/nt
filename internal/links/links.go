@@ -168,13 +168,85 @@ var linkRe = regexp.MustCompile(`\[\[([^\]]+)\]\]`)
 // adapters that need a note's outbound links, e.g. the MCP nt_links tool).
 func Wikilinks(s string) []string { return wikilinks(s) }
 
-// wikilinks returns the raw inner strings of every [[…]] in s.
+// wikilinks returns the raw inner strings of every [[…]] in s, ignoring any
+// inside a fenced code block or an inline code span.
+//
+// Markdown's own code convention is the escape hatch nt otherwise lacks:
+// writing about nt's link syntax INSIDE nt used to mint real dangling links
+// from the examples, and `nt doctor` then reported your documentation as
+// broken, permanently, with no way to quote a [[…]] verbatim.
+//
+// Deliberately not applied to RewriteLine/StripLine: a rename that skipped
+// code blocks would leave a stale name in a printed example, and rewriting one
+// is harmless.
 func wikilinks(s string) []string {
 	var out []string
-	for _, m := range linkRe.FindAllStringSubmatch(s, -1) {
+	for _, m := range linkRe.FindAllStringSubmatch(stripCode(s), -1) {
 		out = append(out, m[1])
 	}
 	return out
+}
+
+// stripCode removes fenced code blocks and inline code spans, leaving the
+// surrounding prose (and the line structure) intact.
+func stripCode(s string) string {
+	if !strings.Contains(s, "`") && !strings.Contains(s, "~~~") {
+		return s
+	}
+	var b strings.Builder
+	fence := ""
+	for _, line := range strings.Split(s, "\n") {
+		t := strings.TrimSpace(line)
+		if fence != "" {
+			if strings.HasPrefix(t, fence) {
+				fence = ""
+			}
+			b.WriteByte('\n')
+			continue
+		}
+		if strings.HasPrefix(t, "```") {
+			fence = "```"
+			b.WriteByte('\n')
+			continue
+		}
+		if strings.HasPrefix(t, "~~~") {
+			fence = "~~~"
+			b.WriteByte('\n')
+			continue
+		}
+		b.WriteString(stripInlineCode(line))
+		b.WriteByte('\n')
+	}
+	return b.String()
+}
+
+// stripInlineCode drops `code` spans from one line, matching a run of backticks
+// with an equal run (CommonMark's rule), so “[[x]]“ is quoted too. An unclosed
+// run means the rest of the line is not code.
+func stripInlineCode(line string) string {
+	if !strings.Contains(line, "`") {
+		return line
+	}
+	var b strings.Builder
+	for i := 0; i < len(line); {
+		if line[i] != '`' {
+			b.WriteByte(line[i])
+			i++
+			continue
+		}
+		j := i
+		for j < len(line) && line[j] == '`' {
+			j++
+		}
+		run := line[i:j]
+		k := strings.Index(line[j:], run)
+		if k < 0 {
+			b.WriteString(line[i:])
+			break
+		}
+		i = j + k + len(run)
+	}
+	return b.String()
 }
 
 // RewriteLine rewrites every [[…]] in s that resolves (by path-suffix) to the
