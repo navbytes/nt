@@ -39,6 +39,11 @@ func (e *Engine) RenameNote(src *note.Note, all []*note.Note, dest string) (newR
 	if !strings.Contains(newRel, "/") { // bare name → keep the note's folder
 		newRel = filepath.ToSlash(filepath.Join(filepath.Dir(oldRel), newRel))
 	}
+	// Slug each segment, the way `nt note` does when it derives a filename from
+	// a title. Without this, `nt mv <note> "ref/My Long Name"` wrote a file with
+	// literal spaces in it — the only file in the store nt hadn't slugged, and
+	// inconsistent with every other path it creates.
+	newRel = slugRel(newRel)
 	newBase := base(newRel)
 	if newBase == "" {
 		return "", 0, fmt.Errorf("rename: invalid destination %q", dest)
@@ -204,4 +209,18 @@ func trashDest(trash, rel string) (string, error) {
 
 func base(rel string) string {
 	return strings.TrimSuffix(filepath.Base(rel), ".md")
+}
+
+// slugRel slugs every segment of a notes-relative path, preserving the folder
+// structure and the .md suffix, so a destination typed in human form lands on
+// the same shape of filename `nt note` would have produced from a title.
+func slugRel(rel string) string {
+	stem := strings.TrimSuffix(rel, ".md")
+	parts := strings.Split(stem, "/")
+	for i, p := range parts {
+		if s := note.Slug(p); s != "" {
+			parts[i] = s
+		}
+	}
+	return strings.Join(parts, "/") + ".md"
 }
