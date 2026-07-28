@@ -111,6 +111,32 @@ relevant, so it's cheap to run every time.
 Install it by keeping `.claude/skills/nt/` in your project, or copy it to
 `~/.claude/skills/nt/` to make it available everywhere.
 
+## 2b. The session loop — `/nt-learn` and `/nt-distill`
+
+Two more bundled skills close the memory loop that Pi and OpenCode already
+ship as `/learn` and `/distill`. They carry the same prompt bodies; only the
+skill name differs, because `~/.claude/skills/` is a global namespace shared
+with every other tool's skills and bare `learn`/`distill` are too generic to
+claim there.
+
+- **[`/nt-learn`](../.claude/skills/nt-learn/SKILL.md)** — harvest what should
+  outlive the session: lessons, rules, core memory, notes, follow-up tasks. It
+  dedups against the store first, proposes a numbered list, and writes nothing
+  until you approve.
+- **[`/nt-distill`](../.claude/skills/nt-distill/SKILL.md)** — the hygiene
+  counterpart, in two passes. Pass 1 merges near-duplicate notes (via the
+  read-only `nt_distill` tool). Pass 2 prunes the **always-loaded block** —
+  `rules/` and `memory/` — looking for subsumption, contradictions, dead
+  triggers, and rules that turned out not to be always-relevant. Both passes
+  land in one approval list; nothing is merged, demoted, or retired silently.
+  `/nt-distill rules` runs pass 2 alone.
+
+Pass 2 matters most on Claude Code. Pi and OpenCode inject the rules block live
+and nudge you when it exceeds `NT_INJECT_MAX`; here the block reaches Claude
+through `CLAUDE.md` (see [Standing rules](#standing-rules-in-claudemd)), which
+has no size warning at all — a prompt is the only signal you get. After pruning,
+re-run `nt export --tag rule` or the change never reaches `CLAUDE.md`.
+
 ---
 
 ## 3. Typed tools — the MCP server

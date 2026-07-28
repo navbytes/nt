@@ -113,11 +113,17 @@ store, and presents a numbered list for approval **before writing**. Items heade
 for the always-injected layer are flagged with their standing cost. The approval
 gate keeps the injected core small.
 
-**4b. `/distill` command (`commands/distill.md`)** — the batch counterpart of
-the write-time near-duplicate guard: lists every near-duplicate note pair via
-`nt_distill` (read-only), then walks each pair to approval before merging
-(`nt_note_edit` + `nt_archive superseded_by`) or tagging a deliberate fork
-`distinct`. Nothing merges without approval.
+**4b. `/distill` command (`commands/distill.md`)** — store consolidation in two
+passes. **Pass 1** is the batch counterpart of the write-time near-duplicate
+guard: lists every near-duplicate note pair via `nt_distill` (read-only), then
+walks each pair to approval before merging (`nt_note_edit` + `nt_archive
+superseded_by`) or tagging a deliberate fork `distinct`. **Pass 2** reviews the
+always-injected `rules/` + `memory/` block — the part billed on every request —
+for subsumption, contradictions, dead triggers, and rules that turned out not to
+be always-relevant; the fix for the last is a demotion to a lesson (still found
+by `nt_recall`, no longer injected), not a deletion. Both passes land in one
+approval list and nothing is written without approval. `/distill rules` runs
+pass 2 alone.
 
 **5. Skill (`skills/nt/SKILL.md`)** — the recall-first / capture-the-why loop and
 folder+tag conventions, loaded on demand via OpenCode's `skill` tool.
