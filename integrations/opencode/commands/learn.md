@@ -41,10 +41,11 @@ Show a numbered list. Per item: bucket, proposed **title**, one-line
 **description** (lessons in trigger-form "when X, do Y — not Z"), and target
 folder+tag (`lessons/`+`lesson`, `rules/`+`rule`, `memory/`+`memory-core`,
 `decisions/`/`ref/` for notes). Flag `rule`/`memory-core` items ⚠
-*always-in-context — costs tokens on every future request*. (The reverse pass —
-pruning rules that stopped earning that cost — is `/distill rules`.) Then ask which
-to save (all, numbers, edits, or none) and **wait**. Save nothing without
-approval.
+*always-in-context — costs tokens on every future request*. For lessons, **add a
+`project` or topical tag** — the `lesson` tag alone won't prevent near-duplicates.
+(The reverse pass — pruning rules that stopped earning that cost — is `/distill
+rules`.) Then ask which to save (all, numbers, edits, or none) and **wait**. Save
+nothing without approval.
 
 ## 4. Write the approved items
 

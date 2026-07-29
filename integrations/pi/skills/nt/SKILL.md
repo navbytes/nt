@@ -33,11 +33,13 @@ relevant. (Dumping every note body wastes context and *degrades* reasoning.)
 
 - `nt_recall` — pass plain-words `context` of what you're about to do; get the
   most relevant notes back, **lessons/gotchas first**, even when your wording
-  differs (it stems + expands synonyms, unlike `nt_search`'s exact match). A
-  `lesson:true` result is a past mistake — `nt_get` it and heed it before coding.
-  Call it at task start, not just when stuck. Your workstream's project gets a
-  soft boost (`project:"none"` disables); an empty result means nothing recorded
-  is on-topic — proceed.
+  differs (it stems + expands synonyms, unlike `nt_search`'s exact match). Each
+  result shows a **confidence tier** (`strong`/`medium`/`weak`) and concept
+  coverage — **read the tier, not the raw score** (which is query-dependent, not
+  comparable across queries). A `lesson:true` result is a past mistake — `nt_get`
+  it and heed it before coding. Call it at task start, not just when stuck. Your
+  workstream's project gets a soft boost (`project:"none"` disables); an empty
+  result means nothing recorded is on-topic — proceed.
 
 **Specifics, on demand:**
 
@@ -67,7 +69,7 @@ injects every session — keep them small and high-signal:
 | **Rule** (stable directive: "always run gofmt", style/process) | `rules/` | `rule` | Every session. Billed every turn — keep terse. |
 | **Core memory** (small evolving fact: a preference, a key convention) | `memory/` | `memory-core` | The agent should *always* know it. A handful, not hundreds. |
 | **Knowledge base** (findings, decisions, reference) | `ref/`, `decisions/` | topical, e.g. `auth` | Looked up on demand (`nt_index` → `nt_search`/`nt_get`) — **not** injected, so size is free. |
-| **Lesson** (a mistake/footgun/dead-end not to repeat) | `lessons/` | `lesson` | Surfaced by `nt_recall` at task start — **not** injected, so free until relevant. Capture with `nt_note kind:"lesson"` (CLI `nt note … --lesson`). |
+| **Lesson** (a mistake/footgun/dead-end not to repeat) | `lessons/` | `lesson` | Surfaced by `nt_recall` at task start — **not** injected, so free until relevant. Capture with `nt_note kind:"lesson"` (CLI `nt note … --lesson`). **Always add a `project` or topical tag** — the `lesson` tag alone won't prevent duplicates. |
 
 So: durable directive → `nt_note kind:"rule"`; recorded mistake → `kind:"lesson"`
 (trigger in the description: "when X, do Y — not Z"); decisions/reference →
