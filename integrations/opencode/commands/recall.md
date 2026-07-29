@@ -12,7 +12,9 @@ ONLY where told; everything else stays as one-line stubs, `nt_get`-able on deman
 
 1. `nt_recall` with the topic as plain words. **Lessons first**: for every
    `lesson:true` result, `nt_get` the full body (lessons are short and they're
-   the payload) and heed it.
+   the payload) and heed it. Check each result's **confidence tier**
+   (`strong`/`medium`/`weak`) — the tier matters, not the raw score (which is
+   query-dependent).
 2. `nt_search` the topic's key terms (and obvious synonyms) for related
    decisions/reference notes. Keep them as stubs; `nt_get` at most the **2** that
    look genuinely load-bearing.
