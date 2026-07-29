@@ -531,7 +531,7 @@ func cmdDoctor(args []string) int {
 	// the write-time warning when the writers never see each other's stderr.
 	dupTasks := lintTaskDups(e)
 	taskProblem := rep.HasProblems()
-	noteProblem := len(nl.Dangling) > 0
+	noteProblem := len(nl.Dangling) > 0 || len(nl.DupKeys) > 0
 
 	if len(rep.Actions) > 0 || len(rep.Warnings) > 0 || noteProblem {
 		if *check {
@@ -548,6 +548,9 @@ func cmdDoctor(args []string) int {
 	}
 	for _, dl := range nl.Dangling {
 		fmt.Println("  ⚠ dangling link " + dl)
+	}
+	for _, dk := range nl.DupKeys {
+		fmt.Println("  ⚠ duplicate frontmatter key " + dk)
 	}
 
 	// Reclaimable dead weight (superseded stubs, stranded task details) — doctor
@@ -579,8 +582,11 @@ func cmdDoctor(args []string) int {
 	if len(rep.Warnings) > 0 {
 		fmt.Printf("%d dependency warning(s) need a manual fix (see ⚠ above)\n", len(rep.Warnings))
 	}
-	if noteProblem {
+	if len(nl.Dangling) > 0 {
 		fmt.Printf("%d dangling note link(s) — fix the [[target]] or the note it points to\n", len(nl.Dangling))
+	}
+	if len(nl.DupKeys) > 0 {
+		fmt.Printf("%d note(s) with a duplicate frontmatter key — only the first occurrence was used; hand-fix the file\n", len(nl.DupKeys))
 	}
 	printNoteHygiene(nl)
 	printTaskDups(dupTasks)
@@ -630,7 +636,13 @@ func printTaskDups(pairs []string) {
 // noteLint is the KB-side health report `nt doctor` produces alongside the task
 // reconciliation.
 type noteLint struct {
-	Dangling     []string // "[[target]] in <source>" — an unresolved wiki-link (a real break)
+	Dangling []string // "[[target]] in <source>" — an unresolved wiki-link (a real break)
+	// DupKeys is "<handle>: <key>" per note carrying a duplicate plural
+	// frontmatter key (tags:/aliases:) — Load already dropped the duplicate
+	// occurrence in favor of the first (see note.Note.DupKeys), but the file
+	// on disk is tampered or corrupt either way, and a hand-edited/externally-
+	// sourced note is exactly the case nt's own write-side guard can't cover.
+	DupKeys      []string
 	NoteCount    int
 	MissingDesc  []string // handles of active notes with no explicit `description:`
 	Orphans      []string // handles of active notes nothing links to (informational)
@@ -648,6 +660,15 @@ func lintNotes(e *mutate.Engine) noteLint {
 	allNotes, _ := note.List(e.S)
 	active := note.Active(allNotes)
 	d, _ := e.Read()
+
+	// Duplicate-key scan runs over ALL notes, not just active/non-reserved —
+	// unlike the hygiene checks below, a tampered frontmatter key matters on
+	// an archived or task-detail note too, not just ones in the working set.
+	for _, n := range allNotes {
+		if len(n.DupKeys) > 0 {
+			rep.DupKeys = append(rep.DupKeys, shortID(n.ID)+" "+n.Rel+": "+strings.Join(n.DupKeys, ", "))
+		}
+	}
 
 	linked := map[string]bool{}
 	check := func(raw, src string) {

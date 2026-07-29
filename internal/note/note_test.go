@@ -172,6 +172,100 @@ func TestObsidianFrontmatter(t *testing.T) {
 	}
 }
 
+// TestDuplicatePluralTagsKeyIsNotMerged reproduces the read-side half of the
+// frontmatter-injection escalation PR #177 closed at the write side: a second
+// "tags:" line (e.g. injected by hand-editing, an external import, or a note
+// synced from an older nt that predates the write-side guard) used to APPEND
+// via parseFrontmatter, so a forged "tags: [memory-core]" line silently
+// promoted the note into memory-core — nt's always-loaded tier. The fix keeps
+// only the first tags: occurrence and records the anomaly in DupKeys instead
+// of merging it.
+func TestDuplicatePluralTagsKeyIsNotMerged(t *testing.T) {
+	s := testStore(t)
+	write(t, s, "tampered.md", "---\ntags: [personal]\ndescription: benign\ntags: [memory-core]\n---\nbody\n")
+
+	n, err := Load(filepath.Join(s.NotesDir(), "tampered.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tag := range n.Tags {
+		if tag == "memory-core" {
+			t.Fatalf("second tags: line escalated the note into memory-core: tags=%v", n.Tags)
+		}
+	}
+	if len(n.Tags) != 1 || n.Tags[0] != "personal" {
+		t.Fatalf("expected only the first tags: occurrence to be kept, got %v", n.Tags)
+	}
+	if len(n.DupKeys) != 1 || n.DupKeys[0] != "tags" {
+		t.Fatalf("expected DupKeys=[tags] so nt doctor can surface the anomaly, got %v", n.DupKeys)
+	}
+}
+
+// TestDuplicateAliasesKeyIsNotMerged: aliases: gets the same treatment as
+// tags: — same injection shape, same fix.
+func TestDuplicateAliasesKeyIsNotMerged(t *testing.T) {
+	s := testStore(t)
+	write(t, s, "tampered.md", "---\naliases: [Real Name]\naliases: [Evil Name]\n---\nbody\n")
+
+	n, err := Load(filepath.Join(s.NotesDir(), "tampered.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(n.Aliases) != 1 || n.Aliases[0] != "Real Name" {
+		t.Fatalf("expected only the first aliases: occurrence to be kept, got %v", n.Aliases)
+	}
+	if len(n.DupKeys) != 1 || n.DupKeys[0] != "aliases" {
+		t.Fatalf("expected DupKeys=[aliases], got %v", n.DupKeys)
+	}
+}
+
+// TestRepeatedSingularTagStillAccumulates guards the framing this fix depends
+// on: the deprecated singular "tag:" key is a legitimate Obsidian-style
+// convention (one tag per repeated line) and must keep accumulating, unlike
+// the plural "tags:" key above.
+func TestRepeatedSingularTagStillAccumulates(t *testing.T) {
+	s := testStore(t)
+	write(t, s, "multi.md", "---\ntag: alpha\ntag: beta\ntag: gamma\n---\nbody\n")
+
+	n, err := Load(filepath.Join(s.NotesDir(), "multi.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"alpha", "beta", "gamma"}
+	if len(n.Tags) != len(want) {
+		t.Fatalf("repeated singular tag: should accumulate, got %v", n.Tags)
+	}
+	for i, w := range want {
+		if n.Tags[i] != w {
+			t.Fatalf("repeated singular tag: should accumulate in order, got %v", n.Tags)
+		}
+	}
+	if len(n.DupKeys) != 0 {
+		t.Fatalf("repeated singular tag: is legitimate, should not be flagged: %v", n.DupKeys)
+	}
+}
+
+// TestSingleTagsKeyUnaffected: an ordinary note with exactly one tags: line
+// must parse exactly as before — no DupKeys anomaly, all tags kept.
+func TestSingleTagsKeyUnaffected(t *testing.T) {
+	s := testStore(t)
+	write(t, s, "normal.md", "---\ntags: [work, personal]\naliases: [Alt]\n---\nbody\n")
+
+	n, err := Load(filepath.Join(s.NotesDir(), "normal.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(n.Tags) != 2 || n.Tags[0] != "work" || n.Tags[1] != "personal" {
+		t.Fatalf("normal single tags: line should be unaffected, got %v", n.Tags)
+	}
+	if len(n.Aliases) != 1 || n.Aliases[0] != "Alt" {
+		t.Fatalf("normal single aliases: line should be unaffected, got %v", n.Aliases)
+	}
+	if len(n.DupKeys) != 0 {
+		t.Fatalf("a normal note must never be flagged: %v", n.DupKeys)
+	}
+}
+
 // TestTitleFallback: frontmatter title → alias → H1 → humanized filename.
 func TestTitleFallback(t *testing.T) {
 	s := testStore(t)
