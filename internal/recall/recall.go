@@ -21,6 +21,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -37,6 +38,27 @@ const LessonTag = "lesson"
 // the same topic should usually win the tie. Multiplicative, like the lesson
 // boost, so it scales with relevance rather than flatly subtracting.
 const expiredPenalty = 0.4
+
+// lenNormB reads BM25's `b` (0 = no length normalization, 1 = full) from
+// NT_LENNORM_B on every call rather than caching it at package init, so a
+// test can flip it with t.Setenv without needing to reload the package. The
+// cost is one getenv+parse per Rank call, negligible next to the
+// O(notes*terms) scoring loop it gates.
+//
+// Unset/unparseable defaults to 0 — the shipped, measured-safe behaviour
+// (see docs/memory-integration-roadmap.md item 13: real, but modest, and the
+// corpus backing it is too thin to flip the default). Out-of-range values
+// are CLAMPED into [0,1] rather than rejected: this is an experimental env
+// knob, not user input at a trust boundary, and BM25's b is only meaningful
+// on [0,1] (0 disables it, 1 is "full" normalization) — a fat-fingered
+// NT_LENNORM_B=2 should behave like "1, but you meant it", not crash recall.
+func lenNormB() float64 {
+	v, err := strconv.ParseFloat(os.Getenv("NT_LENNORM_B"), 64)
+	if err != nil {
+		return 0
+	}
+	return math.Max(0, math.Min(1, v))
+}
 
 // Result is one ranked note. Lesson notes sort first at equal relevance.
 type Result struct {
@@ -508,6 +530,45 @@ func rankProject(notes []*note.Note, context string, limit int, project string, 
 	for _, w := range qwords {
 		fMax += 4 * idf(conceptID(w))
 	}
+	// Length normalization (default off, see lenNormB) needs each bag's
+	// average length across the corpus. Computed once here — skipped
+	// entirely at b=0, so the shipped default pays nothing for this loop.
+	b := lenNormB()
+	var avgStrong, avgWeak float64
+	if b > 0 && numNotes > 0 {
+		for _, cd := range cands {
+			avgStrong += float64(len(cd.strong.concepts))
+			avgWeak += float64(len(cd.weak.concepts))
+		}
+		avgStrong /= float64(numNotes)
+		avgWeak /= float64(numNotes)
+	}
+	// bagNorms returns one candidate's (strong, weak) BM25 length divisors:
+	// max(1-b + b*dl/avgdl, epsilon). Both are 1 at b=0 (a no-op multiply),
+	// which is what keeps the shipped default byte-identical to the
+	// pre-normalization scorer — see TestLenNormZeroIsIdentical.
+	//
+	// PER-BAG, not one divisor over strong+weak combined: the two bags are
+	// structurally different documents, not two halves of one. `strong` is
+	// title+tags+description clamped to 240 chars (bounded, low variance);
+	// `weak` is an unbounded body that can run to thousands of chars. A
+	// combined divisor lets a long body dilute a note's TITLE match, which
+	// is a different, unwanted bias — measured flat-to-harmful on the real
+	// store and it broke the paraphrase corpus 8/8 → 7/8 (see item 13 in
+	// docs/memory-integration-roadmap.md). BM25F normalizes per-field for
+	// this exact reason: each field is only compared against its own kind.
+	bagNorms := func(cd cand) (strongNorm, weakNorm float64) {
+		if b <= 0 {
+			return 1, 1
+		}
+		div := func(dl, avg float64) float64 {
+			if avg <= 0 {
+				return 1
+			}
+			return math.Max(1-b+b*dl/avg, 1e-9) // guard: b=1 + an empty bag would divide by zero
+		}
+		return div(float64(len(cd.strong.concepts)), avgStrong), div(float64(len(cd.weak.concepts)), avgWeak)
+	}
 	// Pass 2: score. Per query concept: exact word in a high-signal field is
 	// strongest, then a synonym there, then the body — each weighted by the
 	// concept's IDF. The lesson boost is MULTIPLICATIVE (not a flat add), so it
@@ -518,22 +579,24 @@ func rankProject(notes []*note.Note, context string, limit int, project string, 
 		var f float64
 		exact, matched := 0, 0
 		var hits []TermHit
+		strongNorm, weakNorm := bagNorms(cd)
 		for _, w := range qwords {
 			c := conceptID(w)
-			var base float64
+			var base, norm float64
 			where := ""
 			switch {
 			case cd.strong.words[w]:
-				base, exact, where = 4, exact+1, "strong-exact"
+				base, exact, where, norm = 4, exact+1, "strong-exact", strongNorm
 			case cd.strong.concepts[c]:
-				base, where = 2, "strong-syn"
+				base, where, norm = 2, "strong-syn", strongNorm
 			case cd.weak.words[w]:
-				base, exact, where = 2, exact+1, "weak-exact"
+				base, exact, where, norm = 2, exact+1, "weak-exact", weakNorm
 			case cd.weak.concepts[c]:
-				base, where = 1, "weak-syn"
+				base, where, norm = 1, "weak-syn", weakNorm
 			}
 			if base > 0 {
 				matched++
+				base /= norm
 			}
 			termIDF := idf(c)
 			f += base * termIDF
@@ -554,7 +617,13 @@ func rankProject(notes []*note.Note, context string, limit int, project string, 
 		raw := f
 		confidence := 0.0
 		if fMax > 0 {
-			confidence = raw / fMax
+			// fMax assumes every term lands exact-in-strong (the b=0 ceiling);
+			// under normalization this candidate's actual ceiling is
+			// fMax/strongNorm, so scaling by strongNorm keeps Confidence
+			// meaning the same thing at every b (a fully strong-exact match
+			// still reads 1.0) instead of sliding the whole tier scale. A
+			// no-op at the shipped b=0 (strongNorm == 1).
+			confidence = raw * strongNorm / fMax
 		}
 		if cd.lesson {
 			f *= 1.6 // surface recorded mistakes, without swamping relevance
