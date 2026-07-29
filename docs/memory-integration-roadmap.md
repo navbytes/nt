@@ -197,6 +197,72 @@ met, don't schedule otherwise):
       from this branch as committed. No real note content is committed
       (stores hold private client data); anyone can re-run the harness
       against their own store.
+    - **Re-run post-consolidation (2026-07-29): it now measurably helps —
+      the flat verdict above was correctly measured, on a store that
+      happened to have no length variance to normalize against.** Item 15's
+      consolidation ran between the flat sweep above and this re-run
+      (193 → 142 notes), and it changed the store's *shape*, not just its
+      size: the flat-sweep store had roughly 75% empty-body notes; **0 of
+      142 notes now have an empty body** (median body 866 chars), and the
+      weak-bag length band went from ~5x to 166x. Length normalization has
+      nothing to divide by when most notes carry no body — that store was a
+      genuine negative result, just not a general one. Re-swept `b` ∈ {0,
+      0.25, 0.5, 0.75, 1.0} on the changed store, HIT@1 (of 22 queries):
+      size 22 → 17/18/18/17/15, size 40 → 14/15/16/18/17, size 100 →
+      13/12/13/13/13, size 142 (whole store) → 12/12/**13**/**13**/10 — a
+      +1-hit (+4.5pp) improvement at `b` ∈ {0.5, 0.75} over `b=0`, with the
+      paraphrase corpus holding 8/8 at every value. Repeated measures (5
+      distractor draws × 2 sizes) at `b=0.5`: positive in 7/10, zero in 3,
+      **negative in none** (sign test p≈0.008 — not noise). Mechanism,
+      confirmed per query: a short target note overtakes a 1.8–2.0x longer
+      generalist note competing on the same concepts.
+    - **This also settles the earlier unresolved contradiction — it was
+      per-bag vs. combined-bag, not two measurements disagreeing with
+      themselves.** The very first field test's `b` sweep divided by ONE
+      combined strong+weak divisor and found every non-zero `b` dropped the
+      paraphrase corpus 8/8 → 7/8. The flat-sweep bullet above (this item's
+      honest-corpus re-test) reported 8/8 throughout at the same `b` values
+      and was left unreconciled. Replaying both modes against the
+      post-consolidation store settles it: **combined**-bag reproduces the
+      8/8 → 7/8 drop (including at `b=0.1`); **per-bag** (each bag divided
+      by its own average) reproduces 8/8 throughout. The flat-sweep bullet's
+      8/8 identifies it as per-bag all along — so the honest comparison is
+      per-bag-then (inert, no length variance) vs. per-bag-now (helps, after
+      consolidation created the variance). Neither session mismeasured;
+      they normalized different scopes. Per-bag is also the structurally
+      correct default, independent of which number is better: `strong`
+      (title+tags+description) is a bounded 240-char field with low
+      variance, `weak` (body) is unbounded, and a combined divisor lets a
+      long body dilute a note's TITLE match — the bias BM25F's per-field
+      normalization exists specifically to avoid.
+    - **Shipped, default OFF, behind `NT_LENNORM_B`** — per-bag only;
+      combined mode was measured and rejected, see above. Default-off is
+      deliberate, not a hedge: the effect is real but modest (+4.5pp at the
+      whole store, 1 hit out of 22), it costs some rank to long, thorough
+      notes, and a 22-query corpus is too thin to trust flipping a
+      production default. `b=0` (the shipped default) is proven
+      byte-identical to the pre-normalization scorer
+      (`TestLenNormZeroIsIdentical` in `internal/recall/lennorm_test.go`).
+      Revisit the default once a real-store corpus exists large enough to
+      stand on a single measurement instead of a repeated-measures sign
+      test.
+    - **Honest caveat, still open: "no length variance ⇒ inert" is
+      plausible, not proven.** A bodies-stripped control arm (removing body
+      content outright, rather than relying on the store's own empty notes)
+      was *also* not inert — so the flat-sweep verdict's explanation may be
+      incomplete. The real threshold at which normalization starts to bite
+      sits somewhere between a 5x and a 26x weak-bag length band, not
+      cleanly at "zero variance." Left for whoever next revisits the
+      default.
+    - **Reusable lesson: the consolidation work looked like it failed on
+      its own terms, but it created the length variance this needed.** Item
+      15's consolidation (193 → 142 notes) was measured against flat HIT@1
+      and looked like it made no difference to recall quality — but filling
+      the empty bodies is exactly what makes length normalization non-inert.
+      A technique can be correctly measured as useless and later become
+      useful because the *data* changed, not the code; "inert" is a
+      property of the corpus it was measured against, not a permanent
+      verdict on the technique.
 - **14** — OpenCode `chat.message` + `tool.execute.before` proactive recall
   — parked on "a live OpenCode build matrix to test against," the same
   precondition item 1 needed before it could ship safely. Also lower-value
