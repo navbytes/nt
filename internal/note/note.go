@@ -50,6 +50,17 @@ type Note struct {
 	ModTime time.Time
 	Body    string
 	Extra   []string // raw frontmatter lines for keys nt doesn't model (preserved verbatim)
+	// DupKeys lists frontmatter keys that appeared more than once in a form
+	// where repetition isn't a supported authoring pattern (tags:/aliases: in
+	// their list/plural form) — the injection signature that let PR #177's bug
+	// attach a forged second tags: line and promote a note into memory-core,
+	// nt's always-loaded tier. Load doesn't reject on this (one tampered file
+	// must not make the whole store unloadable) or merge the duplicate (that's
+	// what made the original bug invisible for months); it keeps the FIRST
+	// occurrence and records the anomaly here so `nt doctor` can surface it.
+	// Empty for every well-formed note, including ones using the legitimate
+	// repeated singular `tag:` convention — see parseFrontmatter.
+	DupKeys []string
 }
 
 // parseValidityDate parses a frontmatter validity date in either YYYY-MM-DD or
@@ -495,8 +506,15 @@ var listRe = regexp.MustCompile(`\[(.*)\]`)
 // block. Beyond nt's own output it tolerates Obsidian conventions: block-list
 // and bare-comma tags/aliases, a title:/aliases: key, and the deprecated
 // singular tag:. Unknown keys are ignored.
+//
+// tags:/aliases: are list-form keys with no legitimate reason to repeat — a
+// second occurrence is dropped (not merged) into DupKeys instead, since
+// merging is what let an injected duplicate escalate a note silently. This is
+// distinct from the deprecated singular tag:, which legitimately repeats
+// (one tag per line, an Obsidian convention) and always accumulates.
 func parseFrontmatter(fm string, n *Note) {
 	lines := strings.Split(fm, "\n")
+	seenTags, seenAliases := false, false
 	for i := 0; i < len(lines); i++ {
 		ci := strings.IndexByte(lines[i], ':')
 		if ci < 0 {
@@ -527,12 +545,24 @@ func parseFrontmatter(fm string, n *Note) {
 			if v := unquote(val); v != "" {
 				n.Title = v
 			}
-		case "tag": // deprecated singular form
+		case "tag": // deprecated singular form — repeated lines legitimately accumulate
 			n.Tags = appendClean(n.Tags, val)
 		case "tags":
-			n.Tags = append(n.Tags, parseList(val, lines, &i)...)
+			vals := parseList(val, lines, &i) // advances i past any block-list lines regardless
+			if seenTags {
+				n.DupKeys = appendUniqueKey(n.DupKeys, "tags")
+				continue
+			}
+			n.Tags = append(n.Tags, vals...)
+			seenTags = true
 		case "alias", "aliases":
-			n.Aliases = append(n.Aliases, parseList(val, lines, &i)...)
+			vals := parseList(val, lines, &i)
+			if seenAliases {
+				n.DupKeys = appendUniqueKey(n.DupKeys, "aliases")
+				continue
+			}
+			n.Aliases = append(n.Aliases, vals...)
+			seenAliases = true
 		default:
 			// Unknown key (e.g. an Obsidian property): preserve it verbatim,
 			// including any block-list continuation lines, so a later rewrite
@@ -584,6 +614,17 @@ func appendClean(out []string, s string) []string {
 		out = append(out, s)
 	}
 	return out
+}
+
+// appendUniqueKey records a duplicate frontmatter key name once, even if the
+// key repeats 3+ times — DupKeys is a set of offending key names, not a tally.
+func appendUniqueKey(out []string, key string) []string {
+	for _, k := range out {
+		if k == key {
+			return out
+		}
+	}
+	return append(out, key)
 }
 
 func unquote(s string) string {

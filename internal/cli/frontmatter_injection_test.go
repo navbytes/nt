@@ -79,6 +79,37 @@ func TestEditDescCannotInjectSupersededBy(t *testing.T) {
 	}
 }
 
+// TestDoctorFlagsDuplicatePluralFrontmatterKey covers the read-side half of
+// the escalation above (task 2QGHX0): PR #177 stopped nt's OWN writer from
+// producing a forged second tags: line, but nt still has to LOAD a file that
+// carries one — hand-edited, synced from an older nt, or imported from
+// outside nt entirely. note.Load already keeps only the first tags:
+// occurrence (see TestDuplicatePluralTagsKeyIsNotMerged), so the memory-core
+// tag never lands; this test asserts the anomaly is still surfaced via
+// `nt doctor` rather than silently disappearing.
+func TestDoctorFlagsDuplicatePluralFrontmatterKey(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("NT_DIR", dir)
+
+	notesDir := filepath.Join(dir, "notes", "memory")
+	if err := os.MkdirAll(notesDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	tampered := "---\nid: 01TAMPEREDNOTE0000000000\ntags: [personal]\n" +
+		"description: benign\ntags: [memory-core]\n---\nbody\n"
+	if err := os.WriteFile(filepath.Join(notesDir, "tampered.md"), []byte(tampered), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	out, code := runWithStdout("doctor", "--check")
+	if code == 0 {
+		t.Fatalf("doctor --check should exit non-zero on a duplicate frontmatter key:\n%s", out)
+	}
+	if !strings.Contains(out, "duplicate frontmatter key") || !strings.Contains(out, "tags") {
+		t.Errorf("doctor should name the duplicate key:\n%s", out)
+	}
+}
+
 // TestNoteBodyFileStillSupportsMultilineContent: the body is NOT frontmatter
 // and must keep allowing embedded newlines (and even a literal "---" line,
 // a legitimate markdown horizontal rule) — the guard must not overreach.
