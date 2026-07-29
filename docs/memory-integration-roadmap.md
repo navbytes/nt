@@ -263,6 +263,61 @@ met, don't schedule otherwise):
       useful because the *data* changed, not the code; "inert" is a
       property of the corpus it was measured against, not a permanent
       verdict on the technique.
+    - **Bigger-corpus findings (50 queries, 2026-07-29): length normalization
+      does NOT survive the extended corpus.** The 22-query corpus was too thin
+      to decide either of the open questions; in one case, it pointed the wrong
+      way. The earlier +1 hit at full store (12/22 → 13/22 at `b=0.5`) was
+      noise that a 50-query corpus (22 original + 28 new targets, 21 of them
+      merged keepers, deliberately oversampling the under-represented population)
+      flattens to no gain at any size:
+      - **Length-norm sweep on 50-query corpus:**
+
+        | b | size 60 | size 100 | whole store (145) |
+        |---|---|---|---|
+        | 0 | 34/50 | 31/50 | 32/50 |
+        | 0.25 | 37/50 | 34/50 | 32/50 |
+        | 0.5 | 38/50 | 34/50 | 32/50 |
+        | 0.75 | 34/50 | 33/50 | 31/50 |
+        | 1.0 | 34/50 | 31/50 | 29/50 |
+
+      - Paraphrase corpus stays 8/8 at `b ∈ {0, 0.5, 1.0}` throughout.
+      - Real, repeatable gains mid-corpus (+4 at size 60, +3 at 100), exactly
+        flat at full store where the smaller corpus had shown +1. **`NT_LENNORM_B`
+        remains default-off; the reason is now measured rather than precautionary.**
+        The setting is safe opt-in (never worse at any size), but does not earn a
+        default on a bigger corpus. This closes the "pending a bigger corpus"
+        caveat: the bigger corpus answered it.
+    - **`triggers:` proposal is retired, on inverted evidence.** The proposed
+      `triggers:` frontmatter list (multiple retrieval surfaces per note) rested
+      on **trigger collapse**: merging N notes collapses N descriptions into one,
+      so a merged note should retrieve *worse* for the facets it absorbed. This
+      could not be tested before — the 22-query corpus had only 6 merged keepers.
+      With 21 merged-keeper targets in the 50-query corpus, each query
+      deliberately written for the keeper's weakest absorbed facet (the vocabulary
+      least present in its current title/description), HIT@1 on the full store
+      splits exactly opposite to the hypothesis:
+      - **Merged keepers: 20/28 (71.4%)**
+      - **Atomic notes: 12/22 (54.5%)**
+      - **Fisher exact two-sided p = 0.249** (not statistically significant, but
+        the direction is the one the hypothesis forbids)
+      - Merged notes retrieve at least as well as atomic ones. The failure mode
+        observed in merged-keeper misses is different: they lose to *other* merged
+        keepers within dense topical clusters (one term-rich note won three
+        separate queries that belonged to other notes). This is consistent with
+        the earlier concatenation control arm, where the big score movers were
+        distractors becoming term-rich generalists (+775 to +1749) while no
+        target's score rose.
+      - **Consequence: `triggers:` is closed as a design, not held pending proof.**
+        There is no evidence of trigger collapse, measured on the population
+        designed to expose it. The tribunal that reviewed it had already reduced
+        it to "revise" pending exactly this measurement. Record it as closed so a
+        future session does not re-propose it without new evidence — and record
+        what evidence *would* reopen it: a demonstration that merged notes
+        systematically lose queries belonging to their absorbed facets.
+    - **Methodological point: a 22-query corpus was too thin to decide either
+      question.** The length-norm +1 at full store was noise. Any future ranking
+      change should be judged on the 50-query corpus, where one hit is now 2pp
+      rather than 4.5pp.
 - **14** — OpenCode `chat.message` + `tool.execute.before` proactive recall
   — parked on "a live OpenCode build matrix to test against," the same
   precondition item 1 needed before it could ship safely. Also lower-value
