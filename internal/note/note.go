@@ -278,18 +278,64 @@ func claimPath(root, dir, slug string) (string, error) {
 	return "", fmt.Errorf("too many slug collisions for %q", slug)
 }
 
-// Save writes the note atomically with frontmatter.
+// invalidFrontmatterLine reports whether line — one physical row of the
+// frontmatter block, already formatted as "key: value" (or a raw Extra
+// line) — can corrupt the file when written. Load finds the frontmatter's
+// end by scanning for the substring "\n---", so an embedded \n/\r puts
+// attacker-controlled text on its own line, where it either becomes a
+// forged extra key (the memory-core tag-injection CVE this guards against)
+// or, if that new line starts with "---", truncates the block early. The
+// latter is also reachable with NO embedded newline: via --field's
+// attacker-chosen key (e.g. --field ---=x, giving a row that starts with
+// "---"), or via a value of "---" itself — harmless today since it's
+// preceded by "key: " on the same physical line, but rejected anyway as
+// defense in depth against any future writer that emits the value alone.
+func invalidFrontmatterLine(line string) bool {
+	if strings.ContainsAny(line, "\n\r") {
+		return true
+	}
+	if strings.HasPrefix(strings.TrimSpace(line), fmDelim) {
+		return true
+	}
+	if _, val, ok := strings.Cut(line, ": "); ok && strings.HasPrefix(strings.TrimSpace(val), fmDelim) {
+		return true
+	}
+	return false
+}
+
+// Save writes the note atomically with frontmatter. Returns an error — and
+// writes nothing — if any frontmatter value would corrupt the block (see
+// invalidFrontmatterLine); we reject rather than silently strip/escape the
+// offending bytes, because a value that trips this came from a caller (or
+// whatever untrusted text it captured) trying to smuggle extra frontmatter,
+// and silently sanitizing it would hide that instead of surfacing it.
 func (n *Note) Save() error {
 	var b strings.Builder
 	b.WriteString("---\n")
+	// line validates and appends one "key: value\n" frontmatter row.
+	line := func(key, val string) error {
+		row := key + ": " + val
+		if invalidFrontmatterLine(row) {
+			return fmt.Errorf("note: %s contains a newline or a %q line — refusing to write corrupt frontmatter", key, fmDelim)
+		}
+		b.WriteString(row)
+		b.WriteByte('\n')
+		return nil
+	}
 	if n.ID != "" {
-		fmt.Fprintf(&b, "id: %s\n", n.ID)
+		if err := line("id", n.ID); err != nil {
+			return err
+		}
 	}
 	if len(n.Tags) > 0 {
-		fmt.Fprintf(&b, "tags: [%s]\n", strings.Join(n.Tags, ", "))
+		if err := line("tags", "["+strings.Join(n.Tags, ", ")+"]"); err != nil {
+			return err
+		}
 	}
 	if len(n.Aliases) > 0 {
-		fmt.Fprintf(&b, "aliases: [%s]\n", strings.Join(n.Aliases, ", "))
+		if err := line("aliases", "["+strings.Join(n.Aliases, ", ")+"]"); err != nil {
+			return err
+		}
 	}
 	// Persist the title when the body's own H1 would otherwise win on reload
 	// (Load's precedence is frontmatter title → alias → first body heading). Without
@@ -298,17 +344,25 @@ func (n *Note) Save() error {
 	// differs, so Obsidian notes whose H1 == title stay frontmatter-clean.
 	if n.Title != "" {
 		if bh := firstHeading(n.Body); bh != "" && bh != n.Title {
-			fmt.Fprintf(&b, "title: %s\n", n.Title)
+			if err := line("title", n.Title); err != nil {
+				return err
+			}
 		}
 	}
 	if n.Source != "" {
-		fmt.Fprintf(&b, "source: %s\n", n.Source)
+		if err := line("source", n.Source); err != nil {
+			return err
+		}
 	}
 	if n.Created != "" {
-		fmt.Fprintf(&b, "created: %s\n", n.Created)
+		if err := line("created", n.Created); err != nil {
+			return err
+		}
 	}
 	if n.Updated != "" {
-		fmt.Fprintf(&b, "updated: %s\n", n.Updated)
+		if err := line("updated", n.Updated); err != nil {
+			return err
+		}
 	}
 	if n.Archived {
 		b.WriteString("archived: true\n")
@@ -317,16 +371,25 @@ func (n *Note) Save() error {
 		b.WriteString("favorite: true\n")
 	}
 	if n.SupersededBy != "" {
-		fmt.Fprintf(&b, "superseded_by: %s\n", n.SupersededBy)
+		if err := line("superseded_by", n.SupersededBy); err != nil {
+			return err
+		}
 	}
 	if n.ValidFrom != "" {
-		fmt.Fprintf(&b, "valid_from: %s\n", n.ValidFrom)
+		if err := line("valid_from", n.ValidFrom); err != nil {
+			return err
+		}
 	}
 	if n.ValidUntil != "" {
-		fmt.Fprintf(&b, "valid_until: %s\n", n.ValidUntil)
+		if err := line("valid_until", n.ValidUntil); err != nil {
+			return err
+		}
 	}
-	for _, line := range n.Extra { // unknown keys (Obsidian properties), verbatim
-		b.WriteString(line)
+	for _, extra := range n.Extra { // unknown keys (Obsidian properties, --field, description:), verbatim
+		if invalidFrontmatterLine(extra) {
+			return fmt.Errorf("note: frontmatter field %q contains a newline or a %q line — refusing to write corrupt frontmatter", extra, fmDelim)
+		}
+		b.WriteString(extra)
 		b.WriteByte('\n')
 	}
 	b.WriteString("---\n\n")
