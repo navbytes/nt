@@ -1,6 +1,9 @@
 # Memory dynamics — decay, delta-writes, and decision history
 
-**Status:** open spec / proposal — not yet implemented
+**Status:** IMPLEMENTED — all four phases shipped on this branch (see
+[`plan-memory-dynamics.md`](plan-memory-dynamics.md) for the work breakdown and
+the commit series for review fixes + simulation-driven polish). Open questions
+§11 remain open where noted; §3.5 class defaults and the deferred items stand.
 **Date:** 2026-07-30
 **Author:** Naveen (with Claude research assist)
 **Discussion:** feature branch `feat/memory-dynamics-spec`

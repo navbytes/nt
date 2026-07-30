@@ -407,7 +407,8 @@ USAGE
   nt ready [flags]            open, unblocked tasks by urgency — the what-next feed
   nt agenda [--days N]        the next N days, grouped Overdue/Today/Upcoming
                               (--days 0 = just today's plan)
-  nt review [--stale N]       weekly digest: overdue, stale, undated, stuck projects
+  nt review [--stale N]       weekly digest: overdue, stale, undated, stuck projects,
+                              and faded notes (past their half-life un-reconfirmed)
   nt index [--tag|--folder]   compact KB catalog (ids+titles+descriptions) + active tasks — start here
                               (large stores tier: pinned rules/memory/ref + last-14d notes
                                + per-folder counts of the rest; --all = every stub;
@@ -419,6 +420,8 @@ USAGE
   nt update <id…> [flags]     change one or more tasks (bulk)  (alias: up)
   nt list --tree              show sub-tasks indented under their parent
   nt search "query" [--tag T]  full-text + tag search (AND terms; "phrase"; --json) (alias: q)
+                              (--include-archived widens to retired notes — the deep sweep
+                               recall's escalate hint suggests; retired hits are marked)
   nt recall "what I'm doing"  relevant notes for a task, lessons flagged ⚑ — paraphrase-aware
                               (--lessons-only filters to recorded mistakes; bare
                                'nt recall --lessons-only' lists every lesson)

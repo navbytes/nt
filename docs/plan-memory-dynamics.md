@@ -1,6 +1,14 @@
 # Memory dynamics — implementation plan
 
-**Status:** plan — companion to [`spec-memory-dynamics.md`](spec-memory-dynamics.md)
+**Status:** EXECUTED — all four phases implemented on this branch in the order
+recommended below (3 → 1 → 2 → 4), plus an independent-review fix pass (8
+confirmed findings) and a multi-agent simulation pass (Sonnet/Haiku sessions
+sharing one store) whose three usability findings were also fixed. Deviations
+from the plan: `RankProject` kept its signature with one `now` hoisted per
+ranking pass instead of the threaded parameter (revisit at the next signature
+churn); MCP `clear_half_life`/`clear_reviewed` not added (`half_life:"none"`
+covers the decay opt-out); OpenCode's regex-and-prompt pass remains the
+tracked follow-up flagged in Part C.
 **Date:** 2026-07-30
 **Branch:** `feat/memory-dynamics-spec`
 
