@@ -219,6 +219,10 @@ func cmdEdit(args []string) int {
 	reviewed := fs.String("reviewed", "", "set the last-reconfirmed date (YYYY-MM-DD or RFC3339) — the decay clock's reset point (prefer `nt touch` for today)")
 	clearHalfLife := fs.Bool("clear-half-life", false, "remove the half_life (stop decaying)")
 	clearReviewed := fs.Bool("clear-reviewed", false, "remove the reviewed date")
+	// Simulation finding: agents pass --source reflexively (every WRITE command
+	// takes it) and got an opaque "flag provided but not defined". Define it so
+	// we can explain instead: provenance is set at creation and edits keep it.
+	sourceFlag := fs.String("source", "", "not applicable on edit — provenance is recorded at creation (nt add/note) and edits keep the original source")
 	expectMtime := fs.String("expect-mtime", "", "optional: the mtime from a prior `nt show --json` of this note — refuse instead of overwriting if it changed on disk since (best-effort; omit if you don't have one)")
 	flags, positional := splitArgs(args, map[string]bool{"clear-valid-from": true, "clear-valid-until": true, "clear-half-life": true, "clear-reviewed": true})
 	if err := fs.Parse(flags); err != nil {
@@ -226,6 +230,9 @@ func cmdEdit(args []string) int {
 	}
 	if len(positional) == 0 {
 		return usageErr(fmt.Errorf("edit: need an id (or note:slug)"))
+	}
+	if strings.TrimSpace(*sourceFlag) != "" {
+		return usageErr(fmt.Errorf("edit: --source doesn't apply here — provenance is recorded at creation (nt add/note --source) and edits keep the original; drop the flag and rerun"))
 	}
 	handle := positional[0]
 	appendVal, aerr := resolveBody(*appendTxt, *appendFile)
@@ -308,7 +315,13 @@ func cmdEdit(args []string) int {
 			count := strings.Count(n.Body, *oldString)
 			switch count {
 			case 0:
-				return fail(fmt.Errorf("edit: --old-string not found in %s's body — run `nt show %s` to see the current text", shortID(n.ID), shortID(n.ID)))
+				// Simulation finding: agents target the description text with
+				// --old-string and get a bare "not found" — say WHERE the text
+				// actually lives instead of leaving them to guess.
+				if strings.Contains(n.Description(1<<20), *oldString) {
+					return fail(fmt.Errorf("edit: --old-string matches the DESCRIPTION, not the body — the description is a separate field; replace it with `nt edit %s --desc \"…\"`", shortID(n.ID)))
+				}
+				return fail(fmt.Errorf("edit: --old-string not found in %s's body — run `nt show %s` to see the current text (descriptions are a separate field: --desc)", shortID(n.ID), shortID(n.ID)))
 			case 1:
 				n.Body = strings.Replace(n.Body, *oldString, *newString, 1)
 				verb = "edited"

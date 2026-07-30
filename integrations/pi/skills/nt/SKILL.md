@@ -107,9 +107,15 @@ nothing and returns the existing note's id + `mtime` to edit in place.
 **Memory dynamics:** volatile facts get a `half_life` (`"90d"`) and fade in
 recall/index until re-confirmed (`nt_touch`) — flagged `faded`, never hidden.
 An edit that reverses a conclusion gets a `nt_decide` line (the note's
-`## Decisions` history); `nt_history` shows a note's git commits. A recall
-response with `escalate` means the hit is weak — run the suggested
-`nt_search include_archived:true` before concluding nothing is recorded.
+`## Decisions` history); `nt_history` shows a note's git commits (the MEMORY
+store's repo, not your project's). A recall response with `escalate` means
+the hit is weak — run the suggested `nt_search include_archived:true` before
+concluding nothing is recorded.
+
+**Scoping by project or tag? The store's vocabulary wins.** A directory or
+repo name is not necessarily the tag past sessions used — check `nt tags`
+before scoping, and if a project/tag filter comes back empty, fall back to a
+topical `nt_search` rather than concluding nothing is recorded.
 
 ## Conventions
 

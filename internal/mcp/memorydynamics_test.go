@@ -116,6 +116,27 @@ func TestMCPSupersedeStampsDecision(t *testing.T) {
 	}
 }
 
+// old_string that lives in the DESCRIPTION (not the body) gets a targeted
+// error naming the real field — the simulation showed agents guessing.
+func TestMCPNoteEditOldStringInDescription(t *testing.T) {
+	s := newServer(t)
+	out, err := s.dispatch("nt_note", map[string]any{"title": "desc target note", "description": "needs APP_ENV=prod exported", "body": "other text"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var n noteOut
+	json.Unmarshal([]byte(out), &n)
+	_, err = s.dispatch("nt_note_edit", map[string]any{"id": n.ID, "old_string": "APP_ENV=prod", "new_string": "APP_ENV=dev"})
+	if err == nil || !strings.Contains(err.Error(), "DESCRIPTION") {
+		t.Fatalf("should point at the description field, got %v", err)
+	}
+	// Truly-absent text keeps the plain not-found error (with the desc pointer).
+	_, err = s.dispatch("nt_note_edit", map[string]any{"id": n.ID, "old_string": "nowhere at all", "new_string": "x"})
+	if err == nil || !strings.Contains(err.Error(), "not found") {
+		t.Fatalf("plain not-found expected, got %v", err)
+	}
+}
+
 // nt_archive superseded_by= must stamp the same provenance line as every
 // other supersede door — history must not depend on which tool performed it.
 func TestMCPArchiveSupersededByStampsDecision(t *testing.T) {

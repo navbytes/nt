@@ -124,6 +124,15 @@ func cmdIndex(args []string) int {
 		filtered = append(filtered, n)
 	}
 
+	// A project scope that matches no notes is usually a NAMING mismatch, not an
+	// empty store — agents guess the directory name ("simproj") while the store's
+	// vocabulary says something else ("tinytool"). Warn on stderr (tasks may
+	// still match below, so this can't be a hard failure) — a silent "0 notes"
+	// reads as "those notes don't exist" to an agent.
+	if *project != "" && len(filtered) == 0 {
+		fmt.Fprintf(os.Stderr, "index: no notes carry project %q — the store may use a different name; check the vocabulary with `nt tags`, or search by topic (`nt search`)\n", *project)
+	}
+
 	// A scoping folder that matches nothing is almost always a typo — a silent
 	// "0 notes" success reads as "those notes don't exist" to an agent.
 	if prefix != "" && !rootOnly && len(filtered) == 0 {

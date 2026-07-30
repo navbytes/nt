@@ -1187,7 +1187,13 @@ func (s *server) noteEdit(a map[string]any) (string, error) {
 		count := strings.Count(n.Body, oldString)
 		switch count {
 		case 0:
-			return "", fmt.Errorf("old_string not found in %s's body — nt_get %s to see the current text", n.ID, n.ID)
+			// Simulation finding: agents target the description text with
+			// old_string and get a bare "not found" — say WHERE the text
+			// actually lives instead of leaving them to guess.
+			if strings.Contains(n.Description(1<<20), oldString) {
+				return "", fmt.Errorf("old_string matches the DESCRIPTION, not the body — the description is a separate field; replace it with the `description` arg instead")
+			}
+			return "", fmt.Errorf("old_string not found in %s's body — nt_get %s to see the current text (descriptions are a separate field: the `description` arg)", n.ID, n.ID)
 		case 1:
 			n.Body = strings.Replace(n.Body, oldString, newString, 1)
 			verb = "edited"

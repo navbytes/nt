@@ -203,6 +203,11 @@ nt links <handle>                          # forward links + backlinks for a not
 nt links --orphans                         # notes nothing links to — gaps in the graph to wire up
 ```
 
+**Scoping by project or tag? The store's vocabulary wins.** A directory or repo
+name is not necessarily the tag past sessions used — check `nt tags` before
+scoping, and if a `--project`/`--tag` filter comes back empty, fall back to a
+topical `nt search` rather than concluding nothing is recorded.
+
 MCP equivalents: `nt_search` (query and/or tag), `nt_links` (handle). **Read links
 before starting related work, not just when writing them** — `nt links <id>`
 reconstructs why a task exists and surfaces the decisions and sibling work around
@@ -224,7 +229,9 @@ backlinks are found automatically.
   section, so the next session sees what was tried and rejected instead of
   re-proposing it. One line per decision, not per edit.
 - **Need the full story?** `nt history <id>` (MCP `nt_history`) shows the note's
-  git commits (store must be `nt git-init`-ed; `--patch` for diffs).
+  git commits (store must be `nt git-init`-ed; `--patch` for diffs). It covers
+  the MEMORY store's repo, not your project's — for source-code history use
+  git in the project as usual.
 - **Recall said `escalate`?** The store's own confidence says the hit is weak —
   run the suggested `nt search … --include-archived` before concluding nothing
   is recorded.
