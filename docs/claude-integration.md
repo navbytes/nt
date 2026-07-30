@@ -176,11 +176,14 @@ nt mcp install --print                  # show what it would do, change nothing
 For any other client (Cursor, a project `.mcp.json`, …), `nt mcp install --print`
 emits the snippet to paste.
 
-Tools exposed (**19**) — **capture:** `nt_add`, `nt_note` (with `folder`,
+Tools exposed (**22**) — **capture:** `nt_add`, `nt_note` (with `folder`,
 `description`, and `kind: lesson|decision|ref|rule|memory` — canonical tag +
 folder; always give a `description`, it's what `nt_index` shows), `nt_note_edit`
 (fix an EXISTING note in place — `append`/`body`/`old_string`+`new_string`/
-`description`; no new id, unlike `nt_note supersede:`), `nt_update` (status:"done" completes; the response echoes what `changed`), `nt_rm` (remove a
+`description`; no new id, unlike `nt_note supersede:`), `nt_touch` (re-confirm a
+decaying note — stamps `reviewed:`, resetting its `half_life` fade clock),
+`nt_decide` (record WHY a note changed — a dated line in its `## Decisions`
+section), `nt_update` (status:"done" completes; the response echoes what `changed`), `nt_rm` (remove a
 mistaken task — journaled, `nt undo` restores), `nt_tag`, `nt_mv`, `nt_archive` (retire
 stale notes — set `superseded_by` to reconcile duplicates), `nt_relink` (fix a wrong outbound link); **retrieve:** `nt_index` (start here — a compact
 catalog of note stubs plus the active tasks and recent completions — tiered on
@@ -192,7 +195,10 @@ note's full body by id/slug/title, optional `section`),
 smart views — list them by calling it bare), `nt_search` (ranked
 stubs, text and/or tag; `full:true` inlines bodies), `nt_recall` (lessons-first,
 paraphrase-aware retrieval for a free-text task context — surfaces past mistakes
-before you repeat them), `nt_links` (forward links + backlinks); **health:**
+before you repeat them; on a weak/empty result it returns an `escalate` hint
+pointing at the deeper `include_archived` search), `nt_links` (forward links +
+backlinks), `nt_history` (a note's git commit history — how it got to its
+current state; needs `nt git-init`); **health:**
 `nt_doctor` (read-only store hygiene — dangling links, task-file issues, expired
 notes), `nt_distill` (read-only — every near-duplicate note pair, uncapped, for
 a human-gated merge), `nt_mindmap` (a note's outline + wikilinks as a graph). They go through the same locked, journaled engine as the CLI,
@@ -292,3 +298,45 @@ nt note "Chose flock over SQLite" --kind decision --description "one writer at a
 
 That pickup step is the whole point: the action items don't vanish when the
 session ends — and `nt ready` tells the next agent exactly where to start.
+
+## Memory dynamics — decay, delta-writes, decisions (worked example)
+
+The knowledge base itself ages. This is the full round-trip of the
+memory-dynamics features ([design](spec-memory-dynamics.md)) on one note:
+
+```bash
+# 1. Capture a VOLATILE fact — one that rots without a known expiry date.
+nt note "k8s ingress needs the v2 annotation" --kind lesson --tag k8s \
+  --description "since chart 4.x, the v1 annotation is silently ignored" \
+  --half-life 90d --source claude
+
+# 2. Months later, an agent recalls before touching ingress config:
+nt recall "changing the ingress annotations"
+#   ⚑ a1b2c3  k8s ingress needs the v2 annotation … ~faded [medium 2/3]
+# The ~faded chip says: past its half-life, un-reconfirmed — verify before trusting.
+
+# 3a. Verified it still holds? Reset the clock (reading alone never does):
+nt touch a1b2c3
+
+# 3b. Or it CHANGED? Edit the canonical note in place and record why:
+nt edit a1b2c3 --old-string "v2 annotation" --new-string "v3 gateway API route"
+nt decide a1b2c3 "chart 6.x replaced annotations with Gateway API — v2 advice obsolete"
+
+# 4. A later session sees the current fact PLUS the trail:
+nt show a1b2c3            # body ends with:  ## Decisions
+                          #   - 2026-07-30: chart 6.x replaced annotations with Gateway API — v2 advice obsolete
+nt history a1b2c3         # the per-edit story from git (needs nt git-init, once)
+
+# 5. And duplicates never fork the topic in the first place:
+nt note "k8s ingress needs the v2 annotation" --if-exists return
+#   exists a1b2c3  lessons/k8s-ingress-needs-the-v2-annotation.md
+#   → edit it (nt edit), don't sibling it
+```
+
+The MCP loop is the same verbs: `nt_note {if_exists:"return"}` →
+`nt_note_edit {expect_mtime}` → `nt_decide` → `nt_touch`, with `nt_recall`
+returning `faded` flags and — on a weak/empty result — an `escalate` hint
+naming the deeper `nt_search {include_archived:true}` sweep. `nt review` lists
+the most-faded notes for a human triage pass: still true (`nt touch`),
+changed (`nt edit` + `nt decide`), or dead (`nt archive`). Nothing ever
+disappears on its own — decay only re-ranks and flags.

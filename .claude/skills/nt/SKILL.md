@@ -49,7 +49,11 @@ sees it.
 
 `nt index` is your "what's here" catalog; `nt ready` is the task feed. **Before
 creating anything, retrieve first** (`nt index` / `nt search`) so you don't
-duplicate an item that already exists. If `nt note` refuses with "a
+duplicate an item that already exists. For topic notes, make the store enforce
+this: pass **`if_exists:"return"`** on `nt_note` (CLI `--if-exists return`) —
+on an exact title/slug match it writes nothing and returns the existing note's
+id + `mtime`; edit that note (`nt_note_edit` with `expect_mtime`) instead of
+minting a sibling. One topic, one note. If `nt note` refuses with "a
 near-duplicate already exists", follow its hint: `nt edit <id> --append`, or
 `--supersede <id>`, or rerun with `--force` only if genuinely distinct. (The MCP
 `nt_note` instead always creates and returns a `similar` list — consolidate
@@ -199,6 +203,11 @@ nt links <handle>                          # forward links + backlinks for a not
 nt links --orphans                         # notes nothing links to — gaps in the graph to wire up
 ```
 
+**Scoping by project or tag? The store's vocabulary wins.** A directory or repo
+name is not necessarily the tag past sessions used — check `nt tags` before
+scoping, and if a `--project`/`--tag` filter comes back empty, fall back to a
+topical `nt search` rather than concluding nothing is recorded.
+
 MCP equivalents: `nt_search` (query and/or tag), `nt_links` (handle). **Read links
 before starting related work, not just when writing them** — `nt links <id>`
 reconstructs why a task exists and surfaces the decisions and sibling work around
@@ -206,6 +215,26 @@ it, recovering reasoning a prior session left behind.
 
 Use `[[note-slug]]` or `[[<id>]]` inside task text or note bodies to cross-link;
 backlinks are found automatically.
+
+## Keep memory current (decay, re-confirmation, decisions)
+
+- **Volatile facts get a `half_life`** (`nt note … --half-life 90d`; MCP
+  `half_life:"90d"`): the note fades in recall/index as it ages un-reconfirmed —
+  down-ranked and flagged `faded`, never hidden. Use for config gotchas and
+  version-specific facts; skip for rules/refs (pinned knowledge doesn't decay).
+- **Verified a faded note still holds? `nt touch <id>`** (MCP `nt_touch`) stamps
+  `reviewed:` and resets its clock. Reading alone never resets decay.
+- **An edit changed a conclusion? Record why: `nt decide <id> "switched X → Y
+  because Z"`** (MCP `nt_decide`) — one dated line in the note's `## Decisions`
+  section, so the next session sees what was tried and rejected instead of
+  re-proposing it. One line per decision, not per edit.
+- **Need the full story?** `nt history <id>` (MCP `nt_history`) shows the note's
+  git commits (store must be `nt git-init`-ed; `--patch` for diffs). It covers
+  the MEMORY store's repo, not your project's — for source-code history use
+  git in the project as usual.
+- **Recall said `escalate`?** The store's own confidence says the hit is weak —
+  run the suggested `nt search … --include-archived` before concluding nothing
+  is recorded.
 
 ## Curate (refile & retag)
 

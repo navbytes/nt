@@ -95,6 +95,14 @@ func TierIndex(notes []*Note, now time.Time) Tiers {
 			// week of journals would crowd out project-relevant recents. They
 			// stay in the rollup (and behind `nt journal` / --folder journal).
 			t.rollupNote(n)
+		case n.Faded(now):
+			// A faded note (aged past its half_life un-reconfirmed, decay.go) is
+			// OLD regardless of file recency — it joins the rollup, not the
+			// what-changed tier. Reachable as ever via --folder/--all/search;
+			// pinned notes never reach this arm (standing knowledge is pinned
+			// because its relevance doesn't decay with age), though an explicit
+			// half_life on one still shows the ~faded review chip in its stub.
+			t.rollupNote(n)
 		case n.ChangedDate() >= cutoff:
 			recent = append(recent, n)
 		default:

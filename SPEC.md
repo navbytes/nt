@@ -194,6 +194,21 @@ Tokens expire after 24h; refresh window is 7d. See [[oauth-flow]].
   same name. Unlike `nt archive`, an expired note is never hidden — `nt recall`/`nt_recall`
   down-rank it and every read path flags it `expired`/`notYetValid`, so an agent still finds it
   but knows to doubt it.
+- **`half_life:`/`reviewed:`** (optional; `Nd/Nw/Nm/Ny` or `none` / `YYYY-MM-DD` or RFC3339)
+  drive **relevance decay** — the smooth complement to `valid_until`'s cliff, for facts that
+  rot without a known expiry (see docs/spec-memory-dynamics.md). A note with a `half_life`
+  fades as it ages un-reconfirmed: multiplicatively down-ranked in recall
+  (`max(0.30, 0.5^(age/half_life))`, floored — fade, never hide), rolled out of the index's
+  recent tier once past one half-life, and flagged `faded` on every read path. Age is measured
+  from the latest of `reviewed`/`updated`/`created`/file-mtime; `nt touch` (MCP `nt_touch`)
+  stamps `reviewed:` to say "still true" — reading alone never resets the clock. Both keys
+  optional; a store that never sets them is byte-identical to before. Malformed values are
+  inert (never affect ranking) and surfaced by `nt doctor`.
+- **`## Decisions`** (body convention, not frontmatter): one dated bullet per decision,
+  newest first — the note's coarse, always-visible version history, so in-place edits don't
+  erase what was tried and rejected. Append with `nt decide <note> "why"` (MCP `nt_decide`);
+  supersedes stamp `- <date>: supersedes [[old-slug]]` on the replacement automatically. The
+  per-edit fine history stays in git: `nt history <note>` (MCP `nt_history`) reads it back.
 
 **Obsidian-compatible (use Obsidian as the notes GUI).** Point an Obsidian vault at `notes/`
 and it works both ways — nt already writes plain `.md` + YAML frontmatter + `[[wikilinks]]`
@@ -413,6 +428,11 @@ nt export --tag rule                 # compile the standing rules layer (CLAUDE.
 nt import backup.json | vault/       # export's inverse: round-trip a JSON backup, or bulk-load an Obsidian vault
 nt distill [--json]                  # every near-duplicate note pair, uncapped — proposes, never merges
 nt undo / redo                       # transactional; workstream-safe (--force overrides)
+nt touch <note…>                     # re-confirm: stamp reviewed:, resetting the half_life decay clock (reading never resets it)
+nt decide <note> "why"               # dated line in the note's ## Decisions section — its visible version history
+nt history <note> [--patch] [--since 30d]   # the note's git commit history (store must be git-init-ed)
+nt note "k8s gotcha" --half-life 90d # volatile fact: fades in recall/index as it ages un-reconfirmed (down-ranked + ~faded, never hidden)
+nt note "topic" --if-exists return   # exact title/slug match → write nothing, print the existing note to edit in place
 nt edit <id|task:N> | nt edit note:<slug>   # safe edit via temp file (§6.2)
 nt mv <note> <new-name|folder/path>  # rename/move a note, rewriting all [[links]] to it
 nt path                              # print $NT_DIR
@@ -491,6 +511,11 @@ findings cross-pollinate. A *workstream* is that isolation axis, distinct from
   all-new line mints its own.
 - **Linking & backlinks** — `[[…]]` cross-links any task or note in any direction; backlinks
   ("Linked from") computed on demand via ripgrep, no index (§5.1).
+- **Memory dynamics** — opt-in relevance decay (`half_life:` + `nt touch`, §5), the
+  `## Decisions` version-history convention (`nt decide` / `nt history`, §5), exact-match
+  write steering (`--if-exists return` / MCP `if_exists`) so one topic stays one note, and
+  a recall `escalate` hint that points weak/empty results at the deeper
+  `nt search --include-archived` sweep. Design + rationale: docs/spec-memory-dynamics.md.
 - **Multi-select & bulk ops** (TUI) — `space`/`V` mark tasks (ULID-keyed, survive
   regroup/filter); `x`/`p`/`D`/`t`/`X` act on the whole set in one undo transaction;
   destructive bulk ops (done-with-recurrence, delete) confirm first.
@@ -668,7 +693,7 @@ the identical UI in a native window (see `desktop/`, ADR 0001).
   todo→ULID map, status-mapped, `src:claude`); the bundled `/nt` skill teaches Claude to
   capture and `nt index`. Setup: docs/claude-integration.md.
 - `nt mcp` runs a stdio **MCP server** (newline-delimited JSON-RPC 2.0, no SDK dep) exposing
-  typed tools (**19**: nt_status, nt_view, nt_add, nt_update, nt_note, nt_note_edit,
+  typed tools (**22**: nt_status, nt_view, nt_add, nt_update, nt_note, nt_note_edit, nt_touch, nt_decide, nt_history,
   nt_relink, nt_index, nt_get, nt_search, nt_recall, nt_links, nt_mv, nt_tag, nt_archive,
   nt_rm, nt_doctor, nt_distill, nt_mindmap) with strict unknown-param rejection, for MCP clients. A thin driving adapter over
   the same engine/domain as the CLI and TUI; defaults `source` to `claude` and refuses

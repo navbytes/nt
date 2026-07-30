@@ -91,6 +91,12 @@ func Run(args []string) int {
 		return cmdRm(rest)
 	case "archive":
 		return cmdArchive(rest)
+	case "touch":
+		return cmdTouch(rest)
+	case "decide":
+		return cmdDecide(rest)
+	case "history":
+		return cmdHistory(rest)
 	case "undo":
 		return cmdUndo(rest)
 	case "redo":
@@ -154,7 +160,7 @@ var knownCommands = []string{
 	"view", "views", "ready", "agenda", "review", "index", "log",
 	"done", "do", "skip", "start", "stop", "update", "up", "search", "q",
 	"recall", "export", "import", "tags", "tag", "links", "mv", "rename", "rm", "delete",
-	"archive", "undo", "redo", "edit", "path", "doctor", "gc", "git-init", "sync", "hook", "mcp",
+	"archive", "undo", "redo", "edit", "touch", "decide", "history", "path", "doctor", "gc", "git-init", "sync", "hook", "mcp",
 	"opencode", "pi", "store-hash", "web", "version", "help", "supersede", "relink", "distill",
 }
 
@@ -432,6 +438,12 @@ USAGE
   nt distill [--json]         list every near-duplicate note pair in the store (uncapped) so you
                               can merge or 'nt tag +distinct' a deliberate fork — proposes, never merges
   nt relink <note> <old> <new>   fix a wrong outbound [[link]] in a note's body
+  nt touch <note…>            re-confirm a note still holds: stamps reviewed:, resetting
+                              its --half-life decay clock (reading never resets it)
+  nt decide <note> "why"      record WHY a note changed: a dated line in its
+                              ## Decisions section — its visible version history
+  nt history <note>           the note's git commit history (--patch diffs, --since 30d;
+                              store must be 'nt git-init'-ed)
   nt rm <id|note> [flags]     delete tasks (undoable) or notes (to .trash/)
                               notes: --unlink strips inbound links, --force keeps them;
                               -y/--yes confirms (required for tasks when non-interactive)

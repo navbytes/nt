@@ -483,12 +483,15 @@ func bestSnippet(n *note.Note, terms []string) string {
 }
 
 type searchNoteJSON struct {
-	ID      string   `json:"id"`
-	Title   string   `json:"title"`
-	Rel     string   `json:"rel"`
-	Path    string   `json:"path"`
-	Tags    []string `json:"tags,omitempty"`
-	Snippet string   `json:"snippet,omitempty"`
+	ID         string   `json:"id"`
+	Title      string   `json:"title"`
+	Rel        string   `json:"rel"`
+	Path       string   `json:"path"`
+	Tags       []string `json:"tags,omitempty"`
+	Snippet    string   `json:"snippet,omitempty"`
+	Archived   bool     `json:"archived,omitempty"`     // only surfaces via --include-archived
+	Superseded string   `json:"supersededBy,omitempty"` // only surfaces via --include-archived
+	Faded      bool     `json:"faded,omitempty"`        // aged past its half_life un-reconfirmed
 }
 
 type searchJSON struct {
@@ -501,9 +504,10 @@ func cmdSearch(args []string) int {
 	typ := fs.String("type", "all", "note|task|all")
 	asJSON := fs.Bool("json", false, "machine-readable output")
 	limit := fs.Int("limit", 0, "cap results per kind (0 = all); a broad term can otherwise print the whole store")
+	includeArchived := fs.Bool("include-archived", false, "also search retired notes (archived/superseded) — the deep sweep; retired hits are marked")
 	var tags stringSlice
 	fs.Var(&tags, "tag", "only items with this tag (repeatable, AND)")
-	flags, positional := splitArgs(args, map[string]bool{"json": true})
+	flags, positional := splitArgs(args, map[string]bool{"json": true, "include-archived": true})
 	if err := fs.Parse(flags); err != nil {
 		return 2
 	}
@@ -534,7 +538,10 @@ func cmdSearch(args []string) int {
 	}
 	var noteHits []noteHit
 	if *typ != "task" {
-		notes := note.Active(mustNotes(e))
+		notes := mustNotes(e)
+		if !*includeArchived {
+			notes = note.Active(notes)
+		}
 		for _, n := range notes {
 			if n.Reserved() {
 				continue // task-detail notes aren't part of the KB
@@ -595,6 +602,8 @@ func cmdSearch(args []string) int {
 			out.Notes = append(out.Notes, searchNoteJSON{
 				ID: h.n.ID, Title: h.n.Title, Rel: h.n.Rel, Path: h.n.Path,
 				Tags: h.n.Tags, Snippet: h.snippet,
+				Archived: h.n.Archived, Superseded: h.n.SupersededBy,
+				Faded: h.n.Faded(time.Now()),
 			})
 		}
 		return printJSON(out)
@@ -602,10 +611,17 @@ func cmdSearch(args []string) int {
 
 	found := 0
 	for _, h := range noteHits {
+		retired := ""
+		switch {
+		case h.n.SupersededBy != "":
+			retired = "  ⚠ superseded by " + shortID(h.n.SupersededBy)
+		case h.n.Archived:
+			retired = "  ⚠ archived"
+		}
 		if h.snippet != "" && h.snippet != h.n.Title {
-			fmt.Printf("note  %s  %s  %s — %s\n", shortID(h.n.ID), h.n.Rel, h.n.Title, h.snippet)
+			fmt.Printf("note  %s  %s  %s — %s%s\n", shortID(h.n.ID), h.n.Rel, h.n.Title, h.snippet, retired)
 		} else {
-			fmt.Printf("note  %s  %s  %s\n", shortID(h.n.ID), h.n.Rel, h.n.Title)
+			fmt.Printf("note  %s  %s  %s%s\n", shortID(h.n.ID), h.n.Rel, h.n.Title, retired)
 		}
 		found++
 	}
@@ -1010,16 +1026,39 @@ func cmdReview(args []string) int {
 	rev := task.BuildReview(scoped, blocked, *staleDays, today)
 	overdue, stale, undated, stuck := rev.Overdue, rev.Stale, rev.Undated, rev.StuckProjects
 
+	// Faded notes (memory-dynamics spec §3): notes past their half_life
+	// un-reconfirmed, most-faded first. This is the human-gated decay pass —
+	// re-confirm (nt touch), update, or archive; nothing fades away silently.
+	const fadedCap = 15
+	var faded []*note.Note
+	now := time.Now()
+	for _, n := range note.Active(mustNotes(e)) {
+		if !n.Reserved() && n.Faded(now) {
+			faded = append(faded, n)
+		}
+	}
+	sort.SliceStable(faded, func(i, j int) bool { return faded[i].FadedDays(now) > faded[j].FadedDays(now) })
+	fadedTotal := len(faded)
+	if len(faded) > fadedCap {
+		faded = faded[:fadedCap] // capped with a count below — never silently
+	}
+
 	if *asJSON {
+		fj := make([]fadedNoteJSON, 0, len(faded))
+		for _, n := range faded {
+			fj = append(fj, fadedNoteJSON{ID: n.ID, Rel: n.Rel, Title: n.Title, HalfLife: n.HalfLife, FadedDays: n.FadedDays(now)})
+		}
 		return printJSON(reviewJSON{
 			Overdue:       tasksToJSON(overdue, idx),
 			Stale:         tasksToJSON(stale, idx),
 			Undated:       tasksToJSON(undated, idx),
 			StuckProjects: stuck,
+			FadedNotes:    fj,
+			FadedTotal:    fadedTotal,
 		})
 	}
 
-	if len(overdue)+len(stale)+len(undated)+len(stuck) == 0 {
+	if len(overdue)+len(stale)+len(undated)+len(stuck)+len(faded) == 0 {
 		fmt.Println("review: nothing needs attention — you're on top of it " + glyphReviewClear())
 		return 0
 	}
@@ -1042,12 +1081,32 @@ func cmdReview(args []string) int {
 			fmt.Println("  +" + p)
 		}
 	}
+	if len(faded) > 0 {
+		fmt.Printf("\nFaded notes — past their half-life un-reconfirmed (%d)\n", fadedTotal)
+		for _, n := range faded {
+			fmt.Printf("  %s  %s  %s  (half-life %s, %dd past)\n", shortID(n.ID), n.Rel, n.Title, n.HalfLife, n.FadedDays(now))
+		}
+		if fadedTotal > len(faded) {
+			fmt.Printf("  … and %d more (nt review --json for all)\n", fadedTotal-len(faded))
+		}
+		fmt.Println("  → still true? nt touch <id> · changed? nt edit · dead? nt archive")
+	}
 	return 0
 }
 
+type fadedNoteJSON struct {
+	ID        string `json:"id"`
+	Rel       string `json:"rel"`
+	Title     string `json:"title"`
+	HalfLife  string `json:"halfLife"`
+	FadedDays int    `json:"fadedDays"`
+}
+
 type reviewJSON struct {
-	Overdue       []taskJSON `json:"overdue"`
-	Stale         []taskJSON `json:"stale"`
-	Undated       []taskJSON `json:"undated"`
-	StuckProjects []string   `json:"stuckProjects"`
+	Overdue       []taskJSON      `json:"overdue"`
+	Stale         []taskJSON      `json:"stale"`
+	Undated       []taskJSON      `json:"undated"`
+	StuckProjects []string        `json:"stuckProjects"`
+	FadedNotes    []fadedNoteJSON `json:"fadedNotes,omitempty"` // past half_life un-reconfirmed, most-faded first (capped)
+	FadedTotal    int             `json:"fadedTotal,omitempty"`
 }

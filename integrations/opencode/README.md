@@ -51,7 +51,7 @@ Lessons cost tokens only when recall returns them.
 
 ## The building blocks
 
-**1. MCP server (`mcp.nt`)** — `nt mcp` exposes 19 typed tools; OpenCode is a
+**1. MCP server (`mcp.nt`)** — `nt mcp` exposes 22 typed tools; OpenCode is a
 first-class MCP client, so this *is* the read/write path. Retrieval is
 progressive: `nt_index` (cheap stub catalog) → `nt_search` (ranked stubs) →
 `nt_get` (one body).

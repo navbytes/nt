@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -214,13 +215,24 @@ func cmdEdit(args []string) int {
 	validUntil := fs.String("valid-until", "", "set: this fact stops being true after this date/time (YYYY-MM-DD or RFC3339) — nt_recall down-ranks and flags it 'expired' past this")
 	clearValidFrom := fs.Bool("clear-valid-from", false, "remove the valid_from constraint")
 	clearValidUntil := fs.Bool("clear-valid-until", false, "remove the valid_until constraint")
+	halfLife := fs.String("half-life", "", "set the relevance half-life (Nd/Nw/Nm/Ny, or 'none') — the note fades in recall/index as it ages un-reconfirmed; `nt touch` resets the clock")
+	reviewed := fs.String("reviewed", "", "set the last-reconfirmed date (YYYY-MM-DD or RFC3339) — the decay clock's reset point (prefer `nt touch` for today)")
+	clearHalfLife := fs.Bool("clear-half-life", false, "remove the half_life (stop decaying)")
+	clearReviewed := fs.Bool("clear-reviewed", false, "remove the reviewed date")
+	// Simulation finding: agents pass --source reflexively (every WRITE command
+	// takes it) and got an opaque "flag provided but not defined". Define it so
+	// we can explain instead: provenance is set at creation and edits keep it.
+	sourceFlag := fs.String("source", "", "not applicable on edit — provenance is recorded at creation (nt add/note) and edits keep the original source")
 	expectMtime := fs.String("expect-mtime", "", "optional: the mtime from a prior `nt show --json` of this note — refuse instead of overwriting if it changed on disk since (best-effort; omit if you don't have one)")
-	flags, positional := splitArgs(args, map[string]bool{"clear-valid-from": true, "clear-valid-until": true})
+	flags, positional := splitArgs(args, map[string]bool{"clear-valid-from": true, "clear-valid-until": true, "clear-half-life": true, "clear-reviewed": true})
 	if err := fs.Parse(flags); err != nil {
 		return 2
 	}
 	if len(positional) == 0 {
 		return usageErr(fmt.Errorf("edit: need an id (or note:slug)"))
+	}
+	if strings.TrimSpace(*sourceFlag) != "" {
+		return usageErr(fmt.Errorf("edit: --source doesn't apply here — provenance is recorded at creation (nt add/note --source) and edits keep the original; drop the flag and rerun"))
 	}
 	handle := positional[0]
 	appendVal, aerr := resolveBody(*appendTxt, *appendFile)
@@ -278,7 +290,8 @@ func cmdEdit(args []string) int {
 	// be fixable only via $EDITOR or a whole-note supersede (which churns the id
 	// and every inbound link); this edits in place.
 	validitySet := strings.TrimSpace(*validFrom) != "" || strings.TrimSpace(*validUntil) != "" || *clearValidFrom || *clearValidUntil
-	if appendVal != "" || bodyVal != "" || replacing || strings.TrimSpace(descVal) != "" || strings.TrimSpace(*title) != "" || validitySet {
+	decaySet := strings.TrimSpace(*halfLife) != "" || strings.TrimSpace(*reviewed) != "" || *clearHalfLife || *clearReviewed
+	if appendVal != "" || bodyVal != "" || replacing || strings.TrimSpace(descVal) != "" || strings.TrimSpace(*title) != "" || validitySet || decaySet {
 		n, nerr := resolveNote(notes, strings.TrimPrefix(handle, "note:"))
 		if nerr != nil {
 			return fail(fmt.Errorf("edit: %w (non-interactive edits apply to notes; for tasks use `nt update`)", nerr))
@@ -302,7 +315,13 @@ func cmdEdit(args []string) int {
 			count := strings.Count(n.Body, *oldString)
 			switch count {
 			case 0:
-				return fail(fmt.Errorf("edit: --old-string not found in %s's body — run `nt show %s` to see the current text", shortID(n.ID), shortID(n.ID)))
+				// Simulation finding: agents target the description text with
+				// --old-string and get a bare "not found" — say WHERE the text
+				// actually lives instead of leaving them to guess.
+				if strings.Contains(n.Description(1<<20), *oldString) {
+					return fail(fmt.Errorf("edit: --old-string matches the DESCRIPTION, not the body — the description is a separate field; replace it with `nt edit %s --desc \"…\"`", shortID(n.ID)))
+				}
+				return fail(fmt.Errorf("edit: --old-string not found in %s's body — run `nt show %s` to see the current text (descriptions are a separate field: --desc)", shortID(n.ID), shortID(n.ID)))
 			case 1:
 				n.Body = strings.Replace(n.Body, *oldString, *newString, 1)
 				verb = "edited"
@@ -351,6 +370,34 @@ func cmdEdit(args []string) int {
 			n.ValidUntil = ""
 			if verb == "" {
 				verb = "set validity of"
+			}
+		}
+		if hl := strings.TrimSpace(*halfLife); hl != "" {
+			if _, ok, isNone := note.ParseHalfLife(hl); !ok && !isNone {
+				return usageErr(fmt.Errorf("edit: --half-life must be Nd/Nw/Nm/Ny or 'none', got %q", hl))
+			}
+			n.HalfLife = hl
+			if verb == "" {
+				verb = "set decay of"
+			}
+		} else if *clearHalfLife {
+			n.HalfLife = ""
+			if verb == "" {
+				verb = "set decay of"
+			}
+		}
+		if rv := strings.TrimSpace(*reviewed); rv != "" {
+			if _, ok := note.ParseFlexDate(rv); !ok {
+				return usageErr(fmt.Errorf("edit: --reviewed must be YYYY-MM-DD or RFC3339, got %q", rv))
+			}
+			n.Reviewed = rv
+			if verb == "" {
+				verb = "set decay of"
+			}
+		} else if *clearReviewed {
+			n.Reviewed = ""
+			if verb == "" {
+				verb = "set decay of"
 			}
 		}
 		n.Updated = time.Now().Format(time.RFC3339)
@@ -649,6 +696,7 @@ type noteLint struct {
 	NearDups     []string // "a ≈ b" pairs of active notes with near-duplicate titles
 	PinnedCount  int      // notes in the always-shown index tier (rules/memory/ref/pin)
 	OldestPinned []string // "handle (aged Nd)" — staleness candidates when the tier is oversized
+	BadDecay     []string // "handle: problem" — unparseable half_life / future or bad reviewed (warn-and-preserve; a bad value never affects ranking)
 }
 
 // lintNotes scans notes and tasks for KB-graph health: unresolved [[links]]
@@ -703,6 +751,21 @@ func lintNotes(e *mutate.Engine) noteLint {
 			pinnedNotes = append(pinnedNotes, n)
 		}
 		handle := shortID(n.ID) + " " + n.Rel
+		// Decay hygiene (spec §3): a malformed half_life/reviewed silently means
+		// "no decay" everywhere else (a bad value must never zero a note), so
+		// doctor is the one place it's made visible.
+		if hl := strings.TrimSpace(n.HalfLife); hl != "" {
+			if _, okHL, isNone := note.ParseHalfLife(hl); !okHL && !isNone {
+				rep.BadDecay = append(rep.BadDecay, handle+": half_life "+strconv.Quote(hl)+" is not Nd/Nw/Nm/Ny or \"none\" — decay is OFF for this note")
+			}
+		}
+		if rv := strings.TrimSpace(n.Reviewed); rv != "" {
+			if t, okRv := note.ParseFlexDate(rv); !okRv {
+				rep.BadDecay = append(rep.BadDecay, handle+": reviewed "+strconv.Quote(rv)+" is not YYYY-MM-DD or RFC3339")
+			} else if t.After(time.Now().AddDate(0, 0, 1)) {
+				rep.BadDecay = append(rep.BadDecay, handle+": reviewed "+rv+" is in the future — the decay clock never advances")
+			}
+		}
 		if !hasExplicitDescription(n) {
 			rep.MissingDesc = append(rep.MissingDesc, handle)
 		}
@@ -817,12 +880,18 @@ func printNoteHygiene(nl noteLint) {
 			fmt.Printf("  oldest pinned (staleness candidates): %s\n", sampleList(nl.OldestPinned, 5))
 		}
 	}
+	if len(nl.BadDecay) > 0 {
+		fmt.Printf("  decay frontmatter problems (value preserved, decay inert until fixed):\n")
+		for _, b := range nl.BadDecay {
+			fmt.Printf("    %s\n", b)
+		}
+	}
 }
 
 // hasHygieneNotices reports whether the informational note-quality summary has
 // anything to say — used to keep the headline honest.
 func (nl noteLint) hasHygieneNotices() bool {
-	return len(nl.MissingDesc) > 0 || len(nl.Orphans) > 0 || len(nl.NearDups) > 0 || nl.PinnedCount > note.TierPinnedWarn
+	return len(nl.MissingDesc) > 0 || len(nl.Orphans) > 0 || len(nl.NearDups) > 0 || nl.PinnedCount > note.TierPinnedWarn || len(nl.BadDecay) > 0
 }
 
 // sampleList joins up to n items, appending "(+K more)" when it truncates.

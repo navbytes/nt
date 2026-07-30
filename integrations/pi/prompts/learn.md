@@ -52,7 +52,11 @@ nothing without approval.
 
 - Notes/rules/memory/lessons → `nt_note` (title, `description`, `body`;
   `kind:"lesson"|"rule"|"decision"|"ref"|"memory"` applies the canonical
-  tag+folder). Set `source:"pi"`. Apply the user's edits.
+  tag+folder). Set `source:"pi"`, and pass **`if_exists:"return"`** — on
+  `matched:true` the topic's canonical note already exists: update it via
+  `nt_note_edit` (with the returned `expect_mtime`), and if the update reverses
+  a conclusion, record why with `nt_decide`. Give volatile facts a `half_life`
+  (e.g. `"90d"`) so they fade instead of going stale. Apply the user's edits.
 - Tasks → `nt_add` (verb-first title ≤ ~60 chars, detail in `body`, link via
   `discovered_from`).
 - If `nt_note`'s response has a `similar` list, check whether you doubled a note;
