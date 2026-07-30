@@ -417,7 +417,7 @@ nt index [--all] [--tag t] [--folder f] [--since 14d] [--json]   # tiered stub c
 nt log [--since 2026-06-01] [--days 7] [--source claude] [--json]   # completed tasks, newest first
 nt done <id|task:N>                  # mark done  (do)
 nt update <id|task:N> --status doing --pri med --due +3d     # (up)
-nt search "race condition" [--type note|task] [--limit 8]   # ranked stubs (q)
+nt search "race condition" [--type note|task] [--limit 8] [--include-archived]   # ranked stubs (q); --include-archived = the deep sweep over retired notes that recall's escalate hint suggests
 nt recall "adding a cache layer" [--lessons-only] [--project p]   # lessons ⚑ first, paraphrase-aware, precision floor (empty = nothing relevant), soft same-project boost (NT_WORKSTREAM default; 'none' disables)
 nt note "gotcha" --kind lesson --description "trigger"   # taxonomy: lesson|decision|ref|rule|memory → canonical tag + folder (--lesson = --kind lesson)
 nt show <id|slug|title>   # one note's full body, on demand
