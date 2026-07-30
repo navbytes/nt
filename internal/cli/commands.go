@@ -691,6 +691,15 @@ func cmdNote(args []string) int {
 				fmt.Fprintf(os.Stderr, "note: %q already exists — %s  %s  (--if-exists error)\n", match.Title, shortID(match.ID), match.Rel)
 				return 1
 			}
+			if *asJSON {
+				// Mirror the MCP payload: matched + the mtime token for the
+				// documented `nt edit --expect-mtime` round-trip. A caller who
+				// asked for JSON must never get the plain-text form.
+				return printJSON(map[string]any{
+					"matched": true, "id": match.ID, "rel": match.Rel, "title": match.Title,
+					"mtime": match.MTimeToken(),
+				})
+			}
 			fmt.Printf("exists %s  %s\n", shortID(match.ID), match.Rel)
 			fmt.Fprintf(os.Stderr, "note: already exists — nothing written. Edit it: nt edit %s --append \"…\" (or --old-string/--new-string); record why with nt decide %s \"…\" if a conclusion changed\n", shortID(match.ID), shortID(match.ID))
 			return 0
@@ -1569,6 +1578,13 @@ type noteJSON struct {
 	// — see note.Note.Expired's doc comment. The note is never hidden either way.
 	Expired     bool `json:"expired,omitempty"`
 	NotYetValid bool `json:"notYetValid,omitempty"`
+	// Decay + decision-log state (memory-dynamics spec §3.3, §5.1) — the
+	// single-note read is where "see it's faded → verify → nt touch" starts.
+	HalfLife       string `json:"halfLife,omitempty"`
+	Reviewed       string `json:"reviewed,omitempty"`
+	Faded          bool   `json:"faded,omitempty"`
+	Decisions      int    `json:"decisions,omitempty"`
+	LatestDecision string `json:"latestDecision,omitempty"`
 }
 
 func notesToJSON(notes []*note.Note) []noteJSON {
@@ -1589,7 +1605,14 @@ func notesToJSON(notes []*note.Note) []noteJSON {
 			ValidUntil:  n.ValidUntil,
 			Expired:     n.Expired(now),
 			NotYetValid: n.NotYetValid(now),
+			HalfLife:    n.HalfLife,
+			Reviewed:    n.Reviewed,
+			Faded:       n.Faded(now),
 		})
+		if count, latest := n.DecisionStats(); count > 0 {
+			out[len(out)-1].Decisions = count
+			out[len(out)-1].LatestDecision = latest
+		}
 	}
 	return out
 }

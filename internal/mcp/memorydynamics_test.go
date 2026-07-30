@@ -38,6 +38,12 @@ func TestMCPTouch(t *testing.T) {
 	if !strings.Contains(gout, res.Reviewed) {
 		t.Fatalf("reviewed not visible via nt_get: %s", gout)
 	}
+	// The returned token must survive the documented round-trip: it has to
+	// describe the POST-save file, or every chained expect_mtime edit fails
+	// with a spurious staleness error.
+	if _, err := s.dispatch("nt_note_edit", map[string]any{"id": n.ID, "append": "still true", "expect_mtime": res.MTime}); err != nil {
+		t.Fatalf("touch's mtime token should be valid for an immediate expect_mtime edit: %v", err)
+	}
 }
 
 // A bad half_life is rejected at write time (never silently stored broken).
@@ -107,6 +113,31 @@ func TestMCPSupersedeStampsDecision(t *testing.T) {
 	gout, _ := s.dispatch("nt_get", map[string]any{"handle": neu.ID})
 	if !strings.Contains(gout, "supersedes [[old-approach-detail]]") {
 		t.Fatalf("new note should carry the supersedes stamp: %s", gout)
+	}
+}
+
+// nt_archive superseded_by= must stamp the same provenance line as every
+// other supersede door — history must not depend on which tool performed it.
+func TestMCPArchiveSupersededByStampsDecision(t *testing.T) {
+	s := newServer(t)
+	out, err := s.dispatch("nt_note", map[string]any{"title": "dup capture here", "body": "v1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var old noteOut
+	json.Unmarshal([]byte(out), &old)
+	out, err = s.dispatch("nt_note", map[string]any{"title": "kept canonical note", "body": "v2", "force": true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var kept noteOut
+	json.Unmarshal([]byte(out), &kept)
+	if _, err := s.dispatch("nt_archive", map[string]any{"handle": old.ID, "superseded_by": kept.ID}); err != nil {
+		t.Fatal(err)
+	}
+	gout, _ := s.dispatch("nt_get", map[string]any{"handle": kept.ID})
+	if !strings.Contains(gout, "supersedes [[dup-capture-here]]") {
+		t.Fatalf("archive-with-superseded_by should stamp the keeper: %s", gout)
 	}
 }
 

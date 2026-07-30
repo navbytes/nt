@@ -150,7 +150,7 @@ var toolDefs = []toolDef{
 			"handle": sp("note id, slug, or title"),
 			"id":     sp("alias for handle — pass a stub's id directly"),
 			"patch":  map[string]any{"type": "boolean", "description": "full diffs per commit instead of one-line summaries (can be large; truncated with a visible marker)"},
-			"since":  sp(`only commits newer than this — any git --since value, e.g. "2 weeks ago" or 2026-06-01`),
+			"since":  sp(`only commits newer than this — nt's Nd/Nw/Nm/Ny shorthand (e.g. "30d") or any git --since value ("2 weeks ago", 2026-06-01)`),
 		}),
 	},
 	{

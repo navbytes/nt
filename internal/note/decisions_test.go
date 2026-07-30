@@ -44,6 +44,22 @@ func TestAppendDecisionHostileInput(t *testing.T) {
 	}
 }
 
+func TestAppendDecisionIgnoresFencedHeading(t *testing.T) {
+	// A note documenting the convention itself: the example heading lives in a
+	// code fence and must not attract real bullets.
+	n := &Note{Body: "How the log works:\n\n```markdown\n## Decisions\n- 2026-01-01: example\n```\n"}
+	if err := AppendDecision(n, "2026-07-30", "real decision"); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(n.Body, "```\n\n"+DecisionsHeading) {
+		t.Fatalf("real section should be created OUTSIDE the fence:\n%s", n.Body)
+	}
+	count, latest := n.DecisionStats()
+	if count != 1 || latest != "2026-07-30" {
+		t.Fatalf("stats should see only the real section, got (%d,%q)", count, latest)
+	}
+}
+
 func TestDecisionStatsScopesToSection(t *testing.T) {
 	// Dated bullets OUTSIDE the section don't count; a later heading ends it.
 	n := &Note{Body: "- 2026-01-01: not a decision\n\n## Decisions\n\n- 2026-05-05: real\n\n## Notes\n\n- 2026-06-06: also not\n"}

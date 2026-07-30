@@ -473,6 +473,10 @@ func rankProject(notes []*note.Note, context string, limit int, project string, 
 	if len(q.words) == 0 {
 		return nil, trace
 	}
+	// One now for the whole ranking pass — expiry and decay must be evaluated
+	// against a single instant (spec §8: never sampled per candidate inside
+	// ranking), or a decayed-store eval run isn't replayable.
+	now := time.Now()
 	proj := projectTokens(project)
 	// Pass 1: build each note's bags and tally document frequency per concept, so a
 	// common word ("database", "test") counts less than a rare, discriminating one.
@@ -638,7 +642,6 @@ func rankProject(notes []*note.Note, context string, limit int, project string, 
 		if isMine {
 			f *= projectBoost
 		}
-		now := time.Now()
 		expired := cd.n.Expired(now)
 		if expired {
 			f *= expiredPenalty

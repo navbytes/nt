@@ -491,6 +491,7 @@ type searchNoteJSON struct {
 	Snippet    string   `json:"snippet,omitempty"`
 	Archived   bool     `json:"archived,omitempty"`     // only surfaces via --include-archived
 	Superseded string   `json:"supersededBy,omitempty"` // only surfaces via --include-archived
+	Faded      bool     `json:"faded,omitempty"`        // aged past its half_life un-reconfirmed
 }
 
 type searchJSON struct {
@@ -602,6 +603,7 @@ func cmdSearch(args []string) int {
 				ID: h.n.ID, Title: h.n.Title, Rel: h.n.Rel, Path: h.n.Path,
 				Tags: h.n.Tags, Snippet: h.snippet,
 				Archived: h.n.Archived, Superseded: h.n.SupersededBy,
+				Faded: h.n.Faded(time.Now()),
 			})
 		}
 		return printJSON(out)

@@ -1319,6 +1319,7 @@ func (s *server) touch(a map[string]any) (string, error) {
 			Path: n.Path, Before: string(beforeRaw),
 		})
 	}
+	refreshMTime(n) // the save minted a NEW on-disk mtime — a stale token would fail the very round-trip it exists for
 	res := map[string]any{"id": n.ID, "rel": n.Rel, "reviewed": n.Reviewed, "mtime": n.MTimeToken()}
 	if n.HalfLife == "" {
 		res["note"] = "reviewed recorded, but this note has no half_life — it doesn't decay; set one via nt_note_edit half_life if it should"
@@ -1361,9 +1362,20 @@ func (s *server) decide(a map[string]any) (string, error) {
 		})
 	}
 	count, latest := n.DecisionStats()
+	refreshMTime(n) // see touch: the token must reflect the post-save mtime
 	return jsonText(map[string]any{
 		"id": n.ID, "rel": n.Rel, "decisions": count, "latestDecision": latest, "mtime": n.MTimeToken(),
 	}), nil
+}
+
+// refreshMTime re-stats n after a save so MTimeToken reflects the file that
+// now exists — Save gives the file a new mtime, but only Load/List set
+// n.ModTime, and returning the PRE-save token makes every documented
+// expect_mtime round-trip fail with a spurious staleness error.
+func refreshMTime(n *note.Note) {
+	if info, err := os.Stat(n.Path); err == nil {
+		n.ModTime = info.ModTime()
+	}
 }
 
 // history is the fine-grained per-edit channel (nt_history): a read-only view
@@ -1395,8 +1407,12 @@ func (s *server) history(a map[string]any) (string, error) {
 	} else {
 		gitArgs = append(gitArgs, "--date=short", "--pretty=format:%h  %ad  %s")
 	}
-	if since := strings.TrimSpace(str(a, "since")); since != "" {
-		gitArgs = append(gitArgs, "--since", since)
+	since := strings.TrimSpace(str(a, "since"))
+	if since != "" {
+		// mcpGitSince: git's approxidate treats nt's own "30d" shorthand as
+		// unparseable and silently falls back to "now" — filtering out EVERY
+		// commit with exit 0, which then reads as "this note has no history".
+		gitArgs = append(gitArgs, "--since", mcpGitSince(since))
 	}
 	gitArgs = append(gitArgs, "--", rel)
 	cmd := exec.Command("git", gitArgs...)
@@ -1415,12 +1431,40 @@ func (s *server) history(a map[string]any) (string, error) {
 	res := map[string]any{"id": n.ID, "rel": n.Rel, "history": text, "patch": patch}
 	if text == "" {
 		res["history"] = ""
-		res["note"] = "no commits touch this note yet (nt sync, or git add/commit in the store, creates history)"
+		if since != "" {
+			// An empty FILTERED result must not claim the note was never
+			// committed — it may have years of history outside the window.
+			res["note"] = "no commits in that since window — drop since for the full history"
+		} else {
+			res["note"] = "no commits touch this note yet (nt sync, or git add/commit in the store, creates history)"
+		}
 	}
 	if truncated {
 		res["truncated"] = true
 	}
 	return jsonText(res), nil
+}
+
+// mcpGitSince turns nt's compact Nd/Nw/Nm/Ny duration shorthand into git's
+// "--since" phrasing; anything else passes through verbatim (git accepts
+// dates and phrases like "2 weeks ago" natively). The mcp-package twin of
+// the cli package's gitSince — see that for why the conversion is mandatory.
+func mcpGitSince(s string) string {
+	if len(s) >= 2 {
+		if num := s[:len(s)-1]; strings.IndexFunc(num, func(r rune) bool { return r < '0' || r > '9' }) < 0 {
+			switch s[len(s)-1] {
+			case 'd':
+				return num + " days ago"
+			case 'w':
+				return num + " weeks ago"
+			case 'm':
+				return num + " months ago"
+			case 'y':
+				return num + " years ago"
+			}
+		}
+	}
+	return s
 }
 
 // resolveNoteClone resolves a note handle and returns a mutation-safe clone
@@ -1480,15 +1524,6 @@ func relinkBody(body, oldT, newT string) (string, int) {
 }
 
 // markSuperseded stamps oldHandle's note with superseded_by=newID.
-func (s *server) markSuperseded(oldHandle, newID string) error {
-	old, err := s.supersedeOld(oldHandle, newID)
-	if err != nil {
-		return err
-	}
-	_ = old // provenance stamping on the NEW note is the caller's step (see note())
-	return nil
-}
-
 // supersedeOld stamps oldHandle's note with superseded_by=newID and returns
 // the retired note (for the provenance decision line on its replacement).
 func (s *server) supersedeOld(oldHandle, newID string) (*note.Note, error) {
@@ -1856,6 +1891,23 @@ func (s *server) get(a map[string]any) (string, error) {
 	}
 	if n.NotYetValid(now) {
 		out["notYetValid"] = true
+	}
+	// Decay + decision-log state (spec §3.3, §5.1): the single-note read is
+	// where "see it's faded → verify → nt_touch" starts, so the flags must be
+	// visible here, not only on recall/index stubs.
+	if n.HalfLife != "" {
+		out["halfLife"] = n.HalfLife
+	}
+	if n.Reviewed != "" {
+		out["reviewed"] = n.Reviewed
+	}
+	if n.Faded(now) {
+		out["faded"] = true
+		out["decay"] = float64(int(n.Decay(now)*100+0.5)) / 100
+	}
+	if count, latest := n.DecisionStats(); count > 0 {
+		out["decisions"] = count
+		out["latestDecision"] = latest
 	}
 	return jsonText(out), nil
 }
@@ -2255,8 +2307,20 @@ func (s *server) archive(a map[string]any) (string, error) {
 		if !ok {
 			return "", fmt.Errorf("no note %q (superseded_by)", by)
 		}
-		if err := s.markSuperseded(handle, newNote.ID); err != nil {
+		old, err := s.supersedeOld(handle, newNote.ID)
+		if err != nil {
 			return "", err
+		}
+		// Provenance stamp (spec §5.1) — the SAME stamp every other supersede
+		// door writes; consolidation history must not depend on which tool
+		// performed it. Best-effort: the supersede already took.
+		slug := strings.TrimSuffix(old.Rel, ".md")
+		if i := strings.LastIndexByte(slug, '/'); i >= 0 {
+			slug = slug[i+1:]
+		}
+		repl := cloneNote(newNote) // cache-shared — never mutate the original
+		if aerr := note.AppendDecision(repl, time.Now().Format("2006-01-02"), "supersedes [["+slug+"]]"); aerr == nil {
+			_ = repl.Save()
 		}
 		return jsonText(map[string]any{"superseded": handle, "canonical": newNote.ID}), nil
 	}

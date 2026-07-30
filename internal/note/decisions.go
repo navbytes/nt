@@ -62,8 +62,11 @@ func AppendDecision(n *Note, date, text string) error {
 
 // decisionsHeadingIndex returns the byte offset of the ## Decisions heading
 // line in body, or -1. Exact-heading match at line start only — "## Decisions
-// we regret" is someone's prose, not the convention section.
+// we regret" is someone's prose, not the convention section — and lines inside
+// fenced code blocks never match (a note DOCUMENTING this convention would
+// otherwise get real bullets inserted into its example fence).
 func decisionsHeadingIndex(body string) int {
+	inFence := false
 	for i := 0; i >= 0 && i < len(body); {
 		lineEnd := strings.IndexByte(body[i:], '\n')
 		var line string
@@ -73,7 +76,10 @@ func decisionsHeadingIndex(body string) int {
 		} else {
 			line = body[i : i+lineEnd]
 		}
-		if strings.TrimRight(line, " \t") == DecisionsHeading {
+		trimmed := strings.TrimRight(line, " \t")
+		if strings.HasPrefix(trimmed, "```") || strings.HasPrefix(trimmed, "~~~") {
+			inFence = !inFence
+		} else if !inFence && trimmed == DecisionsHeading {
 			return i
 		}
 		i += lineEnd + 1

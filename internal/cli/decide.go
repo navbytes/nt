@@ -111,7 +111,13 @@ func cmdHistory(args []string) int {
 		return fail(fmt.Errorf("history: git log: %s", text))
 	}
 	if text == "" {
-		fmt.Printf("no history for %s yet — it hasn't been committed (nt sync, or git add/commit in the store)\n", n.Rel)
+		if strings.TrimSpace(*since) != "" {
+			// An empty FILTERED result must not claim the note was never
+			// committed — it may have plenty of history outside the window.
+			fmt.Printf("no commits touch %s in that --since window — drop --since for the full history\n", n.Rel)
+		} else {
+			fmt.Printf("no history for %s yet — it hasn't been committed (nt sync, or git add/commit in the store)\n", n.Rel)
+		}
 		return 0
 	}
 	fmt.Println(text)

@@ -26,6 +26,11 @@ func cmdTouch(args []string) int {
 	if len(positional) == 0 {
 		return usageErr(fmt.Errorf("touch: need a note handle (slug/title/id), e.g. `nt touch jwt-token-lifetime`"))
 	}
+	// One token can only ever describe one file — with several handles it would
+	// spuriously fail every note after the first (partial success, then a lie).
+	if strings.TrimSpace(*expectMtime) != "" && len(positional) > 1 {
+		return usageErr(fmt.Errorf("touch: --expect-mtime works with exactly one handle (the token describes one file)"))
+	}
 	e, ok := engine()
 	if !ok {
 		return 1
