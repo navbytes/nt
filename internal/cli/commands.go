@@ -579,6 +579,7 @@ func cmdNote(args []string) int {
 	descFile := fs.String("description-file", "", "read the description from a file ('-' = stdin); immune to shell quoting, same as --body-file")
 	supersede := fs.String("supersede", "", "mark this note as replacing an existing one (its handle) — the old note retires from active views")
 	force := fs.Bool("force", false, "create even if a near-duplicate note already exists")
+	ifExists := fs.String("if-exists", "create", "when a note with this exact title/slug already exists (folder-scoped if --folder is set): create (default) | return (write nothing, print the existing note) | error (refuse, exit nonzero)")
 	lesson := fs.Bool("lesson", false, "record a durable lesson/gotcha: tags it 'lesson' and files it under lessons/ so 'nt recall' surfaces it before the mistake recurs")
 	kind := fs.String("kind", "", "note class: lesson|decision|ref|rule|memory — tags it and files it in the canonical folder (memory files under memory/ with tag memory-core — the always-loaded core-memory layer)")
 	validFrom := fs.String("valid-from", "", "this fact is only true from this date/time on (YYYY-MM-DD or RFC3339) — note stays visible before then, unflagged")
@@ -668,6 +669,25 @@ func cmdNote(args []string) int {
 	e, ok := engine()
 	if !ok {
 		return 1
+	}
+	// --if-exists steers the write to the existing canonical note (exact slug or
+	// case-insensitive title match, folder-scoped when one was chosen) instead of
+	// creating a sibling. Deterministic and write-free on a hit — distinct from
+	// the fuzzy FindSimilar guard below, which still applies on "create".
+	switch *ifExists {
+	case "", "create":
+	case "return", "error":
+		if match := note.FindExact(note.Active(mustNotes(e)), title, fold); match != nil {
+			if *ifExists == "error" {
+				fmt.Fprintf(os.Stderr, "note: %q already exists — %s  %s  (--if-exists error)\n", match.Title, shortID(match.ID), match.Rel)
+				return 1
+			}
+			fmt.Printf("exists %s  %s\n", shortID(match.ID), match.Rel)
+			fmt.Fprintf(os.Stderr, "note: already exists — nothing written. Edit it: nt edit %s --append \"…\" (or --old-string/--new-string); record why with nt decide %s \"…\" if a conclusion changed\n", shortID(match.ID), shortID(match.ID))
+			return 0
+		}
+	default:
+		return usageErr(fmt.Errorf("note: --if-exists must be create|return|error, got %q", *ifExists))
 	}
 	// Dedup-on-write guard: don't silently fork a decision a teammate already
 	// captured. Skipped when --force, or when --supersede is explicitly replacing.

@@ -487,8 +487,10 @@ type searchNoteJSON struct {
 	Title   string   `json:"title"`
 	Rel     string   `json:"rel"`
 	Path    string   `json:"path"`
-	Tags    []string `json:"tags,omitempty"`
-	Snippet string   `json:"snippet,omitempty"`
+	Tags       []string `json:"tags,omitempty"`
+	Snippet    string   `json:"snippet,omitempty"`
+	Archived   bool     `json:"archived,omitempty"`     // only surfaces via --include-archived
+	Superseded string   `json:"supersededBy,omitempty"` // only surfaces via --include-archived
 }
 
 type searchJSON struct {
@@ -501,9 +503,10 @@ func cmdSearch(args []string) int {
 	typ := fs.String("type", "all", "note|task|all")
 	asJSON := fs.Bool("json", false, "machine-readable output")
 	limit := fs.Int("limit", 0, "cap results per kind (0 = all); a broad term can otherwise print the whole store")
+	includeArchived := fs.Bool("include-archived", false, "also search retired notes (archived/superseded) — the deep sweep; retired hits are marked")
 	var tags stringSlice
 	fs.Var(&tags, "tag", "only items with this tag (repeatable, AND)")
-	flags, positional := splitArgs(args, map[string]bool{"json": true})
+	flags, positional := splitArgs(args, map[string]bool{"json": true, "include-archived": true})
 	if err := fs.Parse(flags); err != nil {
 		return 2
 	}
@@ -534,7 +537,10 @@ func cmdSearch(args []string) int {
 	}
 	var noteHits []noteHit
 	if *typ != "task" {
-		notes := note.Active(mustNotes(e))
+		notes := mustNotes(e)
+		if !*includeArchived {
+			notes = note.Active(notes)
+		}
 		for _, n := range notes {
 			if n.Reserved() {
 				continue // task-detail notes aren't part of the KB
@@ -595,6 +601,7 @@ func cmdSearch(args []string) int {
 			out.Notes = append(out.Notes, searchNoteJSON{
 				ID: h.n.ID, Title: h.n.Title, Rel: h.n.Rel, Path: h.n.Path,
 				Tags: h.n.Tags, Snippet: h.snippet,
+				Archived: h.n.Archived, Superseded: h.n.SupersededBy,
 			})
 		}
 		return printJSON(out)
@@ -602,10 +609,17 @@ func cmdSearch(args []string) int {
 
 	found := 0
 	for _, h := range noteHits {
+		retired := ""
+		switch {
+		case h.n.SupersededBy != "":
+			retired = "  ⚠ superseded by " + shortID(h.n.SupersededBy)
+		case h.n.Archived:
+			retired = "  ⚠ archived"
+		}
 		if h.snippet != "" && h.snippet != h.n.Title {
-			fmt.Printf("note  %s  %s  %s — %s\n", shortID(h.n.ID), h.n.Rel, h.n.Title, h.snippet)
+			fmt.Printf("note  %s  %s  %s — %s%s\n", shortID(h.n.ID), h.n.Rel, h.n.Title, h.snippet, retired)
 		} else {
-			fmt.Printf("note  %s  %s  %s\n", shortID(h.n.ID), h.n.Rel, h.n.Title)
+			fmt.Printf("note  %s  %s  %s%s\n", shortID(h.n.ID), h.n.Rel, h.n.Title, retired)
 		}
 		found++
 	}

@@ -129,6 +129,9 @@ func cmdRecall(args []string) int {
 	}
 	if len(results) == 0 {
 		fmt.Println("no relevant notes — nothing recorded for this context yet")
+		if context != "" {
+			fmt.Printf("→ before concluding nothing is recorded: nt search %q --include-archived\n", context)
+		}
 		return 0
 	}
 	// A weak top hit means the store likely has nothing on this — printing a
@@ -138,6 +141,7 @@ func cmdRecall(args []string) int {
 	// 0, so a parser keyed on the existing ⚑/space marks skips it).
 	if context != "" && results[0].QueryTerms > 0 && results[0].Tier() == "weak" {
 		fmt.Println("~ all matches weak — likely nothing recorded for this; treat as no answer")
+		fmt.Printf("→ escalate before trusting a weak hit: nt search %q --include-archived\n", context)
 	}
 	for _, r := range results {
 		fmt.Println(resultLine(r))

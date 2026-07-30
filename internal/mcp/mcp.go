@@ -968,6 +968,31 @@ func (s *server) note(a map[string]any) (string, error) {
 		}
 	}
 
+	// if_exists steers a write to the existing canonical note instead of minting
+	// a sibling — the delta-write half of the memory-dynamics spec (§4). Exact
+	// match only (slug or case-insensitive title, folder-scoped when one was
+	// given): deterministic, unlike the fuzzy FindSimilar advisory below, and it
+	// never writes on a hit — the agent makes an ordinary nt_note_edit next, so
+	// expect_mtime and the undo journal stay in the loop. Default "create" keeps
+	// today's never-lose-a-capture contract for existing callers.
+	switch ifExists := strings.TrimSpace(str(a, "if_exists")); ifExists {
+	case "", "create":
+	case "return", "error":
+		if match := note.FindExact(note.Active(s.listNotes()), title, folder); match != nil {
+			if ifExists == "error" {
+				return "", fmt.Errorf("a note with this title already exists: %s (%s) — if_exists=error refused creation; edit it with nt_note_edit", match.ID, match.Rel)
+			}
+			return jsonText(map[string]any{
+				"matched": true, "id": match.ID, "rel": match.Rel, "title": match.Title,
+				"description": match.Description(160), "tags": match.Tags,
+				"mtime": match.MTimeToken(),
+				"hint":  "note exists — nothing was written. Edit it via nt_note_edit (pass this mtime as expect_mtime); if this changes a conclusion, record why with nt_decide.",
+			}), nil
+		}
+	default:
+		return "", fmt.Errorf("invalid if_exists %q (use create|return|error)", ifExists)
+	}
+
 	// Dedup-on-write is a SOFT signal for agents, not a hard refuse: parallel
 	// agents legitimately record similar-but-distinct findings at the same time,
 	// and refusing would silently DROP a capture (a learning lost). So we always
@@ -1650,7 +1675,14 @@ func (s *server) search(a map[string]any) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	notes := note.Active(s.listNotes())
+	// include_archived widens the sweep to retired notes (archived + superseded)
+	// — the escape hatch nt_recall's escalate hint points at, so the long tail
+	// is actually reachable. Retired hits carry archived/supersededBy flags so
+	// the agent knows to doubt them.
+	notes := s.listNotes()
+	if !boolArg(a, "include_archived") {
+		notes = note.Active(notes)
+	}
 	ql := strings.ToLower(q)
 
 	type scored struct {
@@ -1811,9 +1843,36 @@ func (s *server) recall(a map[string]any) (string, error) {
 		if r.Expired {
 			row["expired"] = true // pre-existing drift: CLI JSON already includes this, the MCP stub didn't
 		}
+		if r.QueryTerms > 0 {
+			row["tier"] = r.Tier() // read the tier, not the score — normalized across queries
+		}
 		stubs = append(stubs, row)
 	}
-	return jsonText(map[string]any{"results": stubs}), nil
+	out := map[string]any{"results": stubs}
+	// Escalation hint (memory-dynamics spec §6): when the compressed recall
+	// layer has, by its own confidence measure, failed — zero results, or a weak
+	// top hit — say so and point at the full-attention fallback instead of
+	// letting the agent read a confident-looking miss as "nothing recorded".
+	// Additive and cheap; never emitted on medium/strong results.
+	if context != "" {
+		reason := ""
+		switch {
+		case len(results) == 0:
+			reason = "no_results"
+		case results[0].QueryTerms > 0 && results[0].Tier() == "weak":
+			reason = "low_confidence"
+		}
+		if reason != "" {
+			out["escalate"] = map[string]any{
+				"reason": reason,
+				"try": []map[string]any{
+					{"tool": "nt_search", "args": map[string]any{"query": context, "include_archived": true}},
+					{"tool": "nt_index", "args": map[string]any{"all": true}},
+				},
+			}
+		}
+	}
+	return jsonText(out), nil
 }
 
 func (s *server) links(a map[string]any) (string, error) {
@@ -2093,9 +2152,11 @@ type noteStub struct {
 	Folder      string   `json:"folder,omitempty"`
 	Source      string   `json:"source,omitempty"` // author/agent — ownership on a shared store
 	Updated     string   `json:"updated,omitempty"`
-	Tier        string   `json:"tier,omitempty"`        // "pinned"|"recent" on a tiered nt_index catalog
-	Expired     bool     `json:"expired,omitempty"`     // valid_until has passed — see noteOut
-	NotYetValid bool     `json:"notYetValid,omitempty"` // valid_from is in the future
+	Tier        string   `json:"tier,omitempty"`         // "pinned"|"recent" on a tiered nt_index catalog
+	Expired     bool     `json:"expired,omitempty"`      // valid_until has passed — see noteOut
+	NotYetValid bool     `json:"notYetValid,omitempty"`  // valid_from is in the future
+	Archived    bool     `json:"archived,omitempty"`     // retired note — only surfaces via include_archived search
+	Superseded  string   `json:"supersededBy,omitempty"` // replaced by this id — only surfaces via include_archived search
 }
 
 func noteToStub(n *note.Note, snippet string) noteStub {
@@ -2112,6 +2173,7 @@ func noteToStub(n *note.Note, snippet string) noteStub {
 		ID: n.ID, Rel: n.Rel, Title: n.Title, Description: desc,
 		Snippet: snippet, Tags: n.Tags, Folder: pathDir(n.Rel), Source: n.Source, Updated: shortDate(upd),
 		Expired: n.Expired(now), NotYetValid: n.NotYetValid(now),
+		Archived: n.Archived, Superseded: n.SupersededBy,
 	}
 }
 
