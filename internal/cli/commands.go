@@ -584,6 +584,7 @@ func cmdNote(args []string) int {
 	kind := fs.String("kind", "", "note class: lesson|decision|ref|rule|memory — tags it and files it in the canonical folder (memory files under memory/ with tag memory-core — the always-loaded core-memory layer)")
 	validFrom := fs.String("valid-from", "", "this fact is only true from this date/time on (YYYY-MM-DD or RFC3339) — note stays visible before then, unflagged")
 	validUntil := fs.String("valid-until", "", "this fact stops being true after this date/time (YYYY-MM-DD or RFC3339) — nt_recall down-ranks and flags it 'expired' past this, but never hides it")
+	halfLife := fs.String("half-life", "", "relevance half-life (Nd/Nw/Nm/Ny, or 'none'): the note fades in recall/index as it ages un-reconfirmed — for facts that rot without a known expiry; `nt touch` re-confirms")
 	var fields stringSlice
 	asJSON := fs.Bool("json", false, "print the created note as JSON (id, title, path, …)")
 	fs.Var(&tags, "tag", "tag (repeatable)")
@@ -666,6 +667,14 @@ func cmdNote(args []string) int {
 	if strings.TrimSpace(title) == "" {
 		return usageErr(fmt.Errorf("note: a title is required"))
 	}
+	// Validate --half-life BEFORE creating anything — a usage error after the
+	// create would leave a half-written note on disk.
+	hl := strings.TrimSpace(*halfLife)
+	if hl != "" {
+		if _, okHL, isNone := note.ParseHalfLife(hl); !okHL && !isNone {
+			return usageErr(fmt.Errorf("note: --half-life must be Nd/Nw/Nm/Ny or 'none', got %q", hl))
+		}
+	}
 	e, ok := engine()
 	if !ok {
 		return 1
@@ -706,11 +715,6 @@ func cmdNote(args []string) int {
 	if err != nil {
 		return fail(err)
 	}
-	if h := strings.TrimSpace(*supersede); h != "" {
-		if code := markSuperseded(e, h, n.ID); code != 0 {
-			return code
-		}
-	}
 	if d := strings.TrimSpace(descVal); d != "" { // --description → a modeled frontmatter key
 		fields = append(fields, "description="+d)
 	}
@@ -724,7 +728,10 @@ func cmdNote(args []string) int {
 	if vu != "" {
 		n.ValidUntil = vu
 	}
-	if len(fields) > 0 || vf != "" || vu != "" { // --field key=value → extra frontmatter, preserved verbatim
+	if hl != "" {
+		n.HalfLife = hl
+	}
+	if len(fields) > 0 || vf != "" || vu != "" || hl != "" { // --field key=value → extra frontmatter, preserved verbatim
 		for _, f := range fields {
 			k, v, found := strings.Cut(f, "=")
 			if !found || strings.TrimSpace(k) == "" {
@@ -734,6 +741,14 @@ func cmdNote(args []string) int {
 		}
 		if err := n.Save(); err != nil {
 			return fail(err)
+		}
+	}
+	// Supersede runs AFTER every save of n above: markSuperseded stamps the
+	// provenance decision line onto a fresh from-disk copy of n, and a later
+	// in-memory n.Save() here would silently clobber that stamp.
+	if h := strings.TrimSpace(*supersede); h != "" {
+		if code := markSuperseded(e, h, n.ID); code != 0 {
+			return code
 		}
 	}
 	// Warn (don't fail) on any [[link]] in the body that doesn't resolve, so a
@@ -761,6 +776,19 @@ func markSuperseded(e *mutate.Engine, oldHandle, newID string) int {
 	old.SupersededBy = newID
 	if err := old.Save(); err != nil {
 		return fail(err)
+	}
+	// Provenance stamp (spec §5.1): a mechanical decision line on the NEW note
+	// recording what it replaced — inside the supersede the caller chose, so
+	// it's bookkeeping, not silent consolidation. Best-effort: the supersede
+	// already took; a stamp failure must not unwind it.
+	if repl, rerr := resolveNote(notes, newID); rerr == nil {
+		slug := strings.TrimSuffix(old.Rel, ".md")
+		if i := strings.LastIndexByte(slug, '/'); i >= 0 {
+			slug = slug[i+1:]
+		}
+		if aerr := note.AppendDecision(repl, time.Now().Format("2006-01-02"), "supersedes [["+slug+"]]"); aerr == nil {
+			_ = repl.Save()
+		}
 	}
 	return 0
 }

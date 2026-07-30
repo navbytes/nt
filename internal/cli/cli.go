@@ -91,6 +91,12 @@ func Run(args []string) int {
 		return cmdRm(rest)
 	case "archive":
 		return cmdArchive(rest)
+	case "touch":
+		return cmdTouch(rest)
+	case "decide":
+		return cmdDecide(rest)
+	case "history":
+		return cmdHistory(rest)
 	case "undo":
 		return cmdUndo(rest)
 	case "redo":

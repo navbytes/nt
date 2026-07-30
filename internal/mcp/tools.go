@@ -103,7 +103,17 @@ var toolDefs = []toolDef{
 			"force":       map[string]any{"type": "boolean", "description": "create even if a near-duplicate exists"},
 			"valid_from":  sp("optional: this fact is only true from this date/time on (YYYY-MM-DD or RFC3339)"),
 			"valid_until": sp("optional: this fact stops being true after this date/time (YYYY-MM-DD or RFC3339) — nt_recall down-ranks and flags it expired past this, never hides it"),
+			"half_life":   sp(`optional: relevance half-life (Nd/Nw/Nm/Ny, or "none") — the note fades in recall/index as it ages un-reconfirmed (down-ranked + flagged faded, never hidden). For facts that rot without a known expiry; nt_touch re-confirms and resets the clock`),
 		}, "title"),
+	},
+	{
+		Name:        "nt_touch",
+		Description: `Re-confirm a note is still true: stamps reviewed: with today's date, resetting its relevance-decay clock (half_life) without editing the body. Use when you verified a decaying note's content still holds — reading alone never resets decay.`,
+		InputSchema: obj(map[string]any{
+			"handle":       sp("note id, slug, or title"),
+			"id":           sp("alias for handle — pass a stub's id directly"),
+			"expect_mtime": sp("optional: the mtime token from a prior nt_get — refuses instead of overwriting if the note changed on disk since"),
+		}),
 	},
 	{
 		Name:        "nt_note_edit",
@@ -119,6 +129,28 @@ var toolDefs = []toolDef{
 			"expect_mtime": sp("optional: the `mtime` token from a prior nt_get of this note — refuses instead of overwriting if the note changed on disk since (best-effort; omit if you don't have one)"),
 			"valid_from":   sp("set the valid_from date/time (YYYY-MM-DD or RFC3339)"),
 			"valid_until":  sp("set the valid_until date/time (YYYY-MM-DD or RFC3339)"),
+			"half_life":    sp(`set the relevance half-life (Nd/Nw/Nm/Ny, or "none") — see nt_note`),
+			"reviewed":     sp("set the last-reconfirmed date (YYYY-MM-DD or RFC3339) — prefer nt_touch for today"),
+		}),
+	},
+	{
+		Name:        "nt_decide",
+		Description: "Record WHY a note changed: prepends a dated one-line bullet to its ## Decisions section — the note's visible version history. Call it whenever an edit CHANGES A CONCLUSION (switched approach, reversed a decision, corrected a fact), so the next session sees what was tried and rejected instead of re-proposing it. One line per decision, not per edit.",
+		InputSchema: obj(map[string]any{
+			"handle":       sp("note id, slug, or title"),
+			"id":           sp("alias for handle — pass a stub's id directly"),
+			"text":         sp(`one plain line: what changed and why, e.g. "switched refresh 7d -> 30d — mobile clients re-authed weekly"`),
+			"expect_mtime": sp("optional: the mtime token from a prior nt_get — refuses instead of overwriting if the note changed on disk since"),
+		}, "text"),
+	},
+	{
+		Name:        "nt_history",
+		Description: "How a note got to its current state: its git commit history (the store must be a git repo — nt git-init). Default is one line per commit; patch:true returns full diffs (large — narrow with since). Use when a note's ## Decisions log signals a past change you need the detail of.",
+		InputSchema: obj(map[string]any{
+			"handle": sp("note id, slug, or title"),
+			"id":     sp("alias for handle — pass a stub's id directly"),
+			"patch":  map[string]any{"type": "boolean", "description": "full diffs per commit instead of one-line summaries (can be large; truncated with a visible marker)"},
+			"since":  sp(`only commits newer than this — any git --since value, e.g. "2 weeks ago" or 2026-06-01`),
 		}),
 	},
 	{

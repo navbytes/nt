@@ -169,6 +169,9 @@ func resultLine(r recall.Result) string {
 	if r.Expired {
 		line += "  ⚠ expired"
 	}
+	if r.Faded {
+		line += "  ~faded"
+	}
 	if r.QueryTerms > 0 {
 		line += fmt.Sprintf("  [%s %d/%d]", r.Tier(), r.Matched, r.QueryTerms)
 	}
@@ -189,6 +192,10 @@ func resultJSON(r recall.Result) map[string]any {
 	}
 	if r.Expired {
 		row["expired"] = true
+	}
+	if r.Faded {
+		row["faded"] = true
+		row["decay"] = round2(r.DecayFactor)
 	}
 	if r.QueryTerms > 0 {
 		row["confidence"] = round2(r.Confidence)

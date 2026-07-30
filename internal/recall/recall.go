@@ -67,6 +67,12 @@ type Result struct {
 	Lesson       bool
 	ProjectMatch bool // note belongs to the caller's project (soft ranking boost applied)
 	Expired      bool // note.Note.Expired() as of ranking time — valid_until has passed
+	// Faded/DecayFactor: relevance decay as of ranking time (memory-dynamics
+	// spec §3). Faded = aged past one half-life un-reconfirmed; DecayFactor is
+	// the multiplier applied to the ranking score (1.0 = no decay). Like the
+	// expired flag: a signal to doubt, never a filter.
+	Faded       bool
+	DecayFactor float64
 	// Confidence is the PRE-BOOST score over the best score this query could
 	// possibly award (see fMax below) — comparable across queries and store
 	// sizes, unlike Score, which is IDF-scaled and therefore query-dependent.
@@ -632,10 +638,20 @@ func rankProject(notes []*note.Note, context string, limit int, project string, 
 		if isMine {
 			f *= projectBoost
 		}
-		expired := cd.n.Expired(time.Now())
+		now := time.Now()
+		expired := cd.n.Expired(now)
 		if expired {
 			f *= expiredPenalty
 		}
+		// Relevance decay (memory-dynamics spec §3): multiplicative beside the
+		// expired penalty — they encode different facts (known-invalid vs.
+		// probably-stale) and compose. Floored in note.Decay, so a faded note
+		// ranks lower but can still win an otherwise-empty field. Confidence
+		// stays pre-penalty, like every other boost/penalty here: a faded note
+		// that matches strongly still REPORTS a strong match while ranking low —
+		// the reader sees both signals and decides.
+		decay := cd.n.Decay(now)
+		f *= decay
 		var strongTerms []string
 		if isTarget {
 			strongTerms = strongTermsOf(cd.strong)
@@ -643,6 +659,7 @@ func rankProject(notes []*note.Note, context string, limit int, project string, 
 		out = append(out, candScore{
 			Result: Result{
 				Note: cd.n, Score: int(f*100 + 0.5), Lesson: cd.lesson, ProjectMatch: isMine, Expired: expired,
+				Faded: cd.n.Faded(now), DecayFactor: decay,
 				Confidence: confidence, Matched: matched, QueryTerms: len(qwords),
 			},
 			f: f, exact: exact, matched: matched, raw: raw, hits: hits, strongTerms: strongTerms,

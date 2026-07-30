@@ -100,7 +100,16 @@ default to `"claude"`) so your items are distinct from the user's.
 response carries a `similar` list — check it, and if you truly doubled a note,
 consolidate (`nt_archive superseded_by=<kept id>`) or extend the original. (The
 CLI, by contrast, refuses near-duplicates unless `--force`/`--supersede`.) A
-`danglingLinks` entry is a `[[link]]` typo to fix.
+`danglingLinks` entry is a `[[link]]` typo to fix. For topic notes, prevent the
+dup up front: pass **`if_exists:"return"`** — an exact title/slug match writes
+nothing and returns the existing note's id + `mtime` to edit in place.
+
+**Memory dynamics:** volatile facts get a `half_life` (`"90d"`) and fade in
+recall/index until re-confirmed (`nt_touch`) — flagged `faded`, never hidden.
+An edit that reverses a conclusion gets a `nt_decide` line (the note's
+`## Decisions` history); `nt_history` shows a note's git commits. A recall
+response with `escalate` means the hit is weak — run the suggested
+`nt_search include_archived:true` before concluding nothing is recorded.
 
 ## Conventions
 

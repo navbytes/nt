@@ -176,11 +176,14 @@ nt mcp install --print                  # show what it would do, change nothing
 For any other client (Cursor, a project `.mcp.json`, …), `nt mcp install --print`
 emits the snippet to paste.
 
-Tools exposed (**19**) — **capture:** `nt_add`, `nt_note` (with `folder`,
+Tools exposed (**22**) — **capture:** `nt_add`, `nt_note` (with `folder`,
 `description`, and `kind: lesson|decision|ref|rule|memory` — canonical tag +
 folder; always give a `description`, it's what `nt_index` shows), `nt_note_edit`
 (fix an EXISTING note in place — `append`/`body`/`old_string`+`new_string`/
-`description`; no new id, unlike `nt_note supersede:`), `nt_update` (status:"done" completes; the response echoes what `changed`), `nt_rm` (remove a
+`description`; no new id, unlike `nt_note supersede:`), `nt_touch` (re-confirm a
+decaying note — stamps `reviewed:`, resetting its `half_life` fade clock),
+`nt_decide` (record WHY a note changed — a dated line in its `## Decisions`
+section), `nt_update` (status:"done" completes; the response echoes what `changed`), `nt_rm` (remove a
 mistaken task — journaled, `nt undo` restores), `nt_tag`, `nt_mv`, `nt_archive` (retire
 stale notes — set `superseded_by` to reconcile duplicates), `nt_relink` (fix a wrong outbound link); **retrieve:** `nt_index` (start here — a compact
 catalog of note stubs plus the active tasks and recent completions — tiered on
@@ -192,7 +195,10 @@ note's full body by id/slug/title, optional `section`),
 smart views — list them by calling it bare), `nt_search` (ranked
 stubs, text and/or tag; `full:true` inlines bodies), `nt_recall` (lessons-first,
 paraphrase-aware retrieval for a free-text task context — surfaces past mistakes
-before you repeat them), `nt_links` (forward links + backlinks); **health:**
+before you repeat them; on a weak/empty result it returns an `escalate` hint
+pointing at the deeper `include_archived` search), `nt_links` (forward links +
+backlinks), `nt_history` (a note's git commit history — how it got to its
+current state; needs `nt git-init`); **health:**
 `nt_doctor` (read-only store hygiene — dangling links, task-file issues, expired
 notes), `nt_distill` (read-only — every near-duplicate note pair, uncapped, for
 a human-gated merge), `nt_mindmap` (a note's outline + wikilinks as a graph). They go through the same locked, journaled engine as the CLI,

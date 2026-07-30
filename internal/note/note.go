@@ -44,6 +44,15 @@ type Note struct {
 	// knows to doubt it. See Expired/NotYetValid.
 	ValidFrom  string
 	ValidUntil string
+	// HalfLife/Reviewed drive relevance decay (memory-dynamics spec §3): a
+	// note with a half_life fades smoothly in recall ranking and index tiering
+	// as it ages — never hidden, floored, and flagged — the smooth complement
+	// to ValidUntil's hard cliff. Reviewed is the decay clock's reset point
+	// ("re-confirmed true on this date", set by `nt touch`); age is measured
+	// from the latest of reviewed/updated/created/mtime. Both unset ⇒ no
+	// decay, byte-identical behavior. See decay.go.
+	HalfLife string // duration: Nd / Nw / Nm / Ny, or "none" (explicit opt-out)
+	Reviewed string // YYYY-MM-DD or RFC3339
 	// ModTime is the note file's last-modified time, set by List/Load/cache. It
 	// captures every change — including edits made outside nt (Obsidian, git) that
 	// never touch the `updated:` frontmatter — so "changed since T" is reliable.
@@ -396,6 +405,16 @@ func (n *Note) Save() error {
 			return err
 		}
 	}
+	if n.HalfLife != "" {
+		if err := line("half_life", n.HalfLife); err != nil {
+			return err
+		}
+	}
+	if n.Reviewed != "" {
+		if err := line("reviewed", n.Reviewed); err != nil {
+			return err
+		}
+	}
 	for _, extra := range n.Extra { // unknown keys (Obsidian properties, --field, description:), verbatim
 		if invalidFrontmatterLine(extra) {
 			return fmt.Errorf("note: frontmatter field %q contains a newline or a %q line — refusing to write corrupt frontmatter", extra, fmDelim)
@@ -541,6 +560,10 @@ func parseFrontmatter(fm string, n *Note) {
 			n.ValidFrom = unquote(val)
 		case "valid_until":
 			n.ValidUntil = unquote(val)
+		case "half_life":
+			n.HalfLife = unquote(val)
+		case "reviewed":
+			n.Reviewed = unquote(val)
 		case "title":
 			if v := unquote(val); v != "" {
 				n.Title = v

@@ -13,6 +13,8 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -200,6 +202,12 @@ func (s *server) dispatch(name string, a map[string]any) (string, error) {
 		return s.note(a)
 	case "nt_note_edit":
 		return s.noteEdit(a)
+	case "nt_touch":
+		return s.touch(a)
+	case "nt_decide":
+		return s.decide(a)
+	case "nt_history":
+		return s.history(a)
 	case "nt_relink":
 		return s.relink(a)
 	case "nt_index":
@@ -1031,14 +1039,33 @@ func (s *server) note(a map[string]any) (string, error) {
 		n.ValidUntil = vu
 		extraChanged = true
 	}
+	if hl := strings.TrimSpace(str(a, "half_life")); hl != "" {
+		if _, okHL, isNone := note.ParseHalfLife(hl); !okHL && !isNone {
+			return "", fmt.Errorf("invalid half_life %q (use Nd/Nw/Nm/Ny, or \"none\")", hl)
+		}
+		n.HalfLife = hl
+		extraChanged = true
+	}
 	if extraChanged {
 		if err := n.Save(); err != nil {
 			return "", err
 		}
 	}
 	if supersede != "" {
-		if err := s.markSuperseded(supersede, n.ID); err != nil {
-			return "", err
+		old, serr := s.supersedeOld(supersede, n.ID)
+		if serr != nil {
+			return "", serr
+		}
+		// Provenance stamp (spec §5.1): a mechanical decision line on the NEW
+		// note recording what it replaced — inside an operation the caller
+		// already chose, so it's bookkeeping, not silent consolidation. Best-
+		// effort: a stamp failure must not fail the supersede that already took.
+		slug := strings.TrimSuffix(old.Rel, ".md")
+		if i := strings.LastIndexByte(slug, '/'); i >= 0 {
+			slug = slug[i+1:]
+		}
+		if err := note.AppendDecision(n, time.Now().Format("2006-01-02"), "supersedes [["+slug+"]]"); err == nil {
+			_ = n.Save()
 		}
 	}
 	// Keep the note's fields at the top level (backward-compatible), adding
@@ -1186,8 +1213,26 @@ func (s *server) noteEdit(a map[string]any) (string, error) {
 			verb = "set validity of"
 		}
 	}
+	if hl := strings.TrimSpace(str(a, "half_life")); hl != "" {
+		if _, okHL, isNone := note.ParseHalfLife(hl); !okHL && !isNone {
+			return "", fmt.Errorf("invalid half_life %q (use Nd/Nw/Nm/Ny, or \"none\")", hl)
+		}
+		n.HalfLife = hl
+		if verb == "" {
+			verb = "set decay of"
+		}
+	}
+	if rv := strings.TrimSpace(str(a, "reviewed")); rv != "" {
+		if _, okRv := note.ParseFlexDate(rv); !okRv {
+			return "", fmt.Errorf("invalid reviewed %q (use YYYY-MM-DD or RFC3339; prefer nt_touch for today)", rv)
+		}
+		n.Reviewed = rv
+		if verb == "" {
+			verb = "set decay of"
+		}
+	}
 	if verb == "" {
-		return "", fmt.Errorf("nothing to edit — pass append, body, old_string+new_string, description, valid_from, and/or valid_until")
+		return "", fmt.Errorf("nothing to edit — pass append, body, old_string+new_string, description, valid_from/valid_until, and/or half_life/reviewed")
 	}
 	n.Updated = time.Now().Format(time.RFC3339)
 	// expect_mtime is the token nt_get/nt_index hand back (mtime field); passing
@@ -1243,6 +1288,157 @@ func toMap(v any) map[string]any {
 	return m
 }
 
+// touch re-confirms a note (nt_touch): stamps reviewed: with today's date,
+// resetting the relevance-decay clock (memory-dynamics spec §3.4) without
+// editing the body. Explicit on purpose — reading is not confirming, so
+// nothing auto-touches.
+func (s *server) touch(a map[string]any) (string, error) {
+	handle := strings.TrimSpace(str(a, "handle"))
+	if handle == "" {
+		handle = strings.TrimSpace(str(a, "id"))
+	}
+	if handle == "" {
+		return "", fmt.Errorf("handle is required (a note id, slug, or title)")
+	}
+	n, err := s.resolveNoteClone(handle) // never mutate the cache-shared pointer pre-Save
+	if err != nil {
+		return "", err
+	}
+	beforeRaw, _ := os.ReadFile(n.Path)
+	n.Reviewed = time.Now().Format("2006-01-02")
+	if err := n.SaveIfUnchanged(strings.TrimSpace(str(a, "expect_mtime"))); err != nil {
+		var stale *note.StaleNoteError
+		if errors.As(err, &stale) {
+			return "", fmt.Errorf("%s changed on disk since you loaded it — nt_get it again and retry", n.ID)
+		}
+		return "", err
+	}
+	if beforeRaw != nil {
+		_ = note.RecordUndo(s.eng.S, note.UndoEntry{
+			Op: "touched", TS: time.Now().UTC().Format(time.RFC3339Nano), WS: workstream.Env(),
+			Path: n.Path, Before: string(beforeRaw),
+		})
+	}
+	res := map[string]any{"id": n.ID, "rel": n.Rel, "reviewed": n.Reviewed, "mtime": n.MTimeToken()}
+	if n.HalfLife == "" {
+		res["note"] = "reviewed recorded, but this note has no half_life — it doesn't decay; set one via nt_note_edit half_life if it should"
+	}
+	return jsonText(res), nil
+}
+
+// decide records WHY a note changed (nt_decide): prepends a dated bullet to
+// its ## Decisions section — the coarse always-visible version history that
+// keeps in-place edits from erasing the story (memory-dynamics spec §5).
+func (s *server) decide(a map[string]any) (string, error) {
+	handle := strings.TrimSpace(str(a, "handle"))
+	if handle == "" {
+		handle = strings.TrimSpace(str(a, "id"))
+	}
+	text := strings.TrimSpace(str(a, "text"))
+	if handle == "" || text == "" {
+		return "", fmt.Errorf("handle (or id) and text are required — one plain line stating what changed and why")
+	}
+	n, err := s.resolveNoteClone(handle)
+	if err != nil {
+		return "", err
+	}
+	beforeRaw, _ := os.ReadFile(n.Path)
+	if err := note.AppendDecision(n, time.Now().Format("2006-01-02"), text); err != nil {
+		return "", err
+	}
+	n.Updated = time.Now().Format(time.RFC3339)
+	if err := n.SaveIfUnchanged(strings.TrimSpace(str(a, "expect_mtime"))); err != nil {
+		var stale *note.StaleNoteError
+		if errors.As(err, &stale) {
+			return "", fmt.Errorf("%s changed on disk since you loaded it — nt_get it again and retry", n.ID)
+		}
+		return "", err
+	}
+	if beforeRaw != nil {
+		_ = note.RecordUndo(s.eng.S, note.UndoEntry{
+			Op: "recorded decision on", TS: time.Now().UTC().Format(time.RFC3339Nano), WS: workstream.Env(),
+			Path: n.Path, Before: string(beforeRaw),
+		})
+	}
+	count, latest := n.DecisionStats()
+	return jsonText(map[string]any{
+		"id": n.ID, "rel": n.Rel, "decisions": count, "latestDecision": latest, "mtime": n.MTimeToken(),
+	}), nil
+}
+
+// history is the fine-grained per-edit channel (nt_history): a read-only view
+// over the git layer. Default one line per commit; patch:true is the explicit
+// escalation, truncated with a visible marker rather than silently.
+func (s *server) history(a map[string]any) (string, error) {
+	handle := strings.TrimSpace(str(a, "handle"))
+	if handle == "" {
+		handle = strings.TrimSpace(str(a, "id"))
+	}
+	if handle == "" {
+		return "", fmt.Errorf("handle is required (a note id, slug, or title)")
+	}
+	if _, err := os.Stat(filepath.Join(s.eng.S.Dir, ".git")); os.IsNotExist(err) {
+		return "", fmt.Errorf("the store isn't a git repo — the user can run `nt git-init` once to make every note edit history for free")
+	}
+	n, err := s.resolveNoteClone(handle)
+	if err != nil {
+		return "", err
+	}
+	rel, rerr := filepath.Rel(s.eng.S.Dir, n.Path)
+	if rerr != nil {
+		return "", rerr
+	}
+	gitArgs := []string{"log", "--follow"}
+	patch := boolArg(a, "patch")
+	if patch {
+		gitArgs = append(gitArgs, "-p")
+	} else {
+		gitArgs = append(gitArgs, "--date=short", "--pretty=format:%h  %ad  %s")
+	}
+	if since := strings.TrimSpace(str(a, "since")); since != "" {
+		gitArgs = append(gitArgs, "--since", since)
+	}
+	gitArgs = append(gitArgs, "--", rel)
+	cmd := exec.Command("git", gitArgs...)
+	cmd.Dir = s.eng.S.Dir
+	out, gerr := cmd.CombinedOutput()
+	text := strings.TrimSpace(string(out))
+	if gerr != nil {
+		return "", fmt.Errorf("git log: %s", text)
+	}
+	const maxHistory = 20000 // characters; the -p escalation can be huge
+	truncated := false
+	if len(text) > maxHistory {
+		text = text[:maxHistory] + "\n… [truncated — narrow with since, or read specific commits via the CLI]"
+		truncated = true
+	}
+	res := map[string]any{"id": n.ID, "rel": n.Rel, "history": text, "patch": patch}
+	if text == "" {
+		res["history"] = ""
+		res["note"] = "no commits touch this note yet (nt sync, or git add/commit in the store, creates history)"
+	}
+	if truncated {
+		res["truncated"] = true
+	}
+	return jsonText(res), nil
+}
+
+// resolveNoteClone resolves a note handle and returns a mutation-safe clone
+// (never the cache-shared pointer) — the shared front half of touch/decide.
+func (s *server) resolveNoteClone(handle string) (*note.Note, error) {
+	notes := s.listNotes()
+	it, ok := links.Resolve(handle, nil, notes)
+	if !ok || it.Kind != "note" {
+		return nil, fmt.Errorf("no note %q", handle)
+	}
+	for _, cand := range notes {
+		if cand.Path == it.Path {
+			return cloneNote(cand), nil
+		}
+	}
+	return nil, fmt.Errorf("no note %q", handle)
+}
+
 // relink rewrites a wrong outbound [[link]] inside a note's body (nt_relink).
 func (s *server) relink(a map[string]any) (string, error) {
 	handle := strings.TrimSpace(str(a, "handle"))
@@ -1285,17 +1481,31 @@ func relinkBody(body, oldT, newT string) (string, int) {
 
 // markSuperseded stamps oldHandle's note with superseded_by=newID.
 func (s *server) markSuperseded(oldHandle, newID string) error {
+	old, err := s.supersedeOld(oldHandle, newID)
+	if err != nil {
+		return err
+	}
+	_ = old // provenance stamping on the NEW note is the caller's step (see note())
+	return nil
+}
+
+// supersedeOld stamps oldHandle's note with superseded_by=newID and returns
+// the retired note (for the provenance decision line on its replacement).
+func (s *server) supersedeOld(oldHandle, newID string) (*note.Note, error) {
 	cached, ok := resolveNoteMCP(s.listNotes(), oldHandle)
 	if !ok {
-		return fmt.Errorf("no note %q to supersede", oldHandle)
+		return nil, fmt.Errorf("no note %q to supersede", oldHandle)
 	}
 	if cached.ID == newID {
-		return fmt.Errorf("a note can't supersede itself")
+		return nil, fmt.Errorf("a note can't supersede itself")
 	}
 	// Edit a copy — see cloneNote's doc comment (listNotes() is cache-backed).
 	old := cloneNote(cached)
 	old.SupersededBy = newID
-	return old.Save()
+	if err := old.Save(); err != nil {
+		return nil, err
+	}
+	return old, nil
 }
 
 // danglingLinks returns the [[links]] in a note's body that don't resolve.
@@ -1843,6 +2053,9 @@ func (s *server) recall(a map[string]any) (string, error) {
 		if r.Expired {
 			row["expired"] = true // pre-existing drift: CLI JSON already includes this, the MCP stub didn't
 		}
+		if r.Faded {
+			row["faded"] = true // aged past its half_life un-reconfirmed — doubt, then nt_touch or update
+		}
 		if r.QueryTerms > 0 {
 			row["tier"] = r.Tier() // read the tier, not the score — normalized across queries
 		}
@@ -2129,6 +2342,9 @@ type noteOut struct {
 	ValidUntil  string   `json:"validUntil,omitempty"`
 	Expired     bool     `json:"expired,omitempty"`     // valid_until has passed — down-ranked in nt_recall, never hidden
 	NotYetValid bool     `json:"notYetValid,omitempty"` // valid_from is in the future
+	HalfLife    string   `json:"halfLife,omitempty"`    // relevance half-life (decay opt-in)
+	Reviewed    string   `json:"reviewed,omitempty"`    // last re-confirmation (decay clock reset)
+	Faded       bool     `json:"faded,omitempty"`       // aged past one half-life un-reconfirmed — doubt, then nt_touch or update
 }
 
 func noteToOut(n *note.Note) noteOut {
@@ -2136,6 +2352,7 @@ func noteToOut(n *note.Note) noteOut {
 	return noteOut{
 		ID: n.ID, Rel: n.Rel, Title: n.Title, Tags: n.Tags, Source: n.Source, Archived: n.Archived, Body: strings.TrimSpace(n.Body),
 		ValidFrom: n.ValidFrom, ValidUntil: n.ValidUntil, Expired: n.Expired(now), NotYetValid: n.NotYetValid(now),
+		HalfLife: n.HalfLife, Reviewed: n.Reviewed, Faded: n.Faded(now),
 	}
 }
 
@@ -2157,6 +2374,7 @@ type noteStub struct {
 	NotYetValid bool     `json:"notYetValid,omitempty"`  // valid_from is in the future
 	Archived    bool     `json:"archived,omitempty"`     // retired note — only surfaces via include_archived search
 	Superseded  string   `json:"supersededBy,omitempty"` // replaced by this id — only surfaces via include_archived search
+	Faded       bool     `json:"faded,omitempty"`        // aged past one half_life un-reconfirmed — doubt, then nt_touch or update
 }
 
 func noteToStub(n *note.Note, snippet string) noteStub {
@@ -2173,7 +2391,7 @@ func noteToStub(n *note.Note, snippet string) noteStub {
 		ID: n.ID, Rel: n.Rel, Title: n.Title, Description: desc,
 		Snippet: snippet, Tags: n.Tags, Folder: pathDir(n.Rel), Source: n.Source, Updated: shortDate(upd),
 		Expired: n.Expired(now), NotYetValid: n.NotYetValid(now),
-		Archived: n.Archived, Superseded: n.SupersededBy,
+		Archived: n.Archived, Superseded: n.SupersededBy, Faded: n.Faded(now),
 	}
 }
 
