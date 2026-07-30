@@ -298,3 +298,45 @@ nt note "Chose flock over SQLite" --kind decision --description "one writer at a
 
 That pickup step is the whole point: the action items don't vanish when the
 session ends — and `nt ready` tells the next agent exactly where to start.
+
+## Memory dynamics — decay, delta-writes, decisions (worked example)
+
+The knowledge base itself ages. This is the full round-trip of the
+memory-dynamics features ([design](spec-memory-dynamics.md)) on one note:
+
+```bash
+# 1. Capture a VOLATILE fact — one that rots without a known expiry date.
+nt note "k8s ingress needs the v2 annotation" --kind lesson --tag k8s \
+  --description "since chart 4.x, the v1 annotation is silently ignored" \
+  --half-life 90d --source claude
+
+# 2. Months later, an agent recalls before touching ingress config:
+nt recall "changing the ingress annotations"
+#   ⚑ a1b2c3  k8s ingress needs the v2 annotation … ~faded [medium 2/3]
+# The ~faded chip says: past its half-life, un-reconfirmed — verify before trusting.
+
+# 3a. Verified it still holds? Reset the clock (reading alone never does):
+nt touch a1b2c3
+
+# 3b. Or it CHANGED? Edit the canonical note in place and record why:
+nt edit a1b2c3 --old-string "v2 annotation" --new-string "v3 gateway API route"
+nt decide a1b2c3 "chart 6.x replaced annotations with Gateway API — v2 advice obsolete"
+
+# 4. A later session sees the current fact PLUS the trail:
+nt show a1b2c3            # body ends with:  ## Decisions
+                          #   - 2026-07-30: chart 6.x replaced annotations with Gateway API — v2 advice obsolete
+nt history a1b2c3         # the per-edit story from git (needs nt git-init, once)
+
+# 5. And duplicates never fork the topic in the first place:
+nt note "k8s ingress needs the v2 annotation" --if-exists return
+#   exists a1b2c3  lessons/k8s-ingress-needs-the-v2-annotation.md
+#   → edit it (nt edit), don't sibling it
+```
+
+The MCP loop is the same verbs: `nt_note {if_exists:"return"}` →
+`nt_note_edit {expect_mtime}` → `nt_decide` → `nt_touch`, with `nt_recall`
+returning `faded` flags and — on a weak/empty result — an `escalate` hint
+naming the deeper `nt_search {include_archived:true}` sweep. `nt review` lists
+the most-faded notes for a human triage pass: still true (`nt touch`),
+changed (`nt edit` + `nt decide`), or dead (`nt archive`). Nothing ever
+disappears on its own — decay only re-ranks and flags.
