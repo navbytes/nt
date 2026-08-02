@@ -4,7 +4,7 @@ go 1.25.12
 
 require (
 	github.com/navbytes/nt v0.0.0
-	github.com/wailsapp/wails/v2 v2.12.0
+	github.com/wailsapp/wails/v2 v2.13.0
 )
 
 require (
