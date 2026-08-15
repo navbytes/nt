@@ -175,6 +175,14 @@ Tokens expire after 24h; refresh window is 7d. See [[oauth-flow]].
 - **`description:`** is a one-line summary convention (set via `nt note --description "…"` or
   the `nt_note` `description` arg); it's the stub blurb `nt index` shows so an agent can scan
   the catalog without reading bodies.
+- **`project:`** (optional) scopes a note to one project/codebase in a shared multi-project
+  store — set at capture (`nt note --project`, the `nt_note` `project` arg) or later
+  (`nt edit --project`, `nt_note_edit` `project`; `none` clears). Comparisons fold case and
+  whitespace everywhere: a **hard filter** on `nt index --project` / `nt_index` and
+  `nt search --project` / `nt_search`, a **soft ranking boost** in `nt recall`, and part of
+  the dedup guard's shared-tag set. Domain knowledge meant to be discoverable from every
+  project carries **no** `project:` — unscoped notes are never down-ranked. The project
+  vocabulary is listed by `nt tags --projects`.
 - Filename is a slug of the title (or a datetime when untitled, à la `nb`).
 - Notes may live in **subfolders** of `notes/`. Create into one with
   `nt note "…" --folder work/auth` (or path-style `nt note "work/auth/…"`); the
@@ -413,18 +421,18 @@ nt add "fix auth bug" --pri high --due today --tag backend --project api [--sour
 nt note "JWT expiry" --body "..." --description "..." --tag auth [--folder work] [--source claude]
 nt list [--status open] [--tag bug] [--project api] [--sort urgency] [--json]   # (ls)
 nt ready [--json]                    # open, unblocked work by urgency — the actionable feed
-nt index [--all] [--tag t] [--folder f] [--since 14d] [--json]   # tiered stub catalog + active tasks — start here (AI loop)
+nt index [--all] [--tag t] [--folder f] [--project p] [--since 14d] [--json]   # tiered stub catalog + active tasks — start here (AI loop)
 nt log [--since 2026-06-01] [--days 7] [--source claude] [--json]   # completed tasks, newest first
 nt done <id|task:N>                  # mark done  (do)
 nt update <id|task:N> --status doing --pri med --due +3d     # (up)
-nt search "race condition" [--type note|task] [--limit 8] [--include-archived]   # ranked stubs (q); --include-archived = the deep sweep over retired notes that recall's escalate hint suggests
+nt search "race condition" [--type note|task] [--project p] [--limit 8] [--include-archived]   # ranked stubs (q); --project = hard scope (notes' project: + tasks' +project); --include-archived = the deep sweep over retired notes that recall's escalate hint suggests
 nt recall "adding a cache layer" [--lessons-only] [--project p]   # lessons ⚑ first, paraphrase-aware, precision floor (empty = nothing relevant), soft same-project boost (NT_WORKSTREAM default; 'none' disables)
 nt note "gotcha" --kind lesson --description "trigger"   # taxonomy: lesson|decision|ref|rule|memory → canonical tag + folder (--lesson = --kind lesson)
 nt show <id|slug|title>   # one note's full body, on demand
 nt links <id|task:N> [--json]        # forward links + backlinks for an item (§5.1)
 nt archive                           # move done tasks → done.txt
 nt gc [--older-than 30d] [--yes]     # sweep superseded stubs + stranded __tasks__ notes → .trash/ (dry-run default)
-nt export --tag rule                 # compile the standing rules layer (CLAUDE.md / AGENTS.md)
+nt export --tag rule [--out FILE]    # compile the standing rules layer; --out is recorded, and nt doctor flags the file when it drifts from the store
 nt import backup.json | vault/       # export's inverse: round-trip a JSON backup, or bulk-load an Obsidian vault
 nt distill [--json]                  # every near-duplicate note pair, uncapped — proposes, never merges
 nt undo / redo                       # transactional; workstream-safe (--force overrides)
@@ -557,7 +565,12 @@ findings cross-pollinate. A *workstream* is that isolation axis, distinct from
 | `NT_ASCII` | `1` forces ASCII glyphs instead of Unicode | off |
 | `XDG_DATA_HOME` | Consulted before `~/.local/share` when `NT_DIR` is unset | unset |
 
-Optional `$NT_DIR/config.toml` sets the same knobs from a file (§13).
+Optional `$NT_DIR/config.toml` sets the same knobs from a file (§13), plus per-kind decay
+defaults: a `[decay]` section (`lesson = "180d"`, `ref = "270d"`, …) stamps that `half_life:`
+onto **new** notes of the kind when the caller gives none — visible frontmatter, never an
+invisible read-time rule, so a config change never re-ranks existing notes. An explicit
+`--half-life` always wins; `rule`/`memory` accept a value but pinned knowledge usually
+shouldn't decay. `nt doctor` reports unparseable `[decay]` values.
 
 Everything is plain text under `$NT_DIR`. Back it up or `git init` it. For multi-machine use,
 prefer the git-native pattern (`nt git-init` + `nt sync`) over file-syncing the store (§6.4).

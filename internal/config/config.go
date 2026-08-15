@@ -18,6 +18,12 @@
 //
 //	[tui]
 //	theme = "auto"              # auto | light | dark
+//
+//	[decay]
+//	lesson   = "180d"           # default --half-life stamped on new notes of that
+//	decision = "1y"             # kind when none is given (Nd/Nw/Nm/Ny or "none").
+//	ref      = "270d"           # rule/memory accept a value too, but pinned
+//	                            # knowledge usually shouldn't decay — leave them unset.
 package config
 
 import (
@@ -40,6 +46,12 @@ type Config struct {
 	WebHost         string // [web] host
 	WebDayBudget    int    // [web] day_budget_minutes — Today capacity bar budget (0 = default 360)
 	TUITheme        string // [tui] theme (auto|light|dark)
+	// DecayDefaults maps a note kind (lesson|decision|ref|rule|memory) to the
+	// half-life stamped on NEW notes of that kind when the caller gives none —
+	// per-kind decay policy without per-note judgment. Values are stored raw;
+	// consumers validate with note.ParseHalfLife and skip what doesn't parse
+	// (`nt doctor` reports the typo). nil when the [decay] section is absent.
+	DecayDefaults map[string]string // [decay] <kind> = "180d"
 }
 
 // FileName is the config file's basename within $NT_DIR.
@@ -77,6 +89,13 @@ func Load(dir string) (*Config, error) {
 }
 
 func (c *Config) set(section, key, val string) {
+	if section == "decay" {
+		if c.DecayDefaults == nil {
+			c.DecayDefaults = map[string]string{}
+		}
+		c.DecayDefaults[key] = unquote(val)
+		return
+	}
 	switch section + "." + key {
 	case "defaults.priority":
 		c.DefaultPriority = unquote(val)

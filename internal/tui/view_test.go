@@ -38,18 +38,19 @@ func testModel(t *testing.T) *Model {
 // stray terminal-query byte at launch can't switch tabs.
 func TestStartupKeyGate(t *testing.T) {
 	m := testModel(t)
+	m.tab = tabOrder[0] // the app's launch tab (notes — first in the visual order)
 	m.ready = false
 	m.width, m.height = 100, 24
 	var model tea.Model = m
-	// A stray "]" (next tab) before ready must be dropped (stay on tasks).
+	// A stray "]" (next tab) before ready must be dropped (stay put).
 	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("]")})
-	if model.(*Model).tab != tabTasks {
+	if model.(*Model).tab != tabOrder[0] {
 		t.Fatal("key before ready should be ignored")
 	}
-	// After ready, "]" switches to the next (notes) tab.
+	// After ready, "]" switches to the next tab in the visual order.
 	model, _ = model.Update(readyMsg{})
 	model, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("]")})
-	if model.(*Model).tab != tabNotes {
+	if model.(*Model).tab != tabOrder[1] {
 		t.Fatal("key after ready should be handled")
 	}
 }

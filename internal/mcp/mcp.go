@@ -19,6 +19,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/navbytes/nt/internal/config"
 	"github.com/navbytes/nt/internal/dateparse"
 	"github.com/navbytes/nt/internal/links"
 	"github.com/navbytes/nt/internal/mindmap"
@@ -963,7 +964,8 @@ func (s *server) note(a map[string]any) (string, error) {
 	// kind steers taxonomy at write time (multi-agent stores converge on one
 	// layout instead of inventing folders): canonical tag + folder per class
 	// (note.Kinds, shared with the CLI), with an explicit folder still winning.
-	if kind := strings.TrimSpace(str(a, "kind")); kind != "" {
+	kind := strings.TrimSpace(str(a, "kind"))
+	if kind != "" {
 		meta, ok := note.Kinds[kind]
 		if !ok {
 			return "", fmt.Errorf("invalid kind %q (use lesson|decision|ref|rule|memory)", kind)
@@ -1039,10 +1041,19 @@ func (s *server) note(a map[string]any) (string, error) {
 		n.ValidUntil = vu
 		extraChanged = true
 	}
-	if hl := strings.TrimSpace(str(a, "half_life")); hl != "" {
+	hl := strings.TrimSpace(str(a, "half_life"))
+	if hl != "" {
 		if _, okHL, isNone := note.ParseHalfLife(hl); !okHL && !isNone {
 			return "", fmt.Errorf("invalid half_life %q (use Nd/Nw/Nm/Ny, or \"none\")", hl)
 		}
+	} else if kind != "" {
+		// Config [decay] per-kind default, same as the CLI: stamped into
+		// frontmatter (visible, editable) rather than applied invisibly at
+		// read time. Invalid config values stamp nothing; doctor reports them.
+		cfg, _ := config.Load(s.eng.S.Dir)
+		hl = note.DefaultHalfLife(cfg.DecayDefaults, kind)
+	}
+	if hl != "" {
 		n.HalfLife = hl
 		extraChanged = true
 	}
@@ -1207,6 +1218,22 @@ func (s *server) noteEdit(a map[string]any) (string, error) {
 			verb = "set description of"
 		}
 	}
+	if p := strings.TrimSpace(str(a, "project")); p != "" {
+		// "none" clears, mirroring the CLI (`nt edit --project none`) and
+		// nt_recall's project arg — a note mis-scoped at capture is fixable
+		// without a supersede.
+		if p == "none" {
+			n.SetProject("")
+			if verb == "" {
+				verb = "cleared project of"
+			}
+		} else {
+			n.SetProject(p)
+			if verb == "" {
+				verb = "set project of"
+			}
+		}
+	}
 	if vf := strings.TrimSpace(str(a, "valid_from")); vf != "" {
 		n.ValidFrom = vf
 		if verb == "" {
@@ -1238,7 +1265,7 @@ func (s *server) noteEdit(a map[string]any) (string, error) {
 		}
 	}
 	if verb == "" {
-		return "", fmt.Errorf("nothing to edit — pass append, body, old_string+new_string, description, valid_from/valid_until, and/or half_life/reviewed")
+		return "", fmt.Errorf("nothing to edit — pass append, body, old_string+new_string, description, project, valid_from/valid_until, and/or half_life/reviewed")
 	}
 	n.Updated = time.Now().Format(time.RFC3339)
 	// expect_mtime is the token nt_get/nt_index hand back (mtime field); passing
@@ -1591,6 +1618,7 @@ func (s *server) index(a map[string]any) (string, error) {
 		return "", err
 	}
 	tag, folder := strings.TrimSpace(str(a, "tag")), strings.Trim(strings.TrimSpace(str(a, "folder")), "/")
+	proj := strings.TrimSpace(str(a, "project"))
 	since, warning := "", ""
 	if sv := strings.TrimSpace(str(a, "updated_since")); sv != "" {
 		// Same grammar as the CLI's --updated-since (dateparse.PastDate): Nd = N
@@ -1625,10 +1653,26 @@ func (s *server) index(a map[string]any) (string, error) {
 		if tag != "" && !contains(n.Tags, tag) {
 			continue
 		}
+		// Same hard project scope the CLI has had (`nt index --project`) — the
+		// MCP surface previously offered no project-scoped catalog at all.
+		if proj != "" && !note.SameProject(n.Project(), proj) {
+			continue
+		}
 		if since != "" && noteChangedDate(n) < since {
 			continue // "what changed since T"
 		}
 		filtered = append(filtered, n)
+	}
+	// A project scope matching no notes is usually a NAMING mismatch (the agent
+	// guessed the repo directory name; the store's vocabulary says otherwise),
+	// not an empty store. Tasks may still match below, so warn, don't error.
+	if proj != "" && len(filtered) == 0 {
+		w := fmt.Sprintf("no notes carry project %q — the store may use a different name; check the vocabulary (nt tags --projects) or search by topic (nt_search)", proj)
+		if warning != "" {
+			warning += "; " + w
+		} else {
+			warning = w
+		}
 	}
 	// A folder that matches nothing is almost always a typo — a silent "0 notes"
 	// success reads as "those notes don't exist" to an agent.
@@ -1645,10 +1689,26 @@ func (s *server) index(a map[string]any) (string, error) {
 
 	// Tier the DEFAULT view of a large store (see note.TierIndex): pinned +
 	// recent stubs in full, the long tail as per-folder counts. Explicit scoping
-	// (all/tag/folder/updated_since) shows every match, as before.
+	// (all/tag/folder/project/updated_since) shows every match, as before.
+	unscoped := !boolArg(a, "all") && tag == "" && folder == "" && proj == "" && since == ""
 	tiered := note.Tiers{Recent: filtered}
-	if !boolArg(a, "all") && tag == "" && folder == "" && since == "" {
+	if unscoped {
 		tiered = note.TierIndex(filtered, time.Now())
+		// Proactive hygiene on the session-start read: near-duplicate pairs are
+		// the store rot that degrades recall most, and nothing else surfaces
+		// them until someone already suspects a problem. Same threshold and
+		// size gate as the CLI (note.NearDupWarnThreshold / HygieneScanMaxNotes
+		// — the scan is O(n²)) so both surfaces nag, or stay quiet, in unison.
+		if len(notes) <= note.HygieneScanMaxNotes {
+			if pairs := len(note.NearDupPairs(notes)); pairs >= note.NearDupWarnThreshold {
+				w := fmt.Sprintf("%d near-duplicate note pair(s) — nt_distill lists them; consolidate (nt_note_edit + nt_archive superseded_by) or tag one 'distinct'", pairs)
+				if warning != "" {
+					warning += "; " + w
+				} else {
+					warning = w
+				}
+			}
+		}
 	}
 	stubs := make([]noteStub, 0, len(tiered.Pinned)+len(tiered.Recent))
 	if tiered.Tiered {
@@ -1705,6 +1765,9 @@ func (s *server) index(a map[string]any) (string, error) {
 			continue
 		}
 		if tag != "" && !contains(t.Tags(), tag) {
+			continue
+		}
+		if proj != "" && !note.AnyProject(t.Projects(), proj) {
 			continue
 		}
 		scoped = append(scoped, t)
@@ -1927,8 +1990,9 @@ func (s *server) get(a map[string]any) (string, error) {
 func (s *server) search(a map[string]any) (string, error) {
 	q := strings.TrimSpace(str(a, "query"))
 	tag := strings.TrimSpace(str(a, "tag"))
-	if q == "" && tag == "" {
-		return "", fmt.Errorf("query or tag is required")
+	proj := strings.TrimSpace(str(a, "project"))
+	if q == "" && tag == "" && proj == "" {
+		return "", fmt.Errorf("query, tag, or project is required")
 	}
 	typ := str(a, "type")
 	if typ == "" {
@@ -1965,6 +2029,11 @@ func (s *server) search(a map[string]any) (string, error) {
 				continue // task-detail / machine notes aren't part of the KB catalog
 			}
 			if tag != "" && !contains(n.Tags, tag) {
+				continue
+			}
+			// project: frontmatter is invisible to the text match below (it scans
+			// the parsed body on purpose), so scoping by project needs its own filter.
+			if proj != "" && !note.SameProject(n.Project(), proj) {
 				continue
 			}
 			// Match title first (rank 0), then the BODY only (rank 1). Scanning the
@@ -2019,6 +2088,9 @@ func (s *server) search(a map[string]any) (string, error) {
 			// another agent's workstream come back as an empty result — which agents
 			// read as "no such task" and then duplicated the work.
 			if tag != "" && !contains(t.Tags(), tag) {
+				continue
+			}
+			if proj != "" && !note.AnyProject(t.Projects(), proj) {
 				continue
 			}
 			if q == "" || strings.Contains(strings.ToLower(t.Text), ql) {
