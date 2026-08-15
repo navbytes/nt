@@ -219,12 +219,23 @@ type tagCount struct {
 	Count int    `json:"count"`
 }
 
+// projectCount is one row of the project vocabulary (for --projects --json).
+type projectCount struct {
+	Project string `json:"project"`
+	Count   int    `json:"count"`
+}
+
 // cmdTags enumerates the tag vocabulary (notes + tasks) with counts — helps keep
-// a controlled vocabulary clean.
+// a controlled vocabulary clean. The project vocabulary (a note's `project:`
+// frontmatter, a task's +project) prints alongside it: "check the store's
+// vocabulary before scoping" was unactionable advice while this command showed
+// only tags. --projects lists projects alone (JSON: [{project,count}]); the
+// default --json stays [{tag,count}] — an existing machine contract.
 func cmdTags(args []string) int {
 	fs := flag.NewFlagSet("tags", flag.ContinueOnError)
 	asJSON := fs.Bool("json", false, "machine-readable output")
-	flags, _ := splitArgs(args, map[string]bool{"json": true})
+	projectsOnly := fs.Bool("projects", false, "list the project vocabulary instead (notes' project: frontmatter + tasks' +project, case-folded)")
+	flags, _ := splitArgs(args, map[string]bool{"json": true, "projects": true})
 	if err := fs.Parse(flags); err != nil {
 		return 2
 	}
@@ -233,10 +244,14 @@ func cmdTags(args []string) int {
 		return 1
 	}
 	counts := map[string]int{}
+	projects := map[string]int{}
 	notes, _ := note.List(e.S)
 	for _, n := range notes {
 		for _, tg := range n.Tags {
 			counts[tg]++
+		}
+		if p := note.ProjectKey(n.Project()); p != "" {
+			projects[p]++
 		}
 	}
 	if d, err := e.Read(); err == nil {
@@ -244,13 +259,52 @@ func cmdTags(args []string) int {
 			for _, tg := range t.Tags() {
 				counts[tg]++
 			}
+			for _, p := range t.Projects() {
+				if key := note.ProjectKey(p); key != "" {
+					projects[key]++
+				}
+			}
 		}
 	}
-	keys := make([]string, 0, len(counts))
-	for k := range counts {
-		keys = append(keys, k)
+	sortedKeys := func(m map[string]int) []string {
+		ks := make([]string, 0, len(m))
+		for k := range m {
+			ks = append(ks, k)
+		}
+		sort.Strings(ks)
+		return ks
 	}
-	sort.Strings(keys)
+	keys, projKeys := sortedKeys(counts), sortedKeys(projects)
+
+	// printAligned aligns counts to the widest entry rather than a fixed width
+	// that truncates long names into the count column.
+	printAligned := func(ks []string, m map[string]int, prefix string) {
+		width := 0
+		for _, k := range ks {
+			if n := len(k) + len(prefix); n > width {
+				width = n
+			}
+		}
+		for _, k := range ks {
+			fmt.Printf("%-*s %d\n", width, prefix+k, m[k])
+		}
+	}
+
+	if *projectsOnly {
+		if *asJSON {
+			out := make([]projectCount, 0, len(projKeys))
+			for _, k := range projKeys {
+				out = append(out, projectCount{Project: k, Count: projects[k]})
+			}
+			return printJSON(out)
+		}
+		if len(projects) == 0 {
+			fmt.Println("no projects")
+			return 0
+		}
+		printAligned(projKeys, projects, "+")
+		return 0
+	}
 
 	if *asJSON {
 		out := make([]tagCount, 0, len(keys))
@@ -259,20 +313,17 @@ func cmdTags(args []string) int {
 		}
 		return printJSON(out)
 	}
-	if len(counts) == 0 {
+	if len(counts) == 0 && len(projects) == 0 {
 		fmt.Println("no tags")
 		return 0
 	}
-	// Align counts to the widest tag rather than a fixed width that truncates long
-	// tags into the count column.
-	width := 0
-	for _, k := range keys {
-		if n := len(k) + 1; n > width { // +1 for the leading @
-			width = n
+	printAligned(keys, counts, "@")
+	if len(projects) > 0 {
+		if len(counts) > 0 {
+			fmt.Println()
 		}
-	}
-	for _, k := range keys {
-		fmt.Printf("%-*s %d\n", width, "@"+k, counts[k])
+		fmt.Println("projects:")
+		printAligned(projKeys, projects, "+")
 	}
 	return 0
 }
