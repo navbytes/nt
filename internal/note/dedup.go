@@ -13,6 +13,14 @@ type Pair struct{ A, B *Note }
 // nag (or stay quiet) in unison.
 const NearDupWarnThreshold = 3
 
+// HygieneScanMaxNotes caps the store size at which the unscoped index runs
+// its proactive hygiene scan: NearDupPairs is O(n²) in active notes, and the
+// unscoped index is the hottest read (every session start). Below the cap the
+// scan is milliseconds; past it the nudge isn't worth the latency, and doctor
+// — on-demand, expected to take a moment — remains the uncapped check. Shared
+// by CLI and MCP so both surfaces gate identically.
+const HygieneScanMaxNotes = 1500
+
 func containsStr(ss []string, want string) bool {
 	for _, s := range ss {
 		if s == want {

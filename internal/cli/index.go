@@ -131,7 +131,7 @@ func cmdIndex(args []string) int {
 	// still match below, so this can't be a hard failure) — a silent "0 notes"
 	// reads as "those notes don't exist" to an agent.
 	if *project != "" && len(filtered) == 0 {
-		fmt.Fprintf(os.Stderr, "index: no notes carry project %q — the store may use a different name; check the vocabulary with `nt tags`, or search by topic (`nt search`)\n", *project)
+		fmt.Fprintf(os.Stderr, "index: no notes carry project %q — the store may use a different name; check the vocabulary with `nt tags --projects`, or search by topic (`nt search`)\n", *project)
 	}
 
 	// A scoping folder that matches nothing is almost always a typo — a silent
@@ -228,7 +228,7 @@ func cmdIndex(args []string) int {
 						break
 					}
 				}
-				if keep && *project != "" && !containsProject(t.Projects(), *project) {
+				if keep && *project != "" && !note.AnyProject(t.Projects(), *project) {
 					keep = false
 				}
 				if !keep {
@@ -433,19 +433,6 @@ func folderLabel(f string) string {
 	return f + "/"
 }
 
-// containsProject reports whether any of a task's +project tokens names the
-// given project — the case-insensitive fold notes use (note.SameProject), so
-// one --project value matches both storage forms instead of tasks demanding
-// an exact-case hit that notes don't.
-func containsProject(projects []string, want string) bool {
-	for _, p := range projects {
-		if note.SameProject(p, want) {
-			return true
-		}
-	}
-	return false
-}
-
 // warnStoreHygiene prints a one-line stderr nudge when the store has
 // accumulated enough rot to be worth a curation pass — near-duplicate pairs
 // degrade recall, reclaimable notes are dead weight in every diff. Doctor, gc
@@ -453,6 +440,9 @@ func containsProject(projects []string, want string) bool {
 // human already suspected a problem. Stderr, like every other index warning,
 // so --json output stays parseable.
 func warnStoreHygiene(e *mutate.Engine, active []*note.Note) {
+	if len(active) > note.HygieneScanMaxNotes {
+		return // O(n²) scan gated on the hottest read — doctor covers large stores
+	}
 	pairs := len(note.NearDupPairs(active))
 	reclaim := len(gcCandidates(e, gcDefaultCutoff()))
 	if pairs < note.NearDupWarnThreshold && reclaim < reclaimWarnThreshold {

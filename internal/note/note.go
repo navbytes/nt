@@ -765,6 +765,18 @@ func SameProject(a, b string) bool {
 	return k != "" && k == ProjectKey(b)
 }
 
+// AnyProject reports whether any identifier in projects names want — the
+// task-side membership test (a task can carry several +project tokens),
+// sharing SameProject's fold so CLI and MCP can't drift on matching rules.
+func AnyProject(projects []string, want string) bool {
+	for _, p := range projects {
+		if SameProject(p, want) {
+			return true
+		}
+	}
+	return false
+}
+
 // Reserved reports whether a note lives in a machine-managed folder that isn't
 // part of the human/agent knowledge base — currently notes/__tasks__/, where
 // nt files the detail bodies of split tasks. These are reachable by id/link but

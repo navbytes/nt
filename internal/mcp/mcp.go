@@ -699,18 +699,6 @@ func (s *server) similarToTask(created *task.Task) []map[string]string {
 	return out
 }
 
-// taskInProject reports whether any of a task's +project tokens names the
-// given project — the case-insensitive fold notes use (note.SameProject), so
-// one project value scopes both item kinds identically.
-func taskInProject(t *task.Task, proj string) bool {
-	for _, p := range t.Projects() {
-		if note.SameProject(p, proj) {
-			return true
-		}
-	}
-	return false
-}
-
 func (s *server) update(a map[string]any) (string, error) {
 	id, err := requireID(a)
 	if err != nil {
@@ -1708,14 +1696,17 @@ func (s *server) index(a map[string]any) (string, error) {
 		tiered = note.TierIndex(filtered, time.Now())
 		// Proactive hygiene on the session-start read: near-duplicate pairs are
 		// the store rot that degrades recall most, and nothing else surfaces
-		// them until someone already suspects a problem. Same threshold as the
-		// CLI (note.NearDupWarnThreshold) so both surfaces nag in unison.
-		if pairs := len(note.NearDupPairs(notes)); pairs >= note.NearDupWarnThreshold {
-			w := fmt.Sprintf("%d near-duplicate note pair(s) — nt_distill lists them; consolidate (nt_note_edit + nt_archive superseded_by) or tag one 'distinct'", pairs)
-			if warning != "" {
-				warning += "; " + w
-			} else {
-				warning = w
+		// them until someone already suspects a problem. Same threshold and
+		// size gate as the CLI (note.NearDupWarnThreshold / HygieneScanMaxNotes
+		// — the scan is O(n²)) so both surfaces nag, or stay quiet, in unison.
+		if len(notes) <= note.HygieneScanMaxNotes {
+			if pairs := len(note.NearDupPairs(notes)); pairs >= note.NearDupWarnThreshold {
+				w := fmt.Sprintf("%d near-duplicate note pair(s) — nt_distill lists them; consolidate (nt_note_edit + nt_archive superseded_by) or tag one 'distinct'", pairs)
+				if warning != "" {
+					warning += "; " + w
+				} else {
+					warning = w
+				}
 			}
 		}
 	}
@@ -1776,7 +1767,7 @@ func (s *server) index(a map[string]any) (string, error) {
 		if tag != "" && !contains(t.Tags(), tag) {
 			continue
 		}
-		if proj != "" && !taskInProject(t, proj) {
+		if proj != "" && !note.AnyProject(t.Projects(), proj) {
 			continue
 		}
 		scoped = append(scoped, t)
@@ -2099,7 +2090,7 @@ func (s *server) search(a map[string]any) (string, error) {
 			if tag != "" && !contains(t.Tags(), tag) {
 				continue
 			}
-			if proj != "" && !taskInProject(t, proj) {
+			if proj != "" && !note.AnyProject(t.Projects(), proj) {
 				continue
 			}
 			if q == "" || strings.Contains(strings.ToLower(t.Text), ql) {

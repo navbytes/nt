@@ -587,7 +587,7 @@ func cmdSearch(args []string) int {
 			if len(tags) > 0 && !hasAll(t.Tags()) {
 				continue
 			}
-			if *project != "" && !containsProject(t.Projects(), *project) {
+			if *project != "" && !note.AnyProject(t.Projects(), *project) {
 				continue
 			}
 			if len(terms) == 0 || matchesAll(t.Line(), terms) {

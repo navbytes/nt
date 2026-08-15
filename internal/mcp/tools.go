@@ -191,7 +191,7 @@ var toolDefs = []toolDef{
 	},
 	{
 		Name:        "nt_search",
-		Description: "Find notes and tasks by EXACT text and/or tag — reach for it when you know the words that appear in the note (use nt_recall for paraphrased/conceptual matching, nt_index for the whole catalog). Store-wide: results are never workstream-scoped, so it finds every agent's tasks. Returns ranked STUBS (id, title, description, snippet) not bodies; nt_get the id you want. Title matches rank first; truncated=true when more exist. At least one of query/tag is required; full=true to inline bodies.",
+		Description: "Find notes and tasks by EXACT text, tag, and/or project — reach for it when you know the words that appear in the note (use nt_recall for paraphrased/conceptual matching, nt_index for the whole catalog). Store-wide: results are never workstream-scoped, so it finds every agent's tasks. Returns ranked STUBS (id, title, description, snippet) not bodies; nt_get the id you want. Title matches rank first; truncated=true when more exist. At least one of query/tag/project is required — project alone lists that project's items (the project: frontmatter is invisible to the text match, so don't grep for the name); full=true to inline bodies.",
 		InputSchema: obj(map[string]any{
 			"query":            sp("text to match in titles + bodies (optional if tag or project is set)"),
 			"tag":              sp("only items with this tag"),
