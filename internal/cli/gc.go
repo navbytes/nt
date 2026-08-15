@@ -67,12 +67,29 @@ func gcCandidates(e *mutate.Engine, cutoff string) []gcCandidate {
 // (the same form dateparse.PastDate accepts for --updated-since).
 var pastRelRe = regexp.MustCompile(`^-?(\d+)d$`)
 
+// gcDefaultRetentionDays is gc's default --older-than, shared with every
+// surface that COUNTS reclaimable notes (doctor's hygiene notice, index's
+// store-hygiene warning) so "N reclaimable" always means "what `nt gc` would
+// collect", not a second, silently different cutoff.
+const gcDefaultRetentionDays = 30
+
+// reclaimWarnThreshold is the reclaimable-note count at which `nt index`
+// starts nudging toward `nt gc` — a handful of retired stubs is normal
+// working residue, not worth a warning on every session start.
+const reclaimWarnThreshold = 5
+
+// gcDefaultCutoff is today minus the default retention, as YYYY-MM-DD — the
+// cutoff gcCandidates wants.
+func gcDefaultCutoff() string {
+	return time.Now().AddDate(0, 0, -gcDefaultRetentionDays).Format("2006-01-02")
+}
+
 // cmdGc reclaims dead weight: superseded stubs and stranded task-detail notes
 // move to .trash/ (recoverable — same mechanism as `nt rm` on a note). Dry-run
 // by default; --yes applies. Retention: --older-than 30d.
 func cmdGc(args []string) int {
 	fs := flag.NewFlagSet("gc", flag.ContinueOnError)
-	olderThan := fs.String("older-than", "30d", "only collect notes unchanged for this long (Nd)")
+	olderThan := fs.String("older-than", fmt.Sprintf("%dd", gcDefaultRetentionDays), "only collect notes unchanged for this long (Nd)")
 	yes := fs.Bool("yes", false, "apply (default is a dry-run plan)")
 	fs.BoolVar(yes, "y", false, "apply (default is a dry-run plan)")
 	asJSON := fs.Bool("json", false, "print the plan/result as JSON")

@@ -215,6 +215,7 @@ func cmdEdit(args []string) int {
 	validUntil := fs.String("valid-until", "", "set: this fact stops being true after this date/time (YYYY-MM-DD or RFC3339) — nt_recall down-ranks and flags it 'expired' past this")
 	clearValidFrom := fs.Bool("clear-valid-from", false, "remove the valid_from constraint")
 	clearValidUntil := fs.Bool("clear-valid-until", false, "remove the valid_until constraint")
+	projectFlag := fs.String("project", "", "set the note's project (project: frontmatter — index/search/recall scope by it); 'none' clears it")
 	halfLife := fs.String("half-life", "", "set the relevance half-life (Nd/Nw/Nm/Ny, or 'none') — the note fades in recall/index as it ages un-reconfirmed; `nt touch` resets the clock")
 	reviewed := fs.String("reviewed", "", "set the last-reconfirmed date (YYYY-MM-DD or RFC3339) — the decay clock's reset point (prefer `nt touch` for today)")
 	clearHalfLife := fs.Bool("clear-half-life", false, "remove the half_life (stop decaying)")
@@ -291,7 +292,8 @@ func cmdEdit(args []string) int {
 	// and every inbound link); this edits in place.
 	validitySet := strings.TrimSpace(*validFrom) != "" || strings.TrimSpace(*validUntil) != "" || *clearValidFrom || *clearValidUntil
 	decaySet := strings.TrimSpace(*halfLife) != "" || strings.TrimSpace(*reviewed) != "" || *clearHalfLife || *clearReviewed
-	if appendVal != "" || bodyVal != "" || replacing || strings.TrimSpace(descVal) != "" || strings.TrimSpace(*title) != "" || validitySet || decaySet {
+	projectSet := strings.TrimSpace(*projectFlag) != ""
+	if appendVal != "" || bodyVal != "" || replacing || strings.TrimSpace(descVal) != "" || strings.TrimSpace(*title) != "" || validitySet || decaySet || projectSet {
 		n, nerr := resolveNote(notes, strings.TrimPrefix(handle, "note:"))
 		if nerr != nil {
 			return fail(fmt.Errorf("edit: %w (non-interactive edits apply to notes; for tasks use `nt update`)", nerr))
@@ -348,6 +350,21 @@ func cmdEdit(args []string) int {
 			setNoteDescription(n, d)
 			if verb == "" {
 				verb = "set description of"
+			}
+		}
+		if projectSet {
+			// 'none' clears, mirroring `nt recall --project none` — a bare empty
+			// string can't be told apart from "flag not passed".
+			if p := strings.TrimSpace(*projectFlag); p == "none" {
+				n.SetProject("")
+				if verb == "" {
+					verb = "cleared project of"
+				}
+			} else {
+				n.SetProject(p)
+				if verb == "" {
+					verb = "set project of"
+				}
 			}
 		}
 		if vf := strings.TrimSpace(*validFrom); vf != "" {
@@ -602,18 +619,25 @@ func cmdDoctor(args []string) int {
 
 	// Reclaimable dead weight (superseded stubs, stranded task details) — doctor
 	// is the curation entry point, so it points at the mechanized cleanup.
-	gcCount := len(gcCandidates(e, time.Now().AddDate(0, 0, -30).Format("2006-01-02")))
+	// Same cutoff as `nt gc`'s default, by construction (gcDefaultCutoff).
+	gcCount := len(gcCandidates(e, gcDefaultCutoff()))
+	// Compiled exports that no longer match the store (see exportstate.go), and
+	// config [decay] values that would be silently ignored at capture.
+	exportDrift := exportDriftWarnings(e)
+	cfgWarns := configDecayWarnings()
 
 	if !taskProblem && !noteProblem {
-		if nl.hasHygieneNotices() || gcCount > 0 || len(dupTasks) > 0 {
+		if nl.hasHygieneNotices() || gcCount > 0 || len(dupTasks) > 0 || len(exportDrift) > 0 || len(cfgWarns) > 0 {
 			fmt.Println("tasks and links are healthy — hygiene notices below")
 		} else {
 			fmt.Println("store is healthy — no issues found")
 		}
 		printNoteHygiene(nl)
 		printTaskDups(dupTasks)
+		printNotices(exportDrift)
+		printNotices(cfgWarns)
 		if gcCount > 0 {
-			fmt.Printf("  %d reclaimable note(s) (superseded/stranded >30d) — `nt gc` to review, `nt gc --yes` to trash\n", gcCount)
+			fmt.Printf("  %d reclaimable note(s) (superseded/stranded >%dd) — `nt gc` to review, `nt gc --yes` to trash\n", gcCount, gcDefaultRetentionDays)
 		}
 		return 0
 	}
@@ -637,10 +661,45 @@ func cmdDoctor(args []string) int {
 	}
 	printNoteHygiene(nl)
 	printTaskDups(dupTasks)
+	printNotices(exportDrift)
+	printNotices(cfgWarns)
 	if *check {
 		return 1
 	}
 	return 0
+}
+
+// printNotices prints hygiene notices (export drift, config typos) in doctor's
+// two-space indent style. Notices inform; they never fail --check.
+func printNotices(notices []string) {
+	for _, w := range notices {
+		fmt.Println("  ⚠ " + w)
+	}
+}
+
+// configDecayWarnings validates the [decay] half-life defaults in config.toml.
+// Capture-time consumers skip an unparseable value silently (a broken config
+// must never block an agent's capture) — doctor is where the typo gets seen.
+func configDecayWarnings() []string {
+	cfg := loadConfig()
+	kinds := make([]string, 0, len(cfg.DecayDefaults))
+	for k := range cfg.DecayDefaults {
+		kinds = append(kinds, k)
+	}
+	sort.Strings(kinds)
+	var warns []string
+	for _, k := range kinds {
+		if _, ok := note.Kinds[k]; !ok {
+			warns = append(warns, fmt.Sprintf("config.toml [decay] %s: unknown kind (use lesson|decision|ref|rule|memory) — ignored", k))
+			continue
+		}
+		if v := cfg.DecayDefaults[k]; v != "" {
+			if _, ok, isNone := note.ParseHalfLife(v); !ok && !isNone {
+				warns = append(warns, fmt.Sprintf("config.toml [decay] %s = %q is not a half-life (Nd/Nw/Nm/Ny or 'none') — ignored at capture", k, v))
+			}
+		}
+	}
+	return warns
 }
 
 // lintTaskDups finds pairs of OPEN tasks whose titles overlap heavily (the same

@@ -1,6 +1,6 @@
 module github.com/navbytes/nt/desktop
 
-go 1.25.12
+go 1.25.13
 
 require (
 	github.com/navbytes/nt v0.0.0
