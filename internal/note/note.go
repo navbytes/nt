@@ -730,6 +730,41 @@ func (n *Note) Project() string {
 	return ""
 }
 
+// SetProject sets, replaces, or (with "") removes the note's `project:`
+// frontmatter line — the write-side counterpart of Project. Like the accessor
+// it works over Extra, so any adjacent unmodeled frontmatter is preserved.
+func (n *Note) SetProject(p string) {
+	p = strings.TrimSpace(p)
+	for i, line := range n.Extra {
+		if k, _, ok := strings.Cut(line, ":"); ok && strings.EqualFold(strings.TrimSpace(k), "project") {
+			if p == "" {
+				n.Extra = append(n.Extra[:i], n.Extra[i+1:]...)
+			} else {
+				n.Extra[i] = "project: " + p
+			}
+			return
+		}
+	}
+	if p != "" {
+		n.Extra = append(n.Extra, "project: "+p)
+	}
+}
+
+// ProjectKey normalizes a project identifier for comparison: trimmed and
+// lowercased. Every surface that COMPARES projects (index/search hard filters,
+// the dedup fold below) goes through this one form, so "WTCockpit", "wtcockpit"
+// and " wtcockpit " name the same project everywhere instead of matching in one
+// command and not another. Display keeps the stored casing; only comparisons fold.
+func ProjectKey(s string) string { return strings.ToLower(strings.TrimSpace(s)) }
+
+// SameProject reports whether two project identifiers name the same project
+// (case-insensitive, whitespace-trimmed). Empty never matches anything — a
+// filter for project "" would otherwise select every unscoped note.
+func SameProject(a, b string) bool {
+	k := ProjectKey(a)
+	return k != "" && k == ProjectKey(b)
+}
+
 // Reserved reports whether a note lives in a machine-managed folder that isn't
 // part of the human/agent knowledge base — currently notes/__tasks__/, where
 // nt files the detail bodies of split tasks. These are reachable by id/link but
@@ -787,7 +822,7 @@ func FindSimilar(notes []*Note, title string, tags []string, project string) []*
 // that class look topically related. project stands in for a tag here because
 // that's the role it plays for dedup purposes — "which topic/scope does this
 // note belong to" — even though it lives in a separate frontmatter field.
-// project is trimmed and lowercased before folding in: it's compared exactly
+// project folds in via ProjectKey (trimmed + lowercased): it's compared exactly
 // (unlike TAG case, which is pre-existing and left alone), and the write path
 // (commands.go) trims before storing while callers here don't always trim
 // before calling — without normalizing, "wtc" and " WTC " would silently
@@ -800,7 +835,7 @@ func similarityTags(tags []string, project string) map[string]bool {
 		}
 		out[t] = true
 	}
-	if p := strings.ToLower(strings.TrimSpace(project)); p != "" {
+	if p := ProjectKey(project); p != "" {
 		out[p] = true
 	}
 	return out
@@ -836,7 +871,7 @@ func parallelSiblings(title string, tags []string, project string, n *Note) bool
 // leaving tags untouched when project is unset. project is trimmed and
 // lowercased for the same reason as similarityTags above.
 func tagsWithProject(tags []string, project string) []string {
-	p := strings.ToLower(strings.TrimSpace(project))
+	p := ProjectKey(project)
 	if p == "" {
 		return tags
 	}

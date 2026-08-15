@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/navbytes/nt/internal/dateparse"
+	"github.com/navbytes/nt/internal/mutate"
 	"github.com/navbytes/nt/internal/note"
 	"github.com/navbytes/nt/internal/task"
 	"github.com/navbytes/nt/internal/workstream"
@@ -115,7 +116,7 @@ func cmdIndex(args []string) int {
 		if !match {
 			continue
 		}
-		if *project != "" && n.Project() != *project {
+		if *project != "" && !note.SameProject(n.Project(), *project) {
 			continue
 		}
 		if since != "" && n.ChangedDate() < since {
@@ -151,6 +152,13 @@ func cmdIndex(args []string) int {
 	// scope (--all/--tag/--folder/--updated-since) means the caller is already
 	// narrowing — show every match, exactly as before.
 	scoped := *all || prefix != "" || len(tags) > 0 || since != "" || *project != ""
+	// Proactive hygiene: the unscoped index is the read every session starts
+	// with, so it's where store rot should become visible — doctor/gc/distill
+	// otherwise run only when someone already suspects a problem. Scoped calls
+	// skip it: the caller is mid-task, and the counts are store-wide anyway.
+	if !scoped {
+		warnStoreHygiene(e, notes)
+	}
 	tiers := note.Tiers{Recent: filtered}
 	if !scoped {
 		tiers = note.TierIndex(filtered, time.Now())
@@ -220,7 +228,7 @@ func cmdIndex(args []string) int {
 						break
 					}
 				}
-				if keep && *project != "" && !contains(t.Projects(), *project) {
+				if keep && *project != "" && !containsProject(t.Projects(), *project) {
 					keep = false
 				}
 				if !keep {
@@ -423,4 +431,32 @@ func folderLabel(f string) string {
 		return "(root)"
 	}
 	return f + "/"
+}
+
+// containsProject reports whether any of a task's +project tokens names the
+// given project — the case-insensitive fold notes use (note.SameProject), so
+// one --project value matches both storage forms instead of tasks demanding
+// an exact-case hit that notes don't.
+func containsProject(projects []string, want string) bool {
+	for _, p := range projects {
+		if note.SameProject(p, want) {
+			return true
+		}
+	}
+	return false
+}
+
+// warnStoreHygiene prints a one-line stderr nudge when the store has
+// accumulated enough rot to be worth a curation pass — near-duplicate pairs
+// degrade recall, reclaimable notes are dead weight in every diff. Doctor, gc
+// and distill are otherwise purely on-demand: nothing surfaced them until a
+// human already suspected a problem. Stderr, like every other index warning,
+// so --json output stays parseable.
+func warnStoreHygiene(e *mutate.Engine, active []*note.Note) {
+	pairs := len(note.NearDupPairs(active))
+	reclaim := len(gcCandidates(e, gcDefaultCutoff()))
+	if pairs < note.NearDupWarnThreshold && reclaim < reclaimWarnThreshold {
+		return
+	}
+	fmt.Fprintf(os.Stderr, "index: store hygiene — %d near-duplicate pair(s), %d reclaimable note(s); `nt doctor` for detail (`nt distill` merges dups, `nt gc` reclaims)\n", pairs, reclaim)
 }

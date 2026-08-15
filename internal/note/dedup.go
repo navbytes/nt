@@ -5,6 +5,14 @@ package note
 // anywhere else two notes need to be flagged as probably-the-same-thing.
 type Pair struct{ A, B *Note }
 
+// NearDupWarnThreshold is the pair count at which the catalog surfaces
+// (`nt index` / `nt_index`) start warning proactively that the store needs a
+// distill pass. Below it, a stray pair is normal working residue and a nag on
+// every session start would train readers to ignore the warning; at it, recall
+// quality is measurably degrading. Shared by CLI and MCP so both surfaces
+// nag (or stay quiet) in unison.
+const NearDupWarnThreshold = 3
+
 func containsStr(ss []string, want string) bool {
 	for _, s := range ss {
 		if s == want {

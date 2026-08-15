@@ -505,6 +505,7 @@ func cmdSearch(args []string) int {
 	asJSON := fs.Bool("json", false, "machine-readable output")
 	limit := fs.Int("limit", 0, "cap results per kind (0 = all); a broad term can otherwise print the whole store")
 	includeArchived := fs.Bool("include-archived", false, "also search retired notes (archived/superseded) — the deep sweep; retired hits are marked")
+	project := fs.String("project", "", `only items in this project (a note's "project:" frontmatter, a task's +project) — case-insensitive hard filter; alone it lists the project's items`)
 	var tags stringSlice
 	fs.Var(&tags, "tag", "only items with this tag (repeatable, AND)")
 	flags, positional := splitArgs(args, map[string]bool{"json": true, "include-archived": true})
@@ -512,8 +513,8 @@ func cmdSearch(args []string) int {
 		return 2
 	}
 	query := strings.Join(positional, " ")
-	if query == "" && len(tags) == 0 {
-		return usageErr(fmt.Errorf("search: need a query or --tag"))
+	if query == "" && len(tags) == 0 && strings.TrimSpace(*project) == "" {
+		return usageErr(fmt.Errorf("search: need a query, --tag, or --project"))
 	}
 	e, ok := engine()
 	if !ok {
@@ -549,6 +550,11 @@ func cmdSearch(args []string) int {
 			if len(tags) > 0 && !hasAll(n.Tags) {
 				continue
 			}
+			// project: frontmatter is invisible to the text match below (it scans
+			// title+body on purpose), so scoping to a project needs its own filter.
+			if *project != "" && !note.SameProject(n.Project(), *project) {
+				continue
+			}
 			if len(terms) > 0 && !matchesAll(n.Title+"\n"+n.Body, terms) {
 				continue
 			}
@@ -579,6 +585,9 @@ func cmdSearch(args []string) int {
 		blocked = task.BlockedIDs(d.Tasks())
 		for _, t := range d.Tasks() {
 			if len(tags) > 0 && !hasAll(t.Tags()) {
+				continue
+			}
+			if *project != "" && !containsProject(t.Projects(), *project) {
 				continue
 			}
 			if len(terms) == 0 || matchesAll(t.Line(), terms) {

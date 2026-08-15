@@ -563,9 +563,11 @@ func cmdStop(args []string) int {
 
 func cmdNote(args []string) int {
 	// Config [defaults] source sets the flag default (same as cmdAdd); an
-	// explicit --source wins.
+	// explicit --source wins. cfg is also consulted below for [decay] kind
+	// defaults, so it's loaded once here.
+	cfg := loadConfig()
 	defSource := "cli"
-	if cfg := loadConfig(); cfg.DefaultSource != "" {
+	if cfg.DefaultSource != "" {
 		defSource = cfg.DefaultSource
 	}
 	fs := flag.NewFlagSet("note", flag.ContinueOnError)
@@ -674,6 +676,15 @@ func cmdNote(args []string) int {
 		if _, okHL, isNone := note.ParseHalfLife(hl); !okHL && !isNone {
 			return usageErr(fmt.Errorf("note: --half-life must be Nd/Nw/Nm/Ny or 'none', got %q", hl))
 		}
+	}
+	// No explicit --half-life: config [decay] can supply a per-kind default, so
+	// decay policy is set once instead of re-judged per note. The value is
+	// STAMPED into frontmatter (visible, editable, `nt edit --clear-half-life`
+	// removes it) rather than applied invisibly at read time — a config change
+	// never silently re-ranks existing notes. "none"/invalid config = no stamp;
+	// doctor reports invalid values.
+	if hl == "" && *kind != "" {
+		hl = note.DefaultHalfLife(cfg.DecayDefaults, *kind)
 	}
 	e, ok := engine()
 	if !ok {

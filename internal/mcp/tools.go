@@ -126,6 +126,7 @@ var toolDefs = []toolDef{
 			"old_string":   sp("exact existing text in the body to replace — must match exactly once"),
 			"new_string":   sp("replacement for old_string (empty deletes the matched text); required together with old_string"),
 			"description":  sp("replace the note's one-line description (frontmatter)"),
+			"project":      sp(`set the note's project (project: frontmatter — nt_index/nt_search scope by it, nt_recall boosts it); "none" clears it`),
 			"expect_mtime": sp("optional: the `mtime` token from a prior nt_get of this note — refuses instead of overwriting if the note changed on disk since (best-effort; omit if you don't have one)"),
 			"valid_from":   sp("set the valid_from date/time (YYYY-MM-DD or RFC3339)"),
 			"valid_until":  sp("set the valid_until date/time (YYYY-MM-DD or RFC3339)"),
@@ -168,6 +169,7 @@ var toolDefs = []toolDef{
 		InputSchema: obj(map[string]any{
 			"tag":           sp("only notes/tasks with this tag"),
 			"folder":        sp(`only notes under this folder, e.g. ref ("." = root notes)`),
+			"project":       sp(`only notes whose "project:" frontmatter (and tasks whose +project) name this project — case-insensitive HARD filter, unlike nt_recall's project (a soft ranking preference)`),
 			"all":           map[string]any{"type": "boolean", "description": "full catalog: every note stub, no tiering (large stores tier by default)"},
 			"limit":         map[string]any{"type": "integer", "description": "cap the note catalog to N (truncated=true when more exist); scope with tag/folder for big stores"},
 			"updated_since": sp("only notes changed on/after this date (14d = last 14 days | today | YYYY-MM-DD) — 'what changed since last session'"),
@@ -191,8 +193,9 @@ var toolDefs = []toolDef{
 		Name:        "nt_search",
 		Description: "Find notes and tasks by EXACT text and/or tag — reach for it when you know the words that appear in the note (use nt_recall for paraphrased/conceptual matching, nt_index for the whole catalog). Store-wide: results are never workstream-scoped, so it finds every agent's tasks. Returns ranked STUBS (id, title, description, snippet) not bodies; nt_get the id you want. Title matches rank first; truncated=true when more exist. At least one of query/tag is required; full=true to inline bodies.",
 		InputSchema: obj(map[string]any{
-			"query":            sp("text to match in titles + bodies (optional if tag is set)"),
+			"query":            sp("text to match in titles + bodies (optional if tag or project is set)"),
 			"tag":              sp("only items with this tag"),
+			"project":          sp(`only items in this project (a note's "project:" frontmatter, a task's +project) — case-insensitive hard filter; frontmatter is invisible to the text match, so this is the ONLY way to scope by project`),
 			"type":             enum("note", "task", "all"),
 			"limit":            map[string]any{"type": "integer", "description": "max results (default 8)"},
 			"full":             map[string]any{"type": "boolean", "description": "return full note bodies instead of stubs"},
