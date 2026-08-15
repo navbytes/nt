@@ -11,8 +11,8 @@ require (
 	github.com/charmbracelet/lipgloss v1.1.1-0.20250404203927-76690c660834
 	github.com/fsnotify/fsnotify v1.10.1
 	github.com/muesli/termenv v0.16.0
-	github.com/yuin/goldmark v1.8.2
-	golang.org/x/sys v0.46.0
+	github.com/yuin/goldmark v1.8.5
+	golang.org/x/sys v0.47.0
 )
 
 require (
