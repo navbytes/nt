@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -63,14 +64,27 @@ func cmdArchive(args []string) int {
 // and search — a soft, reversible retire.
 func archiveNotes(e *mutate.Engine, handles []string, unarchive bool) int {
 	notes, _ := note.List(e.S)
-	count := 0
+	// Resolve EVERY handle before writing anything — the same guarantee cmdRm
+	// documents and enforces. The previous loop saved as it went and returned
+	// on the first unresolvable handle, so `nt archive good1 good2 typo` left
+	// good1 and good2 archived (dropped out of index/search/recall) while the
+	// only output was an error and a non-zero exit. Nobody re-checks a command
+	// that reported failure, so that silently shrank the store.
+	resolved := make([]*note.Note, 0, len(handles))
 	for _, h := range handles {
 		n, err := resolveNote(notes, h)
 		if err != nil {
 			return fail(fmt.Errorf("archive: %w", err))
 		}
+		resolved = append(resolved, n)
+	}
+	count := 0
+	for _, n := range resolved {
 		n.Archived = !unarchive
 		n.Updated = time.Now().Format(time.RFC3339)
+		// A mid-loop Save failure can still leave a partial application, but
+		// that needs an I/O error rather than a typo — and every note that did
+		// flip is reported by the count below.
 		if err := n.Save(); err != nil {
 			return fail(err)
 		}
@@ -193,19 +207,33 @@ func cmdEdit(args []string) int {
 	bodyFile := fs.String("body-file", "", "replace the note body from a file ('-' = stdin); immune to shell quoting")
 	oldString := fs.String("old-string", "", "exact existing text in the body to replace — must match exactly once; pair with --new-string for a targeted fix without resending the whole body")
 	newString := fs.String("new-string", "", "replacement text for --old-string (empty deletes the matched text)")
+	title := fs.String("title", "", "set the note's title (frontmatter + body H1) without an editor")
 	desc := fs.String("desc", "", "set the note's one-line description (frontmatter) without an editor")
 	fs.StringVar(desc, "description", "", "alias for --desc")
+	descFile := fs.String("desc-file", "", "read the description from a file ('-' = stdin); immune to shell quoting, same as --body-file")
 	validFrom := fs.String("valid-from", "", "set: this fact is only true from this date/time on (YYYY-MM-DD or RFC3339)")
 	validUntil := fs.String("valid-until", "", "set: this fact stops being true after this date/time (YYYY-MM-DD or RFC3339) — nt_recall down-ranks and flags it 'expired' past this")
 	clearValidFrom := fs.Bool("clear-valid-from", false, "remove the valid_from constraint")
 	clearValidUntil := fs.Bool("clear-valid-until", false, "remove the valid_until constraint")
+	projectFlag := fs.String("project", "", "set the note's project (project: frontmatter — index/search/recall scope by it); 'none' clears it")
+	halfLife := fs.String("half-life", "", "set the relevance half-life (Nd/Nw/Nm/Ny, or 'none') — the note fades in recall/index as it ages un-reconfirmed; `nt touch` resets the clock")
+	reviewed := fs.String("reviewed", "", "set the last-reconfirmed date (YYYY-MM-DD or RFC3339) — the decay clock's reset point (prefer `nt touch` for today)")
+	clearHalfLife := fs.Bool("clear-half-life", false, "remove the half_life (stop decaying)")
+	clearReviewed := fs.Bool("clear-reviewed", false, "remove the reviewed date")
+	// Simulation finding: agents pass --source reflexively (every WRITE command
+	// takes it) and got an opaque "flag provided but not defined". Define it so
+	// we can explain instead: provenance is set at creation and edits keep it.
+	sourceFlag := fs.String("source", "", "not applicable on edit — provenance is recorded at creation (nt add/note) and edits keep the original source")
 	expectMtime := fs.String("expect-mtime", "", "optional: the mtime from a prior `nt show --json` of this note — refuse instead of overwriting if it changed on disk since (best-effort; omit if you don't have one)")
-	flags, positional := splitArgs(args, map[string]bool{"clear-valid-from": true, "clear-valid-until": true})
+	flags, positional := splitArgs(args, map[string]bool{"clear-valid-from": true, "clear-valid-until": true, "clear-half-life": true, "clear-reviewed": true})
 	if err := fs.Parse(flags); err != nil {
 		return 2
 	}
 	if len(positional) == 0 {
 		return usageErr(fmt.Errorf("edit: need an id (or note:slug)"))
+	}
+	if strings.TrimSpace(*sourceFlag) != "" {
+		return usageErr(fmt.Errorf("edit: --source doesn't apply here — provenance is recorded at creation (nt add/note --source) and edits keep the original; drop the flag and rerun"))
 	}
 	handle := positional[0]
 	appendVal, aerr := resolveBody(*appendTxt, *appendFile)
@@ -215,6 +243,12 @@ func cmdEdit(args []string) int {
 	bodyVal, berr := resolveBody(*body, *bodyFile)
 	if berr != nil {
 		return usageErr(fmt.Errorf("edit: %w", berr))
+	}
+	// Same shell-quoting escape hatch --body-file gives the body: backticks in a
+	// --desc value are expanded before nt sees them, silently truncating it.
+	descVal, derr := resolveBody(*desc, *descFile)
+	if derr != nil {
+		return usageErr(fmt.Errorf("edit: %s", strings.ReplaceAll(derr.Error(), "--body", "--desc")))
 	}
 	// --old-string/--new-string only make sense as a pair: one alone has no
 	// target (new-string) or nothing to put in its place (old-string), and
@@ -257,7 +291,9 @@ func cmdEdit(args []string) int {
 	// be fixable only via $EDITOR or a whole-note supersede (which churns the id
 	// and every inbound link); this edits in place.
 	validitySet := strings.TrimSpace(*validFrom) != "" || strings.TrimSpace(*validUntil) != "" || *clearValidFrom || *clearValidUntil
-	if appendVal != "" || bodyVal != "" || replacing || strings.TrimSpace(*desc) != "" || validitySet {
+	decaySet := strings.TrimSpace(*halfLife) != "" || strings.TrimSpace(*reviewed) != "" || *clearHalfLife || *clearReviewed
+	projectSet := strings.TrimSpace(*projectFlag) != ""
+	if appendVal != "" || bodyVal != "" || replacing || strings.TrimSpace(descVal) != "" || strings.TrimSpace(*title) != "" || validitySet || decaySet || projectSet {
 		n, nerr := resolveNote(notes, strings.TrimPrefix(handle, "note:"))
 		if nerr != nil {
 			return fail(fmt.Errorf("edit: %w (non-interactive edits apply to notes; for tasks use `nt update`)", nerr))
@@ -281,7 +317,13 @@ func cmdEdit(args []string) int {
 			count := strings.Count(n.Body, *oldString)
 			switch count {
 			case 0:
-				return fail(fmt.Errorf("edit: --old-string not found in %s's body — run `nt show %s` to see the current text", shortID(n.ID), shortID(n.ID)))
+				// Simulation finding: agents target the description text with
+				// --old-string and get a bare "not found" — say WHERE the text
+				// actually lives instead of leaving them to guess.
+				if strings.Contains(n.Description(1<<20), *oldString) {
+					return fail(fmt.Errorf("edit: --old-string matches the DESCRIPTION, not the body — the description is a separate field; replace it with `nt edit %s --desc \"…\"`", shortID(n.ID)))
+				}
+				return fail(fmt.Errorf("edit: --old-string not found in %s's body — run `nt show %s` to see the current text (descriptions are a separate field: --desc)", shortID(n.ID), shortID(n.ID)))
 			case 1:
 				n.Body = strings.Replace(n.Body, *oldString, *newString, 1)
 				verb = "edited"
@@ -289,10 +331,40 @@ func cmdEdit(args []string) int {
 				return fail(fmt.Errorf("edit: --old-string matches %d times in %s's body — make it longer/more specific so the match is unambiguous", count, shortID(n.ID)))
 			}
 		}
-		if d := strings.TrimSpace(*desc); d != "" {
+		// --title was the missing repair path. Without it a wrong title was
+		// permanent from the CLI: `nt mv` renames the file but pins the OLD
+		// title into frontmatter, where it then beats the body H1, so editing
+		// the H1 changed nothing visible. Rewrite the H1 too when it still
+		// carries the previous title, so frontmatter, heading and filename
+		// don't drift apart.
+		if tt := strings.TrimSpace(*title); tt != "" {
+			if old := strings.TrimSpace(n.Title); old != "" {
+				n.Body = replaceLeadingHeading(n.Body, old, tt)
+			}
+			n.Title = tt
+			if verb == "" {
+				verb = "retitled"
+			}
+		}
+		if d := strings.TrimSpace(descVal); d != "" {
 			setNoteDescription(n, d)
 			if verb == "" {
 				verb = "set description of"
+			}
+		}
+		if projectSet {
+			// 'none' clears, mirroring `nt recall --project none` — a bare empty
+			// string can't be told apart from "flag not passed".
+			if p := strings.TrimSpace(*projectFlag); p == "none" {
+				n.SetProject("")
+				if verb == "" {
+					verb = "cleared project of"
+				}
+			} else {
+				n.SetProject(p)
+				if verb == "" {
+					verb = "set project of"
+				}
 			}
 		}
 		if vf := strings.TrimSpace(*validFrom); vf != "" {
@@ -315,6 +387,34 @@ func cmdEdit(args []string) int {
 			n.ValidUntil = ""
 			if verb == "" {
 				verb = "set validity of"
+			}
+		}
+		if hl := strings.TrimSpace(*halfLife); hl != "" {
+			if _, ok, isNone := note.ParseHalfLife(hl); !ok && !isNone {
+				return usageErr(fmt.Errorf("edit: --half-life must be Nd/Nw/Nm/Ny or 'none', got %q", hl))
+			}
+			n.HalfLife = hl
+			if verb == "" {
+				verb = "set decay of"
+			}
+		} else if *clearHalfLife {
+			n.HalfLife = ""
+			if verb == "" {
+				verb = "set decay of"
+			}
+		}
+		if rv := strings.TrimSpace(*reviewed); rv != "" {
+			if _, ok := note.ParseFlexDate(rv); !ok {
+				return usageErr(fmt.Errorf("edit: --reviewed must be YYYY-MM-DD or RFC3339, got %q", rv))
+			}
+			n.Reviewed = rv
+			if verb == "" {
+				verb = "set decay of"
+			}
+		} else if *clearReviewed {
+			n.Reviewed = ""
+			if verb == "" {
+				verb = "set decay of"
 			}
 		}
 		n.Updated = time.Now().Format(time.RFC3339)
@@ -495,7 +595,7 @@ func cmdDoctor(args []string) int {
 	// the write-time warning when the writers never see each other's stderr.
 	dupTasks := lintTaskDups(e)
 	taskProblem := rep.HasProblems()
-	noteProblem := len(nl.Dangling) > 0
+	noteProblem := len(nl.Dangling) > 0 || len(nl.DupKeys) > 0
 
 	if len(rep.Actions) > 0 || len(rep.Warnings) > 0 || noteProblem {
 		if *check {
@@ -513,21 +613,31 @@ func cmdDoctor(args []string) int {
 	for _, dl := range nl.Dangling {
 		fmt.Println("  ⚠ dangling link " + dl)
 	}
+	for _, dk := range nl.DupKeys {
+		fmt.Println("  ⚠ duplicate frontmatter key " + dk)
+	}
 
 	// Reclaimable dead weight (superseded stubs, stranded task details) — doctor
 	// is the curation entry point, so it points at the mechanized cleanup.
-	gcCount := len(gcCandidates(e, time.Now().AddDate(0, 0, -30).Format("2006-01-02")))
+	// Same cutoff as `nt gc`'s default, by construction (gcDefaultCutoff).
+	gcCount := len(gcCandidates(e, gcDefaultCutoff()))
+	// Compiled exports that no longer match the store (see exportstate.go), and
+	// config [decay] values that would be silently ignored at capture.
+	exportDrift := exportDriftWarnings(e)
+	cfgWarns := configDecayWarnings()
 
 	if !taskProblem && !noteProblem {
-		if nl.hasHygieneNotices() || gcCount > 0 || len(dupTasks) > 0 {
+		if nl.hasHygieneNotices() || gcCount > 0 || len(dupTasks) > 0 || len(exportDrift) > 0 || len(cfgWarns) > 0 {
 			fmt.Println("tasks and links are healthy — hygiene notices below")
 		} else {
 			fmt.Println("store is healthy — no issues found")
 		}
 		printNoteHygiene(nl)
 		printTaskDups(dupTasks)
+		printNotices(exportDrift)
+		printNotices(cfgWarns)
 		if gcCount > 0 {
-			fmt.Printf("  %d reclaimable note(s) (superseded/stranded >30d) — `nt gc` to review, `nt gc --yes` to trash\n", gcCount)
+			fmt.Printf("  %d reclaimable note(s) (superseded/stranded >%dd) — `nt gc` to review, `nt gc --yes` to trash\n", gcCount, gcDefaultRetentionDays)
 		}
 		return 0
 	}
@@ -543,15 +653,53 @@ func cmdDoctor(args []string) int {
 	if len(rep.Warnings) > 0 {
 		fmt.Printf("%d dependency warning(s) need a manual fix (see ⚠ above)\n", len(rep.Warnings))
 	}
-	if noteProblem {
+	if len(nl.Dangling) > 0 {
 		fmt.Printf("%d dangling note link(s) — fix the [[target]] or the note it points to\n", len(nl.Dangling))
+	}
+	if len(nl.DupKeys) > 0 {
+		fmt.Printf("%d note(s) with a duplicate frontmatter key — only the first occurrence was used; hand-fix the file\n", len(nl.DupKeys))
 	}
 	printNoteHygiene(nl)
 	printTaskDups(dupTasks)
+	printNotices(exportDrift)
+	printNotices(cfgWarns)
 	if *check {
 		return 1
 	}
 	return 0
+}
+
+// printNotices prints hygiene notices (export drift, config typos) in doctor's
+// two-space indent style. Notices inform; they never fail --check.
+func printNotices(notices []string) {
+	for _, w := range notices {
+		fmt.Println("  ⚠ " + w)
+	}
+}
+
+// configDecayWarnings validates the [decay] half-life defaults in config.toml.
+// Capture-time consumers skip an unparseable value silently (a broken config
+// must never block an agent's capture) — doctor is where the typo gets seen.
+func configDecayWarnings() []string {
+	cfg := loadConfig()
+	kinds := make([]string, 0, len(cfg.DecayDefaults))
+	for k := range cfg.DecayDefaults {
+		kinds = append(kinds, k)
+	}
+	sort.Strings(kinds)
+	var warns []string
+	for _, k := range kinds {
+		if _, ok := note.Kinds[k]; !ok {
+			warns = append(warns, fmt.Sprintf("config.toml [decay] %s: unknown kind (use lesson|decision|ref|rule|memory) — ignored", k))
+			continue
+		}
+		if v := cfg.DecayDefaults[k]; v != "" {
+			if _, ok, isNone := note.ParseHalfLife(v); !ok && !isNone {
+				warns = append(warns, fmt.Sprintf("config.toml [decay] %s = %q is not a half-life (Nd/Nw/Nm/Ny or 'none') — ignored at capture", k, v))
+			}
+		}
+	}
+	return warns
 }
 
 // lintTaskDups finds pairs of OPEN tasks whose titles overlap heavily (the same
@@ -594,13 +742,20 @@ func printTaskDups(pairs []string) {
 // noteLint is the KB-side health report `nt doctor` produces alongside the task
 // reconciliation.
 type noteLint struct {
-	Dangling     []string // "[[target]] in <source>" — an unresolved wiki-link (a real break)
+	Dangling []string // "[[target]] in <source>" — an unresolved wiki-link (a real break)
+	// DupKeys is "<handle>: <key>" per note carrying a duplicate plural
+	// frontmatter key (tags:/aliases:) — Load already dropped the duplicate
+	// occurrence in favor of the first (see note.Note.DupKeys), but the file
+	// on disk is tampered or corrupt either way, and a hand-edited/externally-
+	// sourced note is exactly the case nt's own write-side guard can't cover.
+	DupKeys      []string
 	NoteCount    int
 	MissingDesc  []string // handles of active notes with no explicit `description:`
 	Orphans      []string // handles of active notes nothing links to (informational)
 	NearDups     []string // "a ≈ b" pairs of active notes with near-duplicate titles
 	PinnedCount  int      // notes in the always-shown index tier (rules/memory/ref/pin)
 	OldestPinned []string // "handle (aged Nd)" — staleness candidates when the tier is oversized
+	BadDecay     []string // "handle: problem" — unparseable half_life / future or bad reviewed (warn-and-preserve; a bad value never affects ranking)
 }
 
 // lintNotes scans notes and tasks for KB-graph health: unresolved [[links]]
@@ -612,6 +767,15 @@ func lintNotes(e *mutate.Engine) noteLint {
 	allNotes, _ := note.List(e.S)
 	active := note.Active(allNotes)
 	d, _ := e.Read()
+
+	// Duplicate-key scan runs over ALL notes, not just active/non-reserved —
+	// unlike the hygiene checks below, a tampered frontmatter key matters on
+	// an archived or task-detail note too, not just ones in the working set.
+	for _, n := range allNotes {
+		if len(n.DupKeys) > 0 {
+			rep.DupKeys = append(rep.DupKeys, shortID(n.ID)+" "+n.Rel+": "+strings.Join(n.DupKeys, ", "))
+		}
+	}
 
 	linked := map[string]bool{}
 	check := func(raw, src string) {
@@ -646,6 +810,21 @@ func lintNotes(e *mutate.Engine) noteLint {
 			pinnedNotes = append(pinnedNotes, n)
 		}
 		handle := shortID(n.ID) + " " + n.Rel
+		// Decay hygiene (spec §3): a malformed half_life/reviewed silently means
+		// "no decay" everywhere else (a bad value must never zero a note), so
+		// doctor is the one place it's made visible.
+		if hl := strings.TrimSpace(n.HalfLife); hl != "" {
+			if _, okHL, isNone := note.ParseHalfLife(hl); !okHL && !isNone {
+				rep.BadDecay = append(rep.BadDecay, handle+": half_life "+strconv.Quote(hl)+" is not Nd/Nw/Nm/Ny or \"none\" — decay is OFF for this note")
+			}
+		}
+		if rv := strings.TrimSpace(n.Reviewed); rv != "" {
+			if t, okRv := note.ParseFlexDate(rv); !okRv {
+				rep.BadDecay = append(rep.BadDecay, handle+": reviewed "+strconv.Quote(rv)+" is not YYYY-MM-DD or RFC3339")
+			} else if t.After(time.Now().AddDate(0, 0, 1)) {
+				rep.BadDecay = append(rep.BadDecay, handle+": reviewed "+rv+" is in the future — the decay clock never advances")
+			}
+		}
 		if !hasExplicitDescription(n) {
 			rep.MissingDesc = append(rep.MissingDesc, handle)
 		}
@@ -760,12 +939,18 @@ func printNoteHygiene(nl noteLint) {
 			fmt.Printf("  oldest pinned (staleness candidates): %s\n", sampleList(nl.OldestPinned, 5))
 		}
 	}
+	if len(nl.BadDecay) > 0 {
+		fmt.Printf("  decay frontmatter problems (value preserved, decay inert until fixed):\n")
+		for _, b := range nl.BadDecay {
+			fmt.Printf("    %s\n", b)
+		}
+	}
 }
 
 // hasHygieneNotices reports whether the informational note-quality summary has
 // anything to say — used to keep the headline honest.
 func (nl noteLint) hasHygieneNotices() bool {
-	return len(nl.MissingDesc) > 0 || len(nl.Orphans) > 0 || len(nl.NearDups) > 0 || nl.PinnedCount > note.TierPinnedWarn
+	return len(nl.MissingDesc) > 0 || len(nl.Orphans) > 0 || len(nl.NearDups) > 0 || nl.PinnedCount > note.TierPinnedWarn || len(nl.BadDecay) > 0
 }
 
 // sampleList joins up to n items, appending "(+K more)" when it truncates.
@@ -985,4 +1170,25 @@ failed command that matches a recorded lesson surfaces it on the next turn.
 Full setup: docs/claude-integration.md. For typed agent tools (nt_add,
 nt_index, nt_search, …) instead of the hook, see: nt mcp install.
 `)
+}
+
+// replaceLeadingHeading rewrites a body's opening "# old" heading to "# new"
+// when it still carries the previous title, so `nt edit --title` doesn't leave
+// the H1 contradicting the frontmatter. Bodies whose H1 was already something
+// else are left alone — that heading is the author's, not a mirror of the title.
+func replaceLeadingHeading(body, old, new string) string {
+	trimmed := strings.TrimLeft(body, "\n")
+	lead := body[:len(body)-len(trimmed)]
+	if !strings.HasPrefix(trimmed, "# ") {
+		return body
+	}
+	line, rest, _ := strings.Cut(trimmed, "\n")
+	if strings.TrimSpace(strings.TrimPrefix(line, "# ")) != strings.TrimSpace(old) {
+		return body
+	}
+	out := lead + "# " + new
+	if rest != "" {
+		out += "\n" + rest
+	}
+	return out
 }

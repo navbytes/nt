@@ -76,10 +76,13 @@ tokens only when recalled.
 - **`skills/nt/SKILL.md`** — the recall-first / capture-the-why workflow
   (`/skill:nt`).
 - **`prompts/{learn,recall,distill}.md`** — human-gated session harvest,
-  on-demand briefing, and near-duplicate note consolidation (Pi's bash-style
-  `$@` args). `/distill` lists every near-dup pair via `nt_distill`
-  (read-only), then walks each to approval before merging or tagging a
-  deliberate fork `distinct` — nothing merges without approval.
+  on-demand briefing, and store consolidation (Pi's bash-style `$@` args).
+  `/distill` runs two passes: pass 1 lists every near-dup pair via `nt_distill`
+  (read-only) and walks each to approval before merging or tagging a deliberate
+  fork `distinct`; pass 2 reviews the always-injected `rules/`+`memory/` block
+  for subsumption, contradictions, dead triggers, and rules that aren't
+  actually always-relevant (demoted to lessons, not deleted). One approval
+  list, nothing written without approval. `/distill rules` runs pass 2 alone.
 - **`AGENTS.md`** — a thin nudge (Pi concatenates it from `~/.pi/agent/`, parent
   dirs, and cwd). **`README.md`**, **`install.sh`**, **`embed.go`**.
 

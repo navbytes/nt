@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"regexp"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -1695,5 +1697,38 @@ func TestMCPDistillNeverWrites(t *testing.T) {
 	after, _ := os.ReadFile(s.listNotes()[0].Path)
 	if string(before) != string(after) {
 		t.Fatal("nt_distill must never write")
+	}
+}
+
+// TestDocsToolCountMatchesCode pins the "N typed tools" claims in the docs to
+// the actual tool table. The count had drifted to 18 (and 16 in the OpenCode
+// README) after nt_mindmap shipped, with nothing to catch it — mcp_test only
+// asserted the wire list matched len(toolDefs), never that the docs did.
+func TestDocsToolCountMatchesCode(t *testing.T) {
+	want := len(toolDefs)
+	// Repo-relative from internal/mcp/.
+	docs := map[string]*regexp.Regexp{
+		"../../README.md":                       regexp.MustCompile(`\*\*(\d+) typed tools\*\*`),
+		"../../SPEC.md":                         regexp.MustCompile(`typed tools \(\*\*(\d+)\*\*`),
+		"../../docs/claude-integration.md":      regexp.MustCompile(`Tools exposed \(\*\*(\d+)\*\*\)`),
+		"../../integrations/opencode/README.md": regexp.MustCompile(`exposes (\d+) typed tools`),
+	}
+	for path, re := range docs {
+		b, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("read %s: %v", path, err)
+		}
+		m := re.FindSubmatch(b)
+		if m == nil {
+			t.Errorf("%s: no tool-count claim matched %q — did the wording change?", path, re)
+			continue
+		}
+		got, err := strconv.Atoi(string(m[1]))
+		if err != nil {
+			t.Fatalf("%s: %v", path, err)
+		}
+		if got != want {
+			t.Errorf("%s claims %d typed tools, code defines %d", path, got, want)
+		}
 	}
 }

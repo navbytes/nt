@@ -112,7 +112,16 @@ const CONFIG = {
 
 // MCP write tools, matched by suffix so both `nt_note` and a server-prefixed
 // `nt_nt_note` count (OpenCode names MCP tools `<server>_<tool>`).
-const NT_WRITE_TOOL = /(^|_)nt_(add|note|update|tag|mv|rm|archive|relink)$/
+// Keep in sync with the Pi extension. `note_edit` was missing here: the regex
+// was written for the idle nudge before nt_note_edit existed, then reused
+// verbatim when it gained a second job (cache invalidation) without being
+// re-derived from the tool list. Being $-anchored, neither `nt_note_edit`
+// nor OpenCode's `nt_nt_note_edit` matched — so an edit to a rules/ or
+// memory/ note stayed invisible to the injected block for up to
+// NT_INJECT_TTL, and a session that captured only via nt_note_edit still
+// got told it had saved nothing. /learn and /distill drive most of their
+// writes through exactly that tool.
+const NT_WRITE_TOOL = /(^|_)nt_(add|note|note_edit|update|tag|mv|rm|archive|relink)$/
 
 export const NtMemory: Plugin = async ({ $, client }) => {
   // Run an nt subcommand, returning stdout (empty string on any failure). A

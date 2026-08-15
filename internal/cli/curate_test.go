@@ -116,3 +116,23 @@ func TestCmdTagBulk(t *testing.T) {
 		}
 	}
 }
+
+// TestShowRejectsUnknownFlags guards the silent-flag-drop bug: cmdShow
+// hand-parses its args, so an unknown flag used to be swallowed and the
+// command exited 0 having ignored it. `nt show <note> --section H` looked
+// like it worked (--section exists on the MCP nt_get tool, not on the CLI).
+func TestShowRejectsUnknownFlags(t *testing.T) {
+	t.Setenv("NT_DIR", t.TempDir())
+	captureRun(t, "note", "Auth Design", "--body", "## Heading\n\nbody text")
+
+	if _, code := runWithStdout("show", "Auth Design", "--section", "Heading"); code == 0 {
+		t.Error("show should reject --section, which it does not implement, not silently ignore it")
+	}
+	// --json is still accepted, and a bare handle still works.
+	if out := captureRun(t, "show", "Auth Design", "--json"); !strings.Contains(out, "auth design") {
+		t.Errorf("show --json regressed: %s", out)
+	}
+	if out := captureRun(t, "show", "Auth Design"); !strings.Contains(out, "body text") {
+		t.Errorf("plain show regressed: %s", out)
+	}
+}

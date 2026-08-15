@@ -84,10 +84,9 @@ text, forever readable, and directly writable by an AI agent without an integrat
 ├── web.pid / web.log         # a backgrounded `nt web --detach` server + its output (optional)
 ├── tasks.txt.lock            # advisory lock file (§6.4)
 ├── .trash/                   # gc + rm destination (recoverable)
-├── notes/
-│   ├── jwt-token-lifetime.md
-│   └── 2026-06-05-standup.md
-└── nt.log                    # JSON logs, rotated at 10MB
+└── notes/
+    ├── jwt-token-lifetime.md
+    └── 2026-06-05-standup.md
 ```
 
 The directory is created on first run. `tasks.txt` and `notes/` are independent and can be
@@ -176,6 +175,14 @@ Tokens expire after 24h; refresh window is 7d. See [[oauth-flow]].
 - **`description:`** is a one-line summary convention (set via `nt note --description "…"` or
   the `nt_note` `description` arg); it's the stub blurb `nt index` shows so an agent can scan
   the catalog without reading bodies.
+- **`project:`** (optional) scopes a note to one project/codebase in a shared multi-project
+  store — set at capture (`nt note --project`, the `nt_note` `project` arg) or later
+  (`nt edit --project`, `nt_note_edit` `project`; `none` clears). Comparisons fold case and
+  whitespace everywhere: a **hard filter** on `nt index --project` / `nt_index` and
+  `nt search --project` / `nt_search`, a **soft ranking boost** in `nt recall`, and part of
+  the dedup guard's shared-tag set. Domain knowledge meant to be discoverable from every
+  project carries **no** `project:` — unscoped notes are never down-ranked. The project
+  vocabulary is listed by `nt tags --projects`.
 - Filename is a slug of the title (or a datetime when untitled, à la `nb`).
 - Notes may live in **subfolders** of `notes/`. Create into one with
   `nt note "…" --folder work/auth` (or path-style `nt note "work/auth/…"`); the
@@ -195,6 +202,21 @@ Tokens expire after 24h; refresh window is 7d. See [[oauth-flow]].
   same name. Unlike `nt archive`, an expired note is never hidden — `nt recall`/`nt_recall`
   down-rank it and every read path flags it `expired`/`notYetValid`, so an agent still finds it
   but knows to doubt it.
+- **`half_life:`/`reviewed:`** (optional; `Nd/Nw/Nm/Ny` or `none` / `YYYY-MM-DD` or RFC3339)
+  drive **relevance decay** — the smooth complement to `valid_until`'s cliff, for facts that
+  rot without a known expiry (see docs/spec-memory-dynamics.md). A note with a `half_life`
+  fades as it ages un-reconfirmed: multiplicatively down-ranked in recall
+  (`max(0.30, 0.5^(age/half_life))`, floored — fade, never hide), rolled out of the index's
+  recent tier once past one half-life, and flagged `faded` on every read path. Age is measured
+  from the latest of `reviewed`/`updated`/`created`/file-mtime; `nt touch` (MCP `nt_touch`)
+  stamps `reviewed:` to say "still true" — reading alone never resets the clock. Both keys
+  optional; a store that never sets them is byte-identical to before. Malformed values are
+  inert (never affect ranking) and surfaced by `nt doctor`.
+- **`## Decisions`** (body convention, not frontmatter): one dated bullet per decision,
+  newest first — the note's coarse, always-visible version history, so in-place edits don't
+  erase what was tried and rejected. Append with `nt decide <note> "why"` (MCP `nt_decide`);
+  supersedes stamp `- <date>: supersedes [[old-slug]]` on the replacement automatically. The
+  per-edit fine history stays in git: `nt history <note>` (MCP `nt_history`) reads it back.
 
 **Obsidian-compatible (use Obsidian as the notes GUI).** Point an Obsidian vault at `notes/`
 and it works both ways — nt already writes plain `.md` + YAML frontmatter + `[[wikilinks]]`
@@ -399,21 +421,26 @@ nt add "fix auth bug" --pri high --due today --tag backend --project api [--sour
 nt note "JWT expiry" --body "..." --description "..." --tag auth [--folder work] [--source claude]
 nt list [--status open] [--tag bug] [--project api] [--sort urgency] [--json]   # (ls)
 nt ready [--json]                    # open, unblocked work by urgency — the actionable feed
-nt index [--all] [--tag t] [--folder f] [--since 14d] [--json]   # tiered stub catalog + active tasks — start here (AI loop)
+nt index [--all] [--tag t] [--folder f] [--project p] [--since 14d] [--json]   # tiered stub catalog + active tasks — start here (AI loop)
 nt log [--since 2026-06-01] [--days 7] [--source claude] [--json]   # completed tasks, newest first
 nt done <id|task:N>                  # mark done  (do)
 nt update <id|task:N> --status doing --pri med --due +3d     # (up)
-nt search "race condition" [--type note|task] [--limit 8] [--full]   # ranked stubs (q)
+nt search "race condition" [--type note|task] [--project p] [--limit 8] [--include-archived]   # ranked stubs (q); --project = hard scope (notes' project: + tasks' +project); --include-archived = the deep sweep over retired notes that recall's escalate hint suggests
 nt recall "adding a cache layer" [--lessons-only] [--project p]   # lessons ⚑ first, paraphrase-aware, precision floor (empty = nothing relevant), soft same-project boost (NT_WORKSTREAM default; 'none' disables)
 nt note "gotcha" --kind lesson --description "trigger"   # taxonomy: lesson|decision|ref|rule|memory → canonical tag + folder (--lesson = --kind lesson)
-nt show <id|slug|title> [--section "Heading"]   # one note's full body, on demand
+nt show <id|slug|title>   # one note's full body, on demand
 nt links <id|task:N> [--json]        # forward links + backlinks for an item (§5.1)
 nt archive                           # move done tasks → done.txt
 nt gc [--older-than 30d] [--yes]     # sweep superseded stubs + stranded __tasks__ notes → .trash/ (dry-run default)
-nt export --tag rule                 # compile the standing rules layer (CLAUDE.md / AGENTS.md)
+nt export --tag rule [--out FILE]    # compile the standing rules layer; --out is recorded, and nt doctor flags the file when it drifts from the store
 nt import backup.json | vault/       # export's inverse: round-trip a JSON backup, or bulk-load an Obsidian vault
 nt distill [--json]                  # every near-duplicate note pair, uncapped — proposes, never merges
 nt undo / redo                       # transactional; workstream-safe (--force overrides)
+nt touch <note…>                     # re-confirm: stamp reviewed:, resetting the half_life decay clock (reading never resets it)
+nt decide <note> "why"               # dated line in the note's ## Decisions section — its visible version history
+nt history <note> [--patch] [--since 30d]   # the note's git commit history (store must be git-init-ed)
+nt note "k8s gotcha" --half-life 90d # volatile fact: fades in recall/index as it ages un-reconfirmed (down-ranked + ~faded, never hidden)
+nt note "topic" --if-exists return   # exact title/slug match → write nothing, print the existing note to edit in place
 nt edit <id|task:N> | nt edit note:<slug>   # safe edit via temp file (§6.2)
 nt mv <note> <new-name|folder/path>  # rename/move a note, rewriting all [[links]] to it
 nt path                              # print $NT_DIR
@@ -446,8 +473,9 @@ nt show token-refresh-race               # then fetch a specific note's body on 
 - **Stable, machine-readable contract:** appending a todo.txt line to `tasks.txt`, or calling
   `nt add`, with `--json` read back out via `nt index`. No MCP server, no schema, no auth.
 - **`src:`** distinguishes AI-created items; the TUI badges them.
-- **Claude Code polish (Phase 4):** a PostToolUse hook mirroring `TaskCreate`/`TaskUpdate`
-  into `nt add`/`nt update`, and a `/nt` skill — built on the Phase 1 loop, not inventing it.
+- **Claude Code polish (Phase 4):** PostToolUse hooks mirroring `TodoWrite` into `nt
+  add`/`nt update` and matching failed `Bash` commands against recorded lessons, plus the
+  `/nt`, `/nt-learn` and `/nt-distill` skills — built on the Phase 1 loop, not inventing it.
 
 **Capture hygiene.** `nt note` refuses a near-duplicate of an active note (echoing repair
 commands: `nt edit --append`, `--supersede`; `--force` overrides; parallel-project siblings
@@ -491,6 +519,11 @@ findings cross-pollinate. A *workstream* is that isolation axis, distinct from
   all-new line mints its own.
 - **Linking & backlinks** — `[[…]]` cross-links any task or note in any direction; backlinks
   ("Linked from") computed on demand via ripgrep, no index (§5.1).
+- **Memory dynamics** — opt-in relevance decay (`half_life:` + `nt touch`, §5), the
+  `## Decisions` version-history convention (`nt decide` / `nt history`, §5), exact-match
+  write steering (`--if-exists return` / MCP `if_exists`) so one topic stays one note, and
+  a recall `escalate` hint that points weak/empty results at the deeper
+  `nt search --include-archived` sweep. Design + rationale: docs/spec-memory-dynamics.md.
 - **Multi-select & bulk ops** (TUI) — `space`/`V` mark tasks (ULID-keyed, survive
   regroup/filter); `x`/`p`/`D`/`t`/`X` act on the whole set in one undo transaction;
   destructive bulk ops (done-with-recurrence, delete) confirm first.
@@ -514,9 +547,7 @@ findings cross-pollinate. A *workstream* is that isolation axis, distinct from
 ## 10. Onboarding & install
 
 - **First run** creates `$NT_DIR`, seeds one example task + note, and prints the three
-  commands that matter (`nt add`, `nt ready`, `nt index`). No config, no account.
-- **`tasks.txt` header**: a leading blank-safe hint line documenting the `key:value`
-  conventions so hand-editors aren't lost (kept compatible — not a todo.txt comment).
+  commands that matter (`nt add`, `nt`, `nt index`). No config, no account.
 - **Install** should offer a plain release binary / `brew` tap in addition to any
   build-from-source path; a `gh api | base64 | bash` one-liner is an adoption blocker.
 
@@ -528,12 +559,21 @@ findings cross-pollinate. A *workstream* is that isolation axis, distinct from
 |----------|-------------|---------|
 | `NT_DIR` | Store directory | `~/.local/share/nt` |
 | `EDITOR` | Editor for `nt edit` / body editing | `vi` |
-| `NT_ICONS` | `nerd` for Nerd Font icons | standard Unicode |
-| `NT_GIT` | `1` to auto-commit each change (multi-machine history) | off |
 | `NT_WORKSTREAM` | Workstream identity for the MCP server — isolates parallel agents' tasks (`auto` = derive from git branch / cwd) | unset (no isolation) |
+| `NT_THEME` | TUI colour theme | auto |
+| `NT_MOUSE` | `0` disables TUI mouse capture | on |
+| `NT_ASCII` | `1` forces ASCII glyphs instead of Unicode | off |
+| `XDG_DATA_HOME` | Consulted before `~/.local/share` when `NT_DIR` is unset | unset |
+
+Optional `$NT_DIR/config.toml` sets the same knobs from a file (§13), plus per-kind decay
+defaults: a `[decay]` section (`lesson = "180d"`, `ref = "270d"`, …) stamps that `half_life:`
+onto **new** notes of the kind when the caller gives none — visible frontmatter, never an
+invisible read-time rule, so a config change never re-ranks existing notes. An explicit
+`--half-life` always wins; `rule`/`memory` accept a value but pinned knowledge usually
+shouldn't decay. `nt doctor` reports unparseable `[decay]` values.
 
 Everything is plain text under `$NT_DIR`. Back it up or `git init` it. For multi-machine use,
-prefer `NT_GIT=1` over file-syncing the store (§6.4).
+prefer the git-native pattern (`nt git-init` + `nt sync`) over file-syncing the store (§6.4).
 
 ---
 
@@ -627,7 +667,7 @@ the identical UI in a native window (see `desktop/`, ADR 0001).
 
 ## 13. Tech stack
 
-- **Go 1.24+**, single static binary, no CGo.
+- **Go 1.25+**, single static binary, no CGo.
 - [Bubble Tea](https://github.com/charmbracelet/bubbletea) + [Lipgloss](https://github.com/charmbracelet/lipgloss) — TUI.
 - [Glamour](https://github.com/charmbracelet/glamour) — markdown rendering.
 - [fsnotify](https://github.com/fsnotify/fsnotify) — directory-watch refresh.
@@ -666,9 +706,9 @@ the identical UI in a native window (see `desktop/`, ADR 0001).
   todo→ULID map, status-mapped, `src:claude`); the bundled `/nt` skill teaches Claude to
   capture and `nt index`. Setup: docs/claude-integration.md.
 - `nt mcp` runs a stdio **MCP server** (newline-delimited JSON-RPC 2.0, no SDK dep) exposing
-  typed tools (**18**: nt_status, nt_view, nt_add, nt_update, nt_note, nt_note_edit,
+  typed tools (**22**: nt_status, nt_view, nt_add, nt_update, nt_note, nt_note_edit, nt_touch, nt_decide, nt_history,
   nt_relink, nt_index, nt_get, nt_search, nt_recall, nt_links, nt_mv, nt_tag, nt_archive,
-  nt_rm, nt_doctor, nt_distill) with strict unknown-param rejection, for MCP clients. A thin driving adapter over
+  nt_rm, nt_doctor, nt_distill, nt_mindmap) with strict unknown-param rejection, for MCP clients. A thin driving adapter over
   the same engine/domain as the CLI and TUI; defaults `source` to `claude` and refuses
   positional handles. nt_note_edit fixes an existing note in place (append/body/
   old_string+new_string/description) — the MCP counterpart of `nt edit`, so an MCP-only

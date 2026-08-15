@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/navbytes/nt/internal/dateparse"
+	"github.com/navbytes/nt/internal/mutate"
 	"github.com/navbytes/nt/internal/note"
 	"github.com/navbytes/nt/internal/task"
 	"github.com/navbytes/nt/internal/workstream"
@@ -50,9 +51,11 @@ type indexNote struct {
 //	nt index --json          # structured
 //	nt index --tag auth      # scope to a tag (AND, repeatable)
 //	nt index --folder ref    # scope to a folder
+//	nt index --project foo   # scope to a project (hard filter, unlike `recall --project`)
 func cmdIndex(args []string) int {
 	fs := flag.NewFlagSet("index", flag.ContinueOnError)
 	folder := fs.String("folder", "", `only notes under this folder, e.g. ref ("." = root notes)`)
+	project := fs.String("project", "", `only notes/tasks in this project — a hard filter on the note's "project:" frontmatter and a task's +project tag (unlike "recall --project", which only ranks, never excludes)`)
 	asJSON := fs.Bool("json", false, "machine-readable output")
 	noTasks := fs.Bool("no-tasks", false, "omit the active-task section")
 	all := fs.Bool("all", false, "full catalog: every note stub, no tiering (large stores tier by default)")
@@ -113,10 +116,22 @@ func cmdIndex(args []string) int {
 		if !match {
 			continue
 		}
+		if *project != "" && !note.SameProject(n.Project(), *project) {
+			continue
+		}
 		if since != "" && n.ChangedDate() < since {
 			continue // "what's changed since T" — skip anything older
 		}
 		filtered = append(filtered, n)
+	}
+
+	// A project scope that matches no notes is usually a NAMING mismatch, not an
+	// empty store — agents guess the directory name ("simproj") while the store's
+	// vocabulary says something else ("tinytool"). Warn on stderr (tasks may
+	// still match below, so this can't be a hard failure) — a silent "0 notes"
+	// reads as "those notes don't exist" to an agent.
+	if *project != "" && len(filtered) == 0 {
+		fmt.Fprintf(os.Stderr, "index: no notes carry project %q — the store may use a different name; check the vocabulary with `nt tags --projects`, or search by topic (`nt search`)\n", *project)
 	}
 
 	// A scoping folder that matches nothing is almost always a typo — a silent
@@ -136,7 +151,14 @@ func cmdIndex(args []string) int {
 	// recent stubs in full, the long tail as per-folder counts. Any explicit
 	// scope (--all/--tag/--folder/--updated-since) means the caller is already
 	// narrowing — show every match, exactly as before.
-	scoped := *all || prefix != "" || len(tags) > 0 || since != ""
+	scoped := *all || prefix != "" || len(tags) > 0 || since != "" || *project != ""
+	// Proactive hygiene: the unscoped index is the read every session starts
+	// with, so it's where store rot should become visible — doctor/gc/distill
+	// otherwise run only when someone already suspects a problem. Scoped calls
+	// skip it: the caller is mid-task, and the counts are store-wide anyway.
+	if !scoped {
+		warnStoreHygiene(e, notes)
+	}
 	tiers := note.Tiers{Recent: filtered}
 	if !scoped {
 		tiers = note.TierIndex(filtered, time.Now())
@@ -205,6 +227,9 @@ func cmdIndex(args []string) int {
 						keep = false // a tag scope matches @tag or +project — projects ARE the task-side project identity
 						break
 					}
+				}
+				if keep && *project != "" && !note.AnyProject(t.Projects(), *project) {
+					keep = false
 				}
 				if !keep {
 					continue
@@ -374,8 +399,29 @@ func cmdIndex(args []string) int {
 			fmt.Printf("- [x] %s `%s`\n", strings.TrimSpace(t.Text), shortID(t.ID()))
 		}
 	}
-	if len(stubs) == 0 && len(active) == 0 && len(recent) == 0 {
-		fmt.Println("index is empty" + freshHint(e))
+	// The empty-state line must be honest about BOTH halves of the catalog —
+	// agents reading only this line, not the header comment, mistook a
+	// tasks-only "add your first task" nudge for proof the store had no
+	// notes at all. --no-tasks means the caller excluded tasks on purpose,
+	// so this stays silent on task counts rather than misreport a filter as
+	// the store's real state.
+	notesEmpty := len(stubs) == 0 && len(pinned) == 0
+	tasksEmpty := len(active) == 0 && len(blockedTasks) == 0 && len(recent) == 0
+	switch {
+	case *noTasks:
+		if notesEmpty {
+			fmt.Println("no notes — add one: nt note \"title\"")
+		}
+	case notesEmpty && tasksEmpty:
+		msg := "index is empty — 0 notes, 0 tasks"
+		if h := freshHint(e); h != "" {
+			msg += "\n  add a note:  nt note \"my first note\"" + h
+		}
+		fmt.Println(msg)
+	case notesEmpty:
+		fmt.Println("no notes — add one: nt note \"title\"")
+	case tasksEmpty:
+		fmt.Println("no active tasks — add one: nt add \"title\"")
 	}
 	return 0
 }
@@ -385,4 +431,22 @@ func folderLabel(f string) string {
 		return "(root)"
 	}
 	return f + "/"
+}
+
+// warnStoreHygiene prints a one-line stderr nudge when the store has
+// accumulated enough rot to be worth a curation pass — near-duplicate pairs
+// degrade recall, reclaimable notes are dead weight in every diff. Doctor, gc
+// and distill are otherwise purely on-demand: nothing surfaced them until a
+// human already suspected a problem. Stderr, like every other index warning,
+// so --json output stays parseable.
+func warnStoreHygiene(e *mutate.Engine, active []*note.Note) {
+	if len(active) > note.HygieneScanMaxNotes {
+		return // O(n²) scan gated on the hottest read — doctor covers large stores
+	}
+	pairs := len(note.NearDupPairs(active))
+	reclaim := len(gcCandidates(e, gcDefaultCutoff()))
+	if pairs < note.NearDupWarnThreshold && reclaim < reclaimWarnThreshold {
+		return
+	}
+	fmt.Fprintf(os.Stderr, "index: store hygiene — %d near-duplicate pair(s), %d reclaimable note(s); `nt doctor` for detail (`nt distill` merges dups, `nt gc` reclaims)\n", pairs, reclaim)
 }

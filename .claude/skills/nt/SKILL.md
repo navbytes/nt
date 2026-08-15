@@ -11,8 +11,9 @@ persist as plain text — tasks in `tasks.txt`, notes as markdown in `notes/` (w
 subfolders) — that the user and the next session can read back, `grep`, and open
 in Obsidian.
 
-Everything is the `nt` CLI. Always pass `--source claude` so AI-created items are
-distinguishable from what the user typed by hand.
+Everything is the `nt` CLI. Pass `--source claude` on **write commands**
+(`add`, `note`, `update`) so AI-created items are distinguishable from what the
+user typed by hand.
 
 > If the `nt` MCP server is registered with your client, **prefer the typed
 > `nt_*` tools over shelling out** — they go through the same store, default
@@ -33,18 +34,26 @@ reasoning).
 
 ```bash
 nt index --json                     # KB catalog: note stubs (id·title·description) + active tasks — no bodies
+nt index --since 14d --json         # what's new since last session (also: today | YYYY-MM-DD)
 nt ready --json                     # open, UNBLOCKED tasks by urgency
 ```
 
 On large stores the index is **tiered**: pinned standing notes (rules/, memory/,
 ref/, or tag `pin`) + everything changed in the last 14 days, with the older
 remainder as per-folder counts. Expand a folder with `--folder <f>`, or pass
-`--all` for every stub. Standing knowledge belongs in the pinned layers — file
-it with `--kind rule|ref` (or tag `pin`) so every future session sees it.
+`--all` for every stub. **`--project <name>` hard-filters to that project**
+(via `project:` frontmatter or `+project` tag, case-insensitive; MCP `nt_index`
+takes the same `project` argument) — unlike `recall --project`, which is a
+soft ranking preference. Standing knowledge belongs in the pinned layers —
+file it with `--kind rule|ref` (or tag `pin`) so every future session sees it.
 
 `nt index` is your "what's here" catalog; `nt ready` is the task feed. **Before
 creating anything, retrieve first** (`nt index` / `nt search`) so you don't
-duplicate an item that already exists. If `nt note` refuses with "a
+duplicate an item that already exists. For topic notes, make the store enforce
+this: pass **`if_exists:"return"`** on `nt_note` (CLI `--if-exists return`) —
+on an exact title/slug match it writes nothing and returns the existing note's
+id + `mtime`; edit that note (`nt_note_edit` with `expect_mtime`) instead of
+minting a sibling. One topic, one note. If `nt note` refuses with "a
 near-duplicate already exists", follow its hint: `nt edit <id> --append`, or
 `--supersede <id>`, or rerun with `--force` only if genuinely distinct. (The MCP
 `nt_note` instead always creates and returns a `similar` list — consolidate
@@ -59,22 +68,53 @@ differs (it's paraphrase-aware, unlike substring `nt search`):
 
 ```bash
 nt recall "adding concurrent token refresh"    # MCP: nt_recall(context: "...")
+nt recall --json "adding concurrent token refresh"   # JSON adds confidence fields
+nt recall --explain "adding concurrent token refresh"   # term-by-term scoring + why notes were dropped
+nt recall --explain-note <id>      # explain one note's score (or why it scored zero)
 ```
 
-An empty result means nothing relevant is recorded (recall has a precision
-floor) — proceed, don't retry with looser words.
+An empty result usually means nothing relevant is recorded — proceed. **Each
+hit shows a confidence tier** `[strong 4/4]`, `[medium 2/4]`, `[weak 1/4]` —
+the tier and concept coverage (how many of your query's ideas matched). **Read
+the tier, not any internal score** — the tier is normalized across queries; a
+raw score is query-dependent and not comparable. When the top hit is weak, a
+banner warns you. If your query was long and oddly specific, one **shorter**
+retry is worth it: recall weighs distinct concepts a note shares with you, so
+wordiness can dilute meaning. Retry shorter, not looser.
+
+**Recall's synonym vocabulary is extensible.** `$NT_DIR/synonyms.txt` — one
+group per line, comma-separated (`gateway, ingress, route, routing`) — merges
+into the built-in table before every recall, no restart. When a recall misses
+a note you later find by other means, the usual cause is vocabulary (you said
+"gateway", the note says "ingress"): suggest adding that group to
+`synonyms.txt` — it fixes the miss for every future session, not just this one.
 
 When `NT_WORKSTREAM` is set, your own project's notes get a soft ranking
-preference (`projectMatch: true` in JSON) — cross-project results stay visible
-below. Override with `--project <name>` or disable with `--project none`.
+preference in results — cross-project results stay visible below. Override
+with `--project <name>` or disable with `--project none`.
 
 When you hit a mistake, footgun, or dead-end, capture it as a **lesson** so the
 next session recalls it — put the trigger in the description ("when X, do Y — not Z"):
 
 ```bash
-nt note "single-flight the refresh; parallel calls double-spend" --lesson --source claude
+nt note "single-flight the refresh; parallel calls double-spend" --lesson \
+  --project tripto --source claude          # ALWAYS a --project or --tag; see below
 nt recall --lessons-only                     # bare: list every recorded lesson
 ```
+
+**Always give a lesson a `--project` or a topical `--tag`.** This is not
+housekeeping — it is what keeps the duplicate guard alive. `--lesson` applies
+only the *structural* `lesson` tag, which the near-duplicate check strips before
+comparing; with nothing else on the note its tag set is empty, the check can
+never fire, and nt will silently accept a near-copy of a lesson you already
+have. A store captured without topical tags fragments into many one-line notes
+saying the same thing, and neither `nt note` nor `nt distill` will tell you.
+
+**Precision note:** recall returns the top-8 results by default (top-N, no hard
+precision guarantee). A very unrelated query can still return results that look
+confident — always check the **tier** before trusting a hit. There is an internal
+precision floor for multi-concept queries, but it's loose by design: better to
+surface a weak match you dismiss than to hide something that needed finding.
 
 ## Capture tasks
 
@@ -123,12 +163,13 @@ this for multi-line/backtick appends), `--body <text>` (replace the whole body
 inline, no temp file needed), `--body-file new.md` (replace the body from a
 file — for long/multi-line content), `--old-string "..." --new-string "..."`
 (patch ONE exact match in place — the targeted fix for a longer note; refuses
-if the match isn't unique, so make it longer to disambiguate), or `--desc "…"`
-(set the one-line summary). These are mutually exclusive per call — pick one
-way to change the body. MCP: `nt_note_edit` takes the same
-`append`/`body`/`old_string`+`new_string`/`description` fields; it's the
-in-place counterpart to `nt_note`, which only ever creates (`supersede:` mints
-a *new* id rather than editing in place).
+if the match isn't unique, so make it longer to disambiguate), `--desc "…"`
+(set the one-line summary), or `--project <name>` (`none` clears — fix a note
+mis-scoped at capture). The body edits are mutually exclusive per call — pick
+one way to change the body. MCP: `nt_note_edit` takes the same
+`append`/`body`/`old_string`+`new_string`/`description`/`project` fields; it's
+the in-place counterpart to `nt_note`, which only ever creates (`supersede:`
+mints a *new* id rather than editing in place).
 
 Tag a note with **`--project <name>`** when it's specific to one codebase in a
 shared multi-project store — `nt recall --project <name>` (default: your
@@ -165,18 +206,50 @@ Durable memory needs the reasoning a future session would otherwise rediscover:
 nt search "race condition"                 # full-text over notes + tasks
 nt search --tag auth --tag ref             # tag-filtered (AND); --tag alone lists, no query needed
 nt search "jwt" --tag auth --type note     # combine text + tag, scope to note|task|all
+nt search --project webhookd               # hard project scope (notes' project: + tasks' +project); alone = list the project's items
 nt tags                                    # the tag vocabulary with counts — keep it controlled
+nt tags --projects                         # the PROJECT vocabulary — check before scoping by project
 nt links <handle>                          # forward links + backlinks for a note or task
 nt links --orphans                         # notes nothing links to — gaps in the graph to wire up
 ```
 
-MCP equivalents: `nt_search` (query and/or tag), `nt_links` (handle). **Read links
+**Scoping by project or tag? The store's vocabulary wins.** A directory or repo
+name is not necessarily the name past sessions used — check `nt tags` /
+`nt tags --projects` before scoping, and if a `--project`/`--tag` filter comes
+back empty, fall back to a topical `nt search` rather than concluding nothing
+is recorded. (Note text search matches title+body only — a note's `project:`
+frontmatter is invisible to it, so scope by `--project`, don't grep for the name.)
+
+MCP equivalents: `nt_search` (query, tag, and/or project), `nt_links` (handle). **Read links
 before starting related work, not just when writing them** — `nt links <id>`
 reconstructs why a task exists and surfaces the decisions and sibling work around
 it, recovering reasoning a prior session left behind.
 
 Use `[[note-slug]]` or `[[<id>]]` inside task text or note bodies to cross-link;
 backlinks are found automatically.
+
+## Keep memory current (decay, re-confirmation, decisions)
+
+- **Volatile facts get a `half_life`** (`nt note … --half-life 90d`; MCP
+  `half_life:"90d"`): the note fades in recall/index as it ages un-reconfirmed —
+  down-ranked and flagged `faded`, never hidden. Use for config gotchas and
+  version-specific facts; skip for rules/refs (pinned knowledge doesn't decay).
+  Config can default this per kind (`[decay] lesson = "180d"` in
+  `$NT_DIR/config.toml`) — new notes of that kind get the stamp automatically;
+  an explicit `half_life` always wins.
+- **Verified a faded note still holds? `nt touch <id>`** (MCP `nt_touch`) stamps
+  `reviewed:` and resets its clock. Reading alone never resets decay.
+- **An edit changed a conclusion? Record why: `nt decide <id> "switched X → Y
+  because Z"`** (MCP `nt_decide`) — one dated line in the note's `## Decisions`
+  section, so the next session sees what was tried and rejected instead of
+  re-proposing it. One line per decision, not per edit.
+- **Need the full story?** `nt history <id>` (MCP `nt_history`) shows the note's
+  git commits (store must be `nt git-init`-ed; `--patch` for diffs). It covers
+  the MEMORY store's repo, not your project's — for source-code history use
+  git in the project as usual.
+- **Recall said `escalate`?** The store's own confidence says the hit is weak —
+  run the suggested `nt search … --include-archived` before concluding nothing
+  is recorded.
 
 ## Curate (refile & retag)
 
@@ -187,7 +260,7 @@ nt mv <note> ref/auth              # refile/rename, rewriting every [[link]] to 
 nt tag <note> +reviewed -inbox     # add/remove tags
 nt rm <note>                       # delete → .trash/ (refuses if inbound [[links]] would dangle; --force overrides)
 nt rm <task-id> --yes              # delete a task (agents must pass --yes; journaled, nt undo restores)
-nt doctor                          # store health: dangling [[links]], near-duplicates, oversized pinned tier
+nt doctor                          # store health: dangling [[links]], near-duplicates, oversized pinned tier, drifted exports
 nt archive <note>                  # retire a stale note from index/search/recall (reversible)
 nt supersede <old> --by <new>      # (or nt note … --supersede <old>) — replace a note; the old one retires with a pointer
 nt gc                              # plan: superseded stubs + stranded task notes >30d old
@@ -225,17 +298,18 @@ the returned id directly with `nt links` / `nt tag` / `nt mv` / `nt rm`.
 
 ## Workstreams (parallel sessions, shared store)
 
-When several agents share one store (e.g. parallel git worktrees), tasks are
-**isolated per workstream** so your in-flight work doesn't mix with another
-session's, while **notes stay shared** so knowledge cross-pollinates. This is
-automatic via the MCP tools and CLI `nt add` when `NT_WORKSTREAM` is set (grove/CI/harness export
-it; `auto` derives it from the git branch, falling back to the working
-directory's basename outside a git repo — prefer a literal id there). You don't stamp anything — `nt_add`
-records it, and `nt_index`/`nt_status` scope to it.
+When several agents share one store (e.g. parallel git worktrees), `NT_WORKSTREAM`
+**scopes tasks only** — your in-flight work doesn't mix with another session's.
+**Notes always stay shared** across all agents, never scoped. Set via environment
+(grove/CI/harness export it; `auto` derives it from git branch, falling back to
+working directory basename — prefer a literal id). The MCP tools and CLI `nt add`
+record it; `nt_index`/`nt_status` then scope to it.
 
 - Tasks with no workstream (the human's CLI/TUI/web backlog) stay visible to
   everyone — only *another* agent's stamped tasks are hidden.
-- `nt_search` and `nt_view` are never scoped — knowledge discovery is store-wide.
+- Notes and `nt_search` are never scoped — knowledge and discovery are store-wide.
+- `nt recall --project` defaults to `NT_WORKSTREAM` as a soft ranking preference
+  (cross-project results stay visible below; pass `none` to disable).
 - Pass `workstream: "*"` on a read to see every workstream's tasks; pass an
   explicit `workstream` to target another one. With `NT_WORKSTREAM` unset there
   is no scoping and behavior is unchanged.

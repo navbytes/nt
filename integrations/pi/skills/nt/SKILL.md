@@ -33,11 +33,13 @@ relevant. (Dumping every note body wastes context and *degrades* reasoning.)
 
 - `nt_recall` — pass plain-words `context` of what you're about to do; get the
   most relevant notes back, **lessons/gotchas first**, even when your wording
-  differs (it stems + expands synonyms, unlike `nt_search`'s exact match). A
-  `lesson:true` result is a past mistake — `nt_get` it and heed it before coding.
-  Call it at task start, not just when stuck. Your workstream's project gets a
-  soft boost (`project:"none"` disables); an empty result means nothing recorded
-  is on-topic — proceed.
+  differs (it stems + expands synonyms, unlike `nt_search`'s exact match). Each
+  result shows a **confidence tier** (`strong`/`medium`/`weak`) and concept
+  coverage — **read the tier, not the raw score** (which is query-dependent, not
+  comparable across queries). A `lesson:true` result is a past mistake — `nt_get`
+  it and heed it before coding. Call it at task start, not just when stuck. Your
+  workstream's project gets a soft boost (`project:"none"` disables); an empty
+  result means nothing recorded is on-topic — proceed.
 
 **Specifics, on demand:**
 
@@ -67,7 +69,7 @@ injects every session — keep them small and high-signal:
 | **Rule** (stable directive: "always run gofmt", style/process) | `rules/` | `rule` | Every session. Billed every turn — keep terse. |
 | **Core memory** (small evolving fact: a preference, a key convention) | `memory/` | `memory-core` | The agent should *always* know it. A handful, not hundreds. |
 | **Knowledge base** (findings, decisions, reference) | `ref/`, `decisions/` | topical, e.g. `auth` | Looked up on demand (`nt_index` → `nt_search`/`nt_get`) — **not** injected, so size is free. |
-| **Lesson** (a mistake/footgun/dead-end not to repeat) | `lessons/` | `lesson` | Surfaced by `nt_recall` at task start — **not** injected, so free until relevant. Capture with `nt_note kind:"lesson"` (CLI `nt note … --lesson`). |
+| **Lesson** (a mistake/footgun/dead-end not to repeat) | `lessons/` | `lesson` | Surfaced by `nt_recall` at task start — **not** injected, so free until relevant. Capture with `nt_note kind:"lesson"` (CLI `nt note … --lesson`). **Always add a `project` or topical tag** — the `lesson` tag alone won't prevent duplicates. |
 
 So: durable directive → `nt_note kind:"rule"`; recorded mistake → `kind:"lesson"`
 (trigger in the description: "when X, do Y — not Z"); decisions/reference →
@@ -98,7 +100,22 @@ default to `"claude"`) so your items are distinct from the user's.
 response carries a `similar` list — check it, and if you truly doubled a note,
 consolidate (`nt_archive superseded_by=<kept id>`) or extend the original. (The
 CLI, by contrast, refuses near-duplicates unless `--force`/`--supersede`.) A
-`danglingLinks` entry is a `[[link]]` typo to fix.
+`danglingLinks` entry is a `[[link]]` typo to fix. For topic notes, prevent the
+dup up front: pass **`if_exists:"return"`** — an exact title/slug match writes
+nothing and returns the existing note's id + `mtime` to edit in place.
+
+**Memory dynamics:** volatile facts get a `half_life` (`"90d"`) and fade in
+recall/index until re-confirmed (`nt_touch`) — flagged `faded`, never hidden.
+An edit that reverses a conclusion gets a `nt_decide` line (the note's
+`## Decisions` history); `nt_history` shows a note's git commits (the MEMORY
+store's repo, not your project's). A recall response with `escalate` means
+the hit is weak — run the suggested `nt_search include_archived:true` before
+concluding nothing is recorded.
+
+**Scoping by project or tag? The store's vocabulary wins.** A directory or
+repo name is not necessarily the tag past sessions used — check `nt tags`
+before scoping, and if a project/tag filter comes back empty, fall back to a
+topical `nt_search` rather than concluding nothing is recorded.
 
 ## Conventions
 

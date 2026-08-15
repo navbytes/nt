@@ -44,12 +44,32 @@ type Note struct {
 	// knows to doubt it. See Expired/NotYetValid.
 	ValidFrom  string
 	ValidUntil string
+	// HalfLife/Reviewed drive relevance decay (memory-dynamics spec §3): a
+	// note with a half_life fades smoothly in recall ranking and index tiering
+	// as it ages — never hidden, floored, and flagged — the smooth complement
+	// to ValidUntil's hard cliff. Reviewed is the decay clock's reset point
+	// ("re-confirmed true on this date", set by `nt touch`); age is measured
+	// from the latest of reviewed/updated/created/mtime. Both unset ⇒ no
+	// decay, byte-identical behavior. See decay.go.
+	HalfLife string // duration: Nd / Nw / Nm / Ny, or "none" (explicit opt-out)
+	Reviewed string // YYYY-MM-DD or RFC3339
 	// ModTime is the note file's last-modified time, set by List/Load/cache. It
 	// captures every change — including edits made outside nt (Obsidian, git) that
 	// never touch the `updated:` frontmatter — so "changed since T" is reliable.
 	ModTime time.Time
 	Body    string
 	Extra   []string // raw frontmatter lines for keys nt doesn't model (preserved verbatim)
+	// DupKeys lists frontmatter keys that appeared more than once in a form
+	// where repetition isn't a supported authoring pattern (tags:/aliases: in
+	// their list/plural form) — the injection signature that let PR #177's bug
+	// attach a forged second tags: line and promote a note into memory-core,
+	// nt's always-loaded tier. Load doesn't reject on this (one tampered file
+	// must not make the whole store unloadable) or merge the duplicate (that's
+	// what made the original bug invisible for months); it keeps the FIRST
+	// occurrence and records the anomaly here so `nt doctor` can surface it.
+	// Empty for every well-formed note, including ones using the legitimate
+	// repeated singular `tag:` convention — see parseFrontmatter.
+	DupKeys []string
 }
 
 // parseValidityDate parses a frontmatter validity date in either YYYY-MM-DD or
@@ -278,18 +298,64 @@ func claimPath(root, dir, slug string) (string, error) {
 	return "", fmt.Errorf("too many slug collisions for %q", slug)
 }
 
-// Save writes the note atomically with frontmatter.
+// invalidFrontmatterLine reports whether line — one physical row of the
+// frontmatter block, already formatted as "key: value" (or a raw Extra
+// line) — can corrupt the file when written. Load finds the frontmatter's
+// end by scanning for the substring "\n---", so an embedded \n/\r puts
+// attacker-controlled text on its own line, where it either becomes a
+// forged extra key (the memory-core tag-injection CVE this guards against)
+// or, if that new line starts with "---", truncates the block early. The
+// latter is also reachable with NO embedded newline: via --field's
+// attacker-chosen key (e.g. --field ---=x, giving a row that starts with
+// "---"), or via a value of "---" itself — harmless today since it's
+// preceded by "key: " on the same physical line, but rejected anyway as
+// defense in depth against any future writer that emits the value alone.
+func invalidFrontmatterLine(line string) bool {
+	if strings.ContainsAny(line, "\n\r") {
+		return true
+	}
+	if strings.HasPrefix(strings.TrimSpace(line), fmDelim) {
+		return true
+	}
+	if _, val, ok := strings.Cut(line, ": "); ok && strings.HasPrefix(strings.TrimSpace(val), fmDelim) {
+		return true
+	}
+	return false
+}
+
+// Save writes the note atomically with frontmatter. Returns an error — and
+// writes nothing — if any frontmatter value would corrupt the block (see
+// invalidFrontmatterLine); we reject rather than silently strip/escape the
+// offending bytes, because a value that trips this came from a caller (or
+// whatever untrusted text it captured) trying to smuggle extra frontmatter,
+// and silently sanitizing it would hide that instead of surfacing it.
 func (n *Note) Save() error {
 	var b strings.Builder
 	b.WriteString("---\n")
+	// line validates and appends one "key: value\n" frontmatter row.
+	line := func(key, val string) error {
+		row := key + ": " + val
+		if invalidFrontmatterLine(row) {
+			return fmt.Errorf("note: %s contains a newline or a %q line — refusing to write corrupt frontmatter", key, fmDelim)
+		}
+		b.WriteString(row)
+		b.WriteByte('\n')
+		return nil
+	}
 	if n.ID != "" {
-		fmt.Fprintf(&b, "id: %s\n", n.ID)
+		if err := line("id", n.ID); err != nil {
+			return err
+		}
 	}
 	if len(n.Tags) > 0 {
-		fmt.Fprintf(&b, "tags: [%s]\n", strings.Join(n.Tags, ", "))
+		if err := line("tags", "["+strings.Join(n.Tags, ", ")+"]"); err != nil {
+			return err
+		}
 	}
 	if len(n.Aliases) > 0 {
-		fmt.Fprintf(&b, "aliases: [%s]\n", strings.Join(n.Aliases, ", "))
+		if err := line("aliases", "["+strings.Join(n.Aliases, ", ")+"]"); err != nil {
+			return err
+		}
 	}
 	// Persist the title when the body's own H1 would otherwise win on reload
 	// (Load's precedence is frontmatter title → alias → first body heading). Without
@@ -298,17 +364,25 @@ func (n *Note) Save() error {
 	// differs, so Obsidian notes whose H1 == title stay frontmatter-clean.
 	if n.Title != "" {
 		if bh := firstHeading(n.Body); bh != "" && bh != n.Title {
-			fmt.Fprintf(&b, "title: %s\n", n.Title)
+			if err := line("title", n.Title); err != nil {
+				return err
+			}
 		}
 	}
 	if n.Source != "" {
-		fmt.Fprintf(&b, "source: %s\n", n.Source)
+		if err := line("source", n.Source); err != nil {
+			return err
+		}
 	}
 	if n.Created != "" {
-		fmt.Fprintf(&b, "created: %s\n", n.Created)
+		if err := line("created", n.Created); err != nil {
+			return err
+		}
 	}
 	if n.Updated != "" {
-		fmt.Fprintf(&b, "updated: %s\n", n.Updated)
+		if err := line("updated", n.Updated); err != nil {
+			return err
+		}
 	}
 	if n.Archived {
 		b.WriteString("archived: true\n")
@@ -317,16 +391,35 @@ func (n *Note) Save() error {
 		b.WriteString("favorite: true\n")
 	}
 	if n.SupersededBy != "" {
-		fmt.Fprintf(&b, "superseded_by: %s\n", n.SupersededBy)
+		if err := line("superseded_by", n.SupersededBy); err != nil {
+			return err
+		}
 	}
 	if n.ValidFrom != "" {
-		fmt.Fprintf(&b, "valid_from: %s\n", n.ValidFrom)
+		if err := line("valid_from", n.ValidFrom); err != nil {
+			return err
+		}
 	}
 	if n.ValidUntil != "" {
-		fmt.Fprintf(&b, "valid_until: %s\n", n.ValidUntil)
+		if err := line("valid_until", n.ValidUntil); err != nil {
+			return err
+		}
 	}
-	for _, line := range n.Extra { // unknown keys (Obsidian properties), verbatim
-		b.WriteString(line)
+	if n.HalfLife != "" {
+		if err := line("half_life", n.HalfLife); err != nil {
+			return err
+		}
+	}
+	if n.Reviewed != "" {
+		if err := line("reviewed", n.Reviewed); err != nil {
+			return err
+		}
+	}
+	for _, extra := range n.Extra { // unknown keys (Obsidian properties, --field, description:), verbatim
+		if invalidFrontmatterLine(extra) {
+			return fmt.Errorf("note: frontmatter field %q contains a newline or a %q line — refusing to write corrupt frontmatter", extra, fmDelim)
+		}
+		b.WriteString(extra)
 		b.WriteByte('\n')
 	}
 	b.WriteString("---\n\n")
@@ -432,8 +525,15 @@ var listRe = regexp.MustCompile(`\[(.*)\]`)
 // block. Beyond nt's own output it tolerates Obsidian conventions: block-list
 // and bare-comma tags/aliases, a title:/aliases: key, and the deprecated
 // singular tag:. Unknown keys are ignored.
+//
+// tags:/aliases: are list-form keys with no legitimate reason to repeat — a
+// second occurrence is dropped (not merged) into DupKeys instead, since
+// merging is what let an injected duplicate escalate a note silently. This is
+// distinct from the deprecated singular tag:, which legitimately repeats
+// (one tag per line, an Obsidian convention) and always accumulates.
 func parseFrontmatter(fm string, n *Note) {
 	lines := strings.Split(fm, "\n")
+	seenTags, seenAliases := false, false
 	for i := 0; i < len(lines); i++ {
 		ci := strings.IndexByte(lines[i], ':')
 		if ci < 0 {
@@ -460,16 +560,32 @@ func parseFrontmatter(fm string, n *Note) {
 			n.ValidFrom = unquote(val)
 		case "valid_until":
 			n.ValidUntil = unquote(val)
+		case "half_life":
+			n.HalfLife = unquote(val)
+		case "reviewed":
+			n.Reviewed = unquote(val)
 		case "title":
 			if v := unquote(val); v != "" {
 				n.Title = v
 			}
-		case "tag": // deprecated singular form
+		case "tag": // deprecated singular form — repeated lines legitimately accumulate
 			n.Tags = appendClean(n.Tags, val)
 		case "tags":
-			n.Tags = append(n.Tags, parseList(val, lines, &i)...)
+			vals := parseList(val, lines, &i) // advances i past any block-list lines regardless
+			if seenTags {
+				n.DupKeys = appendUniqueKey(n.DupKeys, "tags")
+				continue
+			}
+			n.Tags = append(n.Tags, vals...)
+			seenTags = true
 		case "alias", "aliases":
-			n.Aliases = append(n.Aliases, parseList(val, lines, &i)...)
+			vals := parseList(val, lines, &i)
+			if seenAliases {
+				n.DupKeys = appendUniqueKey(n.DupKeys, "aliases")
+				continue
+			}
+			n.Aliases = append(n.Aliases, vals...)
+			seenAliases = true
 		default:
 			// Unknown key (e.g. an Obsidian property): preserve it verbatim,
 			// including any block-list continuation lines, so a later rewrite
@@ -521,6 +637,17 @@ func appendClean(out []string, s string) []string {
 		out = append(out, s)
 	}
 	return out
+}
+
+// appendUniqueKey records a duplicate frontmatter key name once, even if the
+// key repeats 3+ times — DupKeys is a set of offending key names, not a tally.
+func appendUniqueKey(out []string, key string) []string {
+	for _, k := range out {
+		if k == key {
+			return out
+		}
+	}
+	return append(out, key)
 }
 
 func unquote(s string) string {
@@ -603,6 +730,53 @@ func (n *Note) Project() string {
 	return ""
 }
 
+// SetProject sets, replaces, or (with "") removes the note's `project:`
+// frontmatter line — the write-side counterpart of Project. Like the accessor
+// it works over Extra, so any adjacent unmodeled frontmatter is preserved.
+func (n *Note) SetProject(p string) {
+	p = strings.TrimSpace(p)
+	for i, line := range n.Extra {
+		if k, _, ok := strings.Cut(line, ":"); ok && strings.EqualFold(strings.TrimSpace(k), "project") {
+			if p == "" {
+				n.Extra = append(n.Extra[:i], n.Extra[i+1:]...)
+			} else {
+				n.Extra[i] = "project: " + p
+			}
+			return
+		}
+	}
+	if p != "" {
+		n.Extra = append(n.Extra, "project: "+p)
+	}
+}
+
+// ProjectKey normalizes a project identifier for comparison: trimmed and
+// lowercased. Every surface that COMPARES projects (index/search hard filters,
+// the dedup fold below) goes through this one form, so "WTCockpit", "wtcockpit"
+// and " wtcockpit " name the same project everywhere instead of matching in one
+// command and not another. Display keeps the stored casing; only comparisons fold.
+func ProjectKey(s string) string { return strings.ToLower(strings.TrimSpace(s)) }
+
+// SameProject reports whether two project identifiers name the same project
+// (case-insensitive, whitespace-trimmed). Empty never matches anything — a
+// filter for project "" would otherwise select every unscoped note.
+func SameProject(a, b string) bool {
+	k := ProjectKey(a)
+	return k != "" && k == ProjectKey(b)
+}
+
+// AnyProject reports whether any identifier in projects names want — the
+// task-side membership test (a task can carry several +project tokens),
+// sharing SameProject's fold so CLI and MCP can't drift on matching rules.
+func AnyProject(projects []string, want string) bool {
+	for _, p := range projects {
+		if SameProject(p, want) {
+			return true
+		}
+	}
+	return false
+}
+
 // Reserved reports whether a note lives in a machine-managed folder that isn't
 // part of the human/agent knowledge base — currently notes/__tasks__/, where
 // nt files the detail bodies of split tasks. These are reachable by id/link but
@@ -610,32 +784,34 @@ func (n *Note) Project() string {
 func (n *Note) Reserved() bool { return strings.HasPrefix(n.Rel, "__tasks__/") }
 
 // FindSimilar returns active, non-reserved notes that look like near-duplicates of
-// a note with the given title and tags — a guard against concurrent forks (two
-// agents independently recording the same decision). A candidate matches when it
-// has the identical slug, OR it shares a tag AND its title word-set overlaps
-// heavily (Jaccard ≥ 0.5) — UNLESS the pair is a "parallel sibling": each note
-// carries a distinguishing tag the other lacks that also appears in its own
-// title ("taskly repo map" @taskly vs "ratelim repo map" @ratelim). Multi-project
-// stores legitimately hold same-shaped notes per project; the project tag in the
-// title is how the pair self-identifies as distinct. This is a cheap heuristic,
-// not semantic dedup.
-func FindSimilar(notes []*Note, title string, tags []string) []*Note {
+// a note with the given title, tags and project — a guard against concurrent
+// forks (two agents independently recording the same decision). A candidate
+// matches when it has the identical slug, OR it shares a tag AND its title
+// word-set overlaps heavily (Jaccard ≥ 0.5) — UNLESS the pair is a "parallel
+// sibling": each note carries a distinguishing tag the other lacks that also
+// appears in its own title ("taskly repo map" @taskly vs "ratelim repo map"
+// @ratelim). Multi-project stores legitimately hold same-shaped notes per
+// project; the project tag in the title is how the pair self-identifies as
+// distinct. This is a cheap heuristic, not semantic dedup.
+//
+// project is folded into the shared-tag test alongside tags: `--project` stores
+// it as a separate `project:` frontmatter field, not a tag, but for a note whose
+// only tag is a class marker (lesson/rule/memory-core — stripped by
+// structuralTag below) the tag set would otherwise be empty and the Jaccard
+// branch could never fire, silently disabling the guard for the most common
+// kind of note. project isn't written to disk as a tag; it only joins the
+// in-memory set this function compares on.
+func FindSimilar(notes []*Note, title string, tags []string, project string) []*Note {
 	want := titleTokens(title)
 	slug := Slug(title)
-	tagset := map[string]bool{}
-	for _, t := range tags {
-		if structuralTag[t] {
-			continue // class markers (lesson/rule/memory-core) aren't a topical match
-		}
-		tagset[t] = true
-	}
+	tagset := similarityTags(tags, project)
 	var out []*Note
 	for _, n := range notes {
 		if n.Archived || n.SupersededBy != "" || n.Reserved() {
 			continue
 		}
 		sharedTag := false
-		for _, t := range n.Tags {
+		for t := range similarityTags(n.Tags, n.Project()) {
 			if tagset[t] {
 				sharedTag = true
 				break
@@ -645,21 +821,47 @@ func FindSimilar(notes []*Note, title string, tags []string) []*Note {
 			out = append(out, n)
 			continue
 		}
-		if sharedTag && jaccard(want, titleTokens(n.Title)) >= 0.5 && !parallelSiblings(title, tags, n) {
+		if sharedTag && jaccard(want, titleTokens(n.Title)) >= 0.5 && !parallelSiblings(title, tags, project, n) {
 			out = append(out, n)
 		}
 	}
 	return out
 }
 
-// parallelSiblings reports whether the (title, tags) pair and note n look like
-// the same kind of note for two DIFFERENT projects: each side has a tag the
-// other lacks, and that tag appears as a word in its own title but not the
-// other's. Such pairs share their title shape ("X repo map" / "Y repo map") yet
-// are deliberately distinct — refusing them as duplicates was the dedup guard's
-// worst failure mode in multi-project field use.
-func parallelSiblings(title string, tags []string, n *Note) bool {
+// similarityTags is the tag set FindSimilar/parallelSiblings compare on: a
+// note's ordinary tags plus its project (if any), with class-marker tags
+// (lesson/rule/memory-core) stripped since they'd otherwise make every note of
+// that class look topically related. project stands in for a tag here because
+// that's the role it plays for dedup purposes — "which topic/scope does this
+// note belong to" — even though it lives in a separate frontmatter field.
+// project folds in via ProjectKey (trimmed + lowercased): it's compared exactly
+// (unlike TAG case, which is pre-existing and left alone), and the write path
+// (commands.go) trims before storing while callers here don't always trim
+// before calling — without normalizing, "wtc" and " WTC " would silently
+// stop pairing, matching recall.go's projectTokens normalization.
+func similarityTags(tags []string, project string) map[string]bool {
+	out := map[string]bool{}
+	for _, t := range tags {
+		if structuralTag[t] {
+			continue // class markers (lesson/rule/memory-core) aren't a topical match
+		}
+		out[t] = true
+	}
+	if p := ProjectKey(project); p != "" {
+		out[p] = true
+	}
+	return out
+}
+
+// parallelSiblings reports whether the (title, tags, project) triple and note n
+// look like the same kind of note for two DIFFERENT projects: each side has a
+// tag (or project) the other lacks, and that word appears in its own title but
+// not the other's. Such pairs share their title shape ("X repo map" / "Y repo
+// map") yet are deliberately distinct — refusing them as duplicates was the
+// dedup guard's worst failure mode in multi-project field use.
+func parallelSiblings(title string, tags []string, project string, n *Note) bool {
 	aTokens, bTokens := titleTokens(title), titleTokens(n.Title)
+	aTags, bTags := tagsWithProject(tags, project), tagsWithProject(n.Tags, n.Project())
 	distinguishes := func(ownTags []string, otherTags []string, ownTokens, otherTokens map[string]bool) bool {
 		other := map[string]bool{}
 		for _, t := range otherTags {
@@ -673,7 +875,19 @@ func parallelSiblings(title string, tags []string, n *Note) bool {
 		}
 		return false
 	}
-	return distinguishes(tags, n.Tags, aTokens, bTokens) && distinguishes(n.Tags, tags, bTokens, aTokens)
+	return distinguishes(aTags, bTags, aTokens, bTokens) && distinguishes(bTags, aTags, bTokens, aTokens)
+}
+
+// tagsWithProject appends project to tags (as a plain string, not stripped of
+// structural tags — parallelSiblings works over the raw tag/word vocabulary),
+// leaving tags untouched when project is unset. project is trimmed and
+// lowercased for the same reason as similarityTags above.
+func tagsWithProject(tags []string, project string) []string {
+	p := ProjectKey(project)
+	if p == "" {
+		return tags
+	}
+	return append(append([]string{}, tags...), p)
 }
 
 // TitleOverlap is the word-set Jaccard (0..1) of two titles, ignoring short and

@@ -73,6 +73,26 @@ func TestStemSymmetry(t *testing.T) {
 	}
 }
 
+// The trailing-'e' fold used to be unconditional, so stem("mode") == stem("mod")
+// — a real collision: a control query about tailwind "dark mode" confidently
+// matched notes about go.mod on a Go/Swift store that had nothing to do with
+// either. "mode" and "modes" must fold together (self-consistency), but must
+// stay distinct from the unrelated "mod" and "model".
+func TestStemModeCollision(t *testing.T) {
+	if got := stem("mode"); got != stem("modes") {
+		t.Errorf("stem(mode)=%q != stem(modes)=%q, want equal", got, stem("modes"))
+	}
+	if stem("mode") == stem("mod") {
+		t.Errorf("stem(mode)=%q collides with stem(mod)=%q", stem("mode"), stem("mod"))
+	}
+	if stem("mode") == stem("model") {
+		t.Errorf("stem(mode)=%q collides with stem(model)=%q", stem("mode"), stem("model"))
+	}
+	if stem("mod") == stem("model") {
+		t.Errorf("stem(mod)=%q collides with stem(model)=%q", stem("mod"), stem("model"))
+	}
+}
+
 // A cross-domain word (CSS "column"/"overflow") must not pull an unrelated domain
 // (DB migration) — the synonym-collision the adversarial pass caught.
 func TestRankNoCrossDomainBleed(t *testing.T) {

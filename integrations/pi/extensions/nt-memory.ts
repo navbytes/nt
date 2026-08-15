@@ -92,7 +92,7 @@ const CONFIG = {
 }
 
 // nt write tools, matched exactly (Pi registers the tools under nt's own names).
-const NT_WRITE_TOOL = /^nt_(add|note|note_edit|update|tag|mv|rm|archive|relink)$/
+const NT_WRITE_TOOL = /^nt_(add|note|note_edit|touch|decide|update|tag|mv|rm|archive|relink)$/
 
 // ---- run an nt subcommand, returning stdout ("" on any failure) ----
 function runNt(args: string[]): Promise<string> {
@@ -374,7 +374,7 @@ async function compile(): Promise<string> {
 // A bash command that drives nt's write surface directly (fallback path, or
 // an agent that prefers the CLI) — same invalidation trigger as a bridged
 // nt_* write tool.
-const NT_WRITE_COMMAND = /(^|[;&|]\s*)nt\s+(note|add|update|tag|mv|rm|archive|relink|edit)\b/
+const NT_WRITE_COMMAND = /(^|[;&|]\s*)nt\s+(note|add|update|tag|mv|rm|archive|relink|edit|touch|decide)\b/
 
 // Recall recorded lessons for a failed command; empty string when none match.
 async function recallLessons(command: string, errorTail: string): Promise<string> {

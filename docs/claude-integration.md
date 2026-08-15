@@ -92,7 +92,8 @@ teaches Claude to use `nt` directly. With it installed, you can say things like:
 - or just type `/nt`
 
 Claude will run the right `nt` commands (`ready`, `add`, `note`, `index`,
-`recall`, `show`, `done`, `links`, `search`), always passing `--source claude`.
+`recall`, `show`, `done`, `links`, `search`), passing `--source claude` on write
+operations (`add`, `note`, `update`).
 
 **Start a session with `nt ready`.** It returns only actionable work — open
 tasks that aren't done and aren't waiting on a dependency — newest-urgency
@@ -110,6 +111,33 @@ relevant, so it's cheap to run every time.
 
 Install it by keeping `.claude/skills/nt/` in your project, or copy it to
 `~/.claude/skills/nt/` to make it available everywhere.
+
+## 2b. The session loop — `/nt-learn` and `/nt-distill`
+
+Two more bundled skills close the memory loop that Pi and OpenCode already
+ship as `/learn` and `/distill`. They carry the same prompt bodies; only the
+skill name differs, because `~/.claude/skills/` is a global namespace shared
+with every other tool's skills and bare `learn`/`distill` are too generic to
+claim there.
+
+- **[`/nt-learn`](../.claude/skills/nt-learn/SKILL.md)** — harvest what should
+  outlive the session: lessons, rules, core memory, notes, follow-up tasks. It
+  dedups against the store first, proposes a numbered list, and writes nothing
+  until you approve.
+- **[`/nt-distill`](../.claude/skills/nt-distill/SKILL.md)** — the hygiene
+  counterpart, in two passes. Pass 1 merges near-duplicate notes (via the
+  read-only `nt_distill` tool). Pass 2 prunes the **always-loaded block** —
+  `rules/` and `memory/` — looking for subsumption, contradictions, dead
+  triggers, and rules that turned out not to be always-relevant. Both passes
+  land in one approval list; nothing is merged, demoted, or retired silently.
+  `/nt-distill rules` runs pass 2 alone.
+
+Pass 2 matters most on Claude Code. Pi and OpenCode inject the rules block live
+and nudge you when it exceeds `NT_INJECT_MAX`; here the block reaches Claude
+through `CLAUDE.md` (see [Standing rules](#standing-rules-in-claudemd)), which
+has no size warning at all — a prompt is the only signal you get. After pruning,
+re-run `nt export --tag rule` or the change never reaches `CLAUDE.md` — file
+exports are tracked, so `nt doctor` flags the drift if you forget.
 
 ---
 
@@ -149,11 +177,14 @@ nt mcp install --print                  # show what it would do, change nothing
 For any other client (Cursor, a project `.mcp.json`, …), `nt mcp install --print`
 emits the snippet to paste.
 
-Tools exposed (**18**) — **capture:** `nt_add`, `nt_note` (with `folder`,
+Tools exposed (**22**) — **capture:** `nt_add`, `nt_note` (with `folder`,
 `description`, and `kind: lesson|decision|ref|rule|memory` — canonical tag +
 folder; always give a `description`, it's what `nt_index` shows), `nt_note_edit`
 (fix an EXISTING note in place — `append`/`body`/`old_string`+`new_string`/
-`description`; no new id, unlike `nt_note supersede:`), `nt_update` (status:"done" completes; the response echoes what `changed`), `nt_rm` (remove a
+`description`; no new id, unlike `nt_note supersede:`), `nt_touch` (re-confirm a
+decaying note — stamps `reviewed:`, resetting its `half_life` fade clock),
+`nt_decide` (record WHY a note changed — a dated line in its `## Decisions`
+section), `nt_update` (status:"done" completes; the response echoes what `changed`), `nt_rm` (remove a
 mistaken task — journaled, `nt undo` restores), `nt_tag`, `nt_mv`, `nt_archive` (retire
 stale notes — set `superseded_by` to reconcile duplicates), `nt_relink` (fix a wrong outbound link); **retrieve:** `nt_index` (start here — a compact
 catalog of note stubs plus the active tasks and recent completions — tiered on
@@ -165,10 +196,13 @@ note's full body by id/slug/title, optional `section`),
 smart views — list them by calling it bare), `nt_search` (ranked
 stubs, text and/or tag; `full:true` inlines bodies), `nt_recall` (lessons-first,
 paraphrase-aware retrieval for a free-text task context — surfaces past mistakes
-before you repeat them), `nt_links` (forward links + backlinks); **health:**
+before you repeat them; on a weak/empty result it returns an `escalate` hint
+pointing at the deeper `include_archived` search), `nt_links` (forward links +
+backlinks), `nt_history` (a note's git commit history — how it got to its
+current state; needs `nt git-init`); **health:**
 `nt_doctor` (read-only store hygiene — dangling links, task-file issues, expired
 notes), `nt_distill` (read-only — every near-duplicate note pair, uncapped, for
-a human-gated merge). They go through the same locked, journaled engine as the CLI,
+a human-gated merge), `nt_mindmap` (a note's outline + wikilinks as a graph). They go through the same locked, journaled engine as the CLI,
 default `source` to `claude`, and require **stable task ids** (positional
 `task:N` is refused — the index isn't safe for an agent). Retrieval is
 index-first progressive disclosure: load the small stub catalog, then fetch
@@ -235,6 +269,27 @@ Notes in `rules/` (tag `rule`) and `memory/` (tag `memory-core`, written with
 your `CLAUDE.md` / `AGENTS.md` with `nt export --tag rule`. Keep them small —
 they're the part of the store that's paid for on every request.
 
+Compile them into a **dedicated file** and import it, rather than exporting
+over `CLAUDE.md` itself — `nt export --out` rewrites the whole target file, so
+pointing it at a `CLAUDE.md` that contains anything else would destroy the rest:
+
+```bash
+nt export --tag rule --out ~/.claude/nt-rules.md
+```
+
+then one line in `CLAUDE.md` imports it:
+
+```markdown
+@~/.claude/nt-rules.md
+```
+
+File exports are **tracked**: `nt export --out` records what was compiled
+where (`$NT_DIR/export-state.json`, hand-editable), and `nt doctor` re-renders
+each recorded selection against the current store, warning — with the exact
+command to re-run — when the compiled file no longer matches. A rule pruned by
+`/nt-distill` or added by `/nt-learn` now shows up as drift on the next
+doctor instead of silently never reaching Claude.
+
 ## Hook vs. skill — when each fires
 
 - **Hook** = passive, automatic. Mirrors Claude's *own* todo list. Best for
@@ -265,3 +320,45 @@ nt note "Chose flock over SQLite" --kind decision --description "one writer at a
 
 That pickup step is the whole point: the action items don't vanish when the
 session ends — and `nt ready` tells the next agent exactly where to start.
+
+## Memory dynamics — decay, delta-writes, decisions (worked example)
+
+The knowledge base itself ages. This is the full round-trip of the
+memory-dynamics features ([design](spec-memory-dynamics.md)) on one note:
+
+```bash
+# 1. Capture a VOLATILE fact — one that rots without a known expiry date.
+nt note "k8s ingress needs the v2 annotation" --kind lesson --tag k8s \
+  --description "since chart 4.x, the v1 annotation is silently ignored" \
+  --half-life 90d --source claude
+
+# 2. Months later, an agent recalls before touching ingress config:
+nt recall "changing the ingress annotations"
+#   ⚑ a1b2c3  k8s ingress needs the v2 annotation … ~faded [medium 2/3]
+# The ~faded chip says: past its half-life, un-reconfirmed — verify before trusting.
+
+# 3a. Verified it still holds? Reset the clock (reading alone never does):
+nt touch a1b2c3
+
+# 3b. Or it CHANGED? Edit the canonical note in place and record why:
+nt edit a1b2c3 --old-string "v2 annotation" --new-string "v3 gateway API route"
+nt decide a1b2c3 "chart 6.x replaced annotations with Gateway API — v2 advice obsolete"
+
+# 4. A later session sees the current fact PLUS the trail:
+nt show a1b2c3            # body ends with:  ## Decisions
+                          #   - 2026-07-30: chart 6.x replaced annotations with Gateway API — v2 advice obsolete
+nt history a1b2c3         # the per-edit story from git (needs nt git-init, once)
+
+# 5. And duplicates never fork the topic in the first place:
+nt note "k8s ingress needs the v2 annotation" --if-exists return
+#   exists a1b2c3  lessons/k8s-ingress-needs-the-v2-annotation.md
+#   → edit it (nt edit), don't sibling it
+```
+
+The MCP loop is the same verbs: `nt_note {if_exists:"return"}` →
+`nt_note_edit {expect_mtime}` → `nt_decide` → `nt_touch`, with `nt_recall`
+returning `faded` flags and — on a weak/empty result — an `escalate` hint
+naming the deeper `nt_search {include_archived:true}` sweep. `nt review` lists
+the most-faded notes for a human triage pass: still true (`nt touch`),
+changed (`nt edit` + `nt decide`), or dead (`nt archive`). Nothing ever
+disappears on its own — decay only re-ranks and flags.

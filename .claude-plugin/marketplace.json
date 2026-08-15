@@ -8,7 +8,7 @@
     {
       "name": "nt",
       "source": "./",
-      "description": "Durable task & note memory for AI coding sessions — plain-text todo.txt tasks + markdown notes, with paraphrase-aware recall so lessons survive across sessions.",
+      "description": "Durable task & note memory for AI coding sessions — plain-text todo.txt tasks + markdown notes, with paraphrase-aware recall, relevance decay, decision history, and duplicate-preventing write steering so lessons survive across sessions.",
       "homepage": "https://github.com/navbytes/nt",
       "category": "productivity",
       "keywords": ["memory", "tasks", "notes", "knowledge-base", "recall", "todo"]

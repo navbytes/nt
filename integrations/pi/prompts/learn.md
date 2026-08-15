@@ -42,14 +42,21 @@ Show a numbered list. Per item: bucket, proposed **title**, one-line
 **description** (lessons in trigger-form "when X, do Y — not Z"), and target
 folder+tag (`lessons/`+`lesson`, `rules/`+`rule`, `memory/`+`memory-core`,
 `decisions/`/`ref/` for notes). Flag `rule`/`memory-core` items ⚠
-*always-in-context — costs tokens on every future request*. Then ask which to
-save (all, numbers, edits, or none) and **wait**. Save nothing without approval.
+*always-in-context — costs tokens on every future request*. For lessons, **add a
+`project` or topical tag** — the `lesson` tag alone won't prevent near-duplicates.
+(The reverse pass — pruning rules that stopped earning that cost — is `/distill
+rules`.) Then ask which to save (all, numbers, edits, or none) and **wait**. Save
+nothing without approval.
 
 ## 4. Write the approved items
 
 - Notes/rules/memory/lessons → `nt_note` (title, `description`, `body`;
   `kind:"lesson"|"rule"|"decision"|"ref"|"memory"` applies the canonical
-  tag+folder). Set `source:"pi"`. Apply the user's edits.
+  tag+folder). Set `source:"pi"`, and pass **`if_exists:"return"`** — on
+  `matched:true` the topic's canonical note already exists: update it via
+  `nt_note_edit` (with the returned `expect_mtime`), and if the update reverses
+  a conclusion, record why with `nt_decide`. Give volatile facts a `half_life`
+  (e.g. `"90d"`) so they fade instead of going stale. Apply the user's edits.
 - Tasks → `nt_add` (verb-first title ≤ ~60 chars, detail in `body`, link via
   `discovered_from`).
 - If `nt_note`'s response has a `similar` list, check whether you doubled a note;

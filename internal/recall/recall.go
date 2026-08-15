@@ -21,6 +21,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -38,6 +39,27 @@ const LessonTag = "lesson"
 // boost, so it scales with relevance rather than flatly subtracting.
 const expiredPenalty = 0.4
 
+// lenNormB reads BM25's `b` (0 = no length normalization, 1 = full) from
+// NT_LENNORM_B on every call rather than caching it at package init, so a
+// test can flip it with t.Setenv without needing to reload the package. The
+// cost is one getenv+parse per Rank call, negligible next to the
+// O(notes*terms) scoring loop it gates.
+//
+// Unset/unparseable defaults to 0 — the shipped, measured-safe behaviour
+// (see docs/memory-integration-roadmap.md item 13: real, but modest, and the
+// corpus backing it is too thin to flip the default). Out-of-range values
+// are CLAMPED into [0,1] rather than rejected: this is an experimental env
+// knob, not user input at a trust boundary, and BM25's b is only meaningful
+// on [0,1] (0 disables it, 1 is "full" normalization) — a fat-fingered
+// NT_LENNORM_B=2 should behave like "1, but you meant it", not crash recall.
+func lenNormB() float64 {
+	v, err := strconv.ParseFloat(os.Getenv("NT_LENNORM_B"), 64)
+	if err != nil {
+		return 0
+	}
+	return math.Max(0, math.Min(1, v))
+}
+
 // Result is one ranked note. Lesson notes sort first at equal relevance.
 type Result struct {
 	Note         *note.Note
@@ -45,6 +67,58 @@ type Result struct {
 	Lesson       bool
 	ProjectMatch bool // note belongs to the caller's project (soft ranking boost applied)
 	Expired      bool // note.Note.Expired() as of ranking time — valid_until has passed
+	// Faded/DecayFactor: relevance decay as of ranking time (memory-dynamics
+	// spec §3). Faded = aged past one half-life un-reconfirmed; DecayFactor is
+	// the multiplier applied to the ranking score (1.0 = no decay). Like the
+	// expired flag: a signal to doubt, never a filter.
+	Faded       bool
+	DecayFactor float64
+	// Confidence is the PRE-BOOST score over the best score this query could
+	// possibly award (see fMax below) — comparable across queries and store
+	// sizes, unlike Score, which is IDF-scaled and therefore query-dependent.
+	// Boosts (lesson/project/expired) are deliberately excluded: they express
+	// preference, not evidence, and folding them in would let a thinly-matched
+	// lesson print as confident — the exact promotion pathology the precision
+	// floor already fights. Matched/QueryTerms are the raw coverage fraction
+	// (m/n query words that hit at all), shown alongside the tier because a
+	// tier alone hides *how much* of the query a note actually covers.
+	Confidence float64
+	Matched    int
+	QueryTerms int
+}
+
+// Tier thresholds, calibrated against the paraphrase corpus (see
+// TestParaphraseCorpusConfidence) and the real-store tailwind-dark-mode
+// acceptance case: every corpus #1 hit clears "medium", and a nonsense query
+// against a real store does not present as "strong". Boundaries are two named
+// constants (not scattered magic numbers) precisely so recalibration is a
+// one-line change with a test that catches drift.
+const (
+	// tierStrong sits a notch above the design doc's illustrative "exact match
+	// on every term, but only in the body" worked example (0.50): a real-store
+	// probe surfaced a note that verbatim QUOTES a test query as meta-commentary
+	// (a field-test agent recording "recall X returns noise" using X as literal
+	// example text) — full body-exact coverage on every term, landing at
+	// precisely 0.50. Bag-of-words scoring cannot tell "topically about X" from
+	// "contains the string X while talking about something else"; 0.55 costs
+	// nothing against genuine hits (title/tag matches clear 0.6+ easily; see
+	// TestParaphraseCorpusConfidence) and keeps that coincidence out of "strong".
+	tierStrong = 0.55
+	tierMedium = 0.15
+)
+
+// Tier buckets Confidence into a word an agent never has to interpret as a
+// float: "strong" | "medium" | "weak". Kept as a method (not a package func)
+// so CLI and MCP read it off the Result and can't drift into re-deriving it.
+func (r Result) Tier() string {
+	switch {
+	case r.Confidence >= tierStrong:
+		return "strong"
+	case r.Confidence >= tierMedium:
+		return "medium"
+	default:
+		return "weak"
+	}
 }
 
 // synGroups cluster words that mean the same thing to a coding agent. Matching any
@@ -52,7 +126,7 @@ type Result struct {
 // worded differently. Small and dev-focused on purpose — precision matters too.
 //
 // Groups are kept NARROW and non-overlapping: ambiguous cross-domain tokens
-// (column, index, origin, lock, database) are deliberately NOT grouped, because
+// (column, index, origin, lock, database, gc) are deliberately NOT grouped, because
 // one overloaded word ("column" → migration) would otherwise drag a whole wrong
 // domain into an unrelated query (a CSS-column question surfacing DB migrations).
 // nil/null and panic/crash are separate groups so distinct failure modes don't
@@ -69,11 +143,24 @@ var synGroups = [][]string{
 	{"config", "configuration", "setting", "dotenv"},
 	{"panic", "crash", "segfault", "stacktrace"},
 	{"nil", "null", "nullpointer", "npe", "nullptr"},
-	{"leak", "oom", "allocation", "gc"},
+	{"leak", "oom", "allocation", "heap"},
 	// Domains a coding agent hits that the map was previously blind to:
 	{"css", "flexbox", "flex", "grid", "layout", "overflow", "responsive", "viewport", "zindex"},
 	{"billing", "payment", "invoice", "charge", "webhook", "idempotency", "refund", "stripe", "subscription"},
 	{"i18n", "l10n", "locale", "translation", "rtl", "localization"},
+	// Everyday software-engineering vocabulary the table was blind to: a field
+	// test of 48 natural paraphrase pairs from a Go CLI codebase linked only 3.
+	// Same rule as above — narrow, and no token that carries a second domain
+	// (flag/option and module/package are deliberately absent: a feature flag
+	// and a CLI flag are not the same thing).
+	{"undo", "revert", "rollback", "undelete"},
+	{"lint", "linter", "vet", "staticcheck", "gofmt", "formatter"},
+	{"duplicate", "dedupe", "deduplicate", "duplication", "clobber", "overwrite"},
+	{"regex", "regexp", "matcher"},
+	{"serialize", "serialization", "marshal", "unmarshal", "encode", "decode"},
+	{"dependency", "dependabot", "vendoring", "bump", "upgrade"},
+	{"ci", "cicd", "pipeline"},
+	{"frontmatter", "yaml", "toml"},
 }
 
 // buildConceptOf maps each group's stemmed words to a shared group id ("g0",
@@ -165,13 +252,36 @@ func parseSynonymFile(data string) [][]string {
 	return groups
 }
 
-// stop is a tiny stopword set — words too common to carry retrieval signal.
+// stop is a stopword set — closed-class English words too common (in English
+// generally, not just in this store) to carry retrieval signal. This matters
+// more than it looks: IDF alone can't tell "uninformative in English" from
+// "rare in this store" — on a real 218-note store, the modal "should" (df=5,
+// IDF 3.69) outscored "swift", the headline token of an iOS-heavy store (IDF
+// 3.12), and a function word in a title earned it the full strong-bag weight.
+// Measured: the function-word share of the winning note's score was 0.02 on a
+// hit vs 0.44 on a miss, and two misses were carried entirely by function
+// words ("should"+"where"+"can", "where"+"keep") beating the actual target.
+//
+// Deliberately NOT stopped despite being common light verbs, because each is
+// also a real technical term in this codebase's domain: "get"/"set" (HTTP
+// GET, `go get`, getters/setters, Set data structures), "make" (Go's `make()`
+// builtin, `make build`/Makefile targets).
 var stop = map[string]bool{
 	"the": true, "a": true, "an": true, "and": true, "or": true, "to": true, "of": true,
 	"in": true, "on": true, "for": true, "with": true, "is": true, "are": true, "be": true,
 	"it": true, "this": true, "that": true, "when": true, "how": true, "do": true, "i": true,
 	"my": true, "we": true, "add": true, "use": true, "using": true, "new": true, "some": true,
 	"about": true, "into": true, "from": true, "at": true, "by": true, "as": true, "not": true,
+	// Modals: never a topical term, always a hedge/permission/necessity marker.
+	"should": true, "would": true, "could": true, "can": true, "must": true,
+	"will": true, "might": true,
+	// Wh-words: how/when were already covered; the rest of the question set.
+	"where": true, "what": true, "which": true, "why": true,
+	// Auxiliary "do"-support in questions ("does X work", "did it fail").
+	"does": true, "did": true,
+	// Light verbs with no technical sense of their own in this domain (unlike
+	// get/set/make above): "keep the file", "need to fix".
+	"keep": true, "need": true,
 }
 
 // stem is a light suffix stripper — enough to fold plural/verb forms to a common
@@ -182,6 +292,13 @@ func stem(w string) string {
 	switch {
 	case len(w) > 4 && strings.HasSuffix(w, "ies"):
 		w = w[:len(w)-3] + "y" // retries→retry, libraries→library
+	// A plain 4-letter-noun + "s" plural (modes, names, files…) is not the same
+	// pattern as a true sibilant -es plural (boxes, matches, caches): English
+	// only inserts the extra vowel when the base ends in a sibilant sound.
+	// Handled before the general "es" case below so "modes" keeps its silent e
+	// like "mode" does, instead of folding to "mod" (see sibilantE).
+	case len(w) == 5 && strings.HasSuffix(w, "es") && !sibilantE(w[:4]):
+		w = w[:4] // modes→mode, names→name
 	case len(w) > 4 && strings.HasSuffix(w, "es"):
 		w = w[:len(w)-2] // boxes→box, matches→match, caches→cach (canonicalized below)
 	case len(w) > 4 && strings.HasSuffix(w, "ing"):
@@ -193,10 +310,39 @@ func stem(w string) string {
 	}
 	// Canonicalize a trailing 'e' so cache/caches and race/races fold to the same
 	// token (English -es is inconsistent; folding both sides makes stem stable).
-	if len(w) > 3 && strings.HasSuffix(w, "e") {
+	//
+	// Guarded for a bare 4-letter word after a non-sibilant consonant (mode, not
+	// cache/race): stripping those collides with an unrelated, shorter real word
+	// that's meaningful in this store — "mode"→"mod" landed on the same stem as
+	// the literal "mod" token split out of "go.mod", so a nonsense "dark mode"
+	// query confidently matched unrelated go.mod notes. Longer words (5+) keep
+	// the unconditional strip: it's what folds migrate/migrated,
+	// duplicate/duplicated, etc. — their inflected forms are already stripped by
+	// the "ed"/"es" cases above regardless of sibilance, so gating those too
+	// would break that symmetry instead of fixing a real collision.
+	if len(w) > 3 && strings.HasSuffix(w, "e") && (len(w) != 4 || sibilantE(w)) {
 		w = w[:len(w)-1]
 	}
 	return w
+}
+
+// sibilantE reports whether w (which must end in "e") has a sibilant sound
+// (s/x/z/soft c/soft g, or the "ch"/"sh" digraphs) right before that final e —
+// the phonetic condition under which English actually needs the extra vowel to
+// form a pronounceable plural (cache→caches, race→races). Words that fail this
+// check (mode, name, file…) pluralize with a plain "+s" and should keep their e.
+func sibilantE(w string) bool {
+	if len(w) < 2 {
+		return false
+	}
+	switch w[len(w)-2] {
+	case 's', 'x', 'z', 'c', 'g':
+		return true
+	case 'h':
+		return len(w) >= 3 && (w[len(w)-3] == 'c' || w[len(w)-3] == 's')
+	default:
+		return false
+	}
 }
 
 func notWord(r rune) bool {
@@ -296,10 +442,41 @@ func matchesProject(n *note.Note, proj map[string]bool) bool {
 // rank above equally-relevant notes from other projects. Empty project means
 // no preference (identical to Rank).
 func RankProject(notes []*note.Note, context string, limit int, project string) []Result {
+	res, _ := rankProject(notes, context, limit, project, nil)
+	return res
+}
+
+// candScore is a mid-pipeline candidate: the Result plus the bookkeeping
+// needed to sort, floor, trim, and (when tracing) explain it. f is the FINAL
+// (boosted) score used for ranking; raw is the pre-boost score Confidence is
+// derived from. hits/excludeReason are only populated when trace != nil —
+// building a TermHit slice per candidate on every call would be wasted work
+// on the hot untraced path.
+type candScore struct {
+	Result
+	f             float64
+	exact         int
+	matched       int
+	raw           float64
+	hits          []TermHit
+	excludeReason string
+	strongTerms   []string // only set for the ExplainNote target
+}
+
+// rankProject is RankProject's body. trace == nil is the normal hot path (one
+// nil-check per candidate/term, no extra allocation); trace != nil records a
+// term-by-term decomposition plus excluded candidates for ExplainProject/
+// ExplainNote. Kept as a single function (not a second scorer) so the traced
+// and untraced paths can never diverge — see TestExplainMatchesRank.
+func rankProject(notes []*note.Note, context string, limit int, project string, trace *Trace) ([]Result, *Trace) {
 	q := newBag(context)
 	if len(q.words) == 0 {
-		return nil
+		return nil, trace
 	}
+	// One now for the whole ranking pass — expiry and decay must be evaluated
+	// against a single instant (spec §8: never sampled per candidate inside
+	// ranking), or a decayed-store eval run isn't replayable.
+	now := time.Now()
 	proj := projectTokens(project)
 	// Pass 1: build each note's bags and tally document frequency per concept, so a
 	// common word ("database", "test") counts less than a rare, discriminating one.
@@ -337,24 +514,13 @@ func RankProject(notes []*note.Note, context string, limit int, project string) 
 		}
 		cands = append(cands, c)
 	}
-	n := len(cands)
+	numNotes := len(cands)
 	idf := func(concept string) float64 {
 		d := df[concept]
 		if d < 1 {
 			d = 1
 		}
-		return math.Log(1 + float64(n)/float64(d))
-	}
-	// Pass 2: score. Per query concept: exact word in a high-signal field is
-	// strongest, then a synonym there, then the body — each weighted by the
-	// concept's IDF. The lesson boost is MULTIPLICATIVE (not a flat add), so it
-	// tilts ties toward recorded mistakes without letting a one-concept lesson
-	// outrank a genuinely more-relevant note.
-	type scored struct {
-		Result
-		f       float64
-		exact   int
-		matched int
+		return math.Log(1 + float64(numNotes)/float64(d))
 	}
 	// Iterate query words in a FIXED order: float accumulation is not
 	// associative, so map-order iteration makes tied notes differ in their last
@@ -365,30 +531,109 @@ func RankProject(notes []*note.Note, context string, limit int, project string) 
 		qwords = append(qwords, w)
 	}
 	sort.Strings(qwords)
-	var out []scored
+	// fMax is the best score ANY note could earn against this query — every
+	// term matched exact-in-title (base 4) — so raw/fMax is comparable across
+	// queries and store sizes by construction (numerator and denominator carry
+	// the same IDF mass). idf(concept) doesn't depend on the candidate, so this
+	// is computed once, not per note.
+	fMax := 0.0
+	for _, w := range qwords {
+		fMax += 4 * idf(conceptID(w))
+	}
+	// Length normalization (default off, see lenNormB) needs each bag's
+	// average length across the corpus. Computed once here — skipped
+	// entirely at b=0, so the shipped default pays nothing for this loop.
+	b := lenNormB()
+	var avgStrong, avgWeak float64
+	if b > 0 && numNotes > 0 {
+		for _, cd := range cands {
+			avgStrong += float64(len(cd.strong.concepts))
+			avgWeak += float64(len(cd.weak.concepts))
+		}
+		avgStrong /= float64(numNotes)
+		avgWeak /= float64(numNotes)
+	}
+	// bagNorms returns one candidate's (strong, weak) BM25 length divisors:
+	// max(1-b + b*dl/avgdl, epsilon). Both are 1 at b=0 (a no-op multiply),
+	// which is what keeps the shipped default byte-identical to the
+	// pre-normalization scorer — see TestLenNormZeroIsIdentical.
+	//
+	// PER-BAG, not one divisor over strong+weak combined: the two bags are
+	// structurally different documents, not two halves of one. `strong` is
+	// title+tags+description clamped to 240 chars (bounded, low variance);
+	// `weak` is an unbounded body that can run to thousands of chars. A
+	// combined divisor lets a long body dilute a note's TITLE match, which
+	// is a different, unwanted bias — measured flat-to-harmful on the real
+	// store and it broke the paraphrase corpus 8/8 → 7/8 (see item 13 in
+	// docs/memory-integration-roadmap.md). BM25F normalizes per-field for
+	// this exact reason: each field is only compared against its own kind.
+	bagNorms := func(cd cand) (strongNorm, weakNorm float64) {
+		if b <= 0 {
+			return 1, 1
+		}
+		div := func(dl, avg float64) float64 {
+			if avg <= 0 {
+				return 1
+			}
+			return math.Max(1-b+b*dl/avg, 1e-9) // guard: b=1 + an empty bag would divide by zero
+		}
+		return div(float64(len(cd.strong.concepts)), avgStrong), div(float64(len(cd.weak.concepts)), avgWeak)
+	}
+	// Pass 2: score. Per query concept: exact word in a high-signal field is
+	// strongest, then a synonym there, then the body — each weighted by the
+	// concept's IDF. The lesson boost is MULTIPLICATIVE (not a flat add), so it
+	// tilts ties toward recorded mistakes without letting a one-concept lesson
+	// outrank a genuinely more-relevant note.
+	var out []candScore
 	for _, cd := range cands {
 		var f float64
 		exact, matched := 0, 0
+		var hits []TermHit
+		strongNorm, weakNorm := bagNorms(cd)
 		for _, w := range qwords {
 			c := conceptID(w)
-			var base float64
+			var base, norm float64
+			where := ""
 			switch {
 			case cd.strong.words[w]:
-				base, exact = 4, exact+1
+				base, exact, where, norm = 4, exact+1, "strong-exact", strongNorm
 			case cd.strong.concepts[c]:
-				base = 2
+				base, where, norm = 2, "strong-syn", strongNorm
 			case cd.weak.words[w]:
-				base, exact = 2, exact+1
+				base, exact, where, norm = 2, exact+1, "weak-exact", weakNorm
 			case cd.weak.concepts[c]:
-				base = 1
+				base, where, norm = 1, "weak-syn", weakNorm
 			}
 			if base > 0 {
 				matched++
+				base /= norm
 			}
-			f += base * idf(c)
+			termIDF := idf(c)
+			f += base * termIDF
+			if trace != nil {
+				hits = append(hits, TermHit{Term: w, Concept: c, Where: where, Base: base, IDF: termIDF})
+			}
 		}
+		isTarget := trace != nil && trace.TargetID != "" && cd.n.ID == trace.TargetID
 		if f == 0 {
+			if isTarget {
+				trace.Notes = append(trace.Notes, NoteTrace{
+					ID: cd.n.ID, Title: cd.n.Title, Hits: hits,
+					Excluded: "no-match", StrongTerms: strongTermsOf(cd.strong),
+				})
+			}
 			continue
+		}
+		raw := f
+		confidence := 0.0
+		if fMax > 0 {
+			// fMax assumes every term lands exact-in-strong (the b=0 ceiling);
+			// under normalization this candidate's actual ceiling is
+			// fMax/strongNorm, so scaling by strongNorm keeps Confidence
+			// meaning the same thing at every b (a fully strong-exact match
+			// still reads 1.0) instead of sliding the whole tier scale. A
+			// no-op at the shipped b=0 (strongNorm == 1).
+			confidence = raw * strongNorm / fMax
 		}
 		if cd.lesson {
 			f *= 1.6 // surface recorded mistakes, without swamping relevance
@@ -397,24 +642,69 @@ func RankProject(notes []*note.Note, context string, limit int, project string) 
 		if isMine {
 			f *= projectBoost
 		}
-		expired := cd.n.Expired(time.Now())
+		expired := cd.n.Expired(now)
 		if expired {
 			f *= expiredPenalty
 		}
-		out = append(out, scored{Result{Note: cd.n, Score: int(f*100 + 0.5), Lesson: cd.lesson, ProjectMatch: isMine, Expired: expired}, f, exact, matched})
+		// Relevance decay (memory-dynamics spec §3): multiplicative beside the
+		// expired penalty — they encode different facts (known-invalid vs.
+		// probably-stale) and compose. Floored in note.Decay, so a faded note
+		// ranks lower but can still win an otherwise-empty field. Confidence
+		// stays pre-penalty, like every other boost/penalty here: a faded note
+		// that matches strongly still REPORTS a strong match while ranking low —
+		// the reader sees both signals and decides.
+		decay := cd.n.Decay(now)
+		f *= decay
+		var strongTerms []string
+		if isTarget {
+			strongTerms = strongTermsOf(cd.strong)
+		}
+		out = append(out, candScore{
+			Result: Result{
+				Note: cd.n, Score: int(f*100 + 0.5), Lesson: cd.lesson, ProjectMatch: isMine, Expired: expired,
+				Faded: cd.n.Faded(now), DecayFactor: decay,
+				Confidence: confidence, Matched: matched, QueryTerms: len(qwords),
+			},
+			f: f, exact: exact, matched: matched, raw: raw, hits: hits, strongTerms: strongTerms,
+		})
 	}
 	// Precision floor (field-study fix): a specific query (≥4 concepts) matching a
 	// note on a SINGLE concept is topical noise, not a memory hit — the lesson
 	// boost was promoting exactly those to the top of adjacent-topic queries. For
 	// short queries a single shared concept is legitimately all the signal there is.
+	//
+	// The floor applies ONLY when something actually clears it. As an
+	// unconditional filter it was a cliff in both directions: a heavily
+	// paraphrased query that shares just one concept with its target returned
+	// NOTHING, while the same intent in three words returned the right note —
+	// so the documented recovery ("an empty result means nothing is recorded;
+	// don't retry with looser words") was backwards, and the fix was to retry
+	// SHORTER. When no candidate reaches two concepts, one shared concept is all
+	// the signal the query carries, and the ranked list beats an empty answer;
+	// the score the caller sees already reflects how weak the match is.
+	var excluded []candScore
+	floorActive := false
 	if len(q.words) >= 4 {
-		kept := out[:0]
+		anyClears := false
 		for _, s := range out {
 			if s.matched >= 2 {
-				kept = append(kept, s)
+				anyClears = true
+				break
 			}
 		}
-		out = kept
+		if anyClears {
+			floorActive = true
+			kept := out[:0]
+			for _, s := range out {
+				if s.matched >= 2 {
+					kept = append(kept, s)
+				} else if trace != nil {
+					s.excludeReason = "precision-floor"
+					excluded = append(excluded, s)
+				}
+			}
+			out = kept
+		}
 	}
 	sort.SliceStable(out, func(i, j int) bool {
 		if out[i].f != out[j].f {
@@ -440,16 +730,28 @@ func RankProject(notes []*note.Note, context string, limit int, project string) 
 		for _, s := range out[1:] {
 			if s.f >= floor {
 				kept = append(kept, s)
+			} else if trace != nil {
+				s.excludeReason = "tail-trim"
+				excluded = append(excluded, s)
 			}
 		}
 		out = kept
 	}
 	if limit > 0 && len(out) > limit {
+		if trace != nil {
+			for _, s := range out[limit:] {
+				s.excludeReason = "limit"
+				excluded = append(excluded, s)
+			}
+		}
 		out = out[:limit]
+	}
+	if trace != nil {
+		fillTrace(trace, qwords, numNotes, floorActive, out, excluded)
 	}
 	res := make([]Result, len(out))
 	for i := range out {
 		res[i] = out[i].Result
 	}
-	return res
+	return res, trace
 }

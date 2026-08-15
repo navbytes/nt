@@ -113,6 +113,211 @@ met, don't schedule otherwise):
   depending on an external service both cut against that. The cheap,
   philosophy-neutral first move (build only if curious) is extending
   `recall_precision_test.go` into a paraphrase corpus.
+  - **The corpus now exists** (`internal/recall/paraphrase_corpus_test.go`,
+    2026-07-28): 12 notes, 8 queries sharing no verbatim content word with
+    their target, an asserted HIT@1 floor, and a guard that a glossary note
+    never takes #1. It immediately found the precision floor returning
+    *nothing* for 3 of 8 paraphrased queries; softening it took HIT@1 from
+    5/8 to 8/8.
+  - **Length normalization ruled out (honest eval confirms); real blocker
+    identified — do not re-attempt length normalization without new
+    evidence.** A prior field test reported HIT@1 falling 65% → 41% as a
+    store grew, diagnosing length as the cause. Tested against a user's
+    actual store under controlled conditions (22-query corpus built by
+    enforced information asymmetry: one agent wrote scenarios from real notes
+    with distinctive vocabulary stripped; a second agent, unseen notes/titles,
+    wrote queries from scenarios alone):
+    - **Growth-driven degradation is real, and the curve below is corrected.**
+      The harness originally counted `__tasks__/` reserved notes toward each
+      corpus size and toward IDF's document-frequency `n`, even though
+      `RankProject` never scores them as candidates — inflating every labeled
+      size by ~10% (of 218 "active" notes, 23 were reserved). Fixed
+      (`note.Reserved()` now filtered alongside `note.Active()`) and
+      re-measured: HIT@1 by corpus size — smooth, in fact fully monotone,
+      decline: size 22 → 18/22 (targets only, no distractors — every
+      competitor at this size is another correct answer, a different regime
+      from the rest of the curve), size 40 → 16/22, size 100 → 15/22, size
+      160 → 13/22, size 195 (whole store; the true scored size, not 218) →
+      12/22. (At 22 queries per hit ≈ 4.5pp.) The reserved-note fix changed
+      the counts at 100 and 160 and relabeled "218" to "195," but the
+      degradation conclusion is unchanged — if anything the corrected curve
+      is cleaner (no tail wobble).
+    - **Length normalization is flat — swept `b` ∈ {0, 0.25, 0.5, 0.75, 1.0}:**
+      HIT@1 was 16/22 at size 40 and 12/22 at full store at **every** value,
+      with the paraphrase corpus staying 8/8 throughout. The knob moved scores
+      (computed norms ranged 0.27–1.40) but never rankings — length is not
+      the operative variable. This *refines* the earlier verdict: length does
+      not cause the harm.
+    - **Unresolved: this result disagrees with the earlier field test's own
+      `b` sweep.** That sweep (`b` ∈ {0, 0.1, 0.2, 0.3, 0.4, 0.55, 0.75, 1.0})
+      found **every** non-zero `b` — including the same 0.75 and 1.0 tested
+      here — dropped the paraphrase corpus 8/8 → 7/8. This session's sweep,
+      over the same 0.75/1.0 values, found 8/8 throughout. Both cannot be
+      literally true at once; this was not re-reconciled and is left open. Do
+      not read the "partial mitigations" bullet below as an explanation —
+      combining stopwords with `b=0.75` is a different, later experiment that
+      also produced an 8/8 → 7/8 drop, and it is not established that it is
+      the same effect the earlier session hit with `b` alone.
+    - **The actual mechanism:** Closed-class function words are scored as
+      topical terms. Over the store's terse notes, IDF cannot distinguish
+      "uninformative in English" from "rare in store": `should` (df=5) scores
+      IDF 3.69, above `swift` (3.12) in an iOS-heavy store; a function word in
+      a title then earns full strong-bag weight. Growth trigger: target score
+      stays fixed; max distractor score rises sharply. Measured size 25 →
+      218 (this instrumented run predates the reserved-note fix and was not
+      rerun — see provenance note below): **target +19.7%, best distractor
+      +106.9%**. Function-word share of winning note's score: **0.02 on a
+      hit, 0.44 on a miss.**
+    - **Hard ceiling: lexical retrieval cannot cross it by reweighting.**
+      Targets sharing ≤2 query concepts scored 0/6; those sharing ≥3 scored
+      12/16.
+    - **Partial mitigations bounded.** Expanded stopwords gained +1–2
+      mid-range precision but did not fix growth; combined with `b=0.75`
+      reached 21/22 at size 40 but collapsed by size 100 and broke the
+      paraphrase corpus 8/8 → 7/8. The precondition holds: embeddings/semantic
+      retrieval cannot land without semantic-distance quality, which lexical
+      scoring architecturally cannot provide.
+    - **Evaluation methodology.** This session's honest-corpus trial used the
+      information-asymmetry protocol (scenario-writer unsees notes+titles;
+      query-writer unsees source) to isolate corpus distortion from scorer
+      weaknesses — that discipline is why these numbers are trustable. The
+      earlier session's growth case did **not** use this protocol: its
+      distractors were found adversarial by construction only after the fact
+      (one contained "the wait budget for writers" against a query of
+      "writers exceed the wait budget"). Standing caveat, independent of
+      either session's results: planted near-duplicates must not be used to
+      tune the ranker.
+    - **Provenance.** The corpus-size HIT@1 curve above is exactly what the
+      committed harness, `internal/recall/realstore_eval_test.go`
+      (`NT_EVAL_STORE`/`NT_EVAL_CORPUS`/`NT_EVAL_SIZES` env vars; run with
+      `go test ./internal/recall/ -run RealStore -v`), regenerates against a
+      real store and corpus. The `b` sweep, the IDF and function-word-share
+      numbers, and the score-growth percentages above were one-off
+      instrumented runs during this and the earlier session, not reproducible
+      from this branch as committed. No real note content is committed
+      (stores hold private client data); anyone can re-run the harness
+      against their own store.
+    - **Re-run post-consolidation (2026-07-29): it now measurably helps —
+      the flat verdict above was correctly measured, on a store that
+      happened to have no length variance to normalize against.** Item 15's
+      consolidation ran between the flat sweep above and this re-run
+      (193 → 142 notes), and it changed the store's *shape*, not just its
+      size: the flat-sweep store had roughly 75% empty-body notes; **0 of
+      142 notes now have an empty body** (median body 866 chars), and the
+      weak-bag length band went from ~5x to 166x. Length normalization has
+      nothing to divide by when most notes carry no body — that store was a
+      genuine negative result, just not a general one. Re-swept `b` ∈ {0,
+      0.25, 0.5, 0.75, 1.0} on the changed store, HIT@1 (of 22 queries):
+      size 22 → 17/18/18/17/15, size 40 → 14/15/16/18/17, size 100 →
+      13/12/13/13/13, size 142 (whole store) → 12/12/**13**/**13**/10 — a
+      +1-hit (+4.5pp) improvement at `b` ∈ {0.5, 0.75} over `b=0`, with the
+      paraphrase corpus holding 8/8 at every value. Repeated measures (5
+      distractor draws × 2 sizes) at `b=0.5`: positive in 7/10, zero in 3,
+      **negative in none** (sign test p≈0.008 — not noise). Mechanism,
+      confirmed per query: a short target note overtakes a 1.8–2.0x longer
+      generalist note competing on the same concepts.
+    - **This also settles the earlier unresolved contradiction — it was
+      per-bag vs. combined-bag, not two measurements disagreeing with
+      themselves.** The very first field test's `b` sweep divided by ONE
+      combined strong+weak divisor and found every non-zero `b` dropped the
+      paraphrase corpus 8/8 → 7/8. The flat-sweep bullet above (this item's
+      honest-corpus re-test) reported 8/8 throughout at the same `b` values
+      and was left unreconciled. Replaying both modes against the
+      post-consolidation store settles it: **combined**-bag reproduces the
+      8/8 → 7/8 drop (including at `b=0.1`); **per-bag** (each bag divided
+      by its own average) reproduces 8/8 throughout. The flat-sweep bullet's
+      8/8 identifies it as per-bag all along — so the honest comparison is
+      per-bag-then (inert, no length variance) vs. per-bag-now (helps, after
+      consolidation created the variance). Neither session mismeasured;
+      they normalized different scopes. Per-bag is also the structurally
+      correct default, independent of which number is better: `strong`
+      (title+tags+description) is a bounded 240-char field with low
+      variance, `weak` (body) is unbounded, and a combined divisor lets a
+      long body dilute a note's TITLE match — the bias BM25F's per-field
+      normalization exists specifically to avoid.
+    - **Shipped, default OFF, behind `NT_LENNORM_B`** — per-bag only;
+      combined mode was measured and rejected, see above. Default-off is
+      deliberate, not a hedge: the effect is real but modest (+4.5pp at the
+      whole store, 1 hit out of 22), it costs some rank to long, thorough
+      notes, and a 22-query corpus is too thin to trust flipping a
+      production default. `b=0` (the shipped default) is proven
+      byte-identical to the pre-normalization scorer
+      (`TestLenNormZeroIsIdentical` in `internal/recall/lennorm_test.go`).
+      Revisit the default once a real-store corpus exists large enough to
+      stand on a single measurement instead of a repeated-measures sign
+      test.
+    - **Honest caveat, still open: "no length variance ⇒ inert" is
+      plausible, not proven.** A bodies-stripped control arm (removing body
+      content outright, rather than relying on the store's own empty notes)
+      was *also* not inert — so the flat-sweep verdict's explanation may be
+      incomplete. The real threshold at which normalization starts to bite
+      sits somewhere between a 5x and a 26x weak-bag length band, not
+      cleanly at "zero variance." Left for whoever next revisits the
+      default.
+    - **Reusable lesson: the consolidation work looked like it failed on
+      its own terms, but it created the length variance this needed.** Item
+      15's consolidation (193 → 142 notes) was measured against flat HIT@1
+      and looked like it made no difference to recall quality — but filling
+      the empty bodies is exactly what makes length normalization non-inert.
+      A technique can be correctly measured as useless and later become
+      useful because the *data* changed, not the code; "inert" is a
+      property of the corpus it was measured against, not a permanent
+      verdict on the technique.
+    - **Bigger-corpus findings (50 queries, 2026-07-29): length normalization
+      does NOT survive the extended corpus.** The 22-query corpus was too thin
+      to decide either of the open questions; in one case, it pointed the wrong
+      way. The earlier +1 hit at full store (12/22 → 13/22 at `b=0.5`) was
+      noise that a 50-query corpus (22 original + 28 new targets, 21 of them
+      merged keepers, deliberately oversampling the under-represented population)
+      flattens to no gain at any size:
+      - **Length-norm sweep on 50-query corpus:**
+
+        | b | size 60 | size 100 | whole store (145) |
+        |---|---|---|---|
+        | 0 | 34/50 | 31/50 | 32/50 |
+        | 0.25 | 37/50 | 34/50 | 32/50 |
+        | 0.5 | 38/50 | 34/50 | 32/50 |
+        | 0.75 | 34/50 | 33/50 | 31/50 |
+        | 1.0 | 34/50 | 31/50 | 29/50 |
+
+      - Paraphrase corpus stays 8/8 at `b ∈ {0, 0.5, 1.0}` throughout.
+      - Real, repeatable gains mid-corpus (+4 at size 60, +3 at 100), exactly
+        flat at full store where the smaller corpus had shown +1. **`NT_LENNORM_B`
+        remains default-off; the reason is now measured rather than precautionary.**
+        The setting is safe opt-in (never worse at any size), but does not earn a
+        default on a bigger corpus. This closes the "pending a bigger corpus"
+        caveat: the bigger corpus answered it.
+    - **`triggers:` proposal is retired, on inverted evidence.** The proposed
+      `triggers:` frontmatter list (multiple retrieval surfaces per note) rested
+      on **trigger collapse**: merging N notes collapses N descriptions into one,
+      so a merged note should retrieve *worse* for the facets it absorbed. This
+      could not be tested before — the 22-query corpus had only 6 merged keepers.
+      With 21 merged-keeper targets in the 50-query corpus, each query
+      deliberately written for the keeper's weakest absorbed facet (the vocabulary
+      least present in its current title/description), HIT@1 on the full store
+      splits exactly opposite to the hypothesis:
+      - **Merged keepers: 20/28 (71.4%)**
+      - **Atomic notes: 12/22 (54.5%)**
+      - **Fisher exact two-sided p = 0.249** (not statistically significant, but
+        the direction is the one the hypothesis forbids)
+      - Merged notes retrieve at least as well as atomic ones. The failure mode
+        observed in merged-keeper misses is different: they lose to *other* merged
+        keepers within dense topical clusters (one term-rich note won three
+        separate queries that belonged to other notes). This is consistent with
+        the earlier concatenation control arm, where the big score movers were
+        distractors becoming term-rich generalists (+775 to +1749) while no
+        target's score rose.
+      - **Consequence: `triggers:` is closed as a design, not held pending proof.**
+        There is no evidence of trigger collapse, measured on the population
+        designed to expose it. The tribunal that reviewed it had already reduced
+        it to "revise" pending exactly this measurement. Record it as closed so a
+        future session does not re-propose it without new evidence — and record
+        what evidence *would* reopen it: a demonstration that merged notes
+        systematically lose queries belonging to their absorbed facets.
+    - **Methodological point: a 22-query corpus was too thin to decide either
+      question.** The length-norm +1 at full store was noise. Any future ranking
+      change should be judged on the 50-query corpus, where one hit is now 2pp
+      rather than 4.5pp.
 - **14** — OpenCode `chat.message` + `tool.execute.before` proactive recall
   — parked on "a live OpenCode build matrix to test against," the same
   precondition item 1 needed before it could ship safely. Also lower-value

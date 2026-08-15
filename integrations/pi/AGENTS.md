@@ -34,10 +34,20 @@ nt-memory extension bridges nt's MCP server in as native Pi tools).
 ## As you work
 - Capture the *why*: decisions, constraints, dead-ends → `nt_note` (always set a
   one-line `description`); follow-ups → `nt_add` (link via `discovered_from`).
+- Pass `if_exists:"return"` on topic notes — a `matched:true` response means the
+  canonical note exists: `nt_note_edit` it (with `expect_mtime`) instead of
+  creating a sibling; if the edit reverses a conclusion, `nt_decide` the why.
+- Volatile facts get a `half_life` (e.g. `"90d"`) so they fade instead of going
+  stale; `nt_touch` re-confirms one you verified still holds. A recall result
+  with `escalate` means the hit is weak — run the suggested
+  `nt_search include_archived:true` before concluding nothing is recorded.
 - Set `source:"pi"` on what you create.
 - Hit a mistake/footgun/dead-end? Record a **lesson**: `nt_note kind:"lesson"`
   (CLI `nt note … --lesson`), with the *trigger* in the description ("when X, do
-  Y — not Z") so `nt_recall` surfaces it next time.
+  Y — not Z") so `nt_recall` surfaces it next time. **Always give it a `project`
+  or a topical `tag`** — `lesson` alone is a structural tag, stripped before the
+  duplicate check, so a lesson without one silently bypasses the guard and lets
+  you re-record what the store already knows.
 - Look something up: `nt_search` for stubs, then `nt_get` the one note you need
   (by id, or a `section`). Fetch on demand — don't preload.
 - Use the **`nt` skill** (`/skill:nt`) for the full workflow and folder/tag

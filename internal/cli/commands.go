@@ -563,9 +563,11 @@ func cmdStop(args []string) int {
 
 func cmdNote(args []string) int {
 	// Config [defaults] source sets the flag default (same as cmdAdd); an
-	// explicit --source wins.
+	// explicit --source wins. cfg is also consulted below for [decay] kind
+	// defaults, so it's loaded once here.
+	cfg := loadConfig()
 	defSource := "cli"
-	if cfg := loadConfig(); cfg.DefaultSource != "" {
+	if cfg.DefaultSource != "" {
 		defSource = cfg.DefaultSource
 	}
 	fs := flag.NewFlagSet("note", flag.ContinueOnError)
@@ -576,12 +578,15 @@ func cmdNote(args []string) int {
 	folder := fs.String("folder", "", "subfolder under notes/ (e.g. work or work/auth)")
 	project := fs.String("project", "", "project this note belongs to (stored as project: frontmatter; 'nt recall --project' matches it)")
 	desc := fs.String("description", "", "one-line summary shown in 'nt index'")
+	descFile := fs.String("description-file", "", "read the description from a file ('-' = stdin); immune to shell quoting, same as --body-file")
 	supersede := fs.String("supersede", "", "mark this note as replacing an existing one (its handle) — the old note retires from active views")
 	force := fs.Bool("force", false, "create even if a near-duplicate note already exists")
+	ifExists := fs.String("if-exists", "create", "when a note with this exact title/slug already exists (folder-scoped if --folder is set): create (default) | return (write nothing, print the existing note) | error (refuse, exit nonzero)")
 	lesson := fs.Bool("lesson", false, "record a durable lesson/gotcha: tags it 'lesson' and files it under lessons/ so 'nt recall' surfaces it before the mistake recurs")
 	kind := fs.String("kind", "", "note class: lesson|decision|ref|rule|memory — tags it and files it in the canonical folder (memory files under memory/ with tag memory-core — the always-loaded core-memory layer)")
 	validFrom := fs.String("valid-from", "", "this fact is only true from this date/time on (YYYY-MM-DD or RFC3339) — note stays visible before then, unflagged")
 	validUntil := fs.String("valid-until", "", "this fact stops being true after this date/time (YYYY-MM-DD or RFC3339) — nt_recall down-ranks and flags it 'expired' past this, but never hides it")
+	halfLife := fs.String("half-life", "", "relevance half-life (Nd/Nw/Nm/Ny, or 'none'): the note fades in recall/index as it ages un-reconfirmed — for facts that rot without a known expiry; `nt touch` re-confirms")
 	var fields stringSlice
 	asJSON := fs.Bool("json", false, "print the created note as JSON (id, title, path, …)")
 	fs.Var(&tags, "tag", "tag (repeatable)")
@@ -596,6 +601,14 @@ func cmdNote(args []string) int {
 	bodyVal, bodyErr := resolveBody(*body, *bodyFile)
 	if bodyErr != nil {
 		return usageErr(fmt.Errorf("note: %w", bodyErr))
+	}
+	// --description carries the same shell-quoting hazard --body-file exists for:
+	// backticks in it are expanded by the shell before nt sees them, silently
+	// truncating the description while the command still exits 0. The skill's
+	// escaping warning was scoped to bodies, so this had no escape hatch.
+	descVal, descErr := resolveBody(*desc, *descFile)
+	if descErr != nil {
+		return usageErr(fmt.Errorf("note: %s", strings.ReplaceAll(descErr.Error(), "--body", "--description")))
 	}
 	// --lesson is shorthand for the lesson convention: tag `lesson` + folder
 	// lessons/ (unless an explicit --folder overrides). Keeps captured mistakes a
@@ -633,9 +646,19 @@ func cmdNote(args []string) int {
 	// in lessons/ with "custom" mangled into the filename. Prose titles that
 	// merely contain (or end with) a slash are NOT filing choices — see
 	// note.SplitPathTitle for the boundary.
-	if fold == "" {
+	// An explicit --kind is a stated filing choice too, so it now suppresses the
+	// inference rather than losing to it. Field use showed why: engineering
+	// titles routinely open with a bare directory token ("internal/cli test-gap
+	// audit", "README/SPEC drift", "CI/CD"), and the shorthand not only ignored
+	// --kind but STRIPPED that word from the title permanently — with no way to
+	// put it back, since the CLI had no --title. `nt note "custom/x"` with no
+	// flags still files under custom/, unchanged.
+	if fold == "" && kindFolder == "" {
 		if f, t := note.SplitPathTitle(title); f != "" {
 			fold, title = f, t
+			// Say so. The whole failure mode was that this happened silently:
+			// the only signal was the created path in the success line.
+			fmt.Fprintf(os.Stderr, "note: filed under %s/ and dropped %q from the title (path-style shorthand) — pass --folder to choose explicitly, or rephrase to keep the word\n", f, f)
 		}
 	}
 	// The kind's canonical folder is the default only when neither --folder nor a
@@ -646,14 +669,59 @@ func cmdNote(args []string) int {
 	if strings.TrimSpace(title) == "" {
 		return usageErr(fmt.Errorf("note: a title is required"))
 	}
+	// Validate --half-life BEFORE creating anything — a usage error after the
+	// create would leave a half-written note on disk.
+	hl := strings.TrimSpace(*halfLife)
+	if hl != "" {
+		if _, okHL, isNone := note.ParseHalfLife(hl); !okHL && !isNone {
+			return usageErr(fmt.Errorf("note: --half-life must be Nd/Nw/Nm/Ny or 'none', got %q", hl))
+		}
+	}
+	// No explicit --half-life: config [decay] can supply a per-kind default, so
+	// decay policy is set once instead of re-judged per note. The value is
+	// STAMPED into frontmatter (visible, editable, `nt edit --clear-half-life`
+	// removes it) rather than applied invisibly at read time — a config change
+	// never silently re-ranks existing notes. "none"/invalid config = no stamp;
+	// doctor reports invalid values.
+	if hl == "" && *kind != "" {
+		hl = note.DefaultHalfLife(cfg.DecayDefaults, *kind)
+	}
 	e, ok := engine()
 	if !ok {
 		return 1
 	}
+	// --if-exists steers the write to the existing canonical note (exact slug or
+	// case-insensitive title match, folder-scoped when one was chosen) instead of
+	// creating a sibling. Deterministic and write-free on a hit — distinct from
+	// the fuzzy FindSimilar guard below, which still applies on "create".
+	switch *ifExists {
+	case "", "create":
+	case "return", "error":
+		if match := note.FindExact(note.Active(mustNotes(e)), title, fold); match != nil {
+			if *ifExists == "error" {
+				fmt.Fprintf(os.Stderr, "note: %q already exists — %s  %s  (--if-exists error)\n", match.Title, shortID(match.ID), match.Rel)
+				return 1
+			}
+			if *asJSON {
+				// Mirror the MCP payload: matched + the mtime token for the
+				// documented `nt edit --expect-mtime` round-trip. A caller who
+				// asked for JSON must never get the plain-text form.
+				return printJSON(map[string]any{
+					"matched": true, "id": match.ID, "rel": match.Rel, "title": match.Title,
+					"mtime": match.MTimeToken(),
+				})
+			}
+			fmt.Printf("exists %s  %s\n", shortID(match.ID), match.Rel)
+			fmt.Fprintf(os.Stderr, "note: already exists — nothing written. Edit it: nt edit %s --append \"…\" (or --old-string/--new-string); record why with nt decide %s \"…\" if a conclusion changed\n", shortID(match.ID), shortID(match.ID))
+			return 0
+		}
+	default:
+		return usageErr(fmt.Errorf("note: --if-exists must be create|return|error, got %q", *ifExists))
+	}
 	// Dedup-on-write guard: don't silently fork a decision a teammate already
 	// captured. Skipped when --force, or when --supersede is explicitly replacing.
 	if !*force && strings.TrimSpace(*supersede) == "" {
-		if sim := note.FindSimilar(note.Active(mustNotes(e)), title, tags); len(sim) > 0 {
+		if sim := note.FindSimilar(note.Active(mustNotes(e)), title, tags, *project); len(sim) > 0 {
 			fmt.Fprintf(os.Stderr, "note: a near-duplicate already exists — not creating. Did you mean to update it?\n")
 			for _, s := range sim {
 				fmt.Fprintf(os.Stderr, "  %s  %s  %s\n", shortID(s.ID), s.Rel, s.Title)
@@ -667,12 +735,7 @@ func cmdNote(args []string) int {
 	if err != nil {
 		return fail(err)
 	}
-	if h := strings.TrimSpace(*supersede); h != "" {
-		if code := markSuperseded(e, h, n.ID); code != 0 {
-			return code
-		}
-	}
-	if d := strings.TrimSpace(*desc); d != "" { // --description → a modeled frontmatter key
+	if d := strings.TrimSpace(descVal); d != "" { // --description → a modeled frontmatter key
 		fields = append(fields, "description="+d)
 	}
 	if p := strings.TrimSpace(*project); p != "" { // --project → project: frontmatter (recall's project boost matches it)
@@ -685,7 +748,10 @@ func cmdNote(args []string) int {
 	if vu != "" {
 		n.ValidUntil = vu
 	}
-	if len(fields) > 0 || vf != "" || vu != "" { // --field key=value → extra frontmatter, preserved verbatim
+	if hl != "" {
+		n.HalfLife = hl
+	}
+	if len(fields) > 0 || vf != "" || vu != "" || hl != "" { // --field key=value → extra frontmatter, preserved verbatim
 		for _, f := range fields {
 			k, v, found := strings.Cut(f, "=")
 			if !found || strings.TrimSpace(k) == "" {
@@ -695,6 +761,14 @@ func cmdNote(args []string) int {
 		}
 		if err := n.Save(); err != nil {
 			return fail(err)
+		}
+	}
+	// Supersede runs AFTER every save of n above: markSuperseded stamps the
+	// provenance decision line onto a fresh from-disk copy of n, and a later
+	// in-memory n.Save() here would silently clobber that stamp.
+	if h := strings.TrimSpace(*supersede); h != "" {
+		if code := markSuperseded(e, h, n.ID); code != 0 {
+			return code
 		}
 	}
 	// Warn (don't fail) on any [[link]] in the body that doesn't resolve, so a
@@ -722,6 +796,19 @@ func markSuperseded(e *mutate.Engine, oldHandle, newID string) int {
 	old.SupersededBy = newID
 	if err := old.Save(); err != nil {
 		return fail(err)
+	}
+	// Provenance stamp (spec §5.1): a mechanical decision line on the NEW note
+	// recording what it replaced — inside the supersede the caller chose, so
+	// it's bookkeeping, not silent consolidation. Best-effort: the supersede
+	// already took; a stamp failure must not unwind it.
+	if repl, rerr := resolveNote(notes, newID); rerr == nil {
+		slug := strings.TrimSuffix(old.Rel, ".md")
+		if i := strings.LastIndexByte(slug, '/'); i >= 0 {
+			slug = slug[i+1:]
+		}
+		if aerr := note.AppendDecision(repl, time.Now().Format("2006-01-02"), "supersedes [["+slug+"]]"); aerr == nil {
+			_ = repl.Save()
+		}
 	}
 	return 0
 }
@@ -1502,6 +1589,13 @@ type noteJSON struct {
 	// — see note.Note.Expired's doc comment. The note is never hidden either way.
 	Expired     bool `json:"expired,omitempty"`
 	NotYetValid bool `json:"notYetValid,omitempty"`
+	// Decay + decision-log state (memory-dynamics spec §3.3, §5.1) — the
+	// single-note read is where "see it's faded → verify → nt touch" starts.
+	HalfLife       string `json:"halfLife,omitempty"`
+	Reviewed       string `json:"reviewed,omitempty"`
+	Faded          bool   `json:"faded,omitempty"`
+	Decisions      int    `json:"decisions,omitempty"`
+	LatestDecision string `json:"latestDecision,omitempty"`
 }
 
 func notesToJSON(notes []*note.Note) []noteJSON {
@@ -1522,7 +1616,14 @@ func notesToJSON(notes []*note.Note) []noteJSON {
 			ValidUntil:  n.ValidUntil,
 			Expired:     n.Expired(now),
 			NotYetValid: n.NotYetValid(now),
+			HalfLife:    n.HalfLife,
+			Reviewed:    n.Reviewed,
+			Faded:       n.Faded(now),
 		})
+		if count, latest := n.DecisionStats(); count > 0 {
+			out[len(out)-1].Decisions = count
+			out[len(out)-1].LatestDecision = latest
+		}
 	}
 	return out
 }

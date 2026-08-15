@@ -91,6 +91,12 @@ func Run(args []string) int {
 		return cmdRm(rest)
 	case "archive":
 		return cmdArchive(rest)
+	case "touch":
+		return cmdTouch(rest)
+	case "decide":
+		return cmdDecide(rest)
+	case "history":
+		return cmdHistory(rest)
 	case "undo":
 		return cmdUndo(rest)
 	case "redo":
@@ -154,7 +160,7 @@ var knownCommands = []string{
 	"view", "views", "ready", "agenda", "review", "index", "log",
 	"done", "do", "skip", "start", "stop", "update", "up", "search", "q",
 	"recall", "export", "import", "tags", "tag", "links", "mv", "rename", "rm", "delete",
-	"archive", "undo", "redo", "edit", "path", "doctor", "gc", "git-init", "sync", "hook", "mcp",
+	"archive", "undo", "redo", "edit", "touch", "decide", "history", "path", "doctor", "gc", "git-init", "sync", "hook", "mcp",
 	"opencode", "pi", "store-hash", "web", "version", "help", "supersede", "relink", "distill",
 }
 
@@ -401,7 +407,8 @@ USAGE
   nt ready [flags]            open, unblocked tasks by urgency — the what-next feed
   nt agenda [--days N]        the next N days, grouped Overdue/Today/Upcoming
                               (--days 0 = just today's plan)
-  nt review [--stale N]       weekly digest: overdue, stale, undated, stuck projects
+  nt review [--stale N]       weekly digest: overdue, stale, undated, stuck projects,
+                              and faded notes (past their half-life un-reconfirmed)
   nt index [--tag|--folder]   compact KB catalog (ids+titles+descriptions) + active tasks — start here
                               (large stores tier: pinned rules/memory/ref + last-14d notes
                                + per-folder counts of the rest; --all = every stub;
@@ -412,17 +419,19 @@ USAGE
   nt start <id…> / stop <id…> time-track a task (logs elapsed into spent:)
   nt update <id…> [flags]     change one or more tasks (bulk)  (alias: up)
   nt list --tree              show sub-tasks indented under their parent
-  nt search "query" [--tag T]  full-text + tag search (AND terms; "phrase"; --json) (alias: q)
+  nt search "query" [--tag T] [--project P]  full-text + tag/project search (AND terms; "phrase"; --json) (alias: q)
+                              (--include-archived widens to retired notes — the deep sweep
+                               recall's escalate hint suggests; retired hits are marked)
   nt recall "what I'm doing"  relevant notes for a task, lessons flagged ⚑ — paraphrase-aware
                               (--lessons-only filters to recorded mistakes; bare
                                'nt recall --lessons-only' lists every lesson)
                               --project NAME prefers that project's notes — matched
                               by tag, folder, or project: frontmatter
                               (default: NT_WORKSTREAM; 'none' disables)
-  nt export [--tag|--folder]  compile notes into one md/json doc (rules/instructions, SKILL.md)
+  nt export [--tag|--folder]  compile notes into one md/json doc; --out is tracked, doctor flags drift
   nt import <file.json|dir>   bulk-load notes: an export --format json backup, or a folder of
                               markdown (Obsidian vault); skips title near-dups (--force overrides)
-  nt tags                     list the tag vocabulary with counts
+  nt tags [--projects]        list the tag (or project) vocabulary with counts
   nt tag <id|note…> +x -y     retag tasks or notes (no $EDITOR; preserves frontmatter)
   nt links <id|note>          forward links + backlinks + deps  (--orphans, --json)
   nt mindmap <id|note>        Mermaid mind map of a note  (--links, --depth N, --no-fence, --format json; alias: mm)
@@ -432,6 +441,12 @@ USAGE
   nt distill [--json]         list every near-duplicate note pair in the store (uncapped) so you
                               can merge or 'nt tag +distinct' a deliberate fork — proposes, never merges
   nt relink <note> <old> <new>   fix a wrong outbound [[link]] in a note's body
+  nt touch <note…>            re-confirm a note still holds: stamps reviewed:, resetting
+                              its --half-life decay clock (reading never resets it)
+  nt decide <note> "why"      record WHY a note changed: a dated line in its
+                              ## Decisions section — its visible version history
+  nt history <note>           the note's git commit history (--patch diffs, --since 30d;
+                              store must be 'nt git-init'-ed)
   nt rm <id|note> [flags]     delete tasks (undoable) or notes (to .trash/)
                               notes: --unlink strips inbound links, --force keeps them;
                               -y/--yes confirms (required for tasks when non-interactive)

@@ -116,27 +116,50 @@ func TestUndoStillWorksWithoutLaterNoteEdit(t *testing.T) {
 	}
 }
 
-// A path-style title is an explicit filing choice: it beats --kind's canonical
-// folder (which remains only a default), while the kind's tag still applies.
-func TestNotePathStyleTitleBeatsKindFolder(t *testing.T) {
+// A path-style title is an explicit filing choice ONLY when nothing else states
+// one. With no flags it still files under the given folder; with an explicit
+// --kind (or --folder) the flag wins and the title is left intact — engineering
+// titles routinely open with a bare directory token, and the shorthand used to
+// strip that word permanently.
+func TestNotePathStyleTitleFilesWhenNoFlagGiven(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("NT_DIR", dir)
-	out := captureRun(t, "note", "custom/x", "--kind", "lesson")
+	out := captureRun(t, "note", "custom/x")
 	if !strings.Contains(out, "notes/custom/x.md") {
 		t.Fatalf("path-style title should file under custom/, got: %s", out)
 	}
 	if _, err := os.Stat(filepath.Join(dir, "notes", "custom", "x.md")); err != nil {
 		t.Fatalf("note not created at notes/custom/x.md: %v", err)
 	}
+}
+
+// An explicit --kind suppresses the path-style inference and keeps the title
+// whole (regression guard: "internal/cli audit --kind ref" used to land in
+// internal/ with "internal" deleted from the title, unrecoverably).
+func TestNoteExplicitKindBeatsPathStyleAndKeepsTitle(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("NT_DIR", dir)
+	out := captureRun(t, "note", "internal/cli test-gap audit", "--kind", "ref")
+	if !strings.Contains(out, "notes/ref/") {
+		t.Fatalf("--kind ref should file under ref/, got: %s", out)
+	}
 	var j struct {
-		Tags []string `json:"tags"`
+		Title string   `json:"title"`
+		Tags  []string `json:"tags"`
 	}
-	json.Unmarshal([]byte(captureRun(t, "show", "x", "--json")), &j)
-	if !contains(j.Tags, "lesson") {
-		t.Fatalf("--kind lesson should still tag the note, got %v", j.Tags)
+	json.Unmarshal([]byte(captureRun(t, "show", "internal/cli test-gap audit", "--json")), &j)
+	if !strings.Contains(j.Title, "internal") {
+		t.Fatalf("the leading path token must survive in the title, got %q", j.Title)
 	}
+	if !contains(j.Tags, "ref") {
+		t.Fatalf("--kind ref should tag the note, got %v", j.Tags)
+	}
+}
+
+func TestNoteKindFolderStillAppliesWithoutPath(t *testing.T) {
+	t.Setenv("NT_DIR", t.TempDir())
 	// Without a path or --folder, the kind's folder still applies (unchanged).
-	out = captureRun(t, "note", "plain lesson capture", "--kind", "lesson")
+	out := captureRun(t, "note", "plain lesson capture", "--kind", "lesson")
 	if !strings.Contains(out, "notes/lessons/plain-lesson-capture.md") {
 		t.Fatalf("kind folder should still be the default: %s", out)
 	}

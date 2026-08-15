@@ -1,7 +1,7 @@
 {
   "name": "nt",
-  "version": "0.1.0",
-  "description": "Durable task & note memory for AI coding sessions — plain-text todo.txt tasks + markdown notes, with paraphrase-aware recall so lessons survive across sessions.",
+  "version": "0.2.0",
+  "description": "Durable task & note memory for AI coding sessions — plain-text todo.txt tasks + markdown notes, with paraphrase-aware recall, relevance decay (half-life + touch), decision history, and duplicate-preventing write steering so lessons survive across sessions.",
   "author": {
     "name": "navbytes"
   },

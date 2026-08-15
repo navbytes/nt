@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/navbytes/nt/internal/mutate"
 	"github.com/navbytes/nt/internal/note"
 	"github.com/navbytes/nt/internal/task"
 )
@@ -62,19 +63,61 @@ func cmdExport(args []string) int {
 		return 1
 	}
 
+	sel := exportSelection{
+		Folder: strings.Trim(*folder, "/"), Tags: tags, Type: *typ, Format: *format,
+		Title: *title, Limit: *limit, IncludeArchived: *includeArchived,
+		NoProvenance: *noProvenance, NoHeader: *noHeader,
+	}
+	rendered, nNotes, nTasks, err := renderExport(e, sel)
+	if err != nil {
+		return fail(err)
+	}
+	if *out == "" {
+		fmt.Print(rendered)
+		if !strings.HasSuffix(rendered, "\n") {
+			fmt.Println()
+		}
+		return 0
+	}
+
+	if !strings.HasSuffix(rendered, "\n") {
+		rendered += "\n"
+	}
+	if err := os.WriteFile(*out, []byte(rendered), 0o644); err != nil {
+		return fail(fmt.Errorf("export: write %s: %w", *out, err))
+	}
+	// Remember what was exported where, so `nt doctor` can detect drift: a
+	// compiled rules file that no longer matches the store is silently stale —
+	// pruned rules keep costing tokens, new rules never arrive. Best-effort: a
+	// state failure must not fail the export that already succeeded.
+	if err := recordExport(e.S.Dir, *out, sel, rendered); err != nil {
+		fmt.Fprintf(os.Stderr, "export: could not record export state (doctor won't track this file for drift): %v\n", err)
+	}
+	fmt.Printf("exported %d note(s), %d task(s) → %s\n", nNotes, nTasks, *out)
+	return 0
+}
+
+// renderExport selects and renders one export — the shared body of `nt export`
+// and doctor's drift check, which re-renders a recorded selection against the
+// current store and compares. Deterministic for a given store: notes sort by
+// path/title and nothing emits a timestamp, so equal stores render equal bytes.
+func renderExport(e *mutate.Engine, sel exportSelection) (rendered string, nNotes, nTasks int, err error) {
+	wantNotes := sel.Type == "note" || sel.Type == "all"
+	wantTasks := sel.Type == "task" || sel.Type == "all"
+
 	var notes []*note.Note
 	if wantNotes {
 		all := mustNotes(e)
-		if !*includeArchived {
+		if !sel.IncludeArchived {
 			all = note.Active(all)
 		}
-		prefix := strings.Trim(*folder, "/")
+		prefix := strings.Trim(sel.Folder, "/")
 		for _, n := range all {
 			if prefix != "" && !strings.HasPrefix(n.Rel, prefix+"/") {
 				continue
 			}
 			match := true
-			for _, want := range tags {
+			for _, want := range sel.Tags {
 				if !contains(n.Tags, want) {
 					match = false
 					break
@@ -91,20 +134,20 @@ func cmdExport(args []string) int {
 			}
 			return notes[i].Title < notes[j].Title
 		})
-		if *limit > 0 && len(notes) > *limit {
-			notes = notes[:*limit]
+		if sel.Limit > 0 && len(notes) > sel.Limit {
+			notes = notes[:sel.Limit]
 		}
 	}
 
 	var tasks []*task.Task
 	if wantTasks {
-		if d, err := e.Read(); err == nil {
+		if d, derr := e.Read(); derr == nil {
 			for _, t := range d.Tasks() {
 				if t.Status() == "done" {
 					continue
 				}
 				keep := true
-				for _, want := range tags {
+				for _, want := range sel.Tags {
 					if !contains(t.Tags(), want) {
 						keep = false
 						break
@@ -117,8 +160,7 @@ func cmdExport(args []string) int {
 		}
 	}
 
-	var rendered string
-	if *format == "json" {
+	if sel.Format == "json" {
 		payload := map[string]any{}
 		if wantNotes {
 			payload["notes"] = notesToJSON(notes)
@@ -130,33 +172,14 @@ func cmdExport(args []string) int {
 			}
 			payload["tasks"] = tasksToJSON(tasks, idx)
 		}
-		if *out == "" {
-			return printJSON(payload)
+		data, jerr := json.MarshalIndent(payload, "", "  ")
+		if jerr != nil {
+			return "", 0, 0, fmt.Errorf("export: encode json: %w", jerr)
 		}
-		data, err := json.MarshalIndent(payload, "", "  ")
-		if err != nil {
-			return fail(fmt.Errorf("export: encode json: %w", err))
-		}
-		rendered = string(data)
-	} else {
-		rendered = renderExportMarkdown(*title, notes, tasks, !*noProvenance, !*noHeader)
-		if *out == "" {
-			fmt.Print(rendered)
-			if !strings.HasSuffix(rendered, "\n") {
-				fmt.Println()
-			}
-			return 0
-		}
+		// Trailing newline matches the old printJSON (json.Encoder) stdout bytes.
+		return string(data) + "\n", len(notes), len(tasks), nil
 	}
-
-	if !strings.HasSuffix(rendered, "\n") {
-		rendered += "\n"
-	}
-	if err := os.WriteFile(*out, []byte(rendered), 0o644); err != nil {
-		return fail(fmt.Errorf("export: write %s: %w", *out, err))
-	}
-	fmt.Printf("exported %d note(s), %d task(s) → %s\n", len(notes), len(tasks), *out)
-	return 0
+	return renderExportMarkdown(sel.Title, notes, tasks, !sel.NoProvenance, !sel.NoHeader), len(notes), len(tasks), nil
 }
 
 // renderExportMarkdown concatenates note bodies (and an open-task checklist) into
