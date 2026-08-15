@@ -238,14 +238,18 @@ func TestVimCountsAndTabKeys(t *testing.T) {
 		t.Fatalf("5G should jump to row 5 (index 4), got %d", mm.cursor)
 	}
 
-	// Tab keys: ] next, [ prev.
+	// Tab keys: ] next, [ prev — through the visual order (notes, tasks, log).
 	m.tab = tabTasks
-	if mm := press(m, "]").(*Model); mm.tab != tabNotes {
-		t.Fatalf("] should advance to the notes tab, got %v", mm.tab)
+	if mm := press(m, "]").(*Model); mm.tab != tabLogbook {
+		t.Fatalf("] from tasks should advance to the logbook tab, got %v", mm.tab)
 	}
 	m.tab = tabTasks
+	if mm := press(m, "[").(*Model); mm.tab != tabNotes {
+		t.Fatalf("[ from tasks should go back to the notes tab, got %v", mm.tab)
+	}
+	m.tab = tabNotes
 	if mm := press(m, "[").(*Model); mm.tab != tabLogbook {
-		t.Fatalf("[ should wrap to the logbook tab, got %v", mm.tab)
+		t.Fatalf("[ from notes (leftmost) should wrap to the logbook tab, got %v", mm.tab)
 	}
 }
 
@@ -265,9 +269,9 @@ func TestTabSwitchPreservesCursor(t *testing.T) {
 	m.reload()
 	m.tab = tabTasks
 	m.cursor = 4
-	mm := press(m, "]").(*Model) // → notes
-	if mm.tab != tabNotes {
-		t.Fatalf("] should advance to notes, got %v", mm.tab)
+	mm := press(m, "]").(*Model) // → logbook (next in the visual order)
+	if mm.tab != tabLogbook {
+		t.Fatalf("] should advance to the logbook, got %v", mm.tab)
 	}
 	mm = press(mm, "[").(*Model) // ← back to tasks
 	if mm.tab != tabTasks {

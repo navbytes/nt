@@ -64,7 +64,7 @@ func (m *Model) headerView() string {
 	// Worded tabs when there's room; bare numbers in compact widths so the labels
 	// never crowd out (or overflow past) the metadata.
 	full := m.width > compactMax
-	tab := func(active bool, long, short string) string {
+	renderTab := func(active bool, long, short string) string {
 		s := short
 		if full {
 			s = long
@@ -74,18 +74,24 @@ func (m *Model) headerView() string {
 		}
 		return stTabOff.Render(s)
 	}
-	t1 := tab(m.tab == tabTasks, " tasks ", " T ")
-	t2 := tab(m.tab == tabNotes, " notes ", " N ")
-	t3 := tab(m.tab == tabLogbook, " log ", " L ")
+	labels := map[tab][2]string{
+		tabTasks:   {" tasks ", " T "},
+		tabNotes:   {" notes ", " N "},
+		tabLogbook: {" log ", " L "},
+	}
 	p1, brand, p2 := stHeader.Render("  "), stBrand.Render(" nt "), stHeader.Render("  ")
-	left := p1 + brand + p2 + t1 + t2 + t3
-	// Record the clickable tab-label column ranges (header row 0) for the mouse.
-	tabStart := lipgloss.Width(p1) + lipgloss.Width(brand) + lipgloss.Width(p2)
-	w1, w2, w3 := lipgloss.Width(t1), lipgloss.Width(t2), lipgloss.Width(t3)
-	m.tabHits = []tabHit{
-		{start: tabStart, end: tabStart + w1, tab: tabTasks},
-		{start: tabStart + w1, end: tabStart + w1 + w2, tab: tabNotes},
-		{start: tabStart + w1 + w2, end: tabStart + w1 + w2 + w3, tab: tabLogbook},
+	left := p1 + brand + p2
+	// Render tabs in tabOrder and record each label's clickable column range
+	// (header row 0) for the mouse as we go — one loop, so the visual order,
+	// the hit-boxes, and [ / ] cycling can never disagree.
+	x := lipgloss.Width(p1) + lipgloss.Width(brand) + lipgloss.Width(p2)
+	m.tabHits = m.tabHits[:0]
+	for _, tb := range tabOrder {
+		lbl := renderTab(m.tab == tb, labels[tb][0], labels[tb][1])
+		left += lbl
+		w := lipgloss.Width(lbl)
+		m.tabHits = append(m.tabHits, tabHit{start: x, end: x + w, tab: tb})
+		x += w
 	}
 
 	// The right side has two tiers. CONTEXT (group mode, toggles, done count) is

@@ -94,7 +94,7 @@ nt recall "adding concurrent token refresh"   # surfaces the lesson before you h
 
 ### Terminal UI — just run `nt`
 
-A Bubble Tea TUI that adapts to your terminal width (compact strip → standard list → wide split with a live detail pane) and **live-refreshes** via fsnotify when a CLI call or an AI session writes the store. Three tabs — **tasks**, **notes**, and a **Logbook** of completed work grouped by date — with multi-select bulk ops, search-as-you-type, mouse support, undo/**redo**, and a read-only lock. A **`:` command palette** runs any action by name, **vim motions take counts** (`5j`, `12G`), notes capture inline (no `$EDITOR` bounce), and the whole UI follows your terminal's **light/dark** theme. Press `?` for the full keymap.
+A Bubble Tea TUI that adapts to your terminal width (compact strip → standard list → wide split with a live detail pane) and **live-refreshes** via fsnotify when a CLI call or an AI session writes the store. Three tabs — **notes**, **tasks**, and a **Logbook** of completed work grouped by date — with multi-select bulk ops, search-as-you-type, mouse support, undo/**redo**, and a read-only lock. A **`:` command palette** runs any action by name, **vim motions take counts** (`5j`, `12G`), notes capture inline (no `$EDITOR` bounce), and the whole UI follows your terminal's **light/dark** theme. Press `?` for the full keymap.
 
 | Notes | Logbook |
 |---|---|
