@@ -143,7 +143,9 @@ Finish with a short receipt: what was merged, demoted, retired, tagged
 `distinct`, and skipped — plus the block's before/after size. If anything in
 `rules/`/`memory/` changed and the user compiles them into `AGENTS.md` /
 `CLAUDE.md`, remind them to re-run `nt export --tag rule` — otherwise the
-pruning never reaches the place it was being paid for.
+pruning never reaches the place it was being paid for. (Exports written with
+`--out` are tracked, so `nt doctor` also flags the stale file if this is
+forgotten.)
 
 If the `nt_*` tools are unavailable, fall back to the `nt` CLI over bash (`nt
 distill`, `nt show`, `nt index --tag rule`, `nt export --tag rule`, `nt edit

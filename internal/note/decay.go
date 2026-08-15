@@ -55,6 +55,23 @@ func ParseHalfLife(s string) (d time.Duration, ok, isNone bool) {
 	return 0, false, false
 }
 
+// DefaultHalfLife resolves a per-kind half-life default from a kind→value map
+// (config.toml's [decay] section): the configured value when it parses as a
+// positive half-life, else "". "none" and typos yield "" — capture stamps
+// nothing and `nt doctor` reports the typo; a broken config must never block
+// or distort a capture. Lives here (not in config) so the one validity rule
+// stays beside ParseHalfLife.
+func DefaultHalfLife(defaults map[string]string, kind string) string {
+	v := strings.TrimSpace(defaults[kind])
+	if v == "" {
+		return ""
+	}
+	if _, ok, _ := ParseHalfLife(v); !ok {
+		return ""
+	}
+	return v
+}
+
 // ParseFlexDate parses a YYYY-MM-DD or RFC3339 date — the exported form of
 // the validity-date parser, for callers validating reviewed:/valid_* input.
 func ParseFlexDate(s string) (time.Time, bool) { return parseValidityDate(s) }
@@ -63,6 +80,14 @@ func ParseFlexDate(s string) (time.Time, bool) { return parseValidityDate(s) }
 // reviewed/updated/created (frontmatter) and the file mtime. Reviewing a note
 // (nt touch) resets the clock without editing it — confirming a fact is still
 // true is real information. Zero time when nothing is parseable.
+//
+// Caveat — the mtime term makes the clock reset on ANY write to the file, not
+// only a re-confirmation: nt tag/mv, an editor or Obsidian save, and above all
+// a fresh git clone/checkout of the store, which restamps every file's mtime
+// and resets every decay clock at once. mtime is kept because externally
+// authored notes may carry no frontmatter dates at all; on a git-synced store,
+// know that a checkout makes everything look freshly reviewed until real dates
+// (updated/reviewed) catch up past the checkout time.
 func (n *Note) AgeBasis() time.Time {
 	var best time.Time
 	for _, s := range []string{n.Reviewed, n.Updated, n.Created} {

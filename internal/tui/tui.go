@@ -43,6 +43,29 @@ const (
 
 const tabCount = 3
 
+// tabOrder is the visual left-to-right tab order: notes first — the knowledge
+// base is the primary surface — then tasks, then the logbook. The header
+// renders from it and [ / ] / tab cycle through it, so reordering tabs is a
+// one-line change here. The enum values above are stable identities (they
+// index tabCursor/tabOffset and appear throughout the code), deliberately
+// decoupled from presentation order.
+var tabOrder = [tabCount]tab{tabNotes, tabTasks, tabLogbook}
+
+// tabPos is t's position in tabOrder.
+func tabPos(t tab) int {
+	for i, v := range tabOrder {
+		if v == t {
+			return i
+		}
+	}
+	return 0
+}
+
+// nextTab / prevTab step through the VISUAL order with wraparound, so tab
+// cycling always matches what the header shows.
+func nextTab(t tab) tab { return tabOrder[(tabPos(t)+1)%tabCount] }
+func prevTab(t tab) tab { return tabOrder[(tabPos(t)+tabCount-1)%tabCount] }
+
 type groupMode int
 
 const (
@@ -189,7 +212,9 @@ func Run() error {
 	}
 	ti := textinput.New()
 	ti.Prompt = ""
-	m := &Model{eng: eng, input: ti, marked: map[string]bool{}, splitPct: splitDefault}
+	// Open on the first tab of the visual order (notes) — landing on a tab
+	// that isn't leftmost reads as broken.
+	m := &Model{eng: eng, input: ti, marked: map[string]bool{}, splitPct: splitDefault, tab: tabOrder[0]}
 	m.reload()
 
 	ch, stop, err := watchStore(eng.S.Dir)

@@ -351,9 +351,9 @@ func TestLogbookShowsCompleted(t *testing.T) {
 	if len(mm.logFlat) != 1 || mm.logFlat[0].ID() != id {
 		t.Fatalf("completed task should appear in the logbook, got %d entries", len(mm.logFlat))
 	}
-	mm = press(mm, "[").(*Model) // prev tab: tasks → logbook (tabs wrap)
+	mm = press(mm, "]").(*Model) // next tab in visual order: tasks → logbook
 	if mm.tab != tabLogbook {
-		t.Fatal("'[' should switch to the logbook tab")
+		t.Fatal("']' should switch to the logbook tab")
 	}
 	if st := mm.selectedTask(); st == nil || st.ID() != id {
 		t.Fatal("logbook selection should resolve to the completed task")
@@ -533,9 +533,10 @@ func TestReadOnlyLock(t *testing.T) {
 	if mm.cursor != 1 {
 		t.Fatal("locked: navigation should still work")
 	}
-	// Tab switching still works.
+	// Tab switching still works ("]" from tasks → logbook, the next tab in
+	// the visual order).
 	mm = press(mm, "]").(*Model)
-	if mm.tab != tabNotes {
+	if mm.tab != tabLogbook {
 		t.Fatal("locked: tab switching should still work")
 	}
 	// Unlock restores writes.
@@ -658,14 +659,15 @@ func TestClickTabSwitch(t *testing.T) {
 		out, _ := model.Update(tea.MouseMsg{Action: tea.MouseActionPress, Button: tea.MouseButtonLeft, X: th.start + 1, Y: 0})
 		return out
 	}
+	// tabHits follow the visual order: notes, tasks, logbook.
 	var model tea.Model = m
-	if model = clickTab(model, 1); model.(*Model).tab != tabNotes {
+	if model = clickTab(model, 0); model.(*Model).tab != tabNotes {
 		t.Fatal("clicking the notes label should switch to the notes tab")
 	}
 	if model = clickTab(model, 2); model.(*Model).tab != tabLogbook {
 		t.Fatal("clicking the log label should switch to the logbook tab")
 	}
-	if model = clickTab(model, 0); model.(*Model).tab != tabTasks {
+	if model = clickTab(model, 1); model.(*Model).tab != tabTasks {
 		t.Fatal("clicking the tasks label should switch back")
 	}
 }

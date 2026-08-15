@@ -216,12 +216,12 @@ func (m *Model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.cursor = m.selectableLen() - 1
 			m.clampCursor()
 		}
-	case "]": // next tab (digits 1-3 freed for vim counts)
-		m.switchTab((m.tab + 1) % tabCount)
+	case "]": // next tab, in the header's visual order (digits 1-3 freed for vim counts)
+		m.switchTab(nextTab(m.tab))
 	case "[", "shift+tab": // previous tab
-		m.switchTab((m.tab + tabCount - 1) % tabCount)
+		m.switchTab(prevTab(m.tab))
 	case "tab":
-		m.switchTab((m.tab + 1) % tabCount)
+		m.switchTab(nextTab(m.tab))
 	case "v":
 		if m.tab != tabTasks {
 			m.setStatus("not available here")

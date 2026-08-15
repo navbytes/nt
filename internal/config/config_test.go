@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 )
 
@@ -11,7 +12,8 @@ func TestLoadMissingIsEmpty(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if *c != (Config{}) {
+	// DeepEqual, not ==: Config carries a map field (DecayDefaults) now.
+	if !reflect.DeepEqual(*c, Config{}) {
 		t.Fatalf("missing config should be empty, got %+v", c)
 	}
 }
@@ -49,7 +51,7 @@ unknown_key = "skipped"
 		WebHost:         "0.0.0.0",
 		TUITheme:        "light",
 	}
-	if *c != want {
+	if !reflect.DeepEqual(*c, want) {
 		t.Fatalf("parsed config = %+v, want %+v", *c, want)
 	}
 }

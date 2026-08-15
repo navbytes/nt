@@ -136,7 +136,8 @@ Pass 2 matters most on Claude Code. Pi and OpenCode inject the rules block live
 and nudge you when it exceeds `NT_INJECT_MAX`; here the block reaches Claude
 through `CLAUDE.md` (see [Standing rules](#standing-rules-in-claudemd)), which
 has no size warning at all — a prompt is the only signal you get. After pruning,
-re-run `nt export --tag rule` or the change never reaches `CLAUDE.md`.
+re-run `nt export --tag rule` or the change never reaches `CLAUDE.md` — file
+exports are tracked, so `nt doctor` flags the drift if you forget.
 
 ---
 
@@ -267,6 +268,27 @@ Notes in `rules/` (tag `rule`) and `memory/` (tag `memory-core`, written with
 `nt index` so an agent sees them before anything else, and they compile into
 your `CLAUDE.md` / `AGENTS.md` with `nt export --tag rule`. Keep them small —
 they're the part of the store that's paid for on every request.
+
+Compile them into a **dedicated file** and import it, rather than exporting
+over `CLAUDE.md` itself — `nt export --out` rewrites the whole target file, so
+pointing it at a `CLAUDE.md` that contains anything else would destroy the rest:
+
+```bash
+nt export --tag rule --out ~/.claude/nt-rules.md
+```
+
+then one line in `CLAUDE.md` imports it:
+
+```markdown
+@~/.claude/nt-rules.md
+```
+
+File exports are **tracked**: `nt export --out` records what was compiled
+where (`$NT_DIR/export-state.json`, hand-editable), and `nt doctor` re-renders
+each recorded selection against the current store, warning — with the exact
+command to re-run — when the compiled file no longer matches. A rule pruned by
+`/nt-distill` or added by `/nt-learn` now shows up as drift on the next
+doctor instead of silently never reaching Claude.
 
 ## Hook vs. skill — when each fires
 

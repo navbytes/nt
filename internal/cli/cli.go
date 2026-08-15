@@ -419,7 +419,7 @@ USAGE
   nt start <id…> / stop <id…> time-track a task (logs elapsed into spent:)
   nt update <id…> [flags]     change one or more tasks (bulk)  (alias: up)
   nt list --tree              show sub-tasks indented under their parent
-  nt search "query" [--tag T]  full-text + tag search (AND terms; "phrase"; --json) (alias: q)
+  nt search "query" [--tag T] [--project P]  full-text + tag/project search (AND terms; "phrase"; --json) (alias: q)
                               (--include-archived widens to retired notes — the deep sweep
                                recall's escalate hint suggests; retired hits are marked)
   nt recall "what I'm doing"  relevant notes for a task, lessons flagged ⚑ — paraphrase-aware
@@ -428,10 +428,10 @@ USAGE
                               --project NAME prefers that project's notes — matched
                               by tag, folder, or project: frontmatter
                               (default: NT_WORKSTREAM; 'none' disables)
-  nt export [--tag|--folder]  compile notes into one md/json doc (rules/instructions, SKILL.md)
+  nt export [--tag|--folder]  compile notes into one md/json doc; --out is tracked, doctor flags drift
   nt import <file.json|dir>   bulk-load notes: an export --format json backup, or a folder of
                               markdown (Obsidian vault); skips title near-dups (--force overrides)
-  nt tags                     list the tag vocabulary with counts
+  nt tags [--projects]        list the tag (or project) vocabulary with counts
   nt tag <id|note…> +x -y     retag tasks or notes (no $EDITOR; preserves frontmatter)
   nt links <id|note>          forward links + backlinks + deps  (--orphans, --json)
   nt mindmap <id|note>        Mermaid mind map of a note  (--links, --depth N, --no-fence, --format json; alias: mm)
