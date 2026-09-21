@@ -58,6 +58,11 @@ homebrew_casks:
   - repository:
       owner: navbytes
       name: homebrew-tap
+      branch: "release/nt-{{ .Version }}"
+      pull_request:
+        enabled: true
+        base:
+          branch: main
       token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
     homepage: "https://github.com/navbytes/nt"
     description: "Terminal task & note manager — durable memory for AI coding sessions"

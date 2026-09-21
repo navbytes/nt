@@ -4,6 +4,8 @@ name: Release
 # binaries + checksums, creates the GitHub Release, and updates the Homebrew tap.
 on:
   push:
+    branches: [main]
+    paths: ['.github/release-request']
     tags: ["v*"]
   # Manual release valve: when a tag can't be pushed directly (e.g. from a
   # restricted/sandboxed clone where `git push origin <tag>` is blocked),
@@ -19,35 +21,72 @@ on:
 
 permissions:
   contents: write
+  pull-requests: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
 
 jobs:
   goreleaser:
+    outputs:
+      tag: ${{ steps.release.outputs.tag }}
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v7
-        with:
-          fetch-depth: 0 # full history so GoReleaser can build the changelog
+      - name: Require an authorized release PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ] && [ "$GITHUB_REF" != refs/heads/main ]; then
+            echo 'Manual releases must run from main'; exit 1
+          fi
+          gh api "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/pulls" --paginate --slurp > "$RUNNER_TEMP/release-prs.json"
+          jq -e --arg sha "$GITHUB_SHA" --arg repo "$GITHUB_REPOSITORY" 'add | any(.[]; .merged_at != null and .merge_commit_sha == $sha and .base.ref == "main" and .head.repo.full_name == $repo and (.head.ref | startswith("release/")))' "$RUNNER_TEMP/release-prs.json"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       # On manual dispatch, mint the tag here (the default token may push refs
       # inside Actions) so GoReleaser sees a tagged HEAD. A tag pushed with the
       # default GITHUB_TOKEN does not re-trigger this workflow, so there's no
       # double release — this same run carries the build through.
-      - name: Create and push tag (manual dispatch)
-        if: github.event_name == 'workflow_dispatch'
+        with:
+          fetch-depth: 0
+
+      - name: Validate merged release and create its tag
+        id: release
+        env:
+          REQUESTED_TAG: ${{ inputs.tag }}
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git tag -a "${{ inputs.tag }}" -m "nt ${{ inputs.tag }}"
-          git push origin "${{ inputs.tag }}"
-      - uses: actions/setup-go@v7
+          set -euo pipefail
+          git fetch origin main
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/main
+          tag="$REQUESTED_TAG"
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            tag="$GITHUB_REF_NAME"
+          elif [ -z "$tag" ]; then
+            tag="$(cat .github/release-request)"
+          fi
+          [[ "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]] || { echo 'Invalid release tag'; exit 1; }
+          [ "$(cat .github/release-request)" = "$tag" ] || { echo "Release request and tag differ"; exit 1; }
+          if git rev-parse "refs/tags/$tag" >/dev/null 2>&1; then
+            [ "$(git rev-list -n 1 "$tag")" = "$GITHUB_SHA" ] || { echo 'Tag belongs to another commit'; exit 1; }
+          else
+            git tag "$tag" "$GITHUB_SHA"
+            git push origin "refs/tags/$tag"
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "RELEASE_TAG=$tag" >> "$GITHUB_ENV"
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
           go-version-file: go.mod
           cache: true
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: 22
           cache: npm
           cache-dependency-path: internal/web/frontend/package-lock.json
-      - uses: goreleaser/goreleaser-action@v7
+      - uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7
         with:
           version: "~> v2"
           args: release --clean
@@ -82,6 +121,7 @@ jobs:
             platform: windows/amd64
             tags: production
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
     defaults:
       run:
         working-directory: desktop
@@ -97,17 +137,17 @@ jobs:
       # Build the tagged commit in both trigger modes: on a tag push that's
       # GITHUB_REF; on manual dispatch it's the tag the goreleaser job just
       # created (this job `needs` it, so the tag already exists on the remote).
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
-          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
+          ref: ${{ needs.goreleaser.outputs.tag }}
 
-      - uses: actions/setup-go@v7
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
           go-version-file: desktop/go.mod
           cache: true
           cache-dependency-path: desktop/go.sum
 
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: 22
           cache: npm
@@ -118,7 +158,7 @@ jobs:
         # On a tag push the ref name IS the tag; on dispatch take it from the
         # input. RELEASE_TAG is what `gh release upload` targets below.
         run: |
-          REF="${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}"
+          REF="${{ needs.goreleaser.outputs.tag }}"
           echo "VER=${REF#v}" >> "$GITHUB_ENV"
           echo "RELEASE_TAG=${REF}" >> "$GITHUB_ENV"
 
