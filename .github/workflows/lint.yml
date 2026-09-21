@@ -1,23 +1,85 @@
 name: Lint
 
 on:
-  push:
-    branches: [main]
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  golangci:
+  changes:
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      code: ${{ steps.filter.outputs.code }}
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v7
+      - id: filter
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          if [ "$GITHUB_EVENT_NAME" != pull_request ]; then
+            echo 'code=true' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          endpoint="repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER"
+          gh api "$endpoint" > "$RUNNER_TEMP/pr-before.json"
+          if ! jq -e --arg head "$PR_HEAD" --arg base "$PR_BASE" '.head.sha == $head and .base.sha == $base' "$RUNNER_TEMP/pr-before.json" >/dev/null; then
+            echo 'code=true' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          total=$(jq -er '.changed_files' "$RUNNER_TEMP/pr-before.json")
+          gh api --paginate --slurp "$endpoint/files" > "$RUNNER_TEMP/changed-files.json"
+          gh api "$endpoint" > "$RUNNER_TEMP/pr-after.json"
+          if ! jq -e --arg head "$PR_HEAD" --arg base "$PR_BASE" '.head.sha == $head and .base.sha == $base' "$RUNNER_TEMP/pr-after.json" >/dev/null; then
+            echo 'code=true' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          value=$(jq --argjson total "$total" 'add | if length == 0 or length != $total then true else any(.[]; ([.filename, (.previous_filename // .filename)] | any(.[]; test("^(docs/.*\\.md|[^/]+\\.md|LICENSE)$") | not))) end' "$RUNNER_TEMP/changed-files.json")
+          echo "code=$value" >> "$GITHUB_OUTPUT"
+
+  golangci:
+    needs: changes
+    if: needs.changes.outputs.code == 'true' && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
           go-version-file: go.mod
           cache: true
-      - uses: golangci/golangci-lint-action@v9
+      - uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9
         with:
           version: v2.12.2
           # Don't reuse the action's analysis cache: a stale cache was pinning
           # SA5011 false positives that a fresh run (and local v2.12.2) doesn't
           # report. Re-analyze each run for correct, reproducible results.
           skip-cache: true
+
+  result:
+    name: ${{ github.workflow }} result
+    if: always() && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
+    needs: [changes, golangci]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          python3 - <<'PYTHON'
+          import json, os
+          results = json.loads(os.environ['RESULTS'])
+          assert results['changes']['result'] == 'success', 'Change detection did not succeed'
+          assert all(job['result'] in ('success', 'skipped') for job in results.values()), results
+          PYTHON

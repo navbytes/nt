@@ -4,19 +4,64 @@ name: Web
 # committed dist/ — which is embedded into the Go binary so `go build`/`go install`
 # work without Node — is up to date with the source.
 on:
-  push:
-    branches: [main]
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  web:
+  changes:
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      code: ${{ steps.filter.outputs.code }}
+    steps:
+      - id: filter
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          if [ "$GITHUB_EVENT_NAME" != pull_request ]; then
+            echo 'code=true' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          endpoint="repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER"
+          gh api "$endpoint" > "$RUNNER_TEMP/pr-before.json"
+          if ! jq -e --arg head "$PR_HEAD" --arg base "$PR_BASE" '.head.sha == $head and .base.sha == $base' "$RUNNER_TEMP/pr-before.json" >/dev/null; then
+            echo 'code=true' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          total=$(jq -er '.changed_files' "$RUNNER_TEMP/pr-before.json")
+          gh api --paginate --slurp "$endpoint/files" > "$RUNNER_TEMP/changed-files.json"
+          gh api "$endpoint" > "$RUNNER_TEMP/pr-after.json"
+          if ! jq -e --arg head "$PR_HEAD" --arg base "$PR_BASE" '.head.sha == $head and .base.sha == $base' "$RUNNER_TEMP/pr-after.json" >/dev/null; then
+            echo 'code=true' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          value=$(jq --argjson total "$total" 'add | if length == 0 or length != $total then true else any(.[]; ([.filename, (.previous_filename // .filename)] | any(.[]; test("^(docs/.*\\.md|[^/]+\\.md|LICENSE)$") | not))) end' "$RUNNER_TEMP/changed-files.json")
+          echo "code=$value" >> "$GITHUB_OUTPUT"
+
+  web:
+    needs: changes
+    if: needs.changes.outputs.code == 'true' && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
     defaults:
       run:
         working-directory: internal/web/frontend
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: 22
           cache: npm
@@ -37,17 +82,20 @@ jobs:
           fi
 
   e2e:
+    needs: changes
+    if: needs.changes.outputs.code == 'true' && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     defaults:
       run:
         working-directory: internal/web/frontend
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
           go-version-file: go.mod
           cache: true
-      - uses: actions/setup-node@v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with:
           node-version: 22
           cache: npm
@@ -59,9 +107,26 @@ jobs:
         run: npx playwright install --with-deps chromium
       - name: Run e2e (real nt web --spa, seeded store)
         run: npm run e2e
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         if: ${{ !cancelled() }}
         with:
+          retention-days: 7
           name: playwright-report
           path: internal/web/frontend/playwright-report/
-          retention-days: 7
+
+  result:
+    name: ${{ github.workflow }} result
+    if: always() && (github.event_name != 'pull_request' || !github.event.pull_request.draft)
+    needs: [changes, web, e2e]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - env:
+          RESULTS: ${{ toJSON(needs) }}
+        run: |
+          python3 - <<'PYTHON'
+          import json, os
+          results = json.loads(os.environ['RESULTS'])
+          assert results['changes']['result'] == 'success', 'Change detection did not succeed'
+          assert all(job['result'] in ('success', 'skipped') for job in results.values()), results
+          PYTHON
