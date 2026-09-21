@@ -23,7 +23,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
-          go-version-file: go.mod
+          go-version: '1.26.x'
       # Install + run govulncheck directly instead of golang/govulncheck-action,
       # whose internal git checkout was failing in CI with "unable to access … 400"
       # (git exit 128) on every run. This direct invocation is what we run locally
