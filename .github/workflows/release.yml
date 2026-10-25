@@ -81,12 +81,12 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           node-version: 22
           cache: npm
           cache-dependency-path: internal/web/frontend/package-lock.json
-      - uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7
+      - uses: goreleaser/goreleaser-action@a4f02ab5355a589de60d917a659ce617ed19b3de # v7
         with:
           version: "~> v2"
           args: release --clean
@@ -147,7 +147,7 @@ jobs:
           cache: true
           cache-dependency-path: desktop/go.sum
 
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           node-version: 22
           cache: npm
